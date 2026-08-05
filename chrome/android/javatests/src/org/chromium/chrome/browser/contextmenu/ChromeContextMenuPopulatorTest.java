@@ -85,6 +85,7 @@ import org.chromium.chrome.browser.enterprise.util.DataProtectionBridge;
 import org.chromium.chrome.browser.ephemeraltab.EphemeralTabCoordinator;
 import org.chromium.chrome.browser.firstrun.FirstRunStatus;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.glic.GlicEnabling;
 import org.chromium.chrome.browser.gsa.GSAUtils;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.lens.LensEntryPoint;
@@ -133,7 +134,11 @@ import java.util.List;
 @RunWith(ParameterizedRunner.class)
 @UseRunnerDelegate(BaseJUnit4RunnerDelegate.class)
 @Batch(Batch.UNIT_TESTS)
-@DisableFeatures({ChromeFeatureList.LENS_OVERLAY_ANDROID})
+@DisableFeatures({
+    ChromeFeatureList.LENS_OVERLAY_ANDROID,
+    ChromeFeatureList.ENABLE_DOWNLOAD_SAVE_AS_CONTEXT_MENU,
+    ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU,
+})
 public class ChromeContextMenuPopulatorTest {
     private static final String DATA_URL = "data:encodedstringblahblah";
     private static final String PAGE_URL = "http://www.blah.com/page_url";
@@ -2601,17 +2606,16 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
+            },
+            {
                 R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
                 R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
                 R.id.contextmenu_search_tab_with_google_lens,
                 R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
             },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
 
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
@@ -2632,15 +2636,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_create_qr_code},
         };
 
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
@@ -2657,16 +2661,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
 
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
@@ -2686,16 +2689,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
             {R.id.contextmenu_translate},
         };
 
@@ -2717,16 +2719,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
 
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
@@ -2755,16 +2756,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
 
         // All items are present and enabled.
@@ -2799,16 +2799,15 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
-                R.id.contextmenu_save_page,
-                R.id.contextmenu_share_page,
-                R.id.contextmenu_print_page,
-                R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
             },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
             {R.id.contextmenu_view_page_source, R.id.contextmenu_inspect_element},
         };
 
@@ -2850,16 +2849,17 @@ public class ChromeContextMenuPopulatorTest {
         ContextMenuParams params = getPageParams();
         DownloadUtils.setIsDownloadRestrictedByPolicyForTesting(true);
 
-        int[] expectedPage = {
-            R.id.contextmenu_back,
-            R.id.contextmenu_forward,
-            R.id.contextmenu_reload,
-            R.id.contextmenu_save_page,
-            R.id.contextmenu_share_page,
-            R.id.contextmenu_print_page,
-            R.id.contextmenu_open_in_reading_mode,
-            R.id.contextmenu_send_tab_to_self,
-            R.id.contextmenu_create_qr_code
+        int[][] expectedPage = {
+            {
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
+            },
+            {
+                R.id.contextmenu_save_page,
+                R.id.contextmenu_print_page,
+                R.id.contextmenu_share_page,
+                R.id.contextmenu_open_in_reading_mode,
+            },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
         List<Integer> expectedDisabled = Arrays.asList(R.id.contextmenu_save_page);
 
@@ -2875,7 +2875,7 @@ public class ChromeContextMenuPopulatorTest {
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NETWORK_BOUND_TAB, params);
         checkMenuOptions(expectedDisabled, expectedPage);
 
-        int[] expectedPageThinWebView = {R.id.contextmenu_reload, R.id.contextmenu_print_page};
+        int[][] expectedPageThinWebView = {{R.id.contextmenu_reload, R.id.contextmenu_print_page}};
         initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.THIN_WEB_VIEW, params);
         checkMenuOptions(expectedPageThinWebView);
     }
@@ -2889,15 +2889,14 @@ public class ChromeContextMenuPopulatorTest {
 
         int[][] expected = {
             {
-                R.id.contextmenu_back,
-                R.id.contextmenu_forward,
-                R.id.contextmenu_reload,
+                R.id.contextmenu_back, R.id.contextmenu_forward, R.id.contextmenu_reload,
+            },
+            {
                 R.id.contextmenu_save_page,
                 R.id.contextmenu_share_page,
                 R.id.contextmenu_open_in_reading_mode,
-                R.id.contextmenu_send_tab_to_self,
-                R.id.contextmenu_create_qr_code
             },
+            {R.id.contextmenu_send_tab_to_self, R.id.contextmenu_create_qr_code},
         };
 
         initializePopulator(
@@ -2945,13 +2944,18 @@ public class ChromeContextMenuPopulatorTest {
                                 .build()));
         when(mMenuModelBridge.populateModelList()).thenReturn(modelListFromBridge);
         ContextMenuParams params = getHttpLinkParams();
-        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        initializePopulator(
+                ChromeContextMenuPopulator.ContextMenuMode.NORMAL,
+                params,
+                /* shouldShowDeveloperMenu= */ true,
+                /* shouldShowViewPageSourceMenu= */ false,
+                /* supportPrint= */ true);
         List<ModelList> result = mPopulator.buildContextMenu();
-        assertEquals(2, result.size());
+        assertEquals(3, result.size());
         assertEquals(
-                "Expected the group of extension-injected items to be the last group",
+                "Expected the group of extension-injected items to come before developer group",
                 modelListFromBridge,
-                result.get(result.size() - 1));
+                result.get(result.size() - 2));
     }
 
     @Test
@@ -3985,5 +3989,140 @@ public class ChromeContextMenuPopulatorTest {
                 /* openedFromInterestFor= */ false,
                 /* interestForNodeID= */ 0,
                 /* additionalNavigationParams= */ null);
+    }
+
+    @Test
+    @SmallTest
+    @EnableFeatures(ChromeFeatureList.ENABLE_DOWNLOAD_SAVE_AS_CONTEXT_MENU)
+    public void testSaveAsContextMenuStrings() {
+        Context context = ContextUtils.getApplicationContext();
+
+        // Verify that getTitle() returns the "Save... as..." strings
+        assertEquals(
+                context.getString(R.string.contextmenu_save_image_as),
+                ChromeContextMenuItem.getTitle(
+                                context, mProfile, ChromeContextMenuItem.Item.SAVE_IMAGE, false)
+                        .toString());
+        assertEquals(
+                context.getString(R.string.contextmenu_save_link_as),
+                ChromeContextMenuItem.getTitle(
+                                context, mProfile, ChromeContextMenuItem.Item.SAVE_LINK_AS, false)
+                        .toString());
+        assertEquals(
+                context.getString(R.string.contextmenu_save_video_as),
+                ChromeContextMenuItem.getTitle(
+                                context, mProfile, ChromeContextMenuItem.Item.SAVE_VIDEO, false)
+                        .toString());
+        assertEquals(
+                context.getString(R.string.contextmenu_save_video_frame_as),
+                ChromeContextMenuItem.getTitle(
+                                context,
+                                mProfile,
+                                ChromeContextMenuItem.Item.DOWNLOAD_VIDEO_FRAME,
+                                false)
+                        .toString());
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures({ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU, ChromeFeatureList.TAB_BOTTOM_SHEET})
+    @DisableFeatures(ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL)
+    public void testAskGeminiForLinkEligibleWhenFlagEnabled() {
+        // Bottom sheet (mobile) presentation: side panel disabled.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getHttpLinkParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        if (!DeviceInfo.isAutomotive()) {
+            assertTrue(mPopulator.shouldShowAskGeminiForLink());
+        }
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @DisableFeatures(ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU)
+    public void testAskGeminiForLinkIneligibleWhenFlagDisabled() {
+        ContextMenuParams params = getHttpLinkParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        assertFalse(mPopulator.shouldShowAskGeminiForLink());
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures(ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU)
+    @DisableFeatures({
+        ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL,
+        ChromeFeatureList.TAB_BOTTOM_SHEET
+    })
+    public void testAskGeminiForLinkIneligibleWhenBottomSheetDisabled() {
+        // Neither side panel (desktop Android) nor bottom sheet (mobile) available.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getHttpLinkParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        assertFalse(mPopulator.shouldShowAskGeminiForLink());
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures({
+        ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU,
+        ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL
+    })
+    public void testAskGeminiForLinkEligibleOnDesktopSidePanel() {
+        // Side panel (desktop Android) presentation.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getHttpLinkParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        if (!DeviceInfo.isAutomotive()) {
+            assertTrue(mPopulator.shouldShowAskGeminiForLink());
+        }
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures({
+        ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU + ":show_on_page/true",
+        ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL
+    })
+    public void testAskGeminiForPageEligibleOnDesktopSidePanel() {
+        // Side panel (desktop Android) presentation with the page param on.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getPageParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        if (!DeviceInfo.isAutomotive()) {
+            assertTrue(mPopulator.shouldShowAskGeminiForPage());
+        }
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures(ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU + ":show_on_page/true")
+    @DisableFeatures(ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL)
+    public void testAskGeminiForPageIneligibleOnMobile() {
+        // Page entry is desktop-Android (side panel) only.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getPageParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        assertFalse(mPopulator.shouldShowAskGeminiForPage());
+    }
+
+    @Test
+    @SmallTest
+    @UiThreadTest
+    @EnableFeatures({
+        ChromeFeatureList.CLANK_GLIC_CONTEXT_MENU,
+        ChromeFeatureList.ENABLE_ANDROID_SIDE_PANEL
+    })
+    public void testAskGeminiForPageIneligibleWhenPageParamDisabled() {
+        // Feature on but show_on_page defaults to false.
+        GlicEnabling.setEnabledForTesting(true);
+        ContextMenuParams params = getPageParams();
+        initializePopulator(ChromeContextMenuPopulator.ContextMenuMode.NORMAL, params);
+        assertFalse(mPopulator.shouldShowAskGeminiForPage());
     }
 }

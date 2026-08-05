@@ -138,14 +138,7 @@ class SendTabToSelfBubbleOldUITest : public SendTabToSelfBubbleTest {
   base::test::ScopedFeatureList feature_list_;
 };
 
-// TODO(crbug.com/40927205): Flakily fails on some Windows builders.
-#if BUILDFLAG(IS_WIN)
-#define MAYBE_InvokeUi_ShowDeviceList DISABLED_InvokeUi_ShowDeviceList
-#else
-#define MAYBE_InvokeUi_ShowDeviceList InvokeUi_ShowDeviceList
-#endif
-IN_PROC_BROWSER_TEST_F(SendTabToSelfBubbleOldUITest,
-                       MAYBE_InvokeUi_ShowDeviceList) {
+IN_PROC_BROWSER_TEST_F(SendTabToSelfBubbleOldUITest, InvokeUi_ShowDeviceList) {
   ShowAndVerifyUi();
 }
 
@@ -218,7 +211,7 @@ IN_PROC_BROWSER_TEST_P(SendTabToSelfBubbleParameterizedTest,
   // Pin send tab to self to the toolbar.
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   actions::ActionItem* browser_action_item =
-      browser()->browser_actions()->root_action_item();
+      BrowserActions::From(browser())->root_action_item();
   auto* action_item = actions::ActionManager::Get().FindAction(
       kActionSendTabToSelf, browser_action_item);
   action_item->SetEnabled(true);

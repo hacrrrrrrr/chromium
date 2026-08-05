@@ -5,7 +5,13 @@
 #ifndef CONTENT_BROWSER_CONNECTION_ALLOWLIST_UTILS_H_
 #define CONTENT_BROWSER_CONNECTION_ALLOWLIST_UTILS_H_
 
+#include <optional>
+
+#include "base/unguessable_token.h"
+#include "content/common/content_export.h"
+#include "net/base/network_anonymization_key.h"
 #include "services/network/public/cpp/connection_allowlist.h"
+#include "services/network/public/mojom/network_context.mojom-forward.h"
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
 
 class GURL;
@@ -17,34 +23,38 @@ namespace content {
 
 struct PolicyContainerPolicies;
 
-// Returns true if the connection allowlist in Early Hints feature is enabled.
-bool IsConnectionAllowlistsInEarlyHintsEnabled();
-
 // Returns true if the parsed response headers contains a valid
 // "Connection-Allowlist" or "Connection-Allowlist-Report-Only" header.
 bool ResponseContainsConnectionAllowlist(
     const network::mojom::URLResponseHead* response_head);
 
-// Returns true if the response enables connection allowlist origin trial.
-bool ResponseEnablesConnectionAllowlistsOriginTrial(
-    const GURL& request_url,
-    const net::HttpResponseHeaders* response_headers);
-
-// Returns true if the initiator policies enforce connection allowlist.
-bool EnforcesConnectionAllowlist(
+// Returns true if the initiator policies have any active connection allowlists
+// (either enforced or report-only).
+bool HasActiveConnectionAllowlists(
     const PolicyContainerPolicies& initiator_policies);
 
-// Returns true if the connection allowlist allows redirect.
-bool IsRedirectAllowedByConnectionAllowlist(
-    const PolicyContainerPolicies& initiator_policies);
+// Returns true if the connection allowlist allows redirect. If the redirect is
+// not allowed, a report will be generated, and this function returns false.
+//
+// TODO(482728970): This method name should probably shift to match the
+// "AndReportIfNeeded" pattern.
+CONTENT_EXPORT bool IsRedirectAllowedByConnectionAllowlist(
+    const PolicyContainerPolicies& initiator_policies,
+    const GURL& original_url,
+    network::mojom::NetworkContext* network_context,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const std::optional<base::UnguessableToken>& reporting_source);
 
 // Returns true if the connection allowlist enforced by `policies` allows `url`.
-// If the URL is blocked, handles reporting (TODO) and returns false.
+// If the URL is blocked, handles reporting and returns false.
 // If the feature is disabled or there is no enforced allowlist in policies,
 // this function returns true.
-bool ConnectionAllowlistAllowsUrlAndReportIfNeeded(
+CONTENT_EXPORT bool ConnectionAllowlistAllowsUrlAndReportIfNeeded(
     const PolicyContainerPolicies& policies,
-    const GURL& url);
+    const GURL& url,
+    network::mojom::NetworkContext* network_context,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const std::optional<base::UnguessableToken>& reporting_source);
 
 // Evaluates the response and returns the ConnectionAllowlists that should apply
 // to the worker. Handles local scheme inheritance from creator_policies and

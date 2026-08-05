@@ -14,7 +14,6 @@
 #include "base/test/test_future.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
-#include "chrome/browser/browsing_topics/browsing_topics_service_factory.h"
 #include "chrome/browser/media/webrtc/media_device_salt_service_factory.h"
 #include "chrome/browser/private_verification_tokens/private_verification_tokens_service.h"
 #include "chrome/browser/private_verification_tokens/private_verification_tokens_service_factory.h"
@@ -24,7 +23,6 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/browsing_topics/test_util.h"
 #include "components/media_device_salt/media_device_salt_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/private_verification_tokens/common/private_verification_tokens_database.h"
@@ -85,18 +83,6 @@ class ChromeBrowsingDataModelDelegateTest : public testing::Test {
 
     delegate_ = ChromeBrowsingDataModelDelegate::CreateForProfile(profile_);
 
-    browsing_topics::BrowsingTopicsServiceFactory::GetInstance()
-        ->SetTestingFactoryAndUse(
-            profile(),
-            base::BindLambdaForTesting([this](content::BrowserContext* context)
-                                           -> std::unique_ptr<KeyedService> {
-              auto mock_browsing_topics_service = std::make_unique<
-                  browsing_topics::MockBrowsingTopicsService>();
-              mock_browsing_topics_service_ =
-                  mock_browsing_topics_service.get();
-              return mock_browsing_topics_service;
-            }));
-
 #if !BUILDFLAG(IS_ANDROID)
     if (auto* web_app_provider =
             web_app::WebAppProvider::GetForWebApps(profile_.get())) {
@@ -130,10 +116,6 @@ class ChromeBrowsingDataModelDelegateTest : public testing::Test {
 
   ChromeBrowsingDataModelDelegate* delegate() { return delegate_.get(); }
 
-  browsing_topics::MockBrowsingTopicsService* mock_browsing_topics_service() {
-    return mock_browsing_topics_service_;
-  }
-
   media_device_salt::MediaDeviceSaltService* media_device_salt_service() {
     return media_device_salt_service_;
   }
@@ -149,8 +131,6 @@ class ChromeBrowsingDataModelDelegateTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
   raw_ptr<TestingProfile> profile_;  // Owned by `profile_manager_`.
-  raw_ptr<browsing_topics::MockBrowsingTopicsService>
-      mock_browsing_topics_service_;
   std::unique_ptr<ChromeBrowsingDataModelDelegate> delegate_;
   raw_ptr<media_device_salt::MediaDeviceSaltService> media_device_salt_service_;
   raw_ptr<FederatedIdentityPermissionContext>
@@ -171,19 +151,6 @@ class ChromeBrowsingDataModelDelegateTest : public testing::Test {
     database->StoreTokens(tokens);
   }
 };
-
-TEST_F(ChromeBrowsingDataModelDelegateTest, RemoveDataKeyForTopics) {
-  auto test_origin = url::Origin::Create(GURL("a.test"));
-  EXPECT_CALL(*mock_browsing_topics_service(),
-              ClearTopicsDataForOrigin(test_origin))
-      .Times(1);
-
-  delegate()->RemoveDataKey(
-      test_origin,
-      {static_cast<BrowsingDataModel::StorageType>(
-          ChromeBrowsingDataModelDelegate::StorageType::kTopics)},
-      base::DoNothing());
-}
 
 TEST_F(ChromeBrowsingDataModelDelegateTest, RemoveDataKeyForMediaDeviceSalts) {
   base::test::TestFuture<void> done_future;

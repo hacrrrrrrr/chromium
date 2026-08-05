@@ -13,7 +13,10 @@
 #include "chrome/browser/ui/views/tabs/common/tab_collection_node.h"
 #include "chrome/browser/ui/views/tabs/common/tab_group_header_view.h"
 #include "chrome/browser/ui/views/tabs/common/tab_group_view.h"
+#include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
+#include "chrome/browser/ui/views/tabs/common/tab_strip_utils.h"
 #include "chrome/browser/ui/views/tabs/common/tab_view.h"
+#include "components/tabs/public/tab_group.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/view.h"
@@ -107,6 +110,8 @@ views::ProposedLayout TabGroupViewLayout::CalculateVerticalLayout(
           ? tab_group_view->collection_node_->GetDirectChildren()
           : std::vector<views::View*>();
 
+  const bool is_focused = tab_group_view->IsGroupFocused();
+
   // Layout children in order. Children will have their preferred height and
   // fill available width.
   for (auto* child : children) {
@@ -116,12 +121,17 @@ views::ProposedLayout TabGroupViewLayout::CalculateVerticalLayout(
     CHECK(!drag_data || !drag_data->should_hide);
     bounds.set_y(drag_data ? drag_data->offset.y() : height);
 
-    // If the tab strip is not collapsed then the groups tabs should be inset.
-    bounds.set_x(tab_strip_collapse_state !=
-                         tabs::VerticalTabStripCollapseState::kExpanded
-                     ? GetLayoutConstant(
-                           LayoutConstant::kVerticalTabStripHorizontalPadding)
-                     : TabGroupView::kTabLeadingPadding);
+    // If the tab strip is not collapsed and not focused then the groups tabs
+    // should be inset.
+    int child_x = 0;
+    if (tab_strip_collapse_state !=
+        tabs::VerticalTabStripCollapseState::kExpanded) {
+      child_x =
+          GetLayoutConstant(LayoutConstant::kVerticalTabStripHorizontalPadding);
+    } else if (!is_focused) {
+      child_x = TabGroupView::kTabLeadingPadding;
+    }
+    bounds.set_x(child_x);
     // If width is bounded, child views should respect the width constraints
     // and take up the available width excluding trailing horizontal padding.
     if (size_bounds.width().is_bounded()) {
@@ -137,9 +147,10 @@ views::ProposedLayout TabGroupViewLayout::CalculateVerticalLayout(
   if (!children.empty()) {
     group_line_bounds.set_height(height - group_line_bounds.y());
   }
+  const bool show_group_line =
+      !is_focused && tab_group_view->group_line_->GetVisible();
   layouts.child_layouts.emplace_back(tab_group_view->group_line_.get(),
-                                     tab_group_view->group_line_->GetVisible(),
-                                     group_line_bounds);
+                                     show_group_line, group_line_bounds);
 
   // Add extra padding below the group if not collapsed.
   const bool is_group_collapsed = tab_group_view->IsCollapsed();
@@ -147,10 +158,21 @@ views::ProposedLayout TabGroupViewLayout::CalculateVerticalLayout(
     height += kTabVerticalPadding;
   }
 
+  // If the group is focused and we are handling a drag, we need to account for
+  // the dragged views' bottom bound.
+  int dragged_view_bottom = 0;
+  if (tab_group_view->IsGroupFocused() && tab_group_view->IsHandlingDrag()) {
+    dragged_view_bottom = tab_group_view->GetDraggingViewsBounds().bottom();
+    if (size_bounds.height().is_bounded()) {
+      dragged_view_bottom =
+          std::min(dragged_view_bottom, size_bounds.height().value());
+    }
+  }
+
   layouts.host_size = gfx::Size(
       width, is_group_collapsed
                  ? header_bounds.height() + (2 * kGroupHeaderVerticalMargin)
-                 : height);
+                 : std::max(height, dragged_view_bottom));
   return layouts;
 }
 
@@ -185,14 +207,40 @@ views::ProposedLayout TabGroupViewLayout::CalculateHorizontalLayout(
                                        gfx::Rect());
   }
 
+  const std::vector<views::View*> children =
+      tab_group_view->collection_node_->GetDirectChildren();
+
   int x = header_width;
 
   // Layout children in order following the group header.
-  for (views::View* child :
-       tab_group_view->collection_node_->GetDirectChildren()) {
-    int child_width =
+  std::vector<int> child_preferred_widths;
+  std::vector<int> child_min_widths;
+  int total_preferred_width = 0;
+  int total_min_width = 0;
+
+  for (views::View* child : children) {
+    int child_pref_width =
         child->GetPreferredSize(views::SizeBounds({}, container_height))
             .width();
+    int child_min_width = child->GetMinimumSize().width();
+
+    child_preferred_widths.push_back(child_pref_width);
+    child_min_widths.push_back(child_min_width);
+    total_preferred_width += child_pref_width;
+    total_min_width += child_min_width;
+  }
+
+  int available_width =
+      size_bounds.width().value_or(total_preferred_width + header_width);
+  int width_for_children = std::max(0, available_width - header_width);
+
+  std::vector<int> allocated_widths = CalculateProportionalChildWidths(
+      width_for_children, child_preferred_widths, child_min_widths,
+      total_preferred_width, total_min_width);
+
+  for (size_t i = 0; i < children.size(); ++i) {
+    views::View* child = children[i];
+    int child_width = allocated_widths[i];
 
     gfx::Rect bounds(x, 0, child_width, container_height);
     auto drag_data = tab_group_view->GetVisualDataForDraggedView(*child);

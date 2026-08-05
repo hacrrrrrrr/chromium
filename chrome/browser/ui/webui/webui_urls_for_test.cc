@@ -27,7 +27,6 @@ base::span<const std::string_view> GetChromeUrlsForTest() {
       // TODO(crbug.com/487113801): Investigate why tests are flaky on dbg bots.
       "chrome://accessibility",
 #endif
-      "chrome://personal-context-notice",
 // TODO:(https://crbug.com/40265685): Flakily crashes on ChromeOS.
 #if !BUILDFLAG(IS_CHROMEOS)
       "chrome://app-service-internals",
@@ -122,6 +121,7 @@ base::span<const std::string_view> GetChromeUrlsForTest() {
       "chrome://newtab-footer",
       "chrome://new-tab-page-third-party",
       "chrome://newtab",
+      "chrome://notebooks-internals",
       "chrome://ntp-tiles-internals",
       "chrome://omnibox",
       "chrome://on-device-internals",
@@ -131,9 +131,11 @@ base::span<const std::string_view> GetChromeUrlsForTest() {
 #endif
 
       "chrome://optimization-guide-internals",
+#if !BUILDFLAG(IS_ANDROID)
+      "chrome://organizer-panel.top-chrome",
+#endif
       "chrome://password-manager",
       "chrome://password-manager-internals",
-      "chrome://personal-context-internals",
       "chrome://policy",
       "chrome://predictors",
 
@@ -142,7 +144,6 @@ base::span<const std::string_view> GetChromeUrlsForTest() {
       "chrome://prefs-internals",
 #endif
 
-      "chrome://private-aggregation-internals",
       "chrome://private-ai-internals",
       "chrome://process-internals",
       "chrome://profile-internals",
@@ -168,7 +169,6 @@ base::span<const std::string_view> GetChromeUrlsForTest() {
       "chrome://tab-strip-internals",
       "chrome://tabs-from-other-devices.top-chrome",
       "chrome://terms",
-      "chrome://topics-internals",
       "chrome://traces",
       "chrome://traces-internals",
       "chrome://tracing",

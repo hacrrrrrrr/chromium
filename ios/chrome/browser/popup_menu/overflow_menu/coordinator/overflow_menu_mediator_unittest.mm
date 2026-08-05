@@ -196,7 +196,7 @@ class OverflowMenuMediatorTest : public PlatformTest {
                 ProfileIOS, password_manager::MockPasswordStoreInterface>));
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
@@ -546,14 +546,20 @@ TEST_F(OverflowMenuMediatorTest, TestMenuItemsCount) {
   if (send_tab_to_self::AreIOSTabRemindersEnabled() && !mediator_.incognito) {
     number_of_action_items++;
   }
-  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+  if (IsHideToolbarEnabled()) {
     number_of_action_items++;
   }
 
   // New Tab, New Incognito Tab.
   NSUInteger number_of_tab_actions = 2;
-  if (IsSplitToolbarMode(mediator_.baseViewController)) {
+  BOOL showReloadStopAction;
+  if (IsChromeNextIaEnabled()) {
+    showReloadStopAction = !CanShowTabStrip(mediator_.baseViewController);
+  } else {
     // Stop/Reload only shows in split toolbar mode.
+    showReloadStopAction = IsSplitToolbarMode(mediator_.baseViewController);
+  }
+  if (showReloadStopAction) {
     number_of_tab_actions++;
   }
   if (base::ios::IsMultipleScenesSupported()) {
@@ -580,12 +586,12 @@ TEST_F(OverflowMenuMediatorTest, TestMenuItemsCount) {
 }
 
 // Tests that the Report an Issue item is hidden when the capability is false.
-TEST_F(OverflowMenuMediatorTest, TestFeedbackItemHiddenWhenCapabilityFalse) {
+TEST_F(OverflowMenuMediatorTest, FeedbackItemHiddenWhenCapabilityFalse) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(
       kFeedbackEntryPointsRequireCanSubmitFeedbackCapability);
 
-  const FakeSystemIdentity* identity = [FakeSystemIdentity fakeIdentity1];
+  FakeSystemIdentity* identity = [FakeSystemIdentity fakeIdentity1];
   fake_system_identity_manager()->AddIdentityWithUnknownCapabilities(identity);
   AuthenticationServiceFactory::GetForProfile(profile_.get())
       ->SignIn(identity, signin_metrics::AccessPoint::kStartPage);
@@ -759,7 +765,7 @@ TEST_F(OverflowMenuMediatorTest, TestItemsStatusOnNTP) {
 
   EXPECT_TRUE(HasItem(kToolsMenuNewTabId, /*enabled=*/YES));
   EXPECT_FALSE(HasItem(kToolsMenuSiteInformation, /*enabled=*/YES));
-  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+  if (IsHideToolbarEnabled()) {
     EXPECT_TRUE(HasItem(kToolsMenuHideToolbars, /*enabled=*/NO));
   }
 }
@@ -1009,6 +1015,28 @@ TEST_F(OverflowMenuMediatorTest, TestIdentityButtonVisibleWhenSignedIn) {
   EXPECT_NSEQ(expectedSubtitle, identity_action.subtitle);
 }
 
+// Tests that the identity button is hidden in incognito mode even when signed
+// in.
+TEST_F(OverflowMenuMediatorTest, TestIdentityButtonHiddenInIncognitoMode) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(kIdentityAwareness);
+
+  // Sign in user.
+  const FakeSystemIdentity* identity = [FakeSystemIdentity fakeIdentity1];
+  fake_system_identity_manager()->AddIdentity(identity);
+  AuthenticationServiceFactory::GetForProfile(profile_.get())
+      ->SignIn(identity, signin_metrics::AccessPoint::kStartPage);
+
+  // Create mediator in incognito mode.
+  CreateMediator(/*incognito=*/YES);
+  mediator_.authenticationService =
+      AuthenticationServiceFactory::GetForProfile(profile_.get());
+  mediator_.model = model_;
+
+  // Check the identity item is not present.
+  EXPECT_FALSE(HasItem(kToolsMenuIdentityId, /*enabled=*/YES));
+}
+
 // Tests that 1) the tools menu has an enabled 'Add to Bookmarks' button when
 // the current URL is not in bookmarks 2) the bookmark button changes to an
 // enabled 'Edit bookmark' button when navigating to a bookmarked URL, 3) the
@@ -1148,6 +1176,14 @@ TEST_F(OverflowMenuMediatorTest, TestNoEligibleIdentityErrorWhenSyncOff) {
       GetDestination(kToolsMenuSettingsId);
   ASSERT_NE(nil, settingsDestination);
   EXPECT_EQ(BadgeTypeNone, settingsDestination.badge);
+}
+
+// Verifies that the Level Up walkthrough target item (Settings destination)
+// exists in OverflowMenuMediator.
+TEST_F(OverflowMenuMediatorTest, HasSettingsLevelUpDestination) {
+  CreateMediator(/*incognito=*/NO);
+  mediator_.model = model_;
+  EXPECT_NE(GetDestination(kToolsMenuSettingsId), nil);
 }
 
 // Tests that there is an error badge on the Settings destination when there is

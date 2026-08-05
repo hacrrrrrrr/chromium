@@ -31,28 +31,28 @@ struct AudioSampleInfo;
 class WebrtcAudioFifoSinkAdapter;
 
 class WebrtcVideoEncoderFactory;
+class IceConfigFetcher;
 class HostControlDispatcher;
 class HostEventDispatcher;
 
 class WebrtcConnectionToClient : public ConnectionToClient,
-                                 public Session::EventHandler,
                                  public WebrtcTransport::EventHandler,
                                  public ChannelDispatcherBase::EventHandler {
  public:
-  WebrtcConnectionToClient(
-      std::unique_ptr<Session> session,
-      scoped_refptr<protocol::TransportContext> transport_context,
-      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner);
+  explicit WebrtcConnectionToClient(
+      std::unique_ptr<protocol::IceConfigFetcher> ice_config_fetcher);
 
   WebrtcConnectionToClient(const WebrtcConnectionToClient&) = delete;
   WebrtcConnectionToClient& operator=(const WebrtcConnectionToClient&) = delete;
 
   ~WebrtcConnectionToClient() override;
 
+  void Start() override;
+
   // ConnectionToClient interface.
   void SetEventHandler(
       ConnectionToClient::EventHandler* event_handler) override;
-  Session* session() override;
+  Transport* transport() override;
   void Disconnect(ErrorCode error,
                   std::string_view error_details,
                   const SourceLocation& error_location) override;
@@ -70,9 +70,6 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   void ApplyNetworkSettings(const NetworkSettings& settings) override;
   PeerConnectionControls* peer_connection_controls() override;
   WebrtcEventLogData* rtc_event_log() override;
-
-  // Session::EventHandler interface.
-  void OnSessionStateChange(Session::State state) override;
 
   // WebrtcTransport::EventHandler interface
   void OnWebrtcTransportConnecting() override;
@@ -101,16 +98,14 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   // Event handler for handling events sent from this object.
   raw_ptr<ConnectionToClient::EventHandler> event_handler_ = nullptr;
 
+  // Declared before transport_ so it outlives WebRTC tracks and streams.
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
   std::unique_ptr<WebrtcTransport> transport_;
-
-  std::unique_ptr<Session> session_;
 
   raw_ptr<WebrtcVideoEncoderFactory, AcrossTasksDanglingUntriaged>
       video_encoder_factory_;
 
   HostVideoStatsDispatcher video_stats_dispatcher_;
-
-  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
 
   SessionOptions session_options_;
 
@@ -128,6 +123,8 @@ class WebrtcConnectionToClient : public ConnectionToClient,
       base::OnceCallback<void(bool)> acknowledgment_callback);
 
   void BindAudioFifoSinkAdapter();
+
+  bool closed_ = false;
 
   THREAD_CHECKER(thread_checker_);
 

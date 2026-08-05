@@ -176,6 +176,9 @@ public class WebApkValidator {
         List<ResolveInfo> infos = resolveInfosForUrlAndOptionalPackage(context, url, webApkPackage);
         for (ResolveInfo info : infos) {
             if (info.activityInfo != null) {
+                if (!info.activityInfo.packageName.equals(webApkPackage)) {
+                    continue;
+                }
                 @ValidationResult
                 int result = isValidWebApkInternal(context, info.activityInfo.packageName);
                 switch (result) {
@@ -364,13 +367,9 @@ public class WebApkValidator {
 
         intent.addCategory(Intent.CATEGORY_BROWSABLE);
         intent.setComponent(null);
+        intent.setSelector(null);
         if (applicationPackage != null) {
             intent.setPackage(applicationPackage);
-        }
-        Intent selector = intent.getSelector();
-        if (selector != null) {
-            selector.addCategory(Intent.CATEGORY_BROWSABLE);
-            selector.setComponent(null);
         }
         return intent;
     }
@@ -465,7 +464,7 @@ public class WebApkValidator {
 
             // TODO(scottkirkwood): remove this log once well tested.
             if (DEBUG) {
-                Log.d(TAG, "File " + packageFilename + ": " + result);
+                Log.d(TAG, "File %s: %d", packageFilename, result);
             }
             return result == WebApkVerifySignature.Error.OK;
         } catch (Exception e) {

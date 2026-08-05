@@ -18,7 +18,11 @@
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_configuration.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_first_run_page_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_first_run_step.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/gemini_first_run_wrapper_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_promo_view_controller.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
@@ -45,8 +49,8 @@
   // Mediator for handling all logic related to Gemini first run promo.
   GeminiFirstRunMediator* _mediator;
 
-  // Wrapper view controller for the First Run Experience UI.
-  GeminiFirstRunWrapperViewController* _viewController;
+  // View controller for the First Run Experience UI.
+  UIViewController* _viewController;
 
   // Handler for sending Gemini commands.
   id<GeminiCommands> _geminiHandler;
@@ -71,6 +75,12 @@
 
   // Completion block to be called when the FRE flow finishes.
   void (^_completion)(BOOL success);
+
+  // The outcome of the Gemini Live FRE flow, if applicable.
+  IOSGeminiLiveFREOutcome _liveFREOutcome;
+
+  // Whether the Live FRE outcome has already been logged.
+  BOOL _outcomeLogged;
 }
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
@@ -83,6 +93,7 @@
     _entryPoint = entryPoint;
     _firstRunType = firstRunType;
     _completion = completion;
+    _animatedPresentation = YES;
   }
   return self;
 }
@@ -125,22 +136,34 @@
 
   GeminiConsentConfiguration* consentConfig =
       [_mediator consentConfigurationForFirstRunType:_firstRunType];
-  BOOL showPromo =
-      _mediator.shouldShowPromo && (_firstRunType != GeminiFirstRunType::kLive);
-  _viewController =
-      [[GeminiFirstRunWrapperViewController alloc] initWithPromo:showPromo
-                                                    firstRunType:_firstRunType
-                                            consentConfiguration:consentConfig];
+  if (IsGeminiFRERefactorEnabled()) {
+    _viewController = [self
+        createRefactoredViewControllerWithConsentConfiguration:consentConfig];
+  } else {
+    _viewController =
+        [self createLegacyViewControllerWithConsentConfiguration:consentConfig];
+  }
   _viewController.sheetPresentationController.delegate = self;
-  _viewController.mutator = _mediator;
 
-  [self.baseViewController presentViewController:_viewController
-                                        animated:YES
-                                      completion:^{
-                                        // Record the First Run was shown.
-                                        RecordFirstRunShown();
-                                      }];
+  if (_firstRunType == GeminiFirstRunType::kLive) {
+    _liveFREOutcome = IOSGeminiLiveFREOutcome::kDismissedOnConsent;
+    _outcomeLogged = NO;
+  }
 
+  __weak __typeof(self) weakSelf = self;
+  [self.baseViewController
+      presentViewController:_viewController
+                   animated:self.animatedPresentation
+                 completion:^{
+                   __strong __typeof(weakSelf) strongSelf = weakSelf;
+                   if (!strongSelf) {
+                     return;
+                   }
+                   if (strongSelf->_firstRunType != GeminiFirstRunType::kLive) {
+                     // Record the First Run was shown.
+                     RecordFirstRunShown();
+                   }
+                 }];
   [super start];
 }
 
@@ -151,14 +174,25 @@
 #pragma mark - Public
 
 - (void)stopWithCompletion:(ProceduralBlock)completion {
+  [self logLiveFREOutcome];
   // Retain self to survive synchronous teardown from the completion block.
-  __strong __typeof(self) strongSelf = self;
-  GeminiTabHelper* geminiTabHelper = [strongSelf activeWebStateGeminiTabHelper];
-  if (geminiTabHelper) {
-    geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+  __strong __typeof(self) strongSelf =
+      IsGeminiCoordinatorTeardownFixEnabled() ? self : nil;
+  if (strongSelf) {
+    GeminiTabHelper* geminiTabHelper =
+        [strongSelf activeWebStateGeminiTabHelper];
+    if (geminiTabHelper) {
+      geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+    }
+    [strongSelf presentPageActionMenuIPH];
+  } else {
+    GeminiTabHelper* geminiTabHelper = [self activeWebStateGeminiTabHelper];
+    if (geminiTabHelper) {
+      geminiTabHelper->SetPreventContextualPanelEntryPoint(NO);
+    }
+    [self presentPageActionMenuIPH];
   }
 
-  [strongSelf presentPageActionMenuIPH];
   _viewController = nil;
   _geminiHandler = nil;
   _helpCommandsHandler = nil;
@@ -168,7 +202,11 @@
   _tracker = nil;
   _completion = nil;
   if (!_consentCompletion) {
-    [strongSelf dismissPresentedViewWithCompletion:completion];
+    if (strongSelf) {
+      [strongSelf dismissPresentedViewWithCompletion:completion];
+    } else {
+      [self dismissPresentedViewWithCompletion:completion];
+    }
   }
   [super stop];
 }
@@ -176,12 +214,17 @@
 #pragma mark - GeminiFirstRunMediatorDelegate
 
 - (void)dismissGeminiConsentUIWithCompletion:(void (^)())completion {
+  BOOL hasConsented = _prefService->GetBoolean(prefs::kIOSGeminiLiveConsent);
   if (_firstRunType == GeminiFirstRunType::kLive) {
-    if (completion) {
-      _consentCompletion = completion;
+    if (hasConsented) {
+      if (completion) {
+        _consentCompletion = completion;
+      }
+      [self handleLiveMicPermission];
+      return;
+    } else {
+      [self logLiveFREOutcome];
     }
-    [self handleLiveMicPermission];
-    return;
   }
 
   [self dismissPresentedViewWithCompletion:^{
@@ -198,13 +241,76 @@
 
 #pragma mark - UISheetPresentationControllerDelegate
 
-// Handles the dismissal of the UI.
+// Handles the dismissal of the FRE UI.
 - (void)presentationControllerDidDismiss:
     (UIPresentationController*)presentationController {
-  [_geminiHandler dismissGeminiFlowWithCompletion:nil];
+  if (_firstRunType == GeminiFirstRunType::kLive) {
+    [self logLiveFREOutcome];
+    [_mediator disconnect];
+    if (_completion) {
+      void (^completion)(BOOL) = _completion;
+      _completion = nil;
+      completion(NO);
+    }
+  } else {
+    [_geminiHandler dismissGeminiFlowWithCompletion:nil];
+  }
 }
 
 #pragma mark - Private
+
+// Creates the refactored page view controller for the First Run Experience UI.
+- (UIViewController*)createRefactoredViewControllerWithConsentConfiguration:
+    (GeminiConsentConfiguration*)consentConfig {
+  std::vector<GeminiFirstRunStepIdentifier> stepTypes =
+      [_mediator stepsForFirstRunType:_firstRunType];
+  NSMutableArray* steps = [[NSMutableArray alloc] init];
+
+  for (GeminiFirstRunStepIdentifier stepType : stepTypes) {
+    [steps addObject:[self viewControllerForStepType:stepType
+                                consentConfiguration:consentConfig]];
+  }
+
+  BOOL showBrandingHeader =
+      [_mediator shouldShowBrandingHeaderForFirstRunType:_firstRunType];
+  return [[GeminiFirstRunPageViewController alloc]
+           initWithSteps:steps
+      showBrandingHeader:showBrandingHeader];
+}
+
+// Creates the legacy wrapper view controller for the First Run Experience UI.
+- (UIViewController*)createLegacyViewControllerWithConsentConfiguration:
+    (GeminiConsentConfiguration*)consentConfig {
+  BOOL showPromo = [_mediator shouldShowPromoForFirstRunType:_firstRunType];
+  GeminiFirstRunWrapperViewController* wrapperVC =
+      [[GeminiFirstRunWrapperViewController alloc] initWithPromo:showPromo
+                                                    firstRunType:_firstRunType
+                                            consentConfiguration:consentConfig];
+  wrapperVC.mutator = _mediator;
+  return wrapperVC;
+}
+
+// Creates the corresponding step view controller for `stepType`.
+- (UIViewController<GeminiFirstRunStep>*)
+    viewControllerForStepType:(GeminiFirstRunStepIdentifier)stepType
+         consentConfiguration:(GeminiConsentConfiguration*)consentConfig {
+  switch (stepType) {
+    case GeminiFirstRunStepIdentifier::kPromo: {
+      GeminiPromoViewController* promoVC =
+          [[GeminiPromoViewController alloc] init];
+      promoVC.mutator = _mediator;
+      return promoVC;
+    }
+    case GeminiFirstRunStepIdentifier::kConsent: {
+      GeminiConsentViewController* consentVC =
+          [[GeminiConsentViewController alloc]
+              initWithConfiguration:consentConfig];
+      consentVC.mutator = _mediator;
+      consentVC.firstRunType = _firstRunType;
+      return consentVC;
+    }
+  }
+}
 
 // Checks the current microphone permission status and prompts the user if
 // needed.
@@ -230,7 +336,8 @@
 // Handles the result of the microphone permission request.
 - (void)handleLiveMicPermissionResult:(BOOL)granted {
   if (granted) {
-    // TODO(crbug.com/462400054): Start the Live session.
+    _liveFREOutcome = IOSGeminiLiveFREOutcome::kSuccess;
+    [self logLiveFREOutcome];
     __weak __typeof(self) weakSelf = self;
     [self dismissPresentedViewWithCompletion:^{
       __strong __typeof(weakSelf) strongSelf = weakSelf;
@@ -244,8 +351,25 @@
     }];
     _viewController = nil;
   } else {
+    AVAuthorizationStatus status =
+        [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio];
+    if (status == AVAuthorizationStatusAuthorized) {
+      _liveFREOutcome = IOSGeminiLiveFREOutcome::kDeniedChromeMicPermission;
+    } else {
+      _liveFREOutcome = IOSGeminiLiveFREOutcome::kDeniedOSMicPermission;
+    }
+    [self logLiveFREOutcome];
     _consentCompletion = nil;
-    [_mediator didRefuseLiveMicPermission];
+    __weak __typeof(self) weakSelf = self;
+    [self dismissPresentedViewWithCompletion:^{
+      __strong __typeof(weakSelf) strongSelf = weakSelf;
+      if (strongSelf && strongSelf->_completion) {
+        void (^completion)(BOOL) = strongSelf->_completion;
+        strongSelf->_completion = nil;
+        completion(NO);
+      }
+    }];
+    _viewController = nil;
   }
 }
 
@@ -295,6 +419,14 @@
     // Hub In-Product Help (IPH) bubble will be misaligned from using anchor
     // points relative to a partially expanded toolbar.
     FullscreenController::FromBrowser(self.browser)->ExitFullscreen();
+  }
+}
+
+// Logs the final outcome of the Live FRE flow.
+- (void)logLiveFREOutcome {
+  if (_firstRunType == GeminiFirstRunType::kLive && !_outcomeLogged) {
+    RecordLiveFREOutcome(_liveFREOutcome);
+    _outcomeLogged = YES;
   }
 }
 

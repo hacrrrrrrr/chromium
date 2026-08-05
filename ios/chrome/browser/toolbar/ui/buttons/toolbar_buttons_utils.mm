@@ -11,27 +11,35 @@
 #import "ios/chrome/common/ui/util/ui_util.h"
 
 namespace {
-// Constants for regular (non-glass) toolbar element shadows.
+// Constants for default toolbar element shadow.
 constexpr CGFloat kShadowOpacity = 0.12;
 constexpr CGFloat kShadowYOffset = 1;
 
-// Constants for glass prototype element background colors.
-constexpr CGFloat kGlassElementDarkAlpha = 0.50;
-constexpr CGFloat kGlassElementLightAlpha = 0.80;
+// Constants for glassToolbar background.
+constexpr CGFloat kGlassDarkBackgroundAlpha = 0.5;
+constexpr CGFloat kGlassLightBackgroundAlpha = 0.8;
+constexpr CGFloat kGlassIncognitoBackgroundAlpha = 0.75;
 
-// Constants for glass prototype element shadows in dark and incognito modes.
-constexpr CGFloat kGlassShadowDarkOpacity = 0.05;
-constexpr CGFloat kGlassShadowDarkRadius = 10.0;
-
-// Constants for glass prototype element shadows in light mode.
-constexpr CGFloat kGlassShadowLightOpacity = 0.16;
-constexpr CGFloat kGlassShadowLightRadius = 8.0;
-
-// Shared vertical shadow offset for elements in the glass prototype.
-constexpr CGFloat kGlassShadowVerticalOffset = 8.0;
+// Constants for glassToolbar shadow.
+constexpr CGFloat kGlassShadowRadius = 10;
+constexpr CGFloat kGlassShadowOffsetY = 8;
+constexpr CGFloat kGlassDarkShadowOpacity = 0.05;
+constexpr CGFloat kGlassLightShadowOpacity = 0.16;
 }  // namespace
 
 UIColor* ToolbarElementBackgroundColor(BOOL incognito) {
+  if (IsGlassToolbarEnabled()) {
+    if (incognito) {
+      return [UIColor colorWithWhite:0 alpha:kGlassIncognitoBackgroundAlpha];
+    }
+    return [UIColor
+        colorWithDynamicProvider:^UIColor*(UITraitCollection* traitCollection) {
+          if (traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
+            return [UIColor colorWithWhite:0 alpha:kGlassDarkBackgroundAlpha];
+          }
+          return [UIColor colorWithWhite:1.0 alpha:kGlassLightBackgroundAlpha];
+        }];
+  }
   if (incognito) {
     return [UIColor colorNamed:kStaticGrey900Color];
   }
@@ -44,56 +52,42 @@ UIColor* ToolbarElementBackgroundColor(BOOL incognito) {
       }];
 }
 
-UIColor* ToolbarGlassPrototypeElementBackgroundColor(BOOL incognito) {
-  CHECK(IsToolbarGlassPrototypeEnabled());
-  if (incognito) {
-    return [UIColor.blackColor colorWithAlphaComponent:kGlassElementDarkAlpha];
-  }
-  return [UIColor colorWithDynamicProvider:^UIColor*(
-                      UITraitCollection* traitCollection) {
-    if (traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark) {
-      return
-          [UIColor.blackColor colorWithAlphaComponent:kGlassElementDarkAlpha];
-    }
-    return [UIColor.whiteColor colorWithAlphaComponent:kGlassElementLightAlpha];
-  }];
-}
-
-void ConfigureGlassToolbarElementShadow(UIView* container,
-                                        BOOL incognito,
-                                        UITraitCollection* trait_collection) {
-  CHECK(IsToolbarGlassPrototypeEnabled());
-  BOOL isDark = incognito || (trait_collection.userInterfaceStyle ==
-                              UIUserInterfaceStyleDark);
-  container.layer.shadowColor =
-      isDark ? UIColor.whiteColor.CGColor : UIColor.blackColor.CGColor;
-  container.layer.shadowOpacity =
-      isDark ? kGlassShadowDarkOpacity : kGlassShadowLightOpacity;
-  container.layer.shadowRadius =
-      isDark ? kGlassShadowDarkRadius : kGlassShadowLightRadius;
-  container.layer.shadowOffset = CGSizeMake(0, kGlassShadowVerticalOffset);
-}
-
 void ConfigureShadowForToolbarElement(UIView* container, BOOL remove_shadow) {
-  container.layer.shadowColor =
-      remove_shadow ? nil : UIColor.whiteColor.CGColor;
-  container.layer.shadowOpacity = remove_shadow ? 0.0 : kShadowOpacity;
-  container.layer.shadowOffset =
-      remove_shadow ? CGSizeZero : CGSizeMake(0, kShadowYOffset);
+  if (remove_shadow) {
+    container.layer.shadowColor = nil;
+    container.layer.shadowOpacity = 0.0;
+    container.layer.shadowOffset = CGSizeZero;
+    container.layer.shadowRadius = 0;
+    return;
+  }
+
+  if (IsGlassToolbarEnabled()) {
+    BOOL isDarkMode =
+        container.overrideUserInterfaceStyle == UIUserInterfaceStyleDark ||
+        container.traitCollection.userInterfaceStyle ==
+            UIUserInterfaceStyleDark;
+    container.layer.shadowColor =
+        isDarkMode ? UIColor.whiteColor.CGColor : UIColor.blackColor.CGColor;
+    container.layer.shadowOpacity =
+        isDarkMode ? kGlassDarkShadowOpacity : kGlassLightShadowOpacity;
+    container.layer.shadowOffset = CGSizeMake(0, kGlassShadowOffsetY);
+    container.layer.shadowRadius = kGlassShadowRadius;
+    return;
+  }
+
+  container.layer.shadowColor = UIColor.whiteColor.CGColor;
+  container.layer.shadowOpacity = kShadowOpacity;
+  container.layer.shadowOffset = CGSizeMake(0, kShadowYOffset);
   container.layer.shadowRadius = 0;
 }
 
 void ConfigureCornerRadiusForToolbarButtonContainer(
     UIView* container,
     UITraitCollection* trait_collection) {
-  // Always enforce circular or capsule pill shapes under the glass prototype.
-  if (IsToolbarGlassPrototypeEnabled()) {
-    container.layer.cornerRadius = container.bounds.size.height > 0
-                                       ? container.bounds.size.height / 2.0
-                                       : kToolbarButtonSize / 2.0;
+  if (IsGlassToolbarEnabled()) {
+    container.layer.cornerRadius = kToolbarButtonSize / 2;
     return;
   }
-
   // Whether the window has a regular height x compact width size class,
   // corresponding to iPhone portrait mode or a skinny iPad window.
   BOOL isRegularXCompactSizeClass =

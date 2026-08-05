@@ -67,6 +67,7 @@
 #include "partition_alloc/partition_root.h"
 #include "partition_alloc/pointers/instance_tracer.h"
 #include "partition_alloc/pointers/raw_ptr.h"
+#include "partition_alloc/random.h"
 #include "partition_alloc/scheduler_loop_quarantine.h"
 #include "partition_alloc/shim/allocator_shim.h"
 #include "partition_alloc/shim/allocator_shim_default_dispatch_to_partition_alloc.h"
@@ -187,8 +188,9 @@ class LockMetricsRecorderSupport
     auto* recorder = base::LockMetricsRecorder::GetForCurrentThread();
     if (recorder) {
       recorder->RecordLockAcquisitionTime(
-          Microseconds(sample.InMicroseconds()),
-          base::LockMetricsRecorder::LockType::kPartitionAllocLock);
+          base::LockMetricsRecorder::LockMetricSample{
+              Microseconds(sample.InMicroseconds()),
+              base::LockMetricsRecorder::LockType::kPartitionAllocLock});
     }
   }
 };
@@ -847,17 +849,6 @@ void InstallUnretainedDanglingRawPtrChecks() {
   }
 }
 
-bool IsSchedulerLoopQuarantineEnabled(std::string_view process_type) {
-#if PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  return base::allocator::PartitionAllocSupport::
-             ShouldEnablePartitionAllocWithAdvancedChecks(process_type) &&
-         base::FeatureList::IsEnabled(
-             base::features::kPartitionAllocSchedulerLoopQuarantine);
-#else
-  return false;
-#endif  // PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-}
-
 void ReconfigurePartitionForKnownProcess(std::string_view process_type) {
   DCHECK_NE(process_type, switches::kZygoteProcess);
   // TODO(keishi): Move the code to enable BRP back here after Finch
@@ -955,22 +946,6 @@ bool PartitionAllocSupport::ShouldEnableMemoryTaggingInRendererProcess() {
   return ShouldEnableMemoryTagging(switches::kRendererProcess);
 }
 
-// static
-bool PartitionAllocSupport::ShouldEnablePartitionAllocWithAdvancedChecks(
-    std::string_view process_type) {
-#if !PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  return false;
-#else
-  if (!base::FeatureList::IsEnabled(
-          base::features::kPartitionAllocWithAdvancedChecks)) {
-    return false;
-  }
-  return ShouldEnableFeatureOnProcess(
-      base::features::kPartitionAllocWithAdvancedChecksEnabledProcessesParam
-          .Get(),
-      process_type);
-#endif  // !PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-}
 
 // static
 PartitionAllocSupport::BrpConfiguration
@@ -1073,6 +1048,11 @@ void PartitionAllocSupport::ReconfigureAfterZygoteFork(
     called_after_zygote_fork_ = true;
     established_process_type_ = process_type;
   }
+
+  // The generator backing GetRandomPageBase() is seeded once and its state is
+  // inherited across fork(). Reinitialize it so that each child process
+  // derives its own address-space-randomization hints.
+  partition_alloc::internal::ReinitializeRandomGenerator();
 
   if (process_type != switches::kZygoteProcess) {
     ReconfigurePartitionForKnownProcess(process_type);
@@ -1196,20 +1176,7 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
               process_type_identifier,
               SchedulerLoopQuarantineBranchType::kAdvancedMemorySafetyChecks);
 
-  const auto scheduler_loop_quarantine_main_config =
-      GetSchedulerLoopQuarantineConfiguration(
-          process_type, SchedulerLoopQuarantineBranchType::kMain);
-  const auto scheduler_loop_quarantine_io_config =
-      GetSchedulerLoopQuarantineConfiguration(
-          process_type, SchedulerLoopQuarantineBranchType::kIO);
-
-  if (scheduler_loop_quarantine_thread_local_config
-          .enable_task_controlled_purge ||
-      scheduler_loop_quarantine_thread_local_config.pause_in_between_tasks ||
-      scheduler_loop_quarantine_main_config.enable_task_controlled_purge ||
-      scheduler_loop_quarantine_main_config.pause_in_between_tasks ||
-      scheduler_loop_quarantine_io_config.enable_task_controlled_purge ||
-      scheduler_loop_quarantine_io_config.pause_in_between_tasks) {
+  if (HasSchedulerLoopQuarantineTaskControl(process_type_identifier)) {
     base::EnableSchedulerLoopQuarantineTaskControlledPurge();
   }
 
@@ -1389,9 +1356,7 @@ void PartitionAllocSupport::ReconfigureAfterFeatureListInit(
         SchedulerLoopQuarantineBranchType::kMain);
   }
 
-  bool enable_pa_with_advanced_checks =
-      ShouldEnablePartitionAllocWithAdvancedChecks(process_type);
-  if (enable_pa_with_advanced_checks) {
+  if (HasMiracleObject(process_type_identifier)) {
     allocator_shim::InstallPartitionAllocWithAdvancedChecks();
   }
 #endif  // PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)

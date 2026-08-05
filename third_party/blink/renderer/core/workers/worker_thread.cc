@@ -681,6 +681,11 @@ void WorkerThread::InitializeOnWorkerThread(
         this, url_for_debugger, inspector_task_runner_,
         std::move(devtools_params));
 
+    if (auto* worker_global_scope =
+            DynamicTo<WorkerGlobalScope>(GlobalScope())) {
+      worker_global_scope->CreateAnimationFrameTimingMonitor();
+    }
+
     // Since context initialization below may fail, we should notify debugger
     // about the new worker thread separately, so that it can resolve it by id
     // at any moment.
@@ -815,7 +820,8 @@ void WorkerThread::PrepareForShutdownOnWorkerThread() {
   // are observer of the |GlobalScope()| (see the DedicatedWorker class) and
   // they initiate thread termination on destruction of the parent context.
   GlobalScope()->NotifyContextDestroyed();
-  GetIsolate()->ContextDisposedNotification(/*dependant_context=*/false);
+  GetIsolate()->ContextDisposedNotification(
+      v8::ContextDependants::kNoDependants);
 
   worker_scheduler_->Dispose();
 

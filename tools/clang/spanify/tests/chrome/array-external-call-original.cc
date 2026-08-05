@@ -86,3 +86,26 @@ void fct5() {
   // std::string s(buf.data());
   std::string s(buf);
 }
+
+void fct6() {
+  // Expected rewrite:
+  // std::array<char, 10> data;
+  char data[10];
+  data[UnsafeIndex()] = 'a';
+  File f;
+  // No rewrite expected.
+  f.ReadAtCurrentPos(&data[2], 8);
+}
+
+void ExternalVoidPtrApi(const void* data, int size);
+
+void TestVoidPtrCallsite() {
+  // Expected rewrite:
+  // std::array<int, 10> data;
+  int data[10];
+  data[UnsafeIndex()] = 42;
+
+  // Expected rewrite:
+  // ExternalVoidPtrApi(data.data(), 10);
+  ExternalVoidPtrApi(data, 10);
+}

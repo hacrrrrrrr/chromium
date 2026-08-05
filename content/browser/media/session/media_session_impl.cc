@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/flat_set.h"
 #include "base/functional/bind.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -1358,6 +1357,15 @@ void MediaSessionImpl::EnterAutoPictureInPicture() {
   ReportAutoPictureInPictureInfoChanged();
 }
 
+void MediaSessionImpl::SaveVideoFrame() {
+  if (!IsVideoFrameAvailable()) {
+    return;
+  }
+
+  auto& first = normal_players_.begin()->first;
+  first.observer->OnSaveVideoFrame(first.player_id);
+}
+
 void MediaSessionImpl::SetAudioSinkId(const std::optional<std::string>& id) {
   audio_device_id_for_origin_ = id;
 
@@ -1827,6 +1835,10 @@ void MediaSessionImpl::OnVideoVisibilityChanged() {
   RebuildAndNotifyMediaSessionInfoChanged();
 }
 
+void MediaSessionImpl::OnVideoFrameAvailabilityChanged() {
+  RebuildAndNotifyActionsChanged();
+}
+
 void MediaSessionImpl::SetRemotePlaybackMetadata(
     media_session::mojom::RemotePlaybackMetadataPtr metadata) {
   remote_playback_metadata_ = std::move(metadata);
@@ -1926,6 +1938,11 @@ void MediaSessionImpl::RebuildAndNotifyActionsChanged() {
       IsAudioOutputDeviceSwitchingSupported()) {
     actions.insert(
         media_session::mojom::MediaSessionAction::kSwitchAudioDevice);
+  }
+
+  if (base::FeatureList::IsEnabled(media::kGlobalMediaControlsSaveVideoFrame) &&
+      IsVideoFrameAvailable()) {
+    actions.insert(media_session::mojom::MediaSessionAction::kSaveVideoFrame);
   }
 
   if (actions_ == actions)
@@ -2045,35 +2062,13 @@ void MediaSessionImpl::BuildMetadata(
       source_title =
           content_client->GetLocalizedString(IDS_MEDIA_SESSION_DATA_SOURCE);
     } else {
-      url::Origin origin = url::Origin::Create(url);
-      GURL format_url = origin.GetURL();
-
-      // If the origin is opaque, use its precursor origin if available.
-      // Otherwise, traverse the opener chain to find the closest ancestor with
-      // a valid precursor origin. This ensures we display a recognizable origin
-      // to the user.
-      if (origin.opaque()) {
-        WebContents* current_web_contents = web_contents();
-        base::flat_set<WebContents*> seen_web_contents;
-
-        while (current_web_contents &&
-               !seen_web_contents.contains(current_web_contents)) {
-          seen_web_contents.insert(current_web_contents);
-
-          url::Origin current_origin =
-              url::Origin::Create(current_web_contents->GetLastCommittedURL());
-          const auto& precursor =
-              current_origin.GetTupleOrPrecursorTupleIfOpaque();
-          if (precursor.IsValid()) {
-            format_url = precursor.GetURL();
-            break;
-          }
-
-          RenderFrameHost* opener = current_web_contents->GetOpener();
-          current_web_contents =
-              opener ? WebContents::FromRenderFrameHost(opener) : nullptr;
-        }
-      }
+      // Use the frame's committed origin to determine the source title.
+      // This retrieves the inherited origin for "about:blank" documents
+      // (which is the origin of their creator) and the precursor origin for
+      // sandboxed documents (which have opaque origins).
+      const url::Origin& origin =
+          web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+      GURL format_url = origin.GetTupleOrPrecursorTupleIfOpaque().GetURL();
 
       source_title = url_formatter::FormatUrl(
           format_url,
@@ -2093,6 +2088,15 @@ bool MediaSessionImpl::IsPictureInPictureAvailable() const {
 
   auto& first = normal_players_.begin()->first;
   return first.observer->IsPictureInPictureAvailable(first.player_id);
+}
+
+bool MediaSessionImpl::IsVideoFrameAvailable() const {
+  if (normal_players_.size() != 1) {
+    return false;
+  }
+
+  auto& first = normal_players_.begin()->first;
+  return first.observer->IsVideoFrameAvailable(first.player_id);
 }
 
 bool MediaSessionImpl::HasSufficientlyVisibleVideo() const {

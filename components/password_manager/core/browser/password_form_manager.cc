@@ -355,6 +355,11 @@ PasswordFormManager::~PasswordFormManager() {
 }
 
 void PasswordFormManager::OnPasswordFilledManually() {
+  if (client_->IsActorTaskActive()) {
+    client_->OnPasswordFilled(
+        driver_.get(), GetURL(),
+        PasswordManagerClient::PasswordFillTrigger::kAgentTask);
+  }
   allow_filling_upon_fetching_ = false;
   if (!base::FeatureList::IsEnabled(features::kPasswordDateLastFilled) ||
       !parsed_submitted_form_ ||
@@ -1460,7 +1465,8 @@ void PasswordFormManager::CalculateFillingAssistanceAndCorrectnessMetrics(
     if (!saved_form.username_value.empty()) {
       saved_usernames.emplace(saved_form.username_value, saved_form.in_store);
     }
-    saved_passwords.emplace(saved_form.password_value, saved_form.in_store);
+    saved_passwords.emplace(saved_form.password_value.value(),
+                            saved_form.in_store);
   }
 
   metrics_recorder_->CalculateFillingAssistanceMetric(

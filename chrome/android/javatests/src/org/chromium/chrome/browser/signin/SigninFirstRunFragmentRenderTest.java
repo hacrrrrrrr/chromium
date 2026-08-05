@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatDelegate;
 import androidx.test.filters.MediumTest;
 import androidx.test.runner.lifecycle.Stage;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -31,7 +32,6 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.FeatureOverrides;
 import org.chromium.base.Promise;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.supplier.OneshotSupplierImpl;
@@ -89,22 +89,6 @@ import java.util.List;
 @DoNotBatch(reason = "Relies on global state")
 @DisableIf.Device(DeviceFormFactor.DESKTOP_FREEFORM) // crbug.com/511287860
 public class SigninFirstRunFragmentRenderTest {
-    /**
-     * TODO(crbug.com/493130564): Remove these parameters after a
-     * MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS launch.
-     */
-    @ParameterAnnotations.ClassParameter
-    private static final List<ParameterSet> sClassParams =
-            Arrays.asList(
-                    new ParameterSet().value(true).name("IdentityManagerMigrationEnabled"),
-                    new ParameterSet().value(false).name("IdentityManagerMigrationDisabled"));
-
-    public SigninFirstRunFragmentRenderTest(boolean isIdentityManagerMigrationEnabled) {
-        FeatureOverrides.overrideFlag(
-                SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS,
-                isIdentityManagerMigrationEnabled);
-    }
-
     /** Parameter provider for night mode state and device orientation. */
     public static class NightModeAndOrientationParameterProvider implements ParameterProvider {
         private static final List<ParameterSet> sParams =
@@ -209,6 +193,11 @@ public class SigninFirstRunFragmentRenderTest {
                     when(mFirstRunPageDelegateMock.getChildAccountStatusSupplier())
                             .thenReturn(childAccountStatusListener);
                 });
+    }
+
+    @After
+    public void tearDown() {
+        ActivityTestUtils.clearActivityOrientation(mActivityTestRule.getActivity());
     }
 
     @Test

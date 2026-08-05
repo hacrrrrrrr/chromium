@@ -58,7 +58,6 @@ source_set("new_tab_page") {
     "//google_apis/calendar",
     "//google_apis/common",
     "//mojo/public/mojom/base",
-    "//services/data_decoder/public/cpp",
     "//skia",
   ]
 
@@ -243,6 +242,7 @@ if (!is_android) {
       "//chrome/browser/new_tab_page/chrome_colors",
       "//chrome/browser/new_tab_page/chrome_colors:generate_chrome_colors_info",
       "//chrome/browser/optimization_guide",
+      "//chrome/browser/signin:signin_browser_test_base",
       "//chrome/browser/sync",
       "//chrome/browser/ui/views/user_education",
       "//chrome/browser/ui/webui/cr_components/theme_color_picker",

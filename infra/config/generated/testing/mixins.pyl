@@ -323,18 +323,6 @@
       },
     },
   },
-  'gpu_nvidia_shield_tv_stable': {
-    'fail_if_unused': False,
-    'swarming': {
-      'dimensions': {
-        'os': 'Android',
-        'device_type': 'mdarcy',
-        'device_os': 'PPR1.180610.011',
-        'device_os_type': 'userdebug',
-        'pool': 'chromium.tests.gpu',
-      },
-    },
-  },
   'gpu_pixel_10_stable': {
     'fail_if_unused': False,
     'swarming': {
@@ -527,6 +515,13 @@
       },
     },
   },
+  'linux_gpu_high_tier_ai_wpt_dimensions': {
+    'swarming': {
+      'dimensions': {
+        'gpu': '10de|1002|8086:4680|8086:a780|8086:a7a0',
+      },
+    },
+  },
   'linux_intel_uhd_630_experimental': {
     'fail_if_unused': False,
     'swarming': {
@@ -608,6 +603,14 @@
       },
     },
   },
+  'mac_15_x64': {
+    'swarming': {
+      'dimensions': {
+        'cpu': 'x86-64',
+        'os': 'Mac-15',
+      },
+    },
+  },
   'mac_arm64_apple_m1_gpu_experimental': {
     'fail_if_unused': False,
     'swarming': {
@@ -655,7 +658,7 @@
         'cpu': 'arm64',
         'gpu': 'apple:m2',
         'mac_model': 'Mac14,7',
-        'os': 'Mac-14.4.1|Mac-26.5.1',
+        'os': 'Mac-26.5.1',
         'pool': 'chromium.tests.gpu',
         'display_attached': '1',
         'hidpi': '1',
@@ -680,15 +683,7 @@
     'swarming': {
       'dimensions': {
         'cpu': 'arm64',
-        'os': 'Mac-15|Mac-26',
-      },
-    },
-  },
-  'mac_default_x64': {
-    'swarming': {
-      'dimensions': {
-        'cpu': 'x86-64',
-        'os': 'Mac-15|Mac-26',
+        'os': 'Mac-26',
       },
     },
   },
@@ -774,11 +769,6 @@
           'revision': 'git_revision:07e67ff89ff11ed0e3071867ed6bb49319a91b05',
         },
       ],
-    },
-  },
-  'mac_x64_ai_wpt_shards': {
-    'swarming': {
-      'shards': 8,
     },
   },
   'no_gpu': {
@@ -989,8 +979,8 @@
     'swarming': {
       'dimensions': {
         'display_attached': '1',
-        'gpu': '10de:2184-32.0.15.8180',
-        'os': 'Windows-11-26100',
+        'gpu': '10de:2184-32.0.16.1074',
+        'os': 'Windows-11-26200',
         'pool': 'chromium.tests.gpu',
       },
     },
@@ -1094,6 +1084,11 @@
         'os': 'Windows-11-26100',
         'pool': 'chromium.tests.gpu',
       },
+    },
+  },
+  'x64_ai_wpt_shards': {
+    'swarming': {
+      'shards': 8,
     },
   },
   'x86-64': {

@@ -6,6 +6,7 @@
 
 #import <optional>
 
+#import "base/scoped_observation.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/content_settings/core/browser/host_content_settings_map.h"
 #import "components/prefs/pref_service.h"
@@ -24,6 +25,7 @@
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_availability.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_consumer.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_content_entry_point.h"
@@ -34,7 +36,10 @@
 #import "ios/chrome/browser/overlays/model/public/overlay_request_queue.h"
 #import "ios/chrome/browser/price_insights/model/price_insights_model.h"
 #import "ios/chrome/browser/reader_mode/model/features.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_browser_agent.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_browser_agent_observer_bridge.h"
 #import "ios/chrome/browser/reader_mode/model/reader_mode_tab_helper.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_web_state_utils.h"
 #import "ios/chrome/browser/shared/public/commands/contextual_sheet_commands.h"
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_commands.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
@@ -63,7 +68,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
 
 }  // namespace
 
-@interface PageActionMenuMediator () <CRWWebStateObserver>
+@interface PageActionMenuMediator () <CRWWebStateObserver,
+                                      ReaderModeBrowserAgentObserving>
 @end
 
 @implementation PageActionMenuMediator {
@@ -91,6 +97,13 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
   // The tab helper for Reader mode.
   raw_ptr<ReaderModeTabHelper> _readerModeTabHelper;
 
+  // The browser agent for Reader mode bridge.
+  std::unique_ptr<ReaderModeBrowserAgentObserverBridge>
+      _readerModeObserverBridge;
+  std::optional<base::ScopedObservation<ReaderModeBrowserAgent,
+                                        ReaderModeBrowserAgent::Observer>>
+      _readerModeScopedObservation;
+
   // The host content settings map for managing site permissions.
   raw_ptr<HostContentSettingsMap> _hostContentSettingsMap;
 }
@@ -102,6 +115,7 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
                    geminiService:(GeminiService*)geminiService
                  geminiTabHelper:(GeminiTabHelper*)geminiTabHelper
              readerModeTabHelper:(ReaderModeTabHelper*)readerModeTabHelper
+          readerModeBrowserAgent:(ReaderModeBrowserAgent*)readerModeBrowserAgent
           hostContentSettingsMap:
               (HostContentSettingsMap*)hostContentSettingsMap {
   self = [super init];
@@ -116,6 +130,13 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
     _hostContentSettingsMap = hostContentSettingsMap;
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
     _webState->AddObserver(_webStateObserver.get());
+
+    if (readerModeBrowserAgent) {
+      _readerModeObserverBridge =
+          std::make_unique<ReaderModeBrowserAgentObserverBridge>(self);
+      _readerModeScopedObservation.emplace(_readerModeObserverBridge.get());
+      _readerModeScopedObservation->Observe(readerModeBrowserAgent);
+    }
   }
   return self;
 }
@@ -127,12 +148,25 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
 #pragma mark - Public
 
 - (void)disconnect {
+  _readerModeScopedObservation.reset();
+  _readerModeObserverBridge.reset();
   _readerModeTabHelper = nullptr;
   [self detachFromWebState];
 }
 
 - (BOOL)isLensAvailableForProfile {
   return IsLensOverlayAllowedByPolicy(_profilePrefs);
+}
+
+#pragma mark - ReaderModeBrowserAgentObserving
+
+- (void)readerModeBrowserAgent:(ReaderModeBrowserAgent*)agent
+            didHideModeContent:(BOOL)animated {
+  [self.pageActionMenuHandler dismissPageActionMenuWithCompletion:nil];
+}
+
+- (void)readerModeBrowserAgentDestroyed:(ReaderModeBrowserAgent*)agent {
+  _readerModeScopedObservation.reset();
 }
 
 #pragma mark - PageActionMenuMutator
@@ -145,14 +179,7 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
 }
 
 - (BOOL)isReaderModeActive {
-  if (!_readerModeTabHelper) {
-    return NO;
-  }
-  return _readerModeTabHelper->IsActive();
-}
-
-- (BOOL)isReaderModeAvailable {
-  return IsReaderModeAvailable();
+  return IsReaderModeActiveInWebState(_webState);
 }
 
 - (PageActionMenuContentEntryPoint*)geminiEntryPoint {
@@ -172,22 +199,22 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
     return [[PageActionMenuContentEntryPoint alloc] initWithEnabled:YES];
   }
 
-  std::optional<gemini::IneligibilityReasons> result =
-      _geminiService->GeminiIneligibilityForProfile();
-
-  if (result.has_value()) {
-    if (result.value().chrome_enterprise) {
+  ProfileIOS* profile =
+      ProfileIOS::FromBrowserState(_webState->GetBrowserState());
+  gemini::GeminiAvailabilityResult availability =
+      gemini::IsGeminiAvailable(gemini::EntryPoint::AIHub, profile, _webState);
+  if (!availability.enabled) {
+    if (availability.ineligibility_reasons.has_value() &&
+        availability.ineligibility_reasons->chrome_enterprise) {
       return [[PageActionMenuContentEntryPoint alloc]
           initWithEnabled:NO
                footerItem:[ContentEntryPointUnavailabilityItem
                               geminiEnterprise]];
     }
-
     return [[PageActionMenuContentEntryPoint alloc] initWithEnabled:NO];
   }
 
-  return [[PageActionMenuContentEntryPoint alloc]
-      initWithEnabled:_geminiTabHelper->IsGeminiAvailableForWebState()];
+  return [[PageActionMenuContentEntryPoint alloc] initWithEnabled:YES];
 }
 
 - (PageActionMenuContentEntryPoint*)lensEntryPointForTraitCollection:
@@ -398,8 +425,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
         initWithFeatureType:PageActionMenuTranslate
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_TRANSLATE_LABEL)
-                       icon:CustomSymbolTemplateWithPointSize(
-                                kTranslateSymbol, kFeatureRowIconSize)
+                       icon:SymbolTemplateWithPointSize(SymbolTranslate,
+                                                        kFeatureRowIconSize)
                  actionType:PageActionMenuButtonAction];
     translateFeature.subtitle = [self translateLanguagePair];
     translateFeature.actionType = PageActionMenuSettingsAction;
@@ -417,8 +444,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
         initWithFeatureType:PageActionMenuPopupBlocker
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_POPUP_BLOCKER_LABEL)
-                       icon:CustomSymbolWithPointSize(kPopupBadgeMinusSymbol,
-                                                      kFeatureRowIconSize)
+                       icon:SymbolWithPointSize(SymbolPopupBadgeMinus,
+                                                kFeatureRowIconSize)
                  actionType:PageActionMenuButtonAction];
 
     NSInteger blockedCount = [self blockedPopupCount];
@@ -440,8 +467,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
         initWithFeatureType:PageActionMenuCameraPermission
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_CAMERA_PERMISSION_LABEL)
-                       icon:CustomSymbolWithPointSize(kCameraFillSymbol,
-                                                      kFeatureRowIconSize)
+                       icon:SymbolWithPointSize(SymbolCameraFill,
+                                                kFeatureRowIconSize)
                  actionType:PageActionMenuToggleAction];
     web::PermissionState state =
         _webState->GetStateForPermission(web::PermissionCamera);
@@ -457,8 +484,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
         initWithFeatureType:PageActionMenuMicrophonePermission
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_MICROPHONE_PERMISSION_LABEL)
-                       icon:DefaultSymbolWithPointSize(kMicrophoneFillSymbol,
-                                                       kFeatureRowIconSize)
+                       icon:SymbolWithPointSize(SymbolMicrophoneFill,
+                                                kFeatureRowIconSize)
                  actionType:PageActionMenuToggleAction];
     web::PermissionState state =
         _webState->GetStateForPermission(web::PermissionMicrophone);
@@ -473,8 +500,8 @@ bool SigninIsPossible(AuthenticationService* auth_service) {
         initWithFeatureType:PageActionMenuPriceTracking
                       title:l10n_util::GetNSString(
                                 IDS_IOS_AI_HUB_PRICE_TRACKING_LABEL)
-                       icon:CustomSymbolWithPointSize(kDownTrendSymbol,
-                                                      kFeatureRowIconSize)
+                       icon:SymbolWithPointSize(SymbolDownTrend,
+                                                kFeatureRowIconSize)
                  actionType:PageActionMenuButtonAction];
     BOOL isSubscribed = NO;
     ContextualPanelTabHelper* tabHelper =
@@ -753,15 +780,18 @@ std::string GetTargetLanguageCode(ChromeIOSTranslateClient* translate_client) {
     return NO;
   }
 
-  std::optional<gemini::IneligibilityReasons> result =
-      _geminiService->GeminiIneligibilityForProfile();
+  ProfileIOS* profile =
+      ProfileIOS::FromBrowserState(_webState->GetBrowserState());
+  gemini::GeminiAvailabilityResult availability =
+      gemini::IsGeminiAvailable(gemini::EntryPoint::AIHub, profile, _webState);
 
-  if (!result.has_value()) {
+  if (!availability.ineligibility_reasons.has_value()) {
     return NO;
   }
 
-  return !result.value().chrome_enterprise &&
-         !result.value().account_capability && result.value().workspace;
+  return !availability.ineligibility_reasons->chrome_enterprise &&
+         !availability.ineligibility_reasons->account_capability &&
+         availability.ineligibility_reasons->workspace;
 }
 
 @end

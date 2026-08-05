@@ -12,10 +12,11 @@
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_element.h"
 
 @protocol AppBarMutator;
+@protocol GeminiCommands;
 @class LayoutGuideCenter;
+@class LayoutState;
 @protocol SceneCommands;
 @protocol TabGridCommands;
-@class LayoutState;
 
 // View controller for the App Bar.
 @interface AppBarViewController
@@ -37,6 +38,9 @@
 
 // Tab Grid handler.
 @property(nonatomic, weak) id<TabGridCommands> tabGridHandler;
+
+// Handler for Gemini commands.
+@property(nonatomic, weak) id<GeminiCommands> geminiHandler;
 
 // Dynamically updates the corner radius of the app bar.
 - (void)updateCornerRadius:(CGFloat)cornerRadius;

@@ -59,18 +59,14 @@ class SharedTabGroupInteractiveUiTest
         {data_sharing::features::kDataSharingFeature, {}},
         {features::kTabGroupMenuMoreEntryPoints, {}}};
 
-    std::vector<base::test::FeatureRef> disabled_features = {
-        tab_groups::kProjectsPanel};
-
-    scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features,
-                                                       disabled_features);
+    scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features, {});
     InProcessBrowserTest::SetUp();
   }
 
   MultiStep ShowBookmarksBar() {
     return Steps(
         Do([this]() {
-          PrefService* prefs = browser()->profile()->GetPrefs();
+          PrefService* prefs = browser()->GetProfile()->GetPrefs();
           if (base::FeatureList::IsEnabled(
                   ntp_features::kNtpSimplificationBookmarkBar)) {
             prefs->SetInteger(
@@ -347,8 +343,6 @@ IN_PROC_BROWSER_TEST_F(SharedTabGroupInteractiveUiTest,
   RunTestSequence(FinishTabstripAnimations(), ShowBookmarksBar(),
                   PressButton(kSavedTabGroupOverflowButtonElementId),
                   SelectMenuItem(STGEverythingMenu::kTabGroup),
-                  WaitForShow(STGTabsMenuModel::kOpenGroup),
-                  SelectMenuItem(STGTabsMenuModel::kOpenGroup),
                   WaitForShow(kTabGroupHeaderElementId),
                   // Close the everything menu to prevent flakes on mac.
                   HoverTabAt(0), ClickMouse(),
@@ -357,7 +351,7 @@ IN_PROC_BROWSER_TEST_F(SharedTabGroupInteractiveUiTest,
   histogram_tester.ExpectUniqueSample(
       kRecallHistogram,
       saved_tab_groups::metrics::SharedTabGroupRecallTypeDesktop::
-          kOpenedFromSubmenuFromEverythingMenu,
+          kOpenedFromEverythingMenu,
       1);
 }
 

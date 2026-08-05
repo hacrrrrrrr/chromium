@@ -215,6 +215,19 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   return [ChromeEarlGreyAppInterface personalProfileName];
 }
 
+- (void)waitForCurrentProfileName:(NSString*)profileName {
+  ConditionBlock condition = ^{
+    return [self.currentProfileName isEqualToString:profileName];
+  };
+  bool success = base::test::ios::WaitUntilConditionOrTimeout(
+      base::test::ios::kWaitForActionTimeout, condition);
+  NSString* errorString =
+      [NSString stringWithFormat:
+                    @"Timed out waiting for current profile name to become %@",
+                    profileName];
+  EG_TEST_HELPER_ASSERT_TRUE(success, errorString);
+}
+
 #pragma mark - History Utilities (EG2)
 
 - (void)clearBrowsingHistory {
@@ -259,6 +272,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   [self waitForPageToFinishLoading];
 }
 
+- (void)startGoingForward {
+  [ChromeEarlGreyAppInterface startGoingForward];
+}
+
 - (void)goForward {
   [ChromeEarlGreyAppInterface startGoingForward];
   [self waitForPageToFinishLoading];
@@ -274,7 +291,6 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
     [self waitForPageToFinishLoading];
   }
 }
-
 
 - (void)dismissSettings {
   [ChromeEarlGreyAppInterface dismissSettings];
@@ -429,6 +445,18 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
       [self waitForPageToFinishLoadingWithTimeout:kWaitForPageLoadTimeout]);
 }
 
+- (void)waitForAllWebStatesToFinishLoading {
+  GREYCondition* finishedLoading = [GREYCondition
+      conditionWithName:@"Waiting for all WebStates to finish loading"
+                  block:^{
+                    return ![ChromeEarlGreyAppInterface isAnyWebStateLoading];
+                  }];
+
+  GREYAssertTrue(
+      [finishedLoading waitWithTimeout:kWaitForPageLoadTimeout.InSecondsF()],
+      @"All WebStates failed to finish loading within timeout.");
+}
+
 - (void)sceneOpenURL:(const GURL&)URL {
   NSString* spec = base::SysUTF8ToNSString(URL.spec());
   [ChromeEarlGreyAppInterface sceneOpenURL:spec];
@@ -456,14 +484,6 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   if (webStateError) {
     return webStateError;
   }
-
-  // TODO(crbug.com/530841942): On iOS 27, tests frequently fail without this
-  // wait. This is a temporary fix until we find a better solution. It's
-  // possible this is a iOS 27 beta bug, or that we need a new wait for the
-  // compositor state, but so far the wait is the best approach we've found.
-  if (@available(iOS 27, *)) {
-    base::test::ios::SpinRunLoopWithMinDelay(base::Seconds(2));
-  }
   NSError* pageLoadError =
       [self waitForPageToFinishLoadingWithTimeout:pageLoadTimeout.is_zero()
                                                       ? kWaitForPageLoadTimeout
@@ -471,9 +491,9 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   if (pageLoadError) {
     return pageLoadError;
   }
-    // Loading URL (especially the first time) can trigger alerts.
-    [SystemAlertHandler handleSystemAlertIfVisible];
-    return nil;
+  // Loading URL (especially the first time) can trigger alerts.
+  [SystemAlertHandler handleSystemAlertIfVisible];
+  return nil;
 }
 
 - (void)loadURL:(const GURL&)URL withTimeout:(base::TimeDelta)timeout {
@@ -727,8 +747,9 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 
 - (void)waitForMainTabCount:(NSUInteger)count {
   __block NSUInteger actualCount = [ChromeEarlGreyAppInterface mainTabCount];
-  NSString* conditionName = [NSString
-      stringWithFormat:@"Waiting for main tab count to become %" PRIuNS, count];
+  NSString* conditionName =
+      [NSString stringWithFormat:@"Waiting for main tab count to become %lu",
+                                 static_cast<unsigned long>(count)];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -743,16 +764,17 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
       [tabCountCheck waitWithTimeout:kWaitForUIElementTimeout.InSecondsF()];
 
   NSString* errorString = [NSString
-      stringWithFormat:@"Failed waiting for main tab count to become %" PRIuNS
-                        "; actual count: %" PRIuNS,
-                       count, actualCount];
+      stringWithFormat:
+          @"Failed waiting for main tab count to become %lu; actual count: %lu",
+          static_cast<unsigned long>(count),
+          static_cast<unsigned long>(actualCount)];
   EG_TEST_HELPER_ASSERT_TRUE(tabCountEqual, errorString);
 }
 
 - (void)waitForInactiveTabCount:(NSUInteger)count {
   NSString* errorString = [NSString
-      stringWithFormat:
-          @"Failed waiting for inactive tab count to become %" PRIuNS, count];
+      stringWithFormat:@"Failed waiting for inactive tab count to become %lu",
+                       static_cast<unsigned long>(count)];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -770,8 +792,8 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 
 - (void)waitForIncognitoTabCount:(NSUInteger)count {
   NSString* errorString = [NSString
-      stringWithFormat:
-          @"Failed waiting for incognito tab count to become %" PRIuNS, count];
+      stringWithFormat:@"Failed waiting for incognito tab count to become %lu",
+                       static_cast<unsigned long>(count)];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -1281,8 +1303,9 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 - (void)waitForForegroundWindowCount:(NSUInteger)count {
   __block NSUInteger actualCount =
       [ChromeEarlGreyAppInterface foregroundWindowCount];
-  NSString* conditionName = [NSString
-      stringWithFormat:@"Waiting for window count to become %" PRIuNS, count];
+  NSString* conditionName =
+      [NSString stringWithFormat:@"Waiting for window count to become %lu",
+                                 static_cast<unsigned long>(count)];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -1298,9 +1321,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
       [windowCountCheck waitWithTimeout:kWaitForUIElementTimeout.InSecondsF()];
 
   NSString* errorString = [NSString
-      stringWithFormat:@"Failed waiting for window count to become %" PRIuNS
-                        "; actual count: %" PRIuNS,
-                       count, actualCount];
+      stringWithFormat:
+          @"Failed waiting for window count to become %lu; actual count: %lu",
+          static_cast<unsigned long>(count),
+          static_cast<unsigned long>(actualCount)];
   EG_TEST_HELPER_ASSERT_TRUE(windowCountEqual, errorString);
 }
 
@@ -1392,9 +1416,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   __block NSUInteger actualCount =
       [ChromeEarlGreyAppInterface mainTabCountInWindowWithNumber:windowNumber];
   NSString* conditionName = [NSString
-      stringWithFormat:@"Waiting for main tab count to become %" PRIuNS
-                        " from %" PRIuNS " in window with number %d",
-                       count, actualCount, windowNumber];
+      stringWithFormat:@"Waiting for main tab count to become %lu "
+                       @"from %lu in window with number %d",
+                       static_cast<unsigned long>(count),
+                       static_cast<unsigned long>(actualCount), windowNumber];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -1410,10 +1435,11 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
       [tabCountCheck waitWithTimeout:kWaitForUIElementTimeout.InSecondsF()];
 
   NSString* errorString = [NSString
-      stringWithFormat:@"Failed waiting for main tab count to become %" PRIuNS
-                        " in window with number %d"
-                        "; actual count: %" PRIuNS,
-                       count, windowNumber, actualCount];
+      stringWithFormat:@"Failed waiting for main tab count to become "
+                       @"%lu in window with number %d"
+                        "; actual count: %lu",
+                       static_cast<unsigned long>(count), windowNumber,
+                       static_cast<unsigned long>(actualCount)];
   EG_TEST_HELPER_ASSERT_TRUE(tabCountEqual, errorString);
 }
 
@@ -1421,11 +1447,11 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
               inWindowWithNumber:(int)windowNumber {
   __block NSUInteger actualCount = [ChromeEarlGreyAppInterface
       incognitoTabCountInWindowWithNumber:windowNumber];
-  NSString* conditionName =
-      [NSString stringWithFormat:
-                    @"Failed waiting for incognito tab count to become %" PRIuNS
-                     " from %" PRIuNS " in window with number %d",
-                    count, actualCount, windowNumber];
+  NSString* conditionName = [NSString
+      stringWithFormat:@"Failed waiting for incognito tab count to "
+                       @"become %lu from %lu in window with number %d",
+                       static_cast<unsigned long>(count),
+                       static_cast<unsigned long>(actualCount), windowNumber];
 
   // Allow the UI to become idle, in case any tabs are being opened or closed.
   GREYWaitForAppToIdle(@"App failed to idle");
@@ -1442,10 +1468,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 
   NSString* errorString =
       [NSString stringWithFormat:
-                    @"Failed waiting for incognito tab count to become %" PRIuNS
-                     " in window with number %d"
-                     "; actual count: %" PRIuNS,
-                    count, windowNumber, actualCount];
+                    @"Failed waiting for incognito tab count to "
+                    @"become %lu in window with number %d; actual count: %lu",
+                    static_cast<unsigned long>(count), windowNumber,
+                    static_cast<unsigned long>(actualCount)];
   EG_TEST_HELPER_ASSERT_TRUE(tabCountEqual, errorString);
 }
 
@@ -1587,6 +1613,11 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
 
 - (BOOL)isTestFeatureEnabled {
   return [ChromeEarlGreyAppInterface isTestFeatureEnabled];
+}
+
+- (BOOL)isOverflowMenuHomeCustomizationEntrypointEnabled {
+  return [ChromeEarlGreyAppInterface
+      isOverflowMenuHomeCustomizationEntrypointEnabled];
 }
 
 - (BOOL)isFullscreenSmoothScrollingSupported {
@@ -2019,6 +2050,8 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   // Dismiss the Activity View by tapping outside its bounds.
   [[EarlGrey selectElementWithMatcher:grey_keyWindow()]
       performAction:grey_tap()];
+
+  [self verifyActivitySheetNotVisible];
 }
 
 #pragma mark - Unified consent utilities
@@ -2222,6 +2255,14 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration) {
   [ChromeEarlGreyAppInterface openSendTabToSelfNewTabWithURL:url
                                                 textFragment:textFragment
                                                    entryGUID:guid];
+}
+
+- (void)openSendTabToSelfNewBackgroundTabWithURL:(NSString*)url
+                                    textFragment:(NSString*)textFragment
+                                       entryGUID:(NSString*)guid {
+  [ChromeEarlGreyAppInterface openSendTabToSelfNewBackgroundTabWithURL:url
+                                                          textFragment:textFragment
+                                                             entryGUID:guid];
 }
 
 - (BOOL)isViewAnimatingWithAccessibilityID:(NSString*)accessibilityID {

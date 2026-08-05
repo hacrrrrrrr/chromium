@@ -107,16 +107,13 @@ NtpPromoSpecification::Eligibility CheckCustomizationPromoEligibility(
 void InvokeCustomizationPromo(ContextPtr context) {
   actions::ActionManager::Get()
       .FindAction(kActionSidePanelShowCustomizeChrome,
-                  context->AsA<BrowserUserEducationContext>()
-                      ->GetBrowser()
-                      ->GetActions()
+                  BrowserActions::From(
+                      context->AsA<BrowserUserEducationContext>()->GetBrowser())
                       ->root_action_item())
       ->InvokeAction(
           actions::ActionInvocationContext::Builder()
-              .SetProperty(
-                  kSidePanelOpenTriggerKey,
-                  static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-                      SidePanelOpenTrigger::kNewTabPageCustomizationPromo))
+              .SetProperty(kSidePanelOpenTriggerKey,
+                           SidePanelOpenTrigger::kNewTabPageCustomizationPromo)
               .Build());
 }
 

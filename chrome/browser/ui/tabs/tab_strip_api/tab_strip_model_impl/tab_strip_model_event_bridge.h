@@ -27,13 +27,15 @@ class TabStripModelEventBridge : public EventBridge,
   void AddObserver(events::EventObserver* observer) override;
   void RemoveObserver(events::EventObserver* observer) override;
 
+  // Re-emits favicon updates for all tabs.
+  void NotifyFaviconsChanged();
+
   // TabStripModelObserver:
   void OnTabStripModelChanged(
       TabStripModel* tab_strip_model,
       const TabStripModelChange& change,
       const TabStripSelectionChange& selection) override;
   void OnTabChangedAt(tabs::TabInterface* tab,
-                      int index,
                       TabChangeType change_type) override;
   void OnTabGroupChanged(const TabGroupChange& change) override;
   void OnSplitTabChanged(const SplitTabChange& change) override;

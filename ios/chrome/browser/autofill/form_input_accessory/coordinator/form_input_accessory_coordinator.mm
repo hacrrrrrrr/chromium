@@ -61,6 +61,8 @@
 #import "ios/chrome/browser/device_reauth/model/reauthentication_service_factory.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_account_password_store_factory.h"
+#import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager.h"
+#import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager_factory.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_profile_password_store_factory.h"
 #import "ios/chrome/browser/passwords/model/password_tab_helper.h"
 #import "ios/chrome/browser/shared/coordinator/alert/alert_coordinator.h"
@@ -181,6 +183,9 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 
   // Modal alert.
   AlertCoordinator* _alertCoordinator;
+
+  // The coordinator for the AtMemory Autofill feature.
+  AtMemoryCoordinator* _atMemoryCoordinator;
 }
 
 - (instancetype)initWithBaseViewController:(UIViewController*)viewController
@@ -201,9 +206,12 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 }
 
 - (void)start {
+  CHECK(self.profile);
   [_brandingCoordinator start];
   _formInputAccessoryViewController = [[FormInputAccessoryViewController alloc]
       initWithFormInputAccessoryViewControllerDelegate:self];
+  _formInputAccessoryViewController.isContextMenuEnabled =
+      autofill::IsAmbientAutofillEnabled(self.profile);
   _formInputAccessoryViewController.brandingViewController =
       _brandingCoordinator.viewController;
 
@@ -211,7 +219,6 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
       LayoutGuideCenterForBrowser(self.browser);
   _formInputAccessoryViewController.layoutGuideCenter = layoutGuideCenter;
 
-  DCHECK(self.profile);
   auto profilePasswordStore =
       IOSChromeProfilePasswordStoreFactory::GetForProfile(
           self.profile, ServiceAccessType::EXPLICIT_ACCESS);
@@ -311,6 +318,7 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
   [self stopManualFillAllPasswordCoordinator];
 
   [self dismissAlertCoordinator];
+  [self dismissAtMemory];
 }
 
 - (void)stopChildren {
@@ -326,7 +334,7 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
                       forDataType:(manual_fill::ManualFillDataType)dataType
          invokedOnObfuscatedField:(BOOL)invokedOnObfuscatedField {
   if (dataType == manual_fill::ManualFillDataType::kAtMemory) {
-    [self presentAtMemory];
+    [self showAtMemory];
     return;
   }
 
@@ -416,6 +424,65 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
       kAutofillSuggestionHighlightDelay);
 }
 
+- (void)openPasswordDetailsInEditMode:
+    (const password_manager::CredentialUIEntry&)credential {
+  [self reset];
+
+  password_manager::CredentialUIEntry resolvedCredential = credential;
+  if (resolvedCredential.stored_in.empty()) {
+    ProfileIOS* profile = self.profile;
+    if (profile) {
+      scoped_refptr<IOSChromePasswordCheckManager> checkManager =
+          IOSChromePasswordCheckManagerFactory::GetForProfile(profile);
+      if (checkManager && checkManager->GetSavedPasswordsPresenter()) {
+        std::vector<password_manager::CredentialUIEntry> saved_credentials =
+            checkManager->GetSavedPasswordsPresenter()->GetSavedCredentials();
+        auto it = std::ranges::find_if(
+            saved_credentials,
+            [&resolvedCredential](const auto& saved_credential) {
+              return saved_credential.username == resolvedCredential.username &&
+                     saved_credential.GetFirstSignonRealm() ==
+                         resolvedCredential.GetFirstSignonRealm();
+            });
+        if (it != saved_credentials.end()) {
+          resolvedCredential = *it;
+        }
+      }
+    }
+  }
+
+  [self dispatchCommandToEditPassword:resolvedCredential];
+}
+
+- (void)openCreditCardDetails:(const autofill::CreditCard&)card
+                   inEditMode:(BOOL)editMode {
+  [self reset];
+
+  // Check if the card should be edited from the Payments web page.
+  if (editMode &&
+      [AutofillCreditCardUtil shouldEditCardFromPaymentsWebPage:card]) {
+    GURL paymentsURL =
+        autofill::payments::GetManageInstrumentUrl(card.instrument_id());
+    OpenNewTabCommand* command =
+        [OpenNewTabCommand commandWithURLFromChrome:paymentsURL];
+    id<SceneCommands> sceneHandler =
+        HandlerForProtocol(self.browser->GetCommandDispatcher(), SceneCommands);
+    [sceneHandler openURLInNewTab:command];
+
+    return;
+  }
+
+  CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
+  id<SettingsCommands> settingsHandler =
+      HandlerForProtocol(dispatcher, SettingsCommands);
+  [settingsHandler showCreditCardDetails:card inEditMode:editMode];
+}
+
+- (void)openAddressDetailsInEditModeForSuggestion:
+    (const autofill::AutofillProfile&)address {
+  [self openAddressDetailsInEditMode:address offerMigrateToAccount:NO];
+}
+
 #pragma mark - FormInputAccessoryViewControllerDelegate
 
 - (void)formInputAccessoryViewController:
@@ -473,6 +540,13 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
   return NO;
 }
 
+- (NSString*)formInputAccessoryViewController:
+                 (FormInputAccessoryViewController*)
+                     formInputAccessoryViewController
+                        usernameForSuggestion:(FormSuggestion*)suggestion {
+  return [_formInputAccessoryMediator usernameForSuggestion:suggestion];
+}
+
 - (BOOL)formInputAccessoryViewController:
             (FormInputAccessoryViewController*)formInputAccessoryViewController
                           shouldShowRPId:(NSString*)rpId {
@@ -488,7 +562,7 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 }
 
 - (void)openEditForSuggestion:(FormSuggestion*)suggestion {
-  // TODO(crbug.com/521517095): Implement edit action.
+  [_formInputAccessoryMediator openEditForSuggestion:suggestion];
 }
 
 - (BOOL)isPersonalContextSuggestion:(FormSuggestion*)suggestion {
@@ -591,26 +665,7 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 - (void)cardCoordinator:(CardCoordinator*)cardCoordinator
     didTriggerOpenCardDetails:(autofill::CreditCard)card
                    inEditMode:(BOOL)editMode {
-  [self reset];
-
-  // Check if the card should be edited from the Payments web page.
-  if (editMode &&
-      [AutofillCreditCardUtil shouldEditCardFromPaymentsWebPage:card]) {
-    GURL paymentsURL =
-        autofill::payments::GetManageInstrumentUrl(card.instrument_id());
-    OpenNewTabCommand* command =
-        [OpenNewTabCommand commandWithURLFromChrome:paymentsURL];
-    id<SceneCommands> sceneHandler =
-        HandlerForProtocol(self.browser->GetCommandDispatcher(), SceneCommands);
-    [sceneHandler openURLInNewTab:command];
-
-    return;
-  }
-
-  CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
-  id<SettingsCommands> settingsHandler =
-      HandlerForProtocol(dispatcher, SettingsCommands);
-  [settingsHandler showCreditCardDetails:card inEditMode:editMode];
+  [self openCreditCardDetails:card inEditMode:editMode];
 }
 
 #pragma mark - AddressCoordinatorDelegate
@@ -674,8 +729,28 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 
 #pragma mark - AtMemoryCommands
 
+- (void)showAtMemory {
+  if (_atMemoryCoordinator) {
+    return;
+  }
+  _atMemoryCoordinator = [[AtMemoryCoordinator alloc]
+      initWithBaseViewController:self.baseViewController
+                         browser:self.browser
+                 contentInjector:self.injectionHandler];
+
+  [self.childCoordinators addObject:_atMemoryCoordinator];
+
+  [_atMemoryCoordinator start];
+}
+
 - (void)dismissAtMemory {
-  [self reset];
+  if (!_atMemoryCoordinator) {
+    return;
+  }
+  AtMemoryCoordinator* coordinator = _atMemoryCoordinator;
+  _atMemoryCoordinator = nil;
+  [coordinator stop];
+  [self.childCoordinators removeObject:coordinator];
 }
 
 #pragma mark - SecurityAlertCommands
@@ -736,16 +811,6 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
   [_allPasswordCoordinator stop];
   _allPasswordCoordinator.manualFillAllPasswordCoordinatorDelegate = nil;
   _allPasswordCoordinator = nil;
-}
-
-// Presents the AtMemory Page Sheet (on iPhone) or Form Sheet (on iPad).
-- (void)presentAtMemory {
-  AtMemoryCoordinator* atMemoryCoordinator = [[AtMemoryCoordinator alloc]
-      initWithBaseViewController:self.baseViewController
-                         browser:self.browser];
-  [atMemoryCoordinator start];
-
-  [self.childCoordinators addObject:atMemoryCoordinator];
 }
 
 - (void)dismissAlertCoordinator {
@@ -929,6 +994,8 @@ AutofillSettingsPage SuggestionToAutofillSettingsPage(
 // Resets `formInputAccessoryViewController` and `formInputViewController` to
 // their initial state.
 - (void)resetInputViews {
+  _formInputAccessoryViewController.isContextMenuEnabled =
+      autofill::IsAmbientAutofillEnabled(self.profile);
   _formInputAccessoryMediator.suggestionsEnabled = YES;
   [_formInputAccessoryViewController reset];
 

@@ -13,6 +13,7 @@
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "media/base/audio_buffer.h"
@@ -225,7 +226,7 @@ bool FFmpegAudioDecoder::FFmpegDecode(const DecoderBuffer& buffer) {
   } else {
     auto buffer_span = base::span(buffer);
     packet->data = const_cast<uint8_t*>(buffer_span.data());
-    packet->size = buffer_span.size();
+    packet->size = base::checked_cast<int>(buffer_span.size());
     packet->pts =
         ConvertToTimeBase(codec_context_->time_base, buffer.timestamp());
 
@@ -317,10 +318,15 @@ bool FFmpegAudioDecoder::OnNewFrame(const DecoderBuffer& buffer,
         << config_.samples_per_second() << ", ChannelLayout: " << channel_layout
         << " vs " << config_.channel_layout() << ", Channels: " << channels
         << " vs " << config_.channels();
+    const bool should_discard_decoder_delay =
+        config_.should_discard_decoder_delay();
     config_.Initialize(config_.codec(), config_.sample_format(),
                        {channel_layout, channels}, frame->sample_rate,
                        config_.extra_data(), config_.encryption_scheme(),
                        config_.seek_preroll(), config_.codec_delay());
+    if (!should_discard_decoder_delay) {
+      config_.disable_discard_decoder_delay();
+    }
 
     if (is_sample_rate_change)
       ResetTimestampState(config_);

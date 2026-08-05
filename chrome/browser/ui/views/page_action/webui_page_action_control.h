@@ -25,9 +25,13 @@ class WebContents;
 namespace actions {
 class ActionItem;
 }
+class BrowserWindowInterface;
 class WebUIToolbarControlDelegate;
 
 namespace page_actions {
+class PageActionModelInterface;
+class PageActionViewInterface;
+class WebUIPageActionView;
 
 // WebUIPageActionControl bridges the page actions backend (managed by
 // PageActionController) to the WebUI toolbar. It manages a set of delegates
@@ -49,8 +53,15 @@ class WebUIPageActionControl {
   // Updates the active controller based on the active tab of the browser.
   void UpdateController(content::WebContents* web_contents);
 
+  // Asks the active controller to update visibility of page actions.
+  void SetShouldHidePageActions(bool should_hide_page_actions);
+
   // Returns the current state of all visible page actions for WebUI.
   std::vector<toolbar_ui_api::mojom::PageActionStatePtr> GetPageActionStates();
+
+  // Returns the PageActionViewInterface for the given action id.
+  PageActionViewInterface* GetPageActionViewInterface(
+      actions::ActionId action_id);
 
   // Handles a click on a page action from WebUI.
   void OnPageActionClick(
@@ -65,6 +76,13 @@ class WebUIPageActionControl {
       toolbar_ui_api::mojom::ToolbarUIService::
           OnPageActionChipShowingChangedCallback callback);
 
+  // Helpers accessed by WebUIPageActionView:
+  BrowserWindowInterface* GetBrowser();
+  const page_actions::PageActionModelInterface* GetObservedModel(
+      actions::ActionId action_id) const;
+  page_actions::PageActionController* GetController(
+      actions::ActionId action_id);
+
  private:
   // The internal implementation of PageActionController::Delegate and
   // PageActionModelObserver, held per ActionId in `delegates_`.
@@ -73,6 +91,10 @@ class WebUIPageActionControl {
   // Plumbing method that calls OnPageActionChanged on `webui_delegate_`. Called
   // by the internal WebUIPageActionDelegate.
   void NotifyPageActionStateChanged();
+
+  // Plumbing method that calls AnnounceAlert on `webui_delegate_`. Called by
+  // the internal WebUIPageActionDelegate.
+  void AnnounceAlert(const std::u16string& announcement);
 
   void OnControllerDestroying(page_actions::PageActionController& controller);
 
@@ -92,6 +114,7 @@ class WebUIPageActionControl {
 
   std::map<actions::ActionId, std::unique_ptr<WebUIPageActionDelegate>>
       delegates_;
+  std::map<actions::ActionId, std::unique_ptr<WebUIPageActionView>> views_;
 };
 
 }  // namespace page_actions

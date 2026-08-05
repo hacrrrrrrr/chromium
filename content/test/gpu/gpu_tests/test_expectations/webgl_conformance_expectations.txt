@@ -6,6 +6,7 @@
 #         fuchsia
 #         linux ubuntu
 #         mac highsierra mojave catalina bigsur monterey ventura sonoma sequoia
+#             macos26
 #         win win8 win10 win11 ]
 # Devices
 # tags: [ android-pixel-2 android-pixel-4 android-pixel-6 android-pixel-10
@@ -480,7 +481,7 @@ crbug.com/844311 [ angle-opengl mac ] conformance/glsl/misc/fragcolor-fragdata-i
 
 ## Mac Intel failures ##
 
-crbug.com/527353878 [ mac intel-0x3e9b angle-metal ] conformance/extensions/khr-parallel-shader-compile.html [ RetryOnFailure ]
+crbug.com/527353878 [ mac intel-0x3e9b angle-metal ] conformance/extensions/khr-parallel-shader-compile.html [ Failure ]
 
 ## Mac AMD failures ##
 
@@ -494,9 +495,10 @@ crbug.com/328100306 [ amd angle-metal sonoma ] conformance/glsl/bugs/sampler-arr
 crbug.com/354627705 [ mac amd-0x7340 angle-opengl ] conformance/context/context-attributes-alpha-depth-stencil-antialias.html [ Failure ]
 crbug.com/354627705 [ mac amd-0x7340 angle-metal ] conformance/extensions/webgl-polygon-mode.html [ Failure ]
 crbug.com/354627705 [ mac amd-0x7340 angle-opengl ] conformance/rendering/color-mask-preserved-during-implicit-clears.html [ Failure ]
-crbug.com/436522727 [ amd-0x7340 debug graphite-enabled no-clang-coverage sonoma ] conformance/extensions/khr-parallel-shader-compile.html [ Failure ]
 
 ## Apple M2 ##
+
+crbug.com/537387984 [ mac apple-angle-metal-renderer:-apple-m2 asan ] conformance/glsl/misc/shader-with-for-loop.html [ Slow ]
 
 ####################
 # Linux failures   #
@@ -506,8 +508,6 @@ crbug.com/436522727 [ amd-0x7340 debug graphite-enabled no-clang-coverage sonoma
 
 crbug.com/1021428 [ linux angle-vulkan passthrough intel ] WebglExtension_WEBGL_depth_texture [ Failure ]  # finder:disable-unused Not tested in Chromium, but tested by Intel.
 
-## Linux / OpenGL / GTX 1660 ##
-crbug.com/498282277 [ linux angle-opengl nvidia-0x2184 ] conformance/textures/canvas/tex-2d-rgba-rgba-unsigned_byte.html [ RetryOnFailure ]
 
 
 ####################

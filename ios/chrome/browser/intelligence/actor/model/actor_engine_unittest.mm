@@ -10,11 +10,15 @@
 #import "components/actor/public/mojom/actor_types.mojom.h"
 #import "ios/chrome/browser/intelligence/actor/model/actor_task.h"
 #import "ios/chrome/browser/intelligence/actor/public/actor_types.h"
+#import "ios/chrome/browser/intelligence/actor/tools/model/actor_task_form_filling_handler.h"
 #import "ios/chrome/browser/intelligence/actor/tools/model/actor_tool_factory.h"
 #import "ios/chrome/browser/intelligence/actor/tools/model/actor_tool_request.h"
 #import "ios/chrome/browser/intelligence/actor/tools/model/tool_delegate.h"
 #import "ios/chrome/browser/intelligence/actor/util/actor_test_utils.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/shared/model/browser/browser_list.h"
+#import "ios/chrome/browser/shared/model/browser/browser_list_factory.h"
+#import "ios/chrome/browser/shared/model/browser/test/test_browser.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
 #import "ios/web/public/test/fakes/fake_web_state.h"
 #import "testing/gtest/include/gtest/gtest.h"
@@ -56,17 +60,17 @@ class FakeToolDelegate : public ToolDelegate {
   ~FakeToolDelegate() override = default;
 
   ActorTaskId GetTaskId() const override { return ActorTaskId(1); }
-  AggregatedJournal& GetJournal() const override { return *journal_; }
-  ActorToolFactory& GetToolFactory() const override { return *tool_factory_; }
-  actor_login::ActorLoginService* GetActorLoginService() override {
+  bool IsWindowIdValid(int32_t window_id) override { return false; }
+  web::WebState* InsertWebState(
+      int32_t window_id,
+      const web::NavigationManager::WebLoadParams& load_params,
+      bool in_background) override {
     return nullptr;
   }
-  void PromptToSelectCredential(
-      const std::vector<actor_login::Credential>& credentials,
-      CredentialSelectedCallback callback) override {}
-  std::optional<CredentialWithPermission> GetUserSelectedCredential(
-      const url::Origin& request_origin) const override {
-    return std::nullopt;
+  AggregatedJournal& GetJournal() const override { return *journal_; }
+  ActorToolFactory& GetToolFactory() const override { return *tool_factory_; }
+  ActorTaskFormFillingHandler* GetActorTaskFormFillingHandler() override {
+    return nullptr;
   }
   void InterruptFromTool() override {}
   void UninterruptFromTool() override {}
@@ -280,8 +284,24 @@ TEST_F(ActorEngineTest, CompleteActionsOverwrite) {
 // just before tool execution with correct, unique parameters for every tool in
 // the sequence.
 TEST_F(ActorEngineTest, OnWillExecuteToolCalled) {
-  web::WebStateID id1 = web::WebStateID::FromSerializedValue(1);
-  web::WebStateID id2 = web::WebStateID::FromSerializedValue(2);
+  TestProfileIOS* profile = tool_delegate_.profile_.get();
+  BrowserList* browser_list = BrowserListFactory::GetForProfile(profile);
+  auto browser = std::make_unique<TestBrowser>(profile);
+  browser_list->AddBrowser(browser.get());
+
+  auto web_state1 = std::make_unique<web::FakeWebState>();
+  web_state1->SetBrowserState(profile);
+  web::WebStateID id1 = web_state1->GetUniqueIdentifier();
+  browser->GetWebStateList()->InsertWebState(
+      std::move(web_state1),
+      WebStateList::InsertionParams::AtIndex(0).Activate());
+
+  auto web_state2 = std::make_unique<web::FakeWebState>();
+  web_state2->SetBrowserState(profile);
+  web::WebStateID id2 = web_state2->GetUniqueIdentifier();
+  browser->GetWebStateList()->InsertWebState(
+      std::move(web_state2),
+      WebStateList::InsertionParams::AtIndex(1).Activate());
 
   std::vector<std::unique_ptr<ActorToolRequest>> actions;
 
@@ -307,7 +327,7 @@ TEST_F(ActorEngineTest, OnWillExecuteToolCalled) {
   run_loop.Run();
 
   EXPECT_TRUE(execution_updates_delegate_.on_will_execute_called_);
-  ASSERT_GE(execution_updates_delegate_.calls_.size(), 1U);
+  ASSERT_GE(execution_updates_delegate_.calls_.size(), 2U);
 
   EXPECT_EQ(execution_updates_delegate_.calls_[0].tool_type, ToolType::kWait);
   EXPECT_EQ(execution_updates_delegate_.calls_[0].web_state_id, id1);

@@ -113,6 +113,7 @@
 #include "content/browser/renderer_host/navigation_request.h"
 #include "content/browser/renderer_host/page_impl.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
+#include "content/browser/renderer_host/render_frame_host_manager.h"
 #include "content/browser/renderer_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate_view.h"
@@ -127,7 +128,6 @@
 #include "content/browser/screen_details/screen_change_monitor.h"
 #include "content/browser/screen_orientation/screen_orientation_provider.h"
 #include "content/browser/security/cpsp/child_process_security_policy_impl.h"
-#include "content/browser/shared_storage/shared_storage_budget_charger.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/surface_embed/surface_embed_connector_impl.h"
 #include "content/browser/wake_lock/wake_lock_context_host.h"
@@ -1381,10 +1381,6 @@ WebContentsImpl::WebContentsImpl(BrowserContext* browser_context)
   screen_change_monitor_ =
       std::make_unique<ScreenChangeMonitor>(base::BindRepeating(
           &WebContentsImpl::OnScreensChange, base::Unretained(this)));
-
-  if (base::FeatureList::IsEnabled(network::features::kSharedStorageAPI)) {
-    SharedStorageBudgetCharger::CreateForWebContents(this);
-  }
 }
 
 WebContentsImpl::~WebContentsImpl() {
@@ -1437,24 +1433,31 @@ WebContentsImpl::~WebContentsImpl() {
     GetOuterWebContents()->DetachUnownedInnerWebContents(this);
   }
 
-  if (surface_embed_connector_) {
-    ClearSurfaceEmbedConnector();
-  }
-
   if (pointer_lock_widget_) {
     pointer_lock_widget_->RejectPointerLockOrUnlockIfNecessary(
         blink::mojom::PointerLockResult::kElementDestroyed);
 
-    // Normally, the call above clears mouse_lock_widget_ pointers on the
+    // Normally, the call above clears pointer_lock_widget_ pointers on the
     // entire WebContents chain, since it results in calling LostPointerLock()
-    // when the mouse lock is already active. However, this doesn't work for
-    // <webview> guests if the mouse lock request is still pending while the
-    // <webview> is destroyed. Hence, ensure that all mouse lock widget
+    // when the pointer lock is already active. However, this doesn't work for
+    // <webview> guests if the pointer lock request is still pending while the
+    // <webview> is destroyed. Hence, ensure that all pointer lock widget
     // pointers are cleared. See https://crbug.com/1346245.
-    for (WebContentsImpl* current = this; current;
-         current = current->GetOuterWebContents()) {
-      current->pointer_lock_widget_ = nullptr;
+    SetPointerLockWidgetInParentChain(nullptr);
+  }
+
+  // Auto-detach any WebContents embedded in this one via SurfaceEmbed.
+  // Swap to a local since Detach modifies surface_embed_children_.
+  std::vector<base::WeakPtr<WebContents>> children;
+  children.swap(surface_embed_children_);
+  for (auto& child_weak : children) {
+    if (WebContents* child = child_weak.get()) {
+      SurfaceEmbedConnector::Detach(child);
     }
+  }
+
+  if (surface_embed_connector_) {
+    ClearSurfaceEmbedConnector();
   }
 
   for (auto& itr : created_widgets_) {
@@ -2072,8 +2075,12 @@ RenderWidgetHostView* WebContentsImpl::GetRenderWidgetHostView() {
 }
 
 RenderWidgetHostView* WebContentsImpl::GetTopLevelRenderWidgetHostView() {
-  if (GetOuterWebContents()) {
-    return GetOuterWebContents()->GetTopLevelRenderWidgetHostView();
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    return static_cast<SurfaceEmbedConnectorImpl*>(connector)
+        ->GetRootRenderWidgetHostView();
+  }
+  if (WebContentsImpl* outer = GetOuterWebContents()) {
+    return outer->GetTopLevelRenderWidgetHostView();
   }
   return GetRenderManager()->GetRenderWidgetHostView();
 }
@@ -3417,6 +3424,14 @@ void WebContentsImpl::AttachInnerWebContentsImpl(
     inner_web_contents_impl->SetAsFocusedWebContentsIfNecessary();
   }
 
+  // Synchronize visual properties so that the inner main frame's renderer
+  // process immediately receives initial throttling status upon being attached
+  // as an embedded main frame.
+  if (auto* rwh = inner_web_contents_impl->GetPrimaryMainFrame()
+                      ->GetRenderWidgetHost()) {
+    rwh->SynchronizeVisualProperties();
+  }
+
   observers_.NotifyObservers(&WebContentsObserver::InnerWebContentsAttached,
                              inner_web_contents_impl, render_frame_host);
 
@@ -3560,11 +3575,13 @@ void WebContentsImpl::SetSurfaceEmbedConnector(
 
   RecursivelyRegisterRenderWidgetHostViews();
 
-  surface_embed_connector_->UpdateViewForCurrentRenderFrameHost();
+  surface_embed_connector_->OnAttachedToParent();
 }
 
 void WebContentsImpl::ClearSurfaceEmbedConnector() {
   CHECK(surface_embed_connector_);
+
+  surface_embed_connector_->OnDetachedFromParent();
 
   surface_embed_connector_->ClearFocusOnInnerWebContents();
 
@@ -3709,6 +3726,14 @@ void WebContentsImpl::AttachGuestPage(
 
   outer_render_manager->set_attach_inner_delegate_complete();
   inner_main_frame->PropagateEmbeddingTokenToParentFrame();
+
+  // Synchronize visual properties so that the guest main frame's renderer
+  // process immediately receives initial throttling status upon being attached
+  // as an embedded main frame.
+  if (auto* rwh = inner_main_frame->GetRenderWidgetHost()) {
+    rwh->SynchronizeVisualProperties();
+  }
+
   // TODO(crbug.com/40202416): Determine if anything else is needed here.
 }
 
@@ -3734,6 +3759,13 @@ void WebContentsImpl::RecursivelyRegisterRenderWidgetHostViews() {
       static_cast<RenderWidgetHostViewChildFrame*>(view)->RegisterFrameSinkId();
     }
   }
+
+  // surface_embed_children_ is not expected to change during registration.
+  for (const auto& child_weak : surface_embed_children_) {
+    if (auto* child = static_cast<WebContentsImpl*>(child_weak.get())) {
+      child->RecursivelyRegisterRenderWidgetHostViews();
+    }
+  }
 }
 
 void WebContentsImpl::RecursivelyUnregisterRenderWidgetHostViews() {
@@ -3750,6 +3782,13 @@ void WebContentsImpl::RecursivelyUnregisterRenderWidgetHostViews() {
     if (view->IsRenderWidgetHostViewChildFrame()) {
       static_cast<RenderWidgetHostViewChildFrame*>(view)
           ->UnregisterFrameSinkId();
+    }
+  }
+
+  // surface_embed_children_ is not expected to change during unregistration.
+  for (const auto& child_weak : surface_embed_children_) {
+    if (auto* child = static_cast<WebContentsImpl*>(child_weak.get())) {
+      child->RecursivelyUnregisterRenderWidgetHostViews();
     }
   }
 }
@@ -4282,6 +4321,8 @@ void WebContentsImpl::Init(const WebContents::CreateParams& params,
       params.initially_use_platform_autofill;
 
   is_never_composited_ = params.is_never_composited;
+
+  privileged_params_ = params.privileged_params;
 
   creator_location_ = params.creator_location;
 #if BUILDFLAG(IS_ANDROID)
@@ -5266,6 +5307,12 @@ blink::mojom::DisplayMode WebContentsImpl::GetDisplayMode() const {
                    : blink::mojom::DisplayMode::kBrowser;
 }
 
+blink::mojom::ApplicationContext WebContentsImpl::GetApplicationContext()
+    const {
+  return delegate_ ? delegate_->GetApplicationContext(this)
+                   : blink::mojom::ApplicationContext::kNone;
+}
+
 void WebContentsImpl::RequestToLockPointer(
     RenderWidgetHostImpl* render_widget_host,
     bool user_gesture,
@@ -5280,13 +5327,10 @@ void WebContentsImpl::RequestToLockPointer(
                        bad_message::WCI_REQUEST_LOCK_MOUSE_FENCED_FRAME);
     return;
   }
-  for (WebContentsImpl* current = this; current;
-       current = current->GetOuterWebContents()) {
-    if (current->pointer_lock_widget_) {
-      render_widget_host->GotResponseToPointerLockRequest(
-          blink::mojom::PointerLockResult::kAlreadyLocked);
-      return;
-    }
+  if (HasPointerLockWidgetInParentChain()) {
+    render_widget_host->GotResponseToPointerLockRequest(
+        blink::mojom::PointerLockResult::kAlreadyLocked);
+    return;
   }
 
   bool widget_in_frame_tree = false;
@@ -5298,13 +5342,11 @@ void WebContentsImpl::RequestToLockPointer(
     }
   }
 
-  if (widget_in_frame_tree && delegate_) {
-    for (WebContentsImpl* current = this; current;
-         current = current->GetOuterWebContents()) {
-      current->pointer_lock_widget_ = render_widget_host;
-    }
+  WebContentsDelegate* delegate = GetFirstWebContentsDelegate();
+  if (widget_in_frame_tree && delegate) {
+    SetPointerLockWidgetInParentChain(render_widget_host);
     observers_.NotifyObservers(&WebContentsObserver::PointerLockRequested);
-    delegate_->RequestPointerLock(this, user_gesture, last_unlocked_by_target);
+    delegate->RequestPointerLock(this, user_gesture, last_unlocked_by_target);
   } else {
     render_widget_host->GotResponseToPointerLockRequest(
         blink::mojom::PointerLockResult::kWrongDocument);
@@ -5313,10 +5355,11 @@ void WebContentsImpl::RequestToLockPointer(
 
 bool WebContentsImpl::IsWaitingForPointerLockPrompt(
     RenderWidgetHostImpl* render_widget_host) {
-  if (!delegate_ || (pointer_lock_widget_ != render_widget_host)) {
+  WebContentsDelegate* delegate = GetFirstWebContentsDelegate();
+  if (!delegate || (pointer_lock_widget_ != render_widget_host)) {
     return false;
   }
-  return delegate_->IsWaitingForPointerLockPrompt(this);
+  return delegate->IsWaitingForPointerLockPrompt(this);
 }
 
 void WebContentsImpl::LostPointerLock(
@@ -5331,13 +5374,11 @@ void WebContentsImpl::LostPointerLock(
   }
 
   pointer_lock_widget_->SendPointerLockLost();
-  for (WebContentsImpl* current = this; current;
-       current = current->GetOuterWebContents()) {
-    current->pointer_lock_widget_ = nullptr;
-  }
+  SetPointerLockWidgetInParentChain(nullptr);
 
-  if (delegate_) {
-    delegate_->LostPointerLock();
+  WebContentsDelegate* delegate = GetFirstWebContentsDelegate();
+  if (delegate) {
+    delegate->LostPointerLock();
   }
 }
 
@@ -5360,6 +5401,10 @@ bool WebContentsImpl::IsPointerLockSandboxedForWidget(
 }
 
 bool WebContentsImpl::HasPointerLock(RenderWidgetHostImpl* render_widget_host) {
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    return static_cast<SurfaceEmbedConnectorImpl*>(connector)->HasPointerLock(
+        render_widget_host);
+  }
   // To verify if the mouse is locked, the mouse_lock_widget_ needs to be
   // assigned to the widget that requested the mouse lock, and the top-level
   // platform RenderWidgetHostView needs to hold the mouse lock from the OS.
@@ -5369,6 +5414,10 @@ bool WebContentsImpl::HasPointerLock(RenderWidgetHostImpl* render_widget_host) {
 }
 
 RenderWidgetHostImpl* WebContentsImpl::GetPointerLockWidget() {
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    return static_cast<SurfaceEmbedConnectorImpl*>(connector)
+        ->GetPointerLockWidget();
+  }
   auto* widget_host = GetTopLevelRenderWidgetHostView();
   if (widget_host && widget_host->IsPointerLocked()) {
     return pointer_lock_widget_;
@@ -5697,21 +5746,17 @@ FrameTree* WebContentsImpl::CreateNewWindow(
   bool was_blocked = false;
   base::WeakPtr<WebContentsImpl> weak_new_contents =
       new_contents_impl->weak_factory_.GetWeakPtr();
+  base::WeakPtr<WebContentsImpl> weak_this = weak_factory_.GetWeakPtr();
   WebContentsImpl* contents_to_load = new_contents_impl;
   if (delegate_) {
-    // Capture WeakPtrs before AddNewContents(), whose nested message loop on
-    // Windows can destroy `this` and/or `opener` re-entrantly.
-    base::WeakPtr<WebContentsImpl> weak_this = weak_factory_.GetWeakPtr();
-    base::WeakPtr<RenderFrameHostImpl> weak_opener = opener->GetWeakPtr();
     WebContents* web_contents_navigated = delegate_->AddNewContents(
         this, std::move(new_contents), params.target_url, params.disposition,
         *params.features, has_user_gesture, &was_blocked);
 
-    if (!weak_this || !weak_opener) {
-      // `this` or `opener` may be deleted after AddNewContents() due to a
-      // nested message loop (e.g. the window hosting the opener is closed, or
-      // a subframe opener is detached during the nested loop). See
-      // crbug.com/527676561 and crbug.com/531415953.
+    if (!weak_this) {
+      // `this` may be deleted after AddNewContents() due to a nested message
+      // loop (e.g. the window hosting the opener is closed). See
+      // crbug.com/527676561.
       return nullptr;
     }
 
@@ -7284,12 +7329,14 @@ bool WebContentsImpl::GotResponseToPointerLockRequest(
     if (pointer_lock_widget_->GotResponseToPointerLockRequest(result)) {
       return true;
     }
+
+    if (pointer_lock_widget_ && pointer_lock_widget_->GetView() &&
+        pointer_lock_widget_->GetView()->IsPointerLocked()) {
+      return true;
+    }
   }
 
-  for (WebContentsImpl* current = this; current;
-       current = current->GetOuterWebContents()) {
-    current->pointer_lock_widget_ = nullptr;
-  }
+  SetPointerLockWidgetInParentChain(nullptr);
 
   return false;
 }
@@ -7304,10 +7351,7 @@ void WebContentsImpl::DropPointerLockForTesting() {
   if (pointer_lock_widget_) {
     pointer_lock_widget_->RejectPointerLockOrUnlockIfNecessary(
         blink::mojom::PointerLockResult::kUnknownError);
-    for (WebContentsImpl* current = this; current;
-         current = current->GetOuterWebContents()) {
-      current->pointer_lock_widget_ = nullptr;
-    }
+    SetPointerLockWidgetInParentChain(nullptr);
   }
 }
 
@@ -8005,9 +8049,18 @@ void WebContentsImpl::DraggableRegionsChanged(
   GetDelegate()->DraggableRegionsChanged(regions, this);
 }
 
-void WebContentsImpl::OnFirstContentfulPaintInPrimaryMainFrame() {
+void WebContentsImpl::OnFirstContentfulPaintInPrimaryMainFrame(
+    base::TimeTicks presentation_time) {
   observers_.NotifyObservers(
-      &WebContentsObserver::OnFirstContentfulPaintInPrimaryMainFrame);
+      &WebContentsObserver::OnFirstContentfulPaintInPrimaryMainFrame,
+      presentation_time);
+}
+
+void WebContentsImpl::OnLargestContentfulPaintInPrimaryMainFrame(
+    base::TimeTicks presentation_time) {
+  observers_.NotifyObservers(
+      &WebContentsObserver::OnLargestContentfulPaintInPrimaryMainFrame,
+      presentation_time);
 }
 
 gfx::NativeWindow WebContentsImpl::GetOwnerNativeWindow() {
@@ -8032,11 +8085,22 @@ void WebContentsImpl::NotifyChangedNavigationState(
 }
 
 bool WebContentsImpl::ShouldAllowRendererInitiatedCrossProcessNavigation(
+    RenderFrameHostImpl* render_frame_host,
     bool is_outermost_main_frame_navigation) {
   OPTIONAL_TRACE_EVENT1(
       "content",
       "WebContentsImpl::ShouldAllowRendererInitiatedCrossProcessNavigation",
       "is_outermost_main_frame_navigation", is_outermost_main_frame_navigation);
+  if (render_frame_host->frame_tree()->is_guest()) {
+    GuestPageHolderImpl* guest =
+        GuestPageHolderImpl::FromRenderFrameHost(*render_frame_host);
+    if (guest && guest->delegate()) {
+      return guest->delegate()
+          ->GuestShouldAllowRendererInitiatedCrossProcessNavigation(
+              is_outermost_main_frame_navigation);
+    }
+    return true;
+  }
   if (!delegate_) {
     return true;
   }
@@ -9696,6 +9760,48 @@ WebContentsImpl* WebContentsImpl::GetOuterWebContents() {
   return node_.outer_web_contents();
 }
 
+WebContentsDelegate* WebContentsImpl::GetFirstWebContentsDelegate() {
+  // `delegate_` can be nullptr outside of tests, e.g. during WebContents
+  // creation, teardown, or when transferring ownership (e.g. prerender
+  // activation).
+  if (delegate_) {
+    return delegate_;
+  }
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    return static_cast<SurfaceEmbedConnectorImpl*>(connector)
+        ->GetFirstWebContentsDelegate();
+  }
+  if (WebContentsImpl* outer = GetOuterWebContents()) {
+    return outer->GetFirstWebContentsDelegate();
+  }
+  return nullptr;
+}
+
+bool WebContentsImpl::HasPointerLockWidgetInParentChain() {
+  if (pointer_lock_widget_) {
+    return true;
+  }
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    return static_cast<SurfaceEmbedConnectorImpl*>(connector)
+        ->HasPointerLockWidgetInParentChain();
+  }
+  if (WebContentsImpl* outer = GetOuterWebContents()) {
+    return outer->HasPointerLockWidgetInParentChain();
+  }
+  return false;
+}
+
+void WebContentsImpl::SetPointerLockWidgetInParentChain(
+    RenderWidgetHostImpl* widget) {
+  pointer_lock_widget_ = widget;
+  if (auto* connector = GetSurfaceEmbedConnector()) {
+    static_cast<SurfaceEmbedConnectorImpl*>(connector)
+        ->SetPointerLockWidgetInParentChain(widget);
+  } else if (WebContentsImpl* outer = GetOuterWebContents()) {
+    outer->SetPointerLockWidgetInParentChain(widget);
+  }
+}
+
 std::vector<WebContents*> WebContentsImpl::GetInnerWebContents() {
   std::vector<WebContents*> all_inner_contents;
   const auto& inner_contents = node_.GetInnerWebContents();
@@ -9782,6 +9888,7 @@ void WebContentsImpl::SurfaceEmbedChildWebContentsAttached(
     RenderFrameHost* embedder_render_frame_host) {
   OPTIONAL_TRACE_EVENT0(
       "content", "WebContentsImpl::SurfaceEmbedChildWebContentsAttached");
+  surface_embed_children_.push_back(inner_web_contents->GetWeakPtr());
   observers_.NotifyObservers(
       &WebContentsObserver::SurfaceEmbedChildWebContentsAttached,
       inner_web_contents, embedder_render_frame_host);
@@ -9791,6 +9898,9 @@ void WebContentsImpl::SurfaceEmbedChildWebContentsDetached(
     WebContents* inner_web_contents) {
   OPTIONAL_TRACE_EVENT0(
       "content", "WebContentsImpl::SurfaceEmbedChildWebContentsDetached");
+  std::erase_if(surface_embed_children_, [inner_web_contents](const auto& ptr) {
+    return ptr.get() == inner_web_contents;
+  });
   observers_.NotifyObservers(
       &WebContentsObserver::SurfaceEmbedChildWebContentsDetached,
       inner_web_contents);
@@ -10683,12 +10793,16 @@ void WebContentsImpl::SetFocusedFrame(FrameTreeNode* node,
       CHECK(GetOuterWebContents());
       SetFocusedFrameTree(&node->frame_tree());
     }
-  } else if (!GetOuterWebContents() || GetFocusedWebContents() == this) {
+  } else if ((!GetOuterWebContents() && !surface_embed_connector_) ||
+             GetFocusedWebContents() == this) {
     // This is an outermost WebContents or we are currently focused so allow
     // the requested node's frame tree to be focused. The
     // (GetFocusedWebContents() == this) is needed when there are multiple
     // frame trees within an inner WebContents (ie. a GuestView with fenced
     // frames).
+    //
+    // A SurfaceEmbed child is not an outermost WebContents and cannot take
+    // focus through a renderer request alone.
     SetFocusedFrameTree(&node->frame_tree());
   }
 
@@ -10717,6 +10831,18 @@ FrameTree* WebContentsImpl::GetDocumentPictureInPictureOpenerFrameTree() {
   }
 
   return nullptr;
+}
+
+std::optional<int64_t> WebContentsImpl::GetPrivilegedContentsFeatureId() {
+  if (privileged_params_) {
+    return privileged_params_->feature_id;
+  }
+  return std::nullopt;
+}
+
+bool WebContentsImpl::DoesWebContentsDisallowServiceWorkerControl() {
+  return privileged_params_ &&
+         privileged_params_->disallow_service_worker_control;
 }
 
 WebContents* WebContentsImpl::GetDocumentPictureInPictureOpener() {
@@ -10778,7 +10904,7 @@ void WebContentsImpl::OnFocusedElementChangedInFrame(
 
   GlobalDOMNodeId global_dom_node_id{frame->GetWeakDocumentPtr(),
                                      editable_dom_node_id};
-  FocusedNodeDetails details = {frame->has_focused_editable_element(),
+  FocusedNodeDetails details = {frame->focused_editable_level(),
                                 bounds_in_screen, focus_type,
                                 global_dom_node_id};
   BrowserAccessibilityStateImpl::GetInstance()->OnFocusChangedInPage(details);
@@ -10880,16 +11006,10 @@ bool WebContentsImpl::ShouldIgnoreInputEvents() {
   return web_contents->ShouldIgnoreInputEvents();
 }
 
-
 void WebContentsImpl::FocusOwningWebContents(
     RenderWidgetHostImpl* render_widget_host) {
   OPTIONAL_TRACE_EVENT1("content", "WebContentsImpl::FocusOwningWebContents",
                         "render_widget_host", render_widget_host);
-
-  if (surface_embed_connector_) {
-    // Requests focus for the embedding element in the parent page.
-    surface_embed_connector_->GetDelegate()->RequestFocus();
-  }
 
   RenderWidgetHostImpl* main_frame_widget_host =
       GetPrimaryMainFrame()->GetRenderWidgetHost();
@@ -10910,6 +11030,12 @@ void WebContentsImpl::FocusOwningWebContents(
 #if BUILDFLAG(IS_ANDROID)
     UMA_HISTOGRAM_BOOLEAN("Android.FocusChanged.FocusOwningWebContents", false);
 #endif
+  }
+
+  if (surface_embed_connector_) {
+    // Requests focus for the embedding elements after their owning frames got
+    // focus as part of SetAsFocusedWebContentsIfNecessary.
+    surface_embed_connector_->RequestFocusOnEmbedElement();
   }
 }
 
@@ -11026,6 +11152,11 @@ void WebContentsImpl::CancelModalDialogsForRenderManager() {
   // cross-process navigation will either destroy the browser plugins or not
   // require their dialogs to close.
   CancelDialogManagerDialogs(/*reset_state=*/true);
+}
+
+void WebContentsImpl::NotifyPrimaryPageWillBeDeactivated(PageImpl& page) {
+  observers_.NotifyObservers(&WebContentsObserver::PrimaryPageWillBeDeactivated,
+                             page);
 }
 
 void WebContentsImpl::NotifySwappedFromRenderManager(
@@ -12497,8 +12628,6 @@ void WebContentsImpl::NotifyPageBecamePrimary(PageImpl& page) {
 
   observers_.NotifyObservers(&WebContentsObserver::PrimaryPageChanged, page);
 }
-
-
 
 FrameTreeNodeId WebContentsImpl::GetOuterDelegateFrameTreeNodeId() {
   return node_.outer_contents_frame_tree_node_id();

@@ -129,17 +129,11 @@ UIImage* GetOmniboxSuggestionIconForSuggestTemplateInfoIconType(
 
 // Returns the asset with "always template" rendering mode.
 UIImage* GetLocationBarSecurityIcon(LocationBarSecurityIconType iconType) {
-  NSString* name = GetLocationBarSecuritySymbolName(iconType);
-  if (!name) {
+  Symbol symbol = GetLocationBarSecuritySymbol(iconType);
+  if (symbol == SymbolNone) {
     return nil;
   }
-
-  if (iconType == LocationBarSecurityIconType::DANGEROUS) {
-    return CustomSymbolTemplateWithPointSize(name, kSymbolLocationBarPointSize);
-  } else {
-    return DefaultSymbolTemplateWithPointSize(name,
-                                              kSymbolLocationBarPointSize);
-  }
+  return SymbolTemplateWithPointSize(symbol, kSymbolLocationBarPointSize);
 }
 
 // Converts the `security_level` to an appropriate security icon type.
@@ -169,6 +163,6 @@ UIImage* GetLocationBarSecurityIconForSecurityState(
 }
 
 UIImage* GetLocationBarOfflineIcon() {
-  return DefaultSymbolTemplateWithPointSize(kDownloadPromptFillSymbol,
-                                            kSymbolLocationBarPointSize);
+  return SymbolTemplateWithPointSize(SymbolDownloadPromptFill,
+                                     kSymbolLocationBarPointSize);
 }

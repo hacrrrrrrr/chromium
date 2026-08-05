@@ -270,6 +270,27 @@ public class WindowAndroid
     private final ObserverList<SelectionHandlesObserver> mSelectionHandlesObservers =
             new ObserverList<>();
 
+    /** Interface for delegating keyboard events. */
+    public interface KeyboardShortcutsDelegate {
+        /**
+         * Called before a keyboard event is dispatched to the page.
+         *
+         * @param event The KeyEvent to handle.
+         * @return true if the event was handled and should be consumed.
+         */
+        boolean preHandleKeyboardEvent(KeyEvent event);
+
+        /**
+         * Called to handle a keyboard event if it wasn't handled by the page.
+         *
+         * @param event The KeyEvent to handle.
+         * @return true if the event was handled and should be consumed.
+         */
+        boolean handleKeyboardEvent(KeyEvent event);
+    }
+
+    private @Nullable KeyboardShortcutsDelegate mKeyboardShortcutsDelegate;
+
     private boolean mAllowChangeRefreshRate;
 
     /** Gets the view for readback. */
@@ -431,15 +452,13 @@ public class WindowAndroid
     }
 
     private boolean shouldTrackOcclusionWithTrustedPresentationApi() {
-        // On rotate Android seems to send a spurious occlusion signal. See crbug.com/380209799 for
-        // details.
+        AconfigFlaggedApiDelegate delegate = AconfigFlaggedApiDelegate.getInstance();
         return mOcclusionTrackingAllowed
-                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM
                 && UiAndroidFeatureList.sAndroidWindowOcclusion.isEnabled()
-                && "trusted_presentation"
-                        .equals(
-                                UiAndroidFeatureList.sAndroidWindowOcclusionTrackingMode
-                                        .getValue());
+                && "trusted_presentation_strict_mode"
+                        .equals(UiAndroidFeatureList.sAndroidWindowOcclusionTrackingMode.getValue())
+                && delegate != null
+                && delegate.isStrictOcclusionAvailable();
     }
 
     private void maybeTrackOcclusionWithTrustedPresentationApi() {
@@ -465,7 +484,13 @@ public class WindowAndroid
         Context context = assumeNonNull(getContext().get());
         WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
 
-        var thresholds = new TrustedPresentationThresholds(Float.MIN_VALUE, Float.MIN_VALUE, 1);
+        AconfigFlaggedApiDelegate delegate = AconfigFlaggedApiDelegate.getInstance();
+        assert delegate != null;
+        TrustedPresentationThresholds thresholds =
+                delegate.createTrustedPresentationThresholdsStrictMode(
+                        Float.MIN_VALUE, Float.MIN_VALUE, 1);
+        assert thresholds != null;
+
         mTrustedPresentationOcclusionObserver =
                 new Consumer<>() {
                     @Override
@@ -652,7 +677,7 @@ public class WindowAndroid
     public boolean showIntent(
             PendingIntent intent, @Nullable IntentCallback callback, @Nullable Integer errorId) {
         if (mIntentRequestTracker == null) {
-            Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
+            Log.d(TAG, "Can't show intent as context is not an Activity: %s", intent);
             return false;
         }
         return mIntentRequestTracker.showCancelableIntent(intent, callback, errorId) >= 0;
@@ -670,7 +695,7 @@ public class WindowAndroid
     public boolean showIntent(
             @Nullable Intent intent, @Nullable IntentCallback callback, @Nullable Integer errorId) {
         if (mIntentRequestTracker == null) {
-            Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
+            Log.d(TAG, "Can't show intent as context is not an Activity: %s", intent);
             return false;
         }
         return mIntentRequestTracker.showCancelableIntent(intent, callback, errorId) >= 0;
@@ -689,7 +714,7 @@ public class WindowAndroid
     public int showCancelableIntent(
             PendingIntent intent, @Nullable IntentCallback callback, @Nullable Integer errorId) {
         if (mIntentRequestTracker == null) {
-            Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
+            Log.d(TAG, "Can't show intent as context is not an Activity: %s", intent);
             return START_INTENT_FAILURE;
         }
         return mIntentRequestTracker.showCancelableIntent(intent, callback, errorId);
@@ -708,7 +733,7 @@ public class WindowAndroid
     public int showCancelableIntent(
             Intent intent, @Nullable IntentCallback callback, @Nullable Integer errorId) {
         if (mIntentRequestTracker == null) {
-            Log.d(TAG, "Can't show intent as context is not an Activity: " + intent);
+            Log.d(TAG, "Can't show intent as context is not an Activity: %s", intent);
             return START_INTENT_FAILURE;
         }
         return mIntentRequestTracker.showCancelableIntent(intent, callback, errorId);
@@ -727,11 +752,12 @@ public class WindowAndroid
 
     /**
      * Force finish another activity that you had previously started with showCancelableIntent.
+     *
      * @param requestCode The request code returned from showCancelableIntent.
      */
     public void cancelIntent(int requestCode) {
         if (mIntentRequestTracker == null) {
-            Log.d(TAG, "Can't cancel intent as context is not an Activity: " + requestCode);
+            Log.d(TAG, "Can't cancel intent as context is not an Activity: %d", requestCode);
             return;
         }
         mIntentRequestTracker.cancelIntent(requestCode);
@@ -1310,6 +1336,20 @@ public class WindowAndroid
         return mKeyboardVisibilityDelegate;
     }
 
+    /**
+     * @param delegate The delegate to handle keyboard events.
+     */
+    public void setKeyboardShortcutsDelegate(KeyboardShortcutsDelegate delegate) {
+        mKeyboardShortcutsDelegate = delegate;
+    }
+
+    /**
+     * @return The delegate to handle keyboard events.
+     */
+    public @Nullable KeyboardShortcutsDelegate getKeyboardShortcutsDelegate() {
+        return mKeyboardShortcutsDelegate;
+    }
+
     /** Returns the {@link InsetObserver} for the root view of the activity or null. */
     public @Nullable InsetObserver getInsetObserver() {
         return mInsetObserver;
@@ -1371,6 +1411,30 @@ public class WindowAndroid
      */
     public WeakReference<Context> getContext() {
         return mContextRef;
+    }
+
+    /**
+     * Returns the raw Context object. This is a helper for native code to directly access the
+     * unwrapped Context instead of dealing with the WeakReference returned by getContext().
+     *
+     * @return The Context associated with this WindowAndroid, or null if it's been garbage
+     *     collected.
+     */
+    @CalledByNative
+    private @Nullable Object getContextForNative() {
+        return mContextRef.get();
+    }
+
+    /**
+     * Returns the System.identityHashCode of the Context. This is used by native code as a unique
+     * identifier for the Context, particularly for caching mechanisms like ColorProvider.
+     *
+     * @return The identity hash code of the Context, or 0 if the Context is null.
+     */
+    @CalledByNative
+    private long getContextHashId() {
+        Context context = mContextRef.get();
+        return context != null ? System.identityHashCode(context) : 0;
     }
 
     /** Return the decor view, or null. */

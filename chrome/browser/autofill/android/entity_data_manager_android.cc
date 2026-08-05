@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <ranges>
 
 #include "base/android/callback_android.h"
 #include "base/android/jni_android.h"
@@ -14,7 +15,6 @@
 #include "base/check_deref.h"
 #include "base/containers/to_vector.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/types/zip.h"
 #include "chrome/browser/account_settings/account_setting_service_factory.h"
 #include "chrome/browser/autofill/android/entity_instance_android.h"
 #include "chrome/browser/autofill/android/entity_instance_with_labels.h"
@@ -44,6 +44,8 @@
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/consent_auditor/consent_auditor.h"
+#include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #include "components/personal_context/core/personal_context_eligibility_service.h"
 #include "components/personal_context/core/personal_context_prefs.h"
 #include "components/personal_context/core/personal_context_types.h"
@@ -93,9 +95,7 @@ EntityDataManagerAndroid::~EntityDataManagerAndroid() = default;
 
 bool EntityDataManagerAndroid::IsPersonalContextPreferenceVisible(JNIEnv* env) {
   return autofill::ShouldShowPersonalContextAutofillSetting(
-#if !BUILDFLAG(IS_FUCHSIA)
       google_groups_manager_,
-#endif
       prefs_, &entity_data_manager(), identity_manager_, sync_service_,
       IsWalletPublicPassStorageEnabledHelper(), is_off_the_record_,
       entity_data_manager_->GetVariationCountryCode(),
@@ -103,12 +103,30 @@ bool EntityDataManagerAndroid::IsPersonalContextPreferenceVisible(JNIEnv* env) {
 }
 
 bool EntityDataManagerAndroid::IsPersonalContextEnabled(JNIEnv* env) {
+  if (IsPersonalContextDisabledByEnterprisePolicy(env)) {
+    return false;
+  }
   return prefs_->GetBoolean(
       personal_context::prefs::kPersonalContextInAutofillSettingsToggleStatus);
 }
 
+bool EntityDataManagerAndroid::IsPersonalContextDisabledByEnterprisePolicy(
+    JNIEnv* env) const {
+  const PrefService::Preference* policy_pref = prefs_->FindPreference(
+      optimization_guide::prefs::kFindAndFillWithGeminiSettings);
+  if (!policy_pref) {
+    return false;
+  }
+  return policy_pref->GetValue()->GetInt() ==
+         std::to_underlying(optimization_guide::model_execution::prefs::
+                                ModelExecutionEnterprisePolicyValue::kDisable);
+}
+
 void EntityDataManagerAndroid::SetPersonalContextEnabled(JNIEnv* env,
                                                          bool enabled) {
+  if (IsPersonalContextDisabledByEnterprisePolicy(env)) {
+    return;
+  }
   prefs_->SetBoolean(
       personal_context::prefs::kPersonalContextInAutofillSettingsToggleStatus,
       enabled);
@@ -324,7 +342,8 @@ EntityDataManagerAndroid::GetEntitiesWithLabels(JNIEnv* env) {
                              g_browser_process->GetApplicationLocale());
     CHECK_EQ(entities_of_type.size(), labels.size());
 
-    for (const auto [entity, label] : base::zip(entities_of_type, labels)) {
+    for (const auto [entity, label] :
+         std::views::zip(entities_of_type, labels)) {
       const bool stored_in_wallet =
           entity->record_type() == EntityInstance::RecordType::kServerWallet;
       entities_with_labels.emplace_back(

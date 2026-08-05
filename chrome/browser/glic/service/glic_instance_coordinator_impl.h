@@ -98,6 +98,9 @@ class GlicInstanceCoordinatorImpl
   // per profile.
   void OnWillCreateFloaty() override;
   void UnbindTabFromAnyInstance(tabs::TabInterface* tab) override;
+  void UnbindTabGroupFromAnyInstance(
+      tab_groups::TabGroupId group_id,
+      GlicInstanceImpl* excluding_instance) override;
   // Sorts conversations by recency and returns the ConversationInfoPtr of each
   // conversation. Used by the web client to get recent conversations.
   std::vector<glic::mojom::ConversationInfoPtr> GetRecentlyActiveConversations(
@@ -124,6 +127,10 @@ class GlicInstanceCoordinatorImpl
       const std::string& conversation_id) override;
   // GlicInstanceCoordinator implementation
   GlicInstance* GetInstanceForTab(const tabs::TabInterface* tab) const override;
+  GlicInstance* GetInstanceForTabGroup(
+      tab_groups::TabGroupId group_id) const override;
+  GlicInstance* ShowInstanceForTabGroup(
+      tab_groups::TabGroupId group_id) override;
   GlicInstance* GetInstanceWithGlicWebContents(
       content::WebContents* glic_web_contents) const override;
   // Sorts instances by recency and returns the instance id and
@@ -137,16 +144,6 @@ class GlicInstanceCoordinatorImpl
 
   void UnpinTabsFromAllInstances(base::span<const tabs::TabHandle> tab_handles,
                                  GlicUnpinTrigger trigger) override;
-
-  // Creates a new conversation and pins the given tabs.
-  // This overrides any conversation that was already associated with any
-  // of the given tabs.
-  void CreateNewConversationForTabs(
-      const std::vector<tabs::TabInterface*>& tabs) override;
-
-  // Pins the given tabs to the instance with the given id.
-  void ShowInstanceForTabs(const std::vector<tabs::TabInterface*>& tabs,
-                           const InstanceId& instance_id) override;
 
   // Toggles the side panel for the active tab if `browser` is provided,
   // otherwise toggles the floating window for the instance. Focus is given
@@ -207,15 +204,20 @@ class GlicInstanceCoordinatorImpl
   // Testing support. These methods should not be added to the public interface.
   GlicInstanceImpl* GetInstanceImplFor(const InstanceId& id) const;
   GlicInstanceImpl* GetInstanceImplForTab(const tabs::TabInterface* tab) const;
+  GlicInstanceImpl* GetInstanceImplForTabGroup(
+      tab_groups::TabGroupId group_id) const;
 
   void RemoveInstance(InstanceId id) override;
 
  private:
   void RemoveAllInstances();
-  base::WeakPtr<GlicInstance> InvokeInternal(
+  void TransferTabGroupBinding(GlicInstanceImpl& source_instance,
+                               GlicInstanceImpl& target_instance);
+  base::WeakPtr<GlicInstanceImpl> InvokeInternal(
       std::optional<InvokeWithAutoSubmitPasskey> auto_submit_passkey,
       GlicInvokeOptions options,
-      GlicInvokeWithAutoSubmitOptions auto_submit_options);
+      GlicInvokeWithAutoSubmitOptions auto_submit_options,
+      bool bypass_in_progress_check = false);
 
   void OnTabEvent(const GlicTabEvent& event);
   // Returns a pointer to an instance with the given conversation id or nullptr
@@ -243,10 +245,6 @@ class GlicInstanceCoordinatorImpl
 
   void OnInstanceActuatingChanged(bool actuating);
 
-  void ShowInstanceForTabs(GlicInstanceImpl* instance,
-                           const std::vector<tabs::TabInterface*>& tabs,
-                           GlicPinTrigger pin_trigger);
-
   void ToggleFloaty(
       bool prevent_close,
       glic::mojom::InvocationSource source,
@@ -255,6 +253,14 @@ class GlicInstanceCoordinatorImpl
       BrowserWindowInterface* browser,
       bool prevent_close,
       glic::mojom::InvocationSource source,
+      std::unique_ptr<GlicWindowInvocationTracker> invocation_tracker);
+  // Helper method for toggling the UI open. This should ONLY be used by the
+  // toggle flow (ToggleSidePanel, ToggleFloaty) as it bypasses the in-progress
+  // invocation check and sets fre_completion_wait_mode to kNever.
+  void InvokeAndLogToggle(
+      glic::mojom::InvocationSource source,
+      Target::Surface surface,
+      const EmbedderKey& key,
       std::unique_ptr<GlicWindowInvocationTracker> invocation_tracker);
 
   void CloseFloaty(const CloseOptions& options = {});

@@ -72,6 +72,9 @@ class TabAndroid : public tabs::TabInterface,
     virtual void OnInitWebContents(TabAndroid* tab) = 0;
   };
 
+  // Denotes an invalid Tab Id.
+  static constexpr int kInvalidTabId = -1;
+
   // Convenience method to retrieve the Tab associated with the passed
   // WebContents. Can return nullptr.
   static TabAndroid* FromWebContents(content::WebContents* web_contents);
@@ -211,6 +214,7 @@ class TabAndroid : public tabs::TabInterface,
   void SendWillDetachUpdate(JNIEnv* env, int32_t detach_reason);
   void SendDidInsertUpdate(JNIEnv* env);
   tabs::TabDestroyStatus DestroyWebContents();
+  tabs::TabDestroyStatus DestroyWebContentsSlowShutdownForTesting();
   void ReleaseWebContents();
 
   // Properly releases the WebContents from both native and Java sides. Should
@@ -317,6 +321,8 @@ class TabAndroid : public tabs::TabInterface,
   void SetTabGroupId(std::optional<tab_groups::TabGroupId> tab_group_id);
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject(JNIEnv* env) const;
+
+  tabs::TabDestroyStatus DestroyWebContentsSlowShutdown();
 
   std::unique_ptr<content::WebContents> ReleaseWebContentsInternal(
       bool keep_session_id,

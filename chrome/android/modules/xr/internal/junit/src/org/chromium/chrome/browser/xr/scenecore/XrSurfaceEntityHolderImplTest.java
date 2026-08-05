@@ -128,6 +128,13 @@ public class XrSurfaceEntityHolderImplTest {
     }
 
     @Test
+    public void testSetSurfaceShape_NotifiesCallback() {
+        mHolder.addCallback(mCallback);
+        mHolder.setSurfaceShape(XrSurfaceEntityShape.SPHERE);
+        verify(mCallback, org.mockito.Mockito.times(2)).surfaceChanged(any(), eq(1), eq(1));
+    }
+
+    @Test
     public void testSetEntitySize_Quad() {
         mHolder.setSurfaceShape(XrSurfaceEntityShape.QUAD);
         mHolder.setEntitySize(10f, 20f);
@@ -135,6 +142,22 @@ public class XrSurfaceEntityHolderImplTest {
         Shape shape = mSurfaceEntity.getShape();
         assertTrue(shape instanceof Shape.Quad);
         assertEquals(10f, ((Shape.Quad) shape).getExtents().getWidth(), DELTA);
+    }
+
+    @Test
+    public void testEdgeFeathering() {
+        mHolder.setRectangleEdgeFeathering(0.05f, 0.02f);
+        SurfaceEntity.EdgeFeatheringParams params = mSurfaceEntity.getEdgeFeatheringParams();
+        assertTrue(params instanceof SurfaceEntity.EdgeFeatheringParams.RectangleFeather);
+        SurfaceEntity.EdgeFeatheringParams.RectangleFeather rectFeather =
+                (SurfaceEntity.EdgeFeatheringParams.RectangleFeather) params;
+        assertEquals(0.05f, rectFeather.getLeftRight(), DELTA);
+        assertEquals(0.02f, rectFeather.getTopBottom(), DELTA);
+
+        mHolder.removeEdgeFeathering();
+        assertTrue(
+                mSurfaceEntity.getEdgeFeatheringParams()
+                        instanceof SurfaceEntity.EdgeFeatheringParams.NoFeathering);
     }
 
     @Test

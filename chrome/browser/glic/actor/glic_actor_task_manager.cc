@@ -249,7 +249,8 @@ void GlicActorClientSession::CreateTask(
   current_task_id_ = actor_keyed_service().CreateTaskWithOptions(
       actor::TaskSourceInfo(actor::TaskSourceInfo::Client::kGlic,
                             conversation_id),
-      &actor_policy_checker(), std::move(options), GetWeakPtr());
+      &actor_policy_checker(), std::move(options), GetWeakPtr(),
+      instance_metrics().initial_invocation_source());
   CHECK(!current_task_id_.is_null());
 
   if (manager_->delegate_) {
@@ -400,6 +401,15 @@ void GlicActorClientSession::OnPerformActionsComplete(
   }
 
   actor::CopyScriptToolResults(response, action_results);
+
+  for (const auto& action_result : action_results) {
+    if (actor::IsOk(*action_result.result)) {
+      response.add_extra_information(action_result.result->message);
+    } else {
+      // In case of an error, the message is copied to `error_message` instead.
+      response.add_extra_information(std::string());
+    }
+  }
 
   auto* latency_info = response.mutable_latency_information();
   for (size_t i = 0; i < action_results.size(); ++i) {
@@ -969,6 +979,15 @@ void GlicActorTaskManager::CancelTask() {
   session_->CancelActiveTask();
 }
 
+void GlicActorTaskManager::PauseTask() {
+  if (!session_ || session_->current_task_id().is_null()) {
+    return;
+  }
+  session_->PauseActorTask(session_->current_task_id().value(),
+                           mojom::ActorTaskPauseReason::kPausedByUser,
+                           std::nullopt);
+}
+
 void GlicActorClientSession::CanActOnWebChanged(bool can_act_on_web) {
   if (!can_act_on_web && current_task_id_) {
     StopTaskImpl(current_task_id_,
@@ -1135,8 +1154,20 @@ void GlicActorClientSession::RequestToShowCredentialSelectionDialog(
 void GlicActorClientSession::RequestToShowGmailOtpOptInDialog(
     actor::TaskId task_id,
     actor::ActorTaskDelegate::GmailOtpOptInCallback callback) {
-  actor_client_->RequestToShowGmailOtpOptInDialog(task_id.value(),
+  auto request =
+      actor::webui::mojom::GmailOtpOptInRequest::New(task_id.value());
+  actor_client_->RequestToShowGmailOtpOptInDialog(std::move(request),
                                                   std::move(callback));
+}
+
+void GlicActorClientSession::RequestToShowGmailOtpConfirmationDialog(
+    actor::TaskId task_id,
+    const std::string& verification_code,
+    actor::ActorTaskDelegate::GmailOtpConfirmationCallback callback) {
+  auto dialog_request = actor::webui::mojom::GmailOtpConfirmationRequest::New(
+      task_id.value(), verification_code);
+  actor_client_->RequestToShowGmailOtpConfirmationDialog(
+      std::move(dialog_request), std::move(callback));
 }
 
 void GlicActorClientSession::RequestToShowUserConfirmationDialog(

@@ -16,9 +16,9 @@ import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.accessibility.settings.ChromeAccessibilitySettingsDelegate;
+import org.chromium.chrome.browser.autofill.settings.AutofillAndPasswordsFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillCreditCardEditor;
 import org.chromium.chrome.browser.autofill.settings.AutofillLocalIbanEditor;
-import org.chromium.chrome.browser.autofill.settings.HomeOfTransactionsFragment;
 import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsCoordinator;
 import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsFragment;
 import org.chromium.chrome.browser.autofill.settings.personal_context.AutofillPersonalContextCoordinator;
@@ -29,12 +29,9 @@ import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsSettings;
 import org.chromium.chrome.browser.language.settings.LanguageSettings;
 import org.chromium.chrome.browser.lifetime.ApplicationLifetime;
 import org.chromium.chrome.browser.locale.LocaleManager;
-import org.chromium.chrome.browser.page_info.SiteSettingsHelper;
 import org.chromium.chrome.browser.password_manager.PasswordManagerHelper;
 import org.chromium.chrome.browser.password_manager.PasswordStoreBridge;
 import org.chromium.chrome.browser.privacy_guide.PrivacyGuideFragment;
-import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsBaseFragment;
-import org.chromium.chrome.browser.privacy_sandbox.TopicsManageFragment;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.safety_check.SafetyCheckBridge;
 import org.chromium.chrome.browser.safety_check.SafetyCheckCoordinator;
@@ -58,7 +55,6 @@ import org.chromium.components.browser_ui.settings.FragmentSettingsNavigation;
 import org.chromium.components.browser_ui.settings.SearchViewProvider;
 import org.chromium.components.browser_ui.settings.SettingsCustomTabLauncher;
 import org.chromium.components.browser_ui.site_settings.BaseSiteSettingsFragment;
-import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
 import org.chromium.ui.base.ActivityResultTracker;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -178,18 +174,6 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
             }
             imageFragment.setDelegate(ImageDescriptionsController.getInstance().getDelegate());
         }
-        if (fragment instanceof PrivacySandboxSettingsBaseFragment) {
-            PrivacySandboxSettingsBaseFragment sandboxFragment =
-                    (PrivacySandboxSettingsBaseFragment) fragment;
-            sandboxFragment.setSnackbarManagerSupplier(mSnackbarManagerSupplier);
-            sandboxFragment.setCookieSettingsIntentHelper(
-                    (Context context) -> {
-                        SiteSettingsHelper.showCategorySettings(
-                                context,
-                                SiteSettingsCategory.Type.THIRD_PARTY_COOKIES,
-                                /* addToBackStack= */ true);
-                    });
-        }
         if (fragment instanceof LanguageSettings) {
             ((LanguageSettings) fragment)
                     .setRestartAction(
@@ -217,10 +201,6 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
         }
         if (fragment instanceof AutofillCreditCardEditor) {
             ((AutofillCreditCardEditor) fragment)
-                    .setModalDialogManagerSupplier(mModalDialogManagerSupplier);
-        }
-        if (fragment instanceof TopicsManageFragment) {
-            ((TopicsManageFragment) fragment)
                     .setModalDialogManagerSupplier(mModalDialogManagerSupplier);
         }
         if (fragment instanceof AutofillLocalIbanEditor) {
@@ -255,8 +235,8 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
         if (fragment instanceof SafetyHubBaseFragment) {
             ((SafetyHubBaseFragment) fragment).setSnackbarManagerSupplier(mSnackbarManagerSupplier);
         }
-        if (fragment instanceof HomeOfTransactionsFragment) {
-            ((HomeOfTransactionsFragment) fragment)
+        if (fragment instanceof AutofillAndPasswordsFragment) {
+            ((AutofillAndPasswordsFragment) fragment)
                     .setDependencies(
                             mModalDialogManagerSupplier,
                             mWindowAndroidSupplier,

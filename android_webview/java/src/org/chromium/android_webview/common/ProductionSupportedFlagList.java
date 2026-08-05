@@ -164,6 +164,10 @@ public final class ProductionSupportedFlagList {
                 "Use SurfaceControl. Requires WebViewThreadSafeMedia and Android device and OS "
                         + "support. Only supported on TV."),
         Flag.baseFeature(
+                "AndroidYuvOverlayEvenAlignment",
+                "Enforces 2-pixel even boundary alignment for YUV hardware video overlays in"
+                        + " SurfaceControl to prevent odd-coordinate display scaling rejections."),
+        Flag.baseFeature(
                 GpuFeatures.LIMIT_A_IMAGE_READER_MAX_SIZE_TO_ONE,
                 "If disabled allows acquiring more than one image from the AImageReader"),
         Flag.baseFeature(
@@ -256,10 +260,6 @@ public final class ProductionSupportedFlagList {
                 "Allows autofill to offer filling again on fields that were autofilled and now hold"
                         + " autocomplete=unrecognized value."),
         Flag.baseFeature(
-                AutofillFeatures.AUTOFILL_FIX_CIVIL_STATE_MISCLASSIFICATION_FOR_ESPT,
-                "When enabled, improves heuristic regexes for state classification to avoid"
-                        + " misclassification as civil state."),
-        Flag.baseFeature(
                 AutofillFeatures.AUTOFILL_FIX_STATE_COUNTRY_MISCLASSIFICATION,
                 "When enabled, the rationalization engine will fix misclassifications where"
                         + " a field is detected as a COUNTRY when it should be a STATE or vice"
@@ -326,10 +326,6 @@ public final class ProductionSupportedFlagList {
                 "If enabled, the missing merge modes will be re-enabled on nodes. To do that,"
                         + "MergeMode::kMergeChildrenAndReformatIfNeeded will be also added to all"
                         + "the nodes where required."),
-        Flag.baseFeature(
-                AutofillFeatures.AUTOFILL_ANDROID_FORM_DATA_COMPARE_FIELD_GLOBAL_ID,
-                "If enabled, form fields are retrieved by comparing FormFieldIds"
-                        + "instead of the set of attributes."),
         Flag.baseFeature(
                 FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_VIRTUAL_CARD_FEATURE,
                 "When enabled, merchant bound virtual cards will be offered in the keyboard "
@@ -445,9 +441,6 @@ public final class ProductionSupportedFlagList {
                 "Allows creating WebRTC Encoded Transforms without the "
                         + "encodedInsertableStreams RTCPeerConnection Parameter."),
         Flag.baseFeature(
-                "IdbSqliteBackingStoreInMemoryContexts",
-                "Enables the SQLite backing store for in-memory contexts."),
-        Flag.baseFeature(
                 "WebRtcEncodedTransformDirectCallback",
                 "Directly invoke WebRTC Encoded Transform callbacks in a worker."),
         Flag.baseFeature("WebRtcPqcForDtls", "Enable Post-Quantum Cryptography in WebRTC"),
@@ -498,6 +491,9 @@ public final class ProductionSupportedFlagList {
                 NetFeatures.SPDY_HEADERS_TO_HTTP_RESPONSE_USE_BUILDER,
                 "Enables new optimized implementation of SpdyHeadersToHttpResponse. No behavior"
                         + " change."),
+        Flag.baseFeature(
+                NetFeatures.ENABLE_INTERMEDIATE_DNS_RESULTS,
+                "Enables intermediate DNS results to ServiceEndpointRequest delegates"),
         Flag.baseFeature(NetFeatures.HAPPY_EYEBALLS_V2, "Enables Happy Eyeballs V2"),
         Flag.baseFeature(NetFeatures.HAPPY_EYEBALLS_V3, "Enables Happy Eyeballs V3"),
         Flag.baseFeature(NetFeatures.OPTIMISTIC_DNS_FOR_TCP, "Enables optimistic DNS for TCP"),
@@ -557,6 +553,10 @@ public final class ProductionSupportedFlagList {
                 UiEventsFeatures.COMPENSATE_GESTURE_DETECTOR_TIMEOUTS,
                 "Componesate for event processing delay for calculating gesture timeouts."),
         Flag.baseFeature("ReduceCpuUtilization2"),
+        Flag.baseFeature(
+                "ReduceMojoURLLoaderFactoryCloning",
+                "Minimizes Mojo URLLoaderFactory cloning overhead during navigation and worker"
+                        + " startup."),
         Flag.baseFeature("NetworkServiceCookiesHighPriorityTaskRunner"),
         Flag.baseFeature("IncreaseCoookieAccesCacheSize"),
         Flag.baseFeature("AvoidScheduleWorkDuringNativeEventProcessing"),
@@ -694,6 +694,9 @@ public final class ProductionSupportedFlagList {
                         + " to enable BFCache through AwSettings as well. If either of"
                         + " the flag / setting is enabled, BFCache will be enabled"),
         Flag.baseFeature(
+                AwFeatures.WEBVIEW_PURGE_MEMORY_IN_BACKGROUND,
+                "Aggressively purge memory when WebView apps go to the background."),
+        Flag.baseFeature(
                 AwSwitches.WEBVIEW_STATIC_METHODS_NOT_TRIGGER_STARTUP,
                 "When enabled, static methods in SharedStatics do not trigger startup."),
         Flag.baseFeature(
@@ -712,9 +715,6 @@ public final class ProductionSupportedFlagList {
                 "BatteryStatusManagerBroadcastReceiverInBackground",
                 "Register, unregister Battery Status Manager broadcast receiver on a background"
                         + " thread."),
-        Flag.baseFeature(
-                BaseFeatures.PARTITION_ALLOC_WITH_ADVANCED_CHECKS,
-                "Enables PartitionAlloc with advanced safety checks"),
         Flag.baseFeature(
                 BaseFeatures.PARTITION_ALLOC_SCHEDULER_LOOP_QUARANTINE,
                 "Enables PartitionAlloc's FreeFlags::kSchedulerLoopQuarantine"),
@@ -1010,8 +1010,13 @@ public final class ProductionSupportedFlagList {
                         + AwSwitches.STARTUP_NON_BLOCKING_WEBVIEW_CONSTRUCTOR
                         + " is enabled."),
         Flag.baseFeature(
-                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS,
-                "Enables Magnification and other views to keep the text cursor onscreen."),
+                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_KEYBOARD_ATTACHED,
+                "Enables Magnification and other views to keep the text cursor onscreen when"
+                        + " physical keyboard is attached."),
+        Flag.baseFeature(
+                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_NO_KEYBOARD,
+                "Enables Magnification and other views to keep the text cursor onscreen when no"
+                        + " physical keyboard is attached."),
         Flag.baseFeature(
                 AccessibilityFeatures.ACCESSIBILITY_TEXT_CHANGE_TYPES,
                 "Enables text change types for text changed events."),
@@ -1115,6 +1120,10 @@ public final class ProductionSupportedFlagList {
                 AwFeatures.WEBVIEW_PROFILE_STORE_NOT_TRIGGER_STARTUP,
                 "When enabled, accessing the ProfileStore does not trigger WebView startup."),
         Flag.baseFeature(
+                AwFeatures.WEBVIEW_WARMUP_NETWORK_SERVICE,
+                "When enabled, eagerly warms up the Network Service during early native browser"
+                        + " process startup in WebView."),
+        Flag.baseFeature(
                 NetworkServiceFeatures.COMPRESSION_DICTIONARY_LIMIT_EARLY_MATCHING,
                 "When enabled, limits the early loading of compression dictionaries to document"
                         + " requests."),
@@ -1152,9 +1161,13 @@ public final class ProductionSupportedFlagList {
                 ContentFeatures.ACCESSIBILITY_DEPRECATE_TYPE_ANNOUNCE,
                 "When enabled, TYPE_ANNOUNCE events will no longer be sent from Chrome."),
         Flag.baseFeature(
-                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS,
+                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_KEYBOARD_ATTACHED,
                 "When enabled, the Android framework will be notified when the text cursor or input"
-                        + " focus moves."),
+                        + " focus moves and a physical keyboard is attached."),
+        Flag.baseFeature(
+                AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_NO_KEYBOARD,
+                "When enabled, the Android framework will be notified when the text cursor or input"
+                        + " focus moves and no physical keyboard is attached."),
         Flag.baseFeature(
                 ContentFeatures.ACCESSIBILITY_SEQUENTIAL_FOCUS,
                 "When enabled, keyboard focus starting point will be synchronized with"
@@ -1169,6 +1182,10 @@ public final class ProductionSupportedFlagList {
                 ContentFeatures.ANDROID_PK_AUTOCORRECT_UNDERLINE_V2,
                 "When enabled, physical keyboard autocorrect underline will display. V2 simplifies"
                         + " V1, while improving the input compatibility."),
+        Flag.baseFeature(
+                ContentFeatures.ANDROID_REMOVE_SET_LOCAL_FOCUS_WORKAROUND_ON_BAKLAVA,
+                "Removes the setLocalFocus workaround and delay for multi-display setups on "
+                        + "Baklava and above."),
         Flag.baseFeature(
                 ContentFeatureList.ANDROID_FORCE_TEXT_INPUT_STATE_UPDATE_UPON_FOCUS,
                 "When enabled, forces pushing active text input state update calculation "
@@ -1377,6 +1394,9 @@ public final class ProductionSupportedFlagList {
                 "PrefetchCancelUnrelatedPrefetch",
                 "Cancels unrelated prefetch when a navigation is started."),
         Flag.baseFeature(
+                "PrefetchMatchResolverUnblockAsync",
+                "Making PrefetchMatchResolver::UnblockInternal() async."),
+        Flag.baseFeature(
                 BlinkFeatures.ANDROID_SYSTEM_FONT_PREWARMING,
                 "Prewarms system fonts on Android to improve initial rendering latency."),
         Flag.baseFeature(
@@ -1409,6 +1429,18 @@ public final class ProductionSupportedFlagList {
         Flag.baseFeature(
                 "ConversionMeasurement",
                 "Controls whether the Attribution Reporting API stub is enabled."),
+        Flag.baseFeature(
+                AwFeatures.WEBVIEW_USE_WVLES_FOR_LAYERED_STUDY,
+                "When enabled, WebView uses the nonembedded low entropy source for layered studies."
+                        + " This requires 2 restarts of the WebView-based app to take effect."),
+        Flag.baseFeature(
+                PaymentFeatureList.PAYMENT_HANDLER_DIALOG_USE_INITIATOR_IN_URL_LOAD,
+                "When enabled, the merchant site is set as the initiator for the web payment"
+                        + " handler modal dialog popup."),
+        Flag.baseFeature("EnableUdpGro", "Utilizes GRO over recvmmsg for readMultiple."),
+        Flag.baseFeature(
+                "StructuredHeadersInRust",
+                "Enables the Rust-based structured headers parser instead of C++."),
         // Add new commandline switches and features above. The final entry should have a
         // trailing comma for cleaner diffs.
     };

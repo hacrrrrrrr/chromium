@@ -12,17 +12,6 @@ namespace prefs {
 inline constexpr char kSharingFCMRegistration[] = "sharing.fcm_registration";
 inline constexpr char kSharingLocalSharingInfo[] = "sharing.local_sharing_info";
 
-// A flag to enable/disable the Shared Clipboard feature which enables users to
-// send text across devices.
-inline constexpr char kSharedClipboardEnabled[] =
-    "browser.shared_clipboard_enabled";
-
-#if !BUILDFLAG(IS_FUCHSIA)
-// A flag to enable/disable the Click to Call feature which enables users to
-// send phone numbers from desktop to Android phones.
-inline constexpr char kClickToCallEnabled[] = "browser.click_to_call_enabled";
-#endif  // !BUILDFLAG(IS_FUCHSIA)
-
 }  // namespace prefs
 
 #endif  // COMPONENTS_SHARING_MESSAGE_PREF_NAMES_H_

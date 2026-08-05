@@ -52,12 +52,10 @@ import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightParams;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightShape;
 import org.chromium.ui.UiUtils;
-import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.hierarchicalmenu.FlyoutController;
 import org.chromium.ui.hierarchicalmenu.FlyoutController.FlyoutHandler;
 import org.chromium.ui.hierarchicalmenu.HierarchicalMenuController;
 import org.chromium.ui.interpolators.Interpolators;
-import org.chromium.ui.util.AttrUtils;
 import org.chromium.ui.widget.AnchoredPopupWindow;
 import org.chromium.ui.widget.FlyoutPopupSpecCalculator;
 import org.chromium.ui.widget.RectProvider;
@@ -393,6 +391,13 @@ class AppMenu implements OnKeyListener {
         mIsByPermanentButton = isByPermanentButton;
 
         View contentView = createAppMenuContentView(context, addTopPaddingBeforeFirstRow);
+        mListView = contentView.findViewById(R.id.app_menu_list);
+
+        if (mDisableVerticalScrollbar) {
+            // TODO(crbug.com/465107697) Move code to xml file once the feature is launched.
+            // Cleanup AppMenuDelegate too.
+            mListView.setVerticalScrollBarEnabled(false);
+        }
 
         if (SysUtils.isLowEndDevice()) {
             var sharedDrawable = AppCompatResources.getDrawable(context, R.drawable.popup_bg_8dp);
@@ -407,12 +412,18 @@ class AppMenu implements OnKeyListener {
         Rect bgPadding = new Rect();
         contentView.getBackground().getPadding(bgPadding);
 
-        int menuWidth;
-        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)) {
-            menuWidth = AttrUtils.getDimensionPixelSize(context, R.attr.appMenuWidth);
-        } else {
-            menuWidth = context.getResources().getDimensionPixelSize(R.dimen.menu_width);
-        }
+        assert mAdapter != null;
+        int itemWidth = UiUtils.computeListAdapterContentDimensions(mAdapter, mListView)[0];
+        int contentWidth = itemWidth + bgPadding.left + bgPadding.right;
+        int minWidth = context.getResources().getDimensionPixelSize(R.dimen.menu_width_min);
+        int menuMaxWidth = context.getResources().getDimensionPixelSize(R.dimen.menu_width_max);
+        int margin = context.getResources().getDimensionPixelSize(R.dimen.menu_horizontal_margin);
+        int windowSpaceWidth = visibleDisplayFrame.width() - 2 * margin;
+        int maxWidth = Math.min(menuMaxWidth, windowSpaceWidth);
+        // We deliberately don't use Math.clamp because maxWidth might end up being smaller than
+        // minWidth because of a very narrow window.
+        int menuWidth = Math.min(Math.max(contentWidth, minWidth), maxWidth);
+
         int popupWidth = menuWidth + bgPadding.left + bgPadding.right;
 
         popup.setWidth(popupWidth);
@@ -425,12 +436,16 @@ class AppMenu implements OnKeyListener {
             padding.bottom = originalPadding.bottom;
         }
 
-        mListView = contentView.findViewById(R.id.app_menu_list);
-        if (mDisableVerticalScrollbar) {
-            // TODO(crbug.com/465107697) Move code to xml file once the feature is launched.
-            // Cleanup AppMenuDelegate too.
-            mListView.setVerticalScrollBarEnabled(false);
+        View innerContainer = contentView.findViewById(R.id.app_menu_content_container);
+        if (footer != null) {
+            innerContainer.setPadding(
+                    innerContainer.getPaddingLeft(),
+                    innerContainer.getPaddingTop(),
+                    innerContainer.getPaddingRight(),
+                    0);
         }
+        padding.top += innerContainer.getPaddingTop();
+        padding.bottom += innerContainer.getPaddingBottom();
 
         int footerHeight = attachFooter(footer, (ViewGroup) contentView, menuWidth);
         int headerHeight = attachHeader(header, menuWidth);
@@ -600,7 +615,11 @@ class AppMenu implements OnKeyListener {
                         .setTouchModal(false)
                         .setAnimateFromAnchor(false)
                         .setAnimationStyle(R.style.PopupWindowAnimFade)
-                        .setSpecCalculator(new FlyoutPopupSpecCalculator())
+                        .setSpecCalculator(
+                                new FlyoutPopupSpecCalculator(
+                                        contentView
+                                                .findViewById(R.id.app_menu_content_container)
+                                                .getPaddingTop()))
                         .setWindowLayoutType(WindowManager.LayoutParams.TYPE_APPLICATION_SUB_PANEL)
                         .addOnDismissListener(
                                 () -> {
@@ -945,11 +964,15 @@ class AppMenu implements OnKeyListener {
     private View createAppMenuContentView(Context context, boolean addTopPaddingBeforeFirstRow) {
         ViewGroup contentView =
                 (ViewGroup) LayoutInflater.from(context).inflate(R.layout.app_menu_layout, null);
-        if (addTopPaddingBeforeFirstRow) {
-            contentView.setBackgroundResource(R.drawable.default_popup_menu_bg);
-        } else {
-            contentView.setBackgroundResource(R.drawable.app_menu_bottom_padding_bg);
-        }
+
+        ViewGroup innerContainer = contentView.findViewById(R.id.app_menu_content_container);
+
+        // Ensure the inner shape has standard padding, and conditionally add visual menu top
+        // padding.
+        int padding = context.getResources().getDimensionPixelSize(R.dimen.app_menu_padding);
+        int topPadding = addTopPaddingBeforeFirstRow ? padding : 0;
+        innerContainer.setPadding(0, topPadding, 0, padding);
+
         return contentView;
     }
 
@@ -961,8 +984,10 @@ class AppMenu implements OnKeyListener {
 
         mFooterView = footer;
         mFooterView.setId(R.id.app_menu_footer);
-        contentView.addView(
-                footer, contentView.indexOfChild(contentView.findViewById(R.id.app_menu_list)) + 1);
+        ViewGroup innerContainer = contentView.findViewById(R.id.app_menu_content_container);
+        innerContainer.addView(
+                footer,
+                innerContainer.indexOfChild(innerContainer.findViewById(R.id.app_menu_list)) + 1);
 
         int widthMeasureSpec = MeasureSpec.makeMeasureSpec(menuWidth, MeasureSpec.EXACTLY);
         int heightMeasureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);

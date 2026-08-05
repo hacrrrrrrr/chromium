@@ -7,6 +7,7 @@ import {html} from '//resources/lit/v3_0/lit.rollup.js';
 import type {OmniboxPopupSearchboxElement} from './omnibox_popup_searchbox.js';
 
 export function getHtml(this: OmniboxPopupSearchboxElement) {
+  // clang-format off
   return html`
     <div id="inputWrapper" @focusout="${this.onInputWrapperFocusout}"
         @keydown="${this.onInputWrapperKeydown}">
@@ -19,6 +20,7 @@ export function getHtml(this: OmniboxPopupSearchboxElement) {
           searchbox-aria-description="${this.searchboxAriaDescription}"
           searchbox-icon="${this.searchboxIcon_}"
           .selectedMatch="${this.selectedMatch}"
+          .inputKeywordModel="${this.inputKeywordModel}"
           ?input-has-matches="${this.hasMatches()}"
           @focusin="${this.onInputFocusin_}"
           @mousedown="${this.onInputMousedown_}"
@@ -48,12 +50,25 @@ export function getHtml(this: OmniboxPopupSearchboxElement) {
           </div>
         ` :
                                                                     ''}
+        <cr-searchbox-compose-button id="composeButton" slot="compose-button"
+            ?dynamic="${this.searchboxDynamicAnimation_}"
+            ?has-user-input="${this.hasUserInput_}"
+            ?hidden="${!this.aimButtonVisible_}"
+            label-text="${this.aimButtonConfig_.text}"
+            tooltip-title="${this.aimButtonConfig_.title}"
+            a11y-label="${this.aimButtonConfig_.a11yLabel}"
+            compose-icon="${this.aimButtonConfig_.icon}"
+            @compose-click="${this.onComposeClick_}">
+        </cr-searchbox-compose-button>
       </cr-searchbox-input>
       <div class="dropdownContainer">
         <cr-searchbox-dropdown id="matches" part="searchbox-dropdown"
             exportparts="dropdown-content"
             role="listbox" .result="${this.result}"
             .selectedMatchIndex="${this.selectedMatchIndex}"
+            ?can-show-secondary-side="${this.canShowSecondarySide}"
+            ?has-secondary-side="${this.hasSecondarySide}"
+            @has-secondary-side-changed="${this.onHasSecondarySideChanged_}"
             @selected-match-index-changed="${this.onSelectedMatchIndexChanged}"
             @match-focusin="${this.onMatchFocusin}"
             @match-click="${this.onMatchClick}"
@@ -62,4 +77,5 @@ export function getHtml(this: OmniboxPopupSearchboxElement) {
       </div>
     </div>
   `;
+  // clang-format on
 }

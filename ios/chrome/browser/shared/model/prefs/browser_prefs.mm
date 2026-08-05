@@ -30,6 +30,7 @@
 #import "components/enterprise/data_controls/core/browser/prefs.h"
 #import "components/enterprise/idle/idle_pref_names.h"
 #import "components/enterprise/isolated_mode/prefs.h"
+#import "components/enterprise/net/core/prefs.h"
 #import "components/feature_engagement/public/pref_names.h"
 #import "components/feed/core/v2/public/ios/pref_names.h"
 #import "components/handoff/handoff_manager.h"
@@ -51,6 +52,7 @@
 #import "components/omnibox/browser/omnibox_pref_names.h"
 #import "components/omnibox/browser/omnibox_prefs.h"
 #import "components/omnibox/browser/zero_suggest_provider.h"
+#import "components/optimization_guide/core/feature_registry/feature_registration.h"
 #import "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #import "components/optimization_guide/core/optimization_guide_prefs.h"
 #import "components/password_manager/core/browser/password_manager.h"
@@ -154,12 +156,6 @@
 namespace {
 
 
-// Deprecated 09/2025.
-inline constexpr char kNtpShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
-constexpr char kGaiaCookieLastListAccountsData[] =
-    "gaia_cookie.last_list_accounts_data";
-inline constexpr char kFRESourceTrial[] = "FileMetricsProviderFRESourceTrial";
-
 // Deprecated 10/2025
 inline constexpr char kSessionStorageFormatPref[] =
     "ios.session.storage.format";
@@ -239,6 +235,12 @@ inline constexpr char kObsoleteManagementPlatformLastLogTime[] =
 inline constexpr char kObsoleteManagementProfileLastLogTime[] =
     "management.profile.last_log_time";
 
+// Deprecated 07/2026.
+constexpr char kMetricsReportingMigrationDone[] =
+    "user_experience_metrics.consent_migration_done";
+constexpr char kMetricsConsentRestructureFeatureState[] =
+    "user_experience_metrics.consent_restructure_feature_state";
+
 // Renames a boolean pref within a PrefService.
 void RenameBooleanPref(std::string_view target_pref_name,
                        std::string_view source_pref_name,
@@ -275,7 +277,6 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   signin::IdentityManager::RegisterLocalStatePrefs(registry);
   IOSChromeMetricsServiceClient::RegisterPrefs(registry);
   metrics::RegisterDemographicsLocalStatePrefs(registry);
-  metrics::MetricsReportingChoiceService::RegisterPrefs(registry);
   network_time::NetworkTimeTracker::RegisterPrefs(registry);
   omnibox::RegisterLocalStatePrefs(registry);
   policy::BrowserPolicyConnector::RegisterPrefs(registry);
@@ -477,6 +478,7 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
                                 0);
 
   registry->RegisterTimePref(prefs::kLastRecordedActiveDay, base::Time());
+  registry->RegisterIntegerPref(prefs::kLastRecordedActiveDaysInPast28Days, -1);
 
   // Deprecated 02/2025.
   registry->RegisterIntegerPref(
@@ -498,6 +500,8 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
 
   // Deprecated 07/2026.
   registry->RegisterIntegerPref(kObsoleteMetricsReportingLevel, 0);
+  registry->RegisterBooleanPref(kMetricsReportingMigrationDone, false);
+  registry->RegisterBooleanPref(kMetricsConsentRestructureFeatureState, false);
   registry->RegisterTimePref(kObsoleteManagementPlatformLastLogTime,
                              base::Time());
 }
@@ -516,6 +520,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   enterprise::RegisterIdentifiersProfilePrefs(registry);
   enterprise_connectors::RegisterProfilePrefs(registry);
   enterprise_data_protection::RegisterProfilePrefs(registry);
+  enterprise_net::RegisterProfilePrefs(registry);
   ios_feed::RegisterProfilePrefs(registry);
   FirstRun::RegisterProfilePrefs(registry);
   FontSizeTabHelper::RegisterProfilePrefs(registry);
@@ -525,6 +530,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   language::LanguagePrefs::RegisterProfilePrefs(registry);
   LevelUpService::RegisterProfilePrefs(registry);
   metrics::RegisterDemographicsProfilePrefs(registry);
+  metrics::MetricsReportingChoiceService::RegisterProfilePrefs(registry);
   ntp_tiles::CustomLinksManagerImpl::RegisterProfilePrefs(registry);
   ntp_tiles::MostVisitedSites::RegisterProfilePrefs(registry);
   ntp_tiles::PopularSitesImpl::RegisterProfilePrefs(registry);
@@ -901,11 +907,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // Prefs for the Synced Set Up Feature.
   registry->RegisterIntegerPref(prefs::kSyncedSetUpImpressionCount, 0);
 
-
-  // Deprecated 09/2025.
-  registry->RegisterInt64Pref(kNtpShownBookmarksFolder, 0);
-  registry->RegisterStringPref(kGaiaCookieLastListAccountsData, std::string());
-  registry->RegisterStringPref(kFRESourceTrial, std::string());
+  // Preference associated with the Gemini Settings policy state.
+  registry->RegisterIntegerPref(optimization_guide::prefs::kGeminiSettings, 0);
 
   // Deprecated 10/2025
   registry->RegisterIntegerPref(kSessionStorageFormatPref, 0);
@@ -1007,6 +1010,8 @@ void MigrateObsoleteLocalStatePrefs(PrefService* prefs) {
 
   // Added 07/2026.
   prefs->ClearPref(kObsoleteMetricsReportingLevel);
+  prefs->ClearPref(kMetricsReportingMigrationDone);
+  prefs->ClearPref(kMetricsConsentRestructureFeatureState);
 
   // Added 07/2026.
   prefs->ClearPref(kObsoleteManagementPlatformLastLogTime);
@@ -1023,11 +1028,6 @@ void MigrateObsoleteProfilePrefs(PrefService* prefs) {
   // Added 09/2024.
   browsing_data::prefs::MaybeMigrateToQuickDeletePrefValues(prefs);
 
-
-  // Added 09/2025.
-  prefs->ClearPref(kNtpShownBookmarksFolder);
-  prefs->ClearPref(kGaiaCookieLastListAccountsData);
-  prefs->ClearPref(kFRESourceTrial);
 
   // Added 10/2025.
   prefs->ClearPref(kSessionStorageFormatPref);

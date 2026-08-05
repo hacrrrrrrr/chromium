@@ -34,6 +34,9 @@ namespace base {
 class File;
 class Lock;
 class RefCountedMemory;
+namespace i18n {
+class LanguageTag;
+}  // namespace i18n
 }  // namespace base
 
 namespace ui {
@@ -150,7 +153,7 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
 
     // Return a ref counted memory resource or null to attempt retrieval of the
     // default resource.
-    virtual base::RefCountedMemory* LoadDataResourceBytes(
+    virtual scoped_refptr<base::RefCountedMemory> LoadDataResourceBytes(
         int resource_id,
         ResourceScaleFactor scale_factor) = 0;
 
@@ -269,7 +272,8 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
       const base::MemoryMappedFile::Region& region);
 
   // Check if the .pak for the given locale exists.
-  static bool LocaleDataPakExists(std::string_view locale, Gender gender);
+  static bool LocaleDataPakExists(const base::i18n::LanguageTag& locale,
+                                  Gender gender);
 
   // Registers additional data pack files with this ResourceBundle.  When
   // looking for a DataResource, we will search these files after searching the
@@ -340,7 +344,8 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
   bool HasDataResource(int resource_id) const;
 
   // Loads the raw bytes of a scale independent data resource or null.
-  base::RefCountedMemory* LoadDataResourceBytes(int resource_id) const;
+  scoped_refptr<base::RefCountedMemory> LoadDataResourceBytes(
+      int resource_id) const;
 
   // Whether the |resource_id| is gzipped in this bundle. False is also returned
   // if the resource is not found.
@@ -355,7 +360,7 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
   // before returning. Use ResourceHandle::kScaleFactorNone for scale
   // independent image resources (such as wallpaper). Returns null if we fail
   // to read the resource.
-  base::RefCountedMemory* LoadDataResourceBytesForScale(
+  scoped_refptr<base::RefCountedMemory> LoadDataResourceBytesForScale(
       int resource_id,
       ResourceScaleFactor scale_factor) const;
 
@@ -394,7 +399,8 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
 
   // Get a localized resource (for example, localized image logo) given a
   // resource id.
-  base::RefCountedMemory* LoadLocalizedResourceBytes(int resource_id) const;
+  scoped_refptr<base::RefCountedMemory> LoadLocalizedResourceBytes(
+      int resource_id) const;
 
   // Returns a font list derived from the platform-specific "Base" font list.
   // The result is always cached and exists for the lifetime of the process.
@@ -568,6 +574,9 @@ class COMPONENT_EXPORT(UI_BASE) ResourceBundle {
 
   // Protects |locale_resources_data_|.
   std::unique_ptr<base::Lock> locale_resources_data_lock_;
+
+  // Protects |resource_handles_|.
+  std::unique_ptr<base::Lock> resource_handles_lock_;
 
   // Handles for data sources.
   std::vector<std::unique_ptr<ResourceHandle>> locale_resources_data_;

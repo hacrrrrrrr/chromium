@@ -67,7 +67,6 @@
 #include "chrome/browser/ash/login/screens/ai_intro_screen.h"
 #include "chrome/browser/ash/login/screens/app_downloading_screen.h"
 #include "chrome/browser/ash/login/screens/app_launch_splash_screen.h"
-#include "chrome/browser/ash/login/screens/arc_vm_data_migration_screen.h"
 #include "chrome/browser/ash/login/screens/base_screen.h"
 #include "chrome/browser/ash/login/screens/categories_selection_screen.h"
 #include "chrome/browser/ash/login/screens/choobe_screen.h"
@@ -171,7 +170,6 @@
 #include "chrome/browser/ui/webui/ash/login/ai_intro_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/app_downloading_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/app_launch_splash_screen_handler.h"
-#include "chrome/browser/ui/webui/ash/login/arc_vm_data_migration_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/auto_enrollment_check_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/categories_selection_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/choobe_screen_handler.h"
@@ -805,11 +803,6 @@ WizardController::CreateScreens() {
   append(std::make_unique<LocalStateErrorScreen>(
       oobe_ui->GetView<LocalStateErrorScreenHandler>()->AsWeakPtr()));
 
-  if (base::FeatureList::IsEnabled(arc::kEnableArcVmDataMigration)) {
-    append(std::make_unique<ArcVmDataMigrationScreen>(
-        oobe_ui->GetView<ArcVmDataMigrationScreenHandler>()->AsWeakPtr()));
-  }
-
   if (HIDDetectionScreen::CanShowScreen(local_state_.get())) {
     append(std::make_unique<HIDDetectionScreen>(
         &local_state_.get(),
@@ -985,7 +978,7 @@ WizardController::CreateScreens() {
           weak_factory_.GetWeakPtr())));
 
   append(std::make_unique<CryptohomeRecoveryScreen>(
-      &local_state_.get(), shared_url_loader_factory_,
+      local_state_.get(), shared_url_loader_factory_,
       oobe_ui->GetView<CryptohomeRecoveryScreenHandler>()->AsWeakPtr(),
       base::BindRepeating(&WizardController::OnCryptohomeRecoveryScreenExit,
                           weak_factory_.GetWeakPtr())));
@@ -1066,13 +1059,13 @@ WizardController::CreateScreens() {
                           weak_factory_.GetWeakPtr())));
 
   append(std::make_unique<LocalDataLossWarningScreen>(
-      &local_state_.get(),
+      local_state_.get(),
       oobe_ui->GetView<LocalDataLossWarningScreenHandler>()->AsWeakPtr(),
       base::BindRepeating(&WizardController::OnLocalDataLossWarningScreenExit,
                           weak_factory_.GetWeakPtr())));
 
   append(std::make_unique<EnterOldPasswordScreen>(
-      &local_state_.get(),
+      local_state_.get(),
       oobe_ui->GetView<EnterOldPasswordScreenHandler>()->AsWeakPtr(),
       base::BindRepeating(&WizardController::OnEnterOldPasswordScreenExit,
                           weak_factory_.GetWeakPtr())));
@@ -1494,10 +1487,6 @@ void WizardController::ShowGuestTosScreen() {
   SetCurrentScreen(GetScreen(GuestTosScreenView::kScreenId));
 }
 
-void WizardController::ShowArcVmDataMigrationScreen() {
-  SetCurrentScreen(GetScreen(ArcVmDataMigrationScreenView::kScreenId));
-}
-
 void WizardController::ShowCryptohomeRecoveryScreen(
     std::unique_ptr<UserContext> user_context) {
   wizard_context_->user_context = std::move(user_context);
@@ -1769,8 +1758,16 @@ void WizardController::OnSamlConfirmPasswordScreenExit(
     case SamlConfirmPasswordScreen::Result::kSuccess:
       switch (wizard_context_->knowledge_factor_setup.auth_setup_flow) {
         case WizardContext::AuthChangeFlow::kInitialSetup:
-          // Continue initial setup by showing other auth factors flows.
-          ShowPinSetupScreenAsMainFactor();
+          // `user_context` is only set on the wizard context for pre-cryptohome
+          // SAML confirm password screen exit. This can happen when the user is
+          // ephemeral as we always show the confirm password screen for
+          // ephemeral users before cryptohome mount.
+          if (wizard_context_->user_context != nullptr) {
+            CompleteLogin();
+          } else {
+            // Continue initial setup by showing other auth factors flows.
+            ShowPinSetupScreenAsMainFactor();
+          }
           break;
         case WizardContext::AuthChangeFlow::kRecovery:
         case WizardContext::AuthChangeFlow::kReauthentication:
@@ -3686,8 +3683,6 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
     ShowConsolidatedConsentScreen();
   } else if (screen_id == CryptohomeRecoverySetupScreenView::kScreenId) {
     ShowCryptohomeRecoverySetupScreen();
-  } else if (screen_id == ArcVmDataMigrationScreenView::kScreenId) {
-    ShowArcVmDataMigrationScreen();
   } else if (screen_id == TouchpadScrollScreenView::kScreenId) {
     ShowTouchpadScrollScreen();
   } else if (screen_id == GaiaInfoScreenView::kScreenId) {

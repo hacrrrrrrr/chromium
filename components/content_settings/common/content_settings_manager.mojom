@@ -26,9 +26,20 @@ interface ContentSettingsManager {
     WEB_LOCKS,
   };
 
-  // Sent by the renderer process to check whether access to a particular
-  // storage system is granted by content settings. Sync support is optional
-  // for when needed; prefer async whenever possible!
+  // Sent by the renderer process to check storage permissions.
+  //
+  // Note: This returns the same value as AllowStorageAccess() below, but
+  // without the side effect of requesting storage access (e.g. eager
+  // pre-fetching during navigation commit).
+  IsStorageAccessAllowed(
+      url.mojom.Origin origin,
+      network.mojom.SiteForCookies site_for_cookies,
+      url.mojom.Origin top_frame_origin) => (bool allowed);
+
+  // Sent by the renderer process when it attempts to access a storage system.
+  // Evaluates permissions, triggers delegate logic, and logs UI/metrics usage.
+  // Sync support is optional for when needed; prefer async whenever possible!
+  //
   // TODO(darin): Ideally this interface would be attached to a document-
   // specific browser-side object that would already know the origin info.
   // Then these parameters would not need to be passed here.

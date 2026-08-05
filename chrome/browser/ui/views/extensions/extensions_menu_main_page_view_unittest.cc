@@ -144,7 +144,10 @@ ExtensionsMenuMainPageViewUnitTest::GetExtensionsInRequestAccessButton() {
 }
 
 void ExtensionsMenuMainPageViewUnitTest::LayoutMenuIfNecessary() {
-  menu_coordinator()->GetExtensionsMenuWidget()->LayoutRootViewIfNecessary();
+  if (views::Widget* menu_widget =
+          menu_coordinator()->GetExtensionsMenuWidget()) {
+    menu_widget->LayoutRootViewIfNecessary();
+  }
 }
 
 void ExtensionsMenuMainPageViewUnitTest::ClickSitePermissionsButton(
@@ -333,6 +336,9 @@ TEST_F(ExtensionsMenuMainPageViewUnitTest,
   EXPECT_TRUE(menu_entry->site_access_toggle_for_testing()->GetIsOn());
   EXPECT_TRUE(menu_entry->site_permissions_button_for_testing()->GetVisible());
   EXPECT_TRUE(menu_entry->site_permissions_button_for_testing()->GetEnabled());
+  EXPECT_EQ(
+      menu_entry->site_permissions_button_for_testing()->GetFocusBehavior(),
+      views::View::FocusBehavior::ALWAYS);
   EXPECT_EQ(menu_entry->site_permissions_button_for_testing()->GetText(),
             l10n_util::GetStringUTF16(
                 IDS_EXTENSIONS_MENU_MAIN_PAGE_EXTENSION_SITE_ACCESS_ON_SITE));
@@ -567,6 +573,57 @@ TEST_F(
       menu_entry->site_permissions_button_for_testing()->GetText(),
       l10n_util::GetStringUTF16(
           IDS_EXTENSIONS_MENU_MAIN_PAGE_EXTENSION_SITE_ACCESS_ON_ALL_SITES));
+}
+
+// Tests that opening the menu on a restricted URL correctly sets the site
+// access toggle state to off.
+TEST_F(ExtensionsMenuMainPageViewUnitTest, SiteAccessToggle_RestrictedUrl) {
+  auto extension =
+      InstallExtensionWithHostPermissions("Extension", {"<all_urls>"});
+
+  const GURL restricted_url("chrome://extensions");
+  web_contents_tester()->NavigateAndCommit(restricted_url);
+
+  ShowMenu();
+  ExtensionsMenuEntryView* menu_entry = GetOnlyMenuEntry();
+
+  // On restricted URLs, site access toggle is hidden and off.
+  EXPECT_FALSE(menu_entry->site_access_toggle_for_testing()->GetVisible());
+  EXPECT_FALSE(menu_entry->site_access_toggle_for_testing()->GetIsOn());
+}
+
+// Tests that an extension with broad site access (kOnAllSites) whose site
+// interaction evaluates to non-granted (e.g., on a policy-blocked host)
+// correctly maintains toggle state matching UserSiteAccess (toggle is on).
+TEST_F(ExtensionsMenuMainPageViewUnitTest,
+       SiteAccessToggle_BroadAccessWithWithheldInteraction) {
+  auto extension =
+      InstallExtensionWithHostPermissions("Extension", {"<all_urls>"});
+
+  // Set up policy-blocked host pattern.
+  URLPattern default_policy_blocked_pattern =
+      URLPattern(URLPattern::SCHEME_ALL, "*://*.policy-blocked.com/*");
+  extensions::URLPatternSet default_allowed_hosts;
+  extensions::URLPatternSet default_blocked_hosts;
+  default_blocked_hosts.AddPattern(default_policy_blocked_pattern);
+  extensions::PermissionsData::SetDefaultPolicyHostRestrictions(
+      extensions::util::GetBrowserContextId(browser()->GetProfile()),
+      default_blocked_hosts, default_allowed_hosts);
+
+  const GURL policy_blocked_url("https://www.policy-blocked.com");
+  web_contents_tester()->NavigateAndCommit(policy_blocked_url);
+
+  // Extension has kOnAllSites access in PermissionsManager.
+  ASSERT_EQ(GetUserSiteAccess(*extension, policy_blocked_url),
+            PermissionsManager::UserSiteAccess::kOnAllSites);
+
+  ShowMenu();
+  ExtensionsMenuEntryView* menu_entry = GetOnlyMenuEntry();
+
+  // Verify that site_access_toggle is on (reflecting
+  // UserSiteAccess::kOnAllSites) even though site interaction on this
+  // policy-blocked URL evaluates to non-granted.
+  EXPECT_TRUE(menu_entry->site_access_toggle_for_testing()->GetIsOn());
 }
 
 // Verifies the site access toggle and site permissions button properties for an
@@ -920,6 +977,20 @@ TEST_F(ExtensionsMenuMainPageViewUnitTest,
   }
 }
 
+// Tests that removing the last extension while the main page is open closes the
+// menu bubble.
+TEST_F(ExtensionsMenuMainPageViewUnitTest,
+       CloseMenuWhenLastExtensionIsRemoved) {
+  auto extension = InstallExtension("Extension");
+
+  ShowMenu();
+  EXPECT_EQ(menu_entries().size(), 1u);
+  EXPECT_TRUE(menu_coordinator()->IsShowing());
+
+  UninstallExtension(extension->id());
+  EXPECT_FALSE(menu_coordinator()->IsShowing());
+}
+
 // Tests that the extensions menu is dynamically updated when there is a
 // navigation while the menu is opened.
 TEST_F(ExtensionsMenuMainPageViewUnitTest, NavigationWhenMainPageIsOpen) {
@@ -1123,7 +1194,9 @@ TEST_F(ExtensionsMenuMainPageViewUnitTest, ReloadExtension) {
   ASSERT_TRUE(registry_observer.WaitForExtensionLoaded());
   LayoutMenuIfNecessary();
 
-  // Verify the extension is visible in the menu.
+  // Re-open the menu (because it was closed when the only extension was
+  // unloaded) to show the reloaded extension.
+  ShowMenu();
   EXPECT_EQ(menu_entries().size(), 1u);
 }
 
@@ -1158,8 +1231,9 @@ TEST_F(ExtensionsMenuMainPageViewUnitTest, ReloadExtensionFailed) {
   base::RunLoop().RunUntilIdle();
   LayoutMenuIfNecessary();
 
-  // Verify the extension is no longer visible in the menu.
-  EXPECT_EQ(menu_entries().size(), 0u);
+  // Verify the menu is no longer showing because the only extension was
+  // removed.
+  EXPECT_FALSE(menu_coordinator()->IsShowing());
 }
 
 // Test that user controls in the menu are hidden on restricted sites, since

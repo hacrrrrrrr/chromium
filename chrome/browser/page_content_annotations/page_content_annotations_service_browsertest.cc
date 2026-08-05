@@ -33,6 +33,7 @@
 #include "chrome/browser/page_content_annotations/page_content_extraction_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -43,7 +44,7 @@
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/test/history_service_test_util.h"
 #include "components/network_session_configurator/common/network_switches.h"
-#include "components/optimization_guide/core/delivery/test_model_info_builder.h"
+#include "components/optimization_guide/core/delivery/model_info.h"
 #include "components/optimization_guide/core/inference/execution_status.h"
 #include "components/optimization_guide/core/optimization_guide_enums.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
@@ -224,8 +225,13 @@ class PageContentAnnotationsServiceDisabledBrowserTest
   PageContentAnnotationsServiceDisabledBrowserTest() {
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{},
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove the two omnibox features below.
+        /*disabled_features=*/
         {optimization_guide::features::kOptimizationHints,
-         features::kPageContentAnnotations});
+         features::kPageContentAnnotations,
+         omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
   }
 
  private:
@@ -361,9 +367,9 @@ class PageContentAnnotationsServiceBrowserTest : public InProcessBrowserTest {
     OptimizationGuideKeyedServiceFactory::GetForProfile(browser()->GetProfile())
         ->OverrideTargetModelForTesting(
             optimization_guide::proto::OPTIMIZATION_TARGET_PAGE_VISIBILITY,
-            optimization_guide::TestModelInfoBuilder()
-                .SetModelFilePath(model_file_path)
-                .Build());
+            optimization_guide::ModelInfo{
+                .model_file_path = model_file_path,
+            });
 
     optimization_guide::RetryForHistogramUntilCountReached(
         &histogram_tester,
@@ -1328,11 +1334,11 @@ class PageContentAnnotationsServiceOnDeviceCategoryClassifierTest
     OptimizationGuideKeyedServiceFactory::GetForProfile(browser()->GetProfile())
         ->OverrideTargetModelForTesting(
             optimization_target,
-            optimization_guide::TestModelInfoBuilder()
-                .SetModelFilePath(test_data_dir.AppendASCII(
+            optimization_guide::ModelInfo{
+                .model_file_path = test_data_dir.AppendASCII(
                     "components/test/data/page_content_annotations/"
-                    "edu_classifier.tflite"))
-                .Build());
+                    "edu_classifier.tflite"),
+            });
   }
 
   void NotifyEmbedderMetadata() {

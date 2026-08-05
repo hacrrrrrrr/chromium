@@ -7,6 +7,12 @@ import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import {getCss} from './toolbar_chip_button.css.js';
 import {getHtml} from './toolbar_chip_button.html.js';
 
+export interface ToolbarChipButtonElement {
+  $: {
+    button: HTMLElement,
+  };
+}
+
 export class ToolbarChipButtonElement extends CrLitElement {
   static get is() {
     return 'toolbar-chip-button';
@@ -38,6 +44,10 @@ export class ToolbarChipButtonElement extends CrLitElement {
         type: String,
         attribute: 'aria-haspopup',
       },
+      ariaExpanded: {
+        type: String,
+        attribute: 'aria-expanded',
+      },
       disabled: {
         type: Boolean,
         reflect: true,
@@ -49,10 +59,11 @@ export class ToolbarChipButtonElement extends CrLitElement {
   override accessor ariaDescription: string = '';
   accessor tooltip: string = '';
   override accessor ariaHasPopup: string|null = null;
+  override accessor ariaExpanded: string|null = null;
   accessor disabled: boolean = false;
 
   override focus() {
-    this.shadowRoot?.querySelector<HTMLElement>('#button')?.focus();
+    this.$.button.focus();
   }
 
   protected onPrefixIconSlotchange_(e: Event) {

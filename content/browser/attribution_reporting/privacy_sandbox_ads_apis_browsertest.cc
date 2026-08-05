@@ -7,7 +7,6 @@
 #include "base/strings/strcat.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
-#include "content/browser/browsing_topics/test_util.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/features.h"
@@ -30,7 +29,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/browsing_topics/browsing_topics.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -43,33 +41,6 @@ constexpr char kAddFencedFrameScript[] = R"(
   document.body.appendChild(fenced_frame);
 )";
 
-class FixedTopicsContentBrowserClient
-    : public ContentBrowserTestContentBrowserClient {
- public:
-  bool HandleTopicsWebApi(
-      const url::Origin& context_origin,
-      content::RenderFrameHost* main_frame,
-      browsing_topics::ApiCallerSource caller_source,
-      bool get_topics,
-      bool observe,
-      std::vector<blink::mojom::EpochTopicPtr>& topics) override {
-    blink::mojom::EpochTopicPtr result_topic = blink::mojom::EpochTopic::New();
-    result_topic->topic = 1;
-    result_topic->config_version = "chrome.1";
-    result_topic->taxonomy_version = "1";
-    result_topic->model_version = "2";
-    result_topic->version = "chrome.1:1:2";
-
-    topics.push_back(std::move(result_topic));
-
-    return true;
-  }
-
-  int NumVersionsInTopicsEpochs(
-      content::RenderFrameHost* main_frame) const override {
-    return 1;
-  }
-};
 }  // namespace
 
 class PrivacySandboxAdsAPIsBrowserTestBase : public ContentBrowserTest {
@@ -92,11 +63,9 @@ class PrivacySandboxAdsAPIsBrowserTestBase : public ContentBrowserTest {
               return true;
             }));
 
-    browser_client_ = std::make_unique<FixedTopicsContentBrowserClient>();
   }
 
   void TearDownOnMainThread() override {
-    browser_client_.reset();
     url_loader_interceptor_.reset();
   }
 
@@ -109,8 +78,6 @@ class PrivacySandboxAdsAPIsBrowserTestBase : public ContentBrowserTest {
   }
 
  private:
-  std::unique_ptr<FixedTopicsContentBrowserClient> browser_client_;
-
   std::unique_ptr<URLLoaderInterceptor> url_loader_interceptor_;
 };
 
@@ -120,10 +87,9 @@ class PrivacySandboxAdsAPIsM1OverrideBrowserTest
   PrivacySandboxAdsAPIsM1OverrideBrowserTest() {
     feature_list_.InitWithFeatures(
         {features::kPrivacySandboxAdsAPIsM1Override,
-         network::features::kBrowsingTopics,
-         blink::features::kBrowsingTopicsDocumentAPI,
-         network::features::kInterestGroupStorage,
-         blink::features::kFencedFrames, network::features::kSharedStorageAPI},
+         network::features::kBrowsingTopics, blink::features::kFledge,
+         blink::features::kAdInterestGroupAPI, blink::features::kFencedFrames,
+         network::features::kSharedStorageAPI},
         /*disabled_features=*/{});
   }
 
@@ -159,8 +125,7 @@ class PrivacySandboxAdsAPIsM1OverrideNoFeatureBrowserTest
     feature_list_.InitWithFeatures(
         {features::kPrivacySandboxAdsAPIsM1Override},
         {network::features::kBrowsingTopics,
-         blink::features::kBrowsingTopicsDocumentAPI,
-         network::features::kInterestGroupStorage,
+         blink::features::kAdInterestGroupAPI, blink::features::kFledge,
          blink::features::kFencedFrames, network::features::kSharedStorageAPI});
   }
 

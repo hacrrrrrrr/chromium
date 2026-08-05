@@ -22,6 +22,7 @@ import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.Acces
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CUT;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_EXPAND;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_FOCUS;
+import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_NEXT_AT_MOVEMENT_GRANULARITY;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_NEXT_HTML_ELEMENT;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_PAGE_DOWN;
@@ -1547,7 +1548,7 @@ public class WebContentsAccessibilityTest {
         mTestData.setReceivedAccessibilityFocusEvent(false);
 
         // Perform a click on the node.
-        performActionOnUiThread(disabledNodeId, ACTION_CLICK, null);
+        Assert.assertFalse(performActionOnUiThread(disabledNodeId, ACTION_CLICK, null));
 
         // Signal end of test
         mActivityTestRule.sendEndOfTestSignal();
@@ -2154,7 +2155,9 @@ public class WebContentsAccessibilityTest {
         // Perform a series of slider increments and check results.
         for (int i = 1; i <= 10; i++) {
             // Increment our slider using action, and poll until we receive the scroll event.
-            performActionOnUiThread(inputNodeVirtualViewId, ACTION_SCROLL_FORWARD, new Bundle());
+            Assert.assertTrue(
+                    performActionOnUiThread(
+                            inputNodeVirtualViewId, ACTION_SCROLL_FORWARD, new Bundle()));
             CriteriaHelper.pollUiThread(
                     () -> mTestData.hasReceivedEvent(), INPUT_RANGE_EVENT_ERROR);
 
@@ -2175,7 +2178,9 @@ public class WebContentsAccessibilityTest {
         // Perform a series of slider decrements and check results.
         for (int i = 1; i <= 20; i++) {
             // Decrement our slider using action, and poll until we receive the scroll event.
-            performActionOnUiThread(inputNodeVirtualViewId, ACTION_SCROLL_BACKWARD, new Bundle());
+            Assert.assertTrue(
+                    performActionOnUiThread(
+                            inputNodeVirtualViewId, ACTION_SCROLL_BACKWARD, new Bundle()));
             CriteriaHelper.pollUiThread(
                     () -> mTestData.hasReceivedEvent(), INPUT_RANGE_EVENT_ERROR);
 
@@ -3278,7 +3283,13 @@ public class WebContentsAccessibilityTest {
                 OFFSET_TYPE_CHILD,
                 rootVvid,
                 imageIndex + 1,
-                OFFSET_TYPE_CHILD);
+                OFFSET_TYPE_CHILD,
+                rootVvid,
+                imageIndex,
+                OFFSET_TYPE_CHILD,
+                buttonVvid,
+                0,
+                OFFSET_TYPE_TEXT);
 
         // Image, using text offset. Text offset 0 points to the beginning of the non-text nodes.
         setAndAssertExtendedSelection(
@@ -3354,7 +3365,13 @@ public class WebContentsAccessibilityTest {
                 OFFSET_TYPE_CHILD,
                 rootVvid,
                 input2Index + 1,
-                OFFSET_TYPE_CHILD);
+                OFFSET_TYPE_CHILD,
+                input1Vvid,
+                0,
+                OFFSET_TYPE_TEXT,
+                paragraph2Vvid,
+                0,
+                OFFSET_TYPE_TEXT);
 
         // Selection from non-editable to the beginning of the editable.
         setAndAssertExtendedSelection(
@@ -3364,7 +3381,13 @@ public class WebContentsAccessibilityTest {
                 OFFSET_TYPE_TEXT,
                 rootVvid,
                 input1Index,
-                OFFSET_TYPE_CHILD);
+                OFFSET_TYPE_CHILD,
+                paragraph1Vvid,
+                1,
+                OFFSET_TYPE_TEXT,
+                input1Vvid,
+                0,
+                OFFSET_TYPE_TEXT);
 
         // Selection from non-editable to the end of the editable.
         setAndAssertExtendedSelection(
@@ -3374,7 +3397,13 @@ public class WebContentsAccessibilityTest {
                 OFFSET_TYPE_TEXT,
                 rootVvid,
                 input2Index + 1,
-                OFFSET_TYPE_CHILD);
+                OFFSET_TYPE_CHILD,
+                paragraph1Vvid,
+                1,
+                OFFSET_TYPE_TEXT,
+                paragraph2Vvid,
+                0,
+                OFFSET_TYPE_TEXT);
 
         // Selection from the beginning of the editable to to a non-editable.
         setAndAssertExtendedSelection(
@@ -3382,6 +3411,12 @@ public class WebContentsAccessibilityTest {
                 rootVvid,
                 input1Index,
                 OFFSET_TYPE_CHILD,
+                paragraph2Vvid,
+                10,
+                OFFSET_TYPE_TEXT,
+                input1Vvid,
+                0,
+                OFFSET_TYPE_TEXT,
                 paragraph2Vvid,
                 10,
                 OFFSET_TYPE_TEXT);
@@ -3524,7 +3559,13 @@ public class WebContentsAccessibilityTest {
                 OFFSET_TYPE_TEXT,
                 rootVvid,
                 contenteditable1Index,
-                OFFSET_TYPE_CHILD);
+                OFFSET_TYPE_CHILD,
+                p1Vvid,
+                1,
+                OFFSET_TYPE_TEXT,
+                contenteditable1Vvid,
+                0,
+                OFFSET_TYPE_TEXT);
 
         // From the end of a contenteditable to outside it.
         setAndAssertExtendedSelection(
@@ -3532,6 +3573,12 @@ public class WebContentsAccessibilityTest {
                 rootVvid,
                 contenteditable1Index + 1,
                 OFFSET_TYPE_CHILD,
+                p2Vvid,
+                5,
+                OFFSET_TYPE_TEXT,
+                p2Vvid,
+                0,
+                OFFSET_TYPE_TEXT,
                 p2Vvid,
                 5,
                 OFFSET_TYPE_TEXT);
@@ -3709,6 +3756,24 @@ public class WebContentsAccessibilityTest {
                         videoVvid,
                         3,
                         OFFSET_TYPE_TEXT));
+    }
+
+    /** Test extended selection when inline text boxes. */
+    @Test
+    @LargeTest
+    public void testPerformAction_setExtendedSelection_inlineTextBoxes() throws Throwable {
+        setupTestWithHTML("<p>Line one<br /><br />Line two</p>");
+
+        // Find HTML nodes.
+        int rootVvid = waitForNodeMatching(sClassNameMatcher, "android.webkit.WebView");
+        int pVvid = waitForNodeMatching(sTextMatcher, "Line one\n\nLine two");
+
+        // To optimize memory and performance, inline text boxes (Role::kInlineTextBox) are loaded
+        // asynchronously only for the node that currently has accessibility focus.
+        focusNode(pVvid);
+
+        setAndAssertExtendedSelection(
+                rootVvid, pVvid, 0, OFFSET_TYPE_TEXT, pVvid, 8, OFFSET_TYPE_TEXT);
     }
 
     /** Test extended selection with a leaf node at the end of root to trigger at_end_of_anchor. */
@@ -4389,6 +4454,23 @@ public class WebContentsAccessibilityTest {
         nodeInfo2 = createAccessibilityNodeInfo(vvid2);
         Assert.assertFalse(PERFORM_ACTION_ERROR, nodeInfo1.isFocused());
         Assert.assertFalse(PERFORM_ACTION_ERROR, nodeInfo2.isFocused());
+    }
+
+    /** Test that the performAction for ACTION_LONG_CLICK works properly with accessibility. */
+    @Test
+    @SmallTest
+    public void testPerformAction_showContextMenu() throws Throwable {
+        setupTestWithHTML("<button id='btn'>Click Me</button>");
+
+        int btnId = waitForNodeMatching(sViewIdResourceNameMatcher, "btn");
+        mNodeInfo = createAccessibilityNodeInfo(btnId);
+        Assert.assertNotNull(NODE_TIMEOUT_ERROR, mNodeInfo);
+
+        // Send a proper action and verify it returns true.
+        Assert.assertTrue(performActionOnUiThread(btnId, ACTION_LONG_CLICK, null));
+
+        // Verify that invalid ID returns false.
+        Assert.assertFalse(performActionOnUiThread(-999, ACTION_LONG_CLICK, null));
     }
 
     /** Test that the performAction for ACTION_SHOW_ON_SCREEN works properly with accessibility. */

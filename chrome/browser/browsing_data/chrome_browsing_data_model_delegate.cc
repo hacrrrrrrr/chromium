@@ -12,13 +12,11 @@
 #include "base/functional/concurrent_callbacks.h"
 #include "base/functional/concurrent_closures.h"
 #include "base/memory/ref_counted.h"
-#include "chrome/browser/browsing_topics/browsing_topics_service_factory.h"
 #include "chrome/browser/media/webrtc/media_device_salt_service_factory.h"
 #include "chrome/browser/private_verification_tokens/private_verification_tokens_service.h"
 #include "chrome/browser/private_verification_tokens/private_verification_tokens_service_factory.h"
 #include "chrome/browser/webid/federated_identity_permission_context.h"
 #include "chrome/browser/webid/federated_identity_permission_context_factory.h"
-#include "components/browsing_topics/browsing_topics_service.h"
 #include "components/content_settings/browser/page_specific_content_settings.h"
 #include "components/media_device_salt/media_device_salt_service.h"
 #include "components/permissions/permissions_client.h"
@@ -30,9 +28,8 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_constants.h"
+#include "chrome/browser/web_applications/isolated_web_apps/get_isolated_web_app_browsing_data.h"
 #include "chrome/browser/web_applications/isolated_web_apps/remove_isolated_web_app_data.h"
-#include "chrome/browser/web_applications/web_app_command_scheduler.h"
-#include "chrome/browser/web_applications/web_app_provider.h"
 #endif
 
 namespace {
@@ -121,11 +118,10 @@ void ChromeBrowsingDataModelDelegate::GetAllDataKeys(
   GetAllFederatedIdentityDataKeys(concurrent.CreateCallback(), {});
 
 #if !BUILDFLAG(IS_ANDROID)
-  auto* web_app_provider = web_app::WebAppProvider::GetForWebApps(profile_);
-  if (web_app_provider && storage_partition_->GetConfig().is_default()) {
-    web_app_provider->scheduler().GetIsolatedWebAppBrowsingData(
-        base::BindOnce(&IsolatedWebAppBrowsingDataToDelegateEntries)
-            .Then(concurrent.CreateCallback()));
+  if (storage_partition_->GetConfig().is_default()) {
+    web_app::GetIsolatedWebAppBrowsingData(
+        profile_, base::BindOnce(&IsolatedWebAppBrowsingDataToDelegateEntries)
+                      .Then(concurrent.CreateCallback()));
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -153,16 +149,6 @@ void ChromeBrowsingDataModelDelegate::RemoveDataKey(
     BrowsingDataModel::StorageTypeSet storage_types,
     base::OnceClosure callback) {
   base::ConcurrentClosures concurrent;
-
-  if (storage_types.Has(
-          static_cast<BrowsingDataModel::StorageType>(StorageType::kTopics))) {
-    // Topics can be deleted but not queried from disk as the creating origins
-    // are hashed before being saved.
-    const url::Origin* origin = std::get_if<url::Origin>(&data_key);
-    auto* browsing_topics_service =
-        browsing_topics::BrowsingTopicsServiceFactory::GetForProfile(profile_);
-    browsing_topics_service->ClearTopicsDataForOrigin(*origin);
-  }
 
   if (storage_types.Has(static_cast<BrowsingDataModel::StorageType>(
           StorageType::kMediaDeviceSalt))) {
@@ -203,8 +189,8 @@ void ChromeBrowsingDataModelDelegate::RemoveDataKey(
               PrivateVerificationTokensServiceFactory::GetForProfile(
                   profile_)) {
         pvt_service->DeleteTokens(base::Time(), base::Time::Max(),
-                                  std::vector<url::Origin>{*origin},
-                                  concurrent.CreateClosure());
+                                  concurrent.CreateClosure(),
+                                  std::vector<url::Origin>{*origin});
       }
     }
   }

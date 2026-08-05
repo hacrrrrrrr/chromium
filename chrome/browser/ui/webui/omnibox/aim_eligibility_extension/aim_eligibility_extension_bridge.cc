@@ -12,18 +12,19 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/omnibox/aim_eligibility/aim_eligibility_page_handler.h"
+#include "chrome/browser/ui/webui/omnibox/aim_eligibility_extension/aim_eligibility_extension_binder_provider.h"
 #include "chrome/browser/ui/webui/omnibox/aim_eligibility_extension/aim_eligibility_extension_bridge_factory.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "extensions/browser/component_extension_resource_manager.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/common/constants.h"
 
-namespace extensions {
-
 AimEligibilityExtensionBridge::AimEligibilityExtensionBridge(Profile* profile)
     : profile_(*profile) {
-  auto* resource_manager =
-      ExtensionsBrowserClient::Get()->GetComponentExtensionResourceManager();
+  AimEligibilityExtensionBinderProvider::Register(profile);
+
+  auto* resource_manager = extensions::ExtensionsBrowserClient::Get()
+                               ->GetComponentExtensionResourceManager();
   if (resource_manager) {
     load_time_data_subscription_ =
         resource_manager->RegisterTemplateDataProvider(
@@ -79,5 +80,3 @@ void AimEligibilityExtensionBridge::CreatePageHandler(
       base::Unretained(this), raw_handler));
   page_handlers_.push_back(std::move(handler_instance));
 }
-
-}  // namespace extensions

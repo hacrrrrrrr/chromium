@@ -66,7 +66,10 @@
 #include "third_party/blink/renderer/core/scheduler/task_attribution_util.h"
 #include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/script/detect_javascript_frameworks.h"
+#include "third_party/blink/renderer/core/timing/animation_frame_timing_info.h"
 #include "third_party/blink/renderer/core/timing/resource_timing_context.h"
+#include "third_party/blink/renderer/core/timing/worker_global_scope_performance.h"
+#include "third_party/blink/renderer/core/timing/worker_performance.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_type_policy_factory.h"
 #include "third_party/blink/renderer/core/url/dom_origin.h"
@@ -215,9 +218,33 @@ scheduler::WorkerScheduler* WorkerGlobalScope::GetScheduler() {
 
 void WorkerGlobalScope::Dispose() {
   DCHECK(IsContextThread());
+  if (animation_frame_timing_monitor_) {
+    CHECK(RuntimeEnabledFeatures::LongAnimationFrameWorkerEnabled());
+    animation_frame_timing_monitor_->Shutdown();
+    animation_frame_timing_monitor_.Clear();
+  }
   loading_virtual_time_pauser_ = WebScopedVirtualTimePauser();
   closing_ = true;
   WorkerOrWorkletGlobalScope::Dispose();
+}
+
+void WorkerGlobalScope::ReportCongestedMoment(AnimationFrameTimingInfo* info) {
+  WorkerGlobalScopePerformance::performance(*this)
+      ->QueueLongAnimationFrameTiming(info);
+}
+
+void WorkerGlobalScope::CreateAnimationFrameTimingMonitor() {
+  // TODO(crbug.com/534893134): support shared and service workers.
+  if (!RuntimeEnabledFeatures::LongAnimationFrameWorkerEnabled() ||
+      !IsDedicatedWorkerGlobalScope()) {
+    return;
+  }
+  CoreProbeSink* sink = GetProbeSink();
+  if (!sink) {
+    return;
+  }
+  animation_frame_timing_monitor_ =
+      MakeGarbageCollected<AnimationFrameTimingMonitor>(*this, sink);
 }
 
 const base::UnguessableToken& WorkerGlobalScope::GetDevToolsToken() const {
@@ -609,7 +636,8 @@ void WorkerGlobalScope::RunWorkerScript() {
   if (auto* controller = GetThread()->GetWorkerInspectorController()) {
     controller->WorkerScriptLoaded();
   }
-  TRACE_EVENT_END("blink.worker", perfetto::Track::FromPointer(this));
+  TRACE_EVENT_END("blink.worker", perfetto::NamedTrack::FromPointer(
+                                      "blink::WorkerGlobalScope", this));
 }
 
 void WorkerGlobalScope::ReceiveMessage(BlinkTransferableMessage message) {
@@ -731,8 +759,9 @@ WorkerGlobalScope::WorkerGlobalScope(
   // Workers should always maintain the default world of an isolate.
   CHECK(creation_params->is_default_world_of_isolate);
   TRACE_EVENT("blink.worker", "WorkerGlobalScope::WorkerGlobalScope");
-  TRACE_EVENT_BEGIN("blink.worker", "WorkerGlobalScope setup",
-                    perfetto::Track::FromPointer(this));
+  TRACE_EVENT_BEGIN(
+      "blink.worker", "WorkerGlobalScope setup",
+      perfetto::NamedTrack::FromPointer("blink::WorkerGlobalScope", this));
 
   InstanceCounters::IncrementCounter(
       InstanceCounters::kWorkerGlobalScopeCounter);
@@ -855,6 +884,7 @@ void WorkerGlobalScope::Trace(Visitor* visitor) const {
   visitor->Trace(trusted_types_);
   visitor->Trace(worker_script_);
   visitor->Trace(browser_interface_broker_proxy_);
+  visitor->Trace(animation_frame_timing_monitor_);
   UniversalGlobalScope::Trace(visitor);
   WorkerOrWorkletGlobalScope::Trace(visitor);
   Supplementable<WorkerGlobalScope>::Trace(visitor);

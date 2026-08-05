@@ -103,6 +103,8 @@ class ProfileManagementFlowController
                         StepSwitchFinishedCallback(),
                     base::OnceClosure pop_step_callback = base::OnceClosure());
 
+  bool CanNavigateBack() const;
+
   void OnNavigateBackRequested();
 
   void OnReloadRequested();
@@ -134,6 +136,9 @@ class ProfileManagementFlowController
   // the content it's rendering. As a final fallback, if this value is empty
   // (which is the default), the host will choose itself some generic title.
   virtual std::u16string GetFallbackAccessibleWindowTitle() const;
+
+  // Called when the native window hosting the flow is being closed.
+  virtual void OnWindowClosing() {}
 
   // A helper method to create a pop callback that will switch to the given
   // step (can be used with `current_step()` to facilitate switching back to the

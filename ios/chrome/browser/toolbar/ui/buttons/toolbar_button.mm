@@ -4,7 +4,10 @@
 
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button.h"
 
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/highlight_utils.h"
+#import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/elements/blue_dot_util.h"
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_constants.h"
@@ -19,6 +22,9 @@ constexpr CGFloat kDisabledOpacity = 0.4;
 
 // Returns the tint color to be used in the normal mode.
 UIColor* NormalTintColor() {
+  if (IsNextOldDesignEnabled()) {
+    return [UIColor colorNamed:kToolbarButtonColor];
+  }
   return [UIColor colorNamed:kSolidBlackColor];
 }
 
@@ -36,44 +42,34 @@ UIColor* NormalTintColor() {
   UIView* _backgroundView;
   UIView* _blueDotView;
   UIView* _gradientView;
-  BOOL _incognito;
 }
 
 @synthesize image = _image;
-@synthesize backgroundView = _backgroundView;
 
 - (instancetype)initWithImageLoader:(ToolbarButtonImageLoader)imageLoader
                           incognito:(BOOL)incognito {
   if ((self = [super initWithFrame:CGRectMake(0, 0, kToolbarButtonSize,
                                               kToolbarButtonSize)])) {
     _imageLoader = [imageLoader copy];
-    _incognito = incognito;
 
     [NSLayoutConstraint activateConstraints:@[
       [self.widthAnchor constraintEqualToConstant:kToolbarButtonSize],
       [self.heightAnchor constraintEqualToConstant:kToolbarButtonSize],
     ]];
 
-    _backgroundView = [[UIView alloc] initWithFrame:CGRectZero];
-    _backgroundView.translatesAutoresizingMaskIntoConstraints = NO;
-    _backgroundView.backgroundColor =
-        IsToolbarGlassPrototypeEnabled()
-            ? ToolbarGlassPrototypeElementBackgroundColor(incognito)
-            : ToolbarElementBackgroundColor(incognito);
-    _backgroundView.userInteractionEnabled = NO;
-    _backgroundView.clipsToBounds = YES;
-    [self insertSubview:_backgroundView belowSubview:self.imageView];
-    AddSameConstraints(self, _backgroundView);
+    if (!IsNextOldDesignEnabled()) {
+      _backgroundView = [[UIView alloc] initWithFrame:CGRectZero];
+      _backgroundView.translatesAutoresizingMaskIntoConstraints = NO;
+      _backgroundView.backgroundColor =
+          ToolbarElementBackgroundColor(incognito);
+      _backgroundView.userInteractionEnabled = NO;
+      _backgroundView.clipsToBounds = YES;
+      [self insertSubview:_backgroundView belowSubview:self.imageView];
+      AddSameConstraints(self, _backgroundView);
 
-    ConfigureCornerRadiusForToolbarButtonContainer(_backgroundView,
-                                                   self.traitCollection);
+      ConfigureCornerRadiusForToolbarButtonContainer(_backgroundView,
+                                                     self.traitCollection);
 
-    if (IsToolbarGlassPrototypeEnabled()) {
-      ConfigureGlassToolbarElementShadow(self, _incognito,
-                                         self.traitCollection);
-      [self registerForTraitChanges:@[ UITraitUserInterfaceStyle.class ]
-                         withAction:@selector(updateGlassShadow)];
-    } else {
       ConfigureShadowForToolbarElement(self);
     }
 
@@ -83,6 +79,9 @@ UIColor* NormalTintColor() {
       UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class
     ]
                        withAction:@selector(updateAppearance)];
+
+    [self registerForTraitChanges:@[ UITraitUserInterfaceStyle.class ]
+                       withAction:@selector(userInterfaceStyleDidChange)];
   }
   return self;
 }
@@ -100,14 +99,37 @@ UIColor* NormalTintColor() {
   [self updateMask];
 }
 
-- (void)setHidden:(BOOL)hidden {
-  [super setHidden:hidden];
-  if (self.forceHidden) {
-    return;
+#pragma mark - ContextMenuInteractionDelegate
+
+- (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
+    willDisplayMenuForConfiguration:(UIContextMenuConfiguration*)configuration
+                           animator:
+                               (id<UIContextMenuInteractionAnimating>)animator {
+  if (IsPageActionMenuEnabled()) {
+    [self.geminiHandler
+        hideFloatyIfInvokedAnimated:YES
+                         fromSource:gemini::FloatyUpdateSource::ContextMenu];
   }
-  self.alpha = hidden ? 0.0 : 1.0;
-  self.transform = hidden ? CGAffineTransformMakeScale(0.01, 0.01)
-                          : CGAffineTransformIdentity;
+  [super contextMenuInteraction:interaction
+      willDisplayMenuForConfiguration:configuration
+                             animator:animator];
+}
+
+- (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
+       willEndForConfiguration:(UIContextMenuConfiguration*)configuration
+                      animator:(id<UIContextMenuInteractionAnimating>)animator {
+  if (IsPageActionMenuEnabled()) {
+    __weak __typeof(self) weakSelf = self;
+    [animator addAnimations:^{
+      [weakSelf.geminiHandler
+          updateFloatyVisibilityIfEligibleAnimated:NO
+                                        fromSource:gemini::FloatyUpdateSource::
+                                                       ContextMenu];
+    }];
+  }
+  [super contextMenuInteraction:interaction
+        willEndForConfiguration:configuration
+                       animator:animator];
 }
 
 #pragma mark - UIControl
@@ -130,6 +152,27 @@ UIColor* NormalTintColor() {
     _image = _imageLoader();
   }
   return _image;
+}
+
+- (void)setShadowAndBackgroundRemoved:(BOOL)shadowAndBackgroundRemoved {
+  if (_shadowAndBackgroundRemoved == shadowAndBackgroundRemoved) {
+    return;
+  }
+  _shadowAndBackgroundRemoved = shadowAndBackgroundRemoved;
+  BOOL isDarkMode =
+      self.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark;
+  if (_shadowAndBackgroundRemoved) {
+    _backgroundView.backgroundColor =
+        IsGlassToolbarEnabled() ? UIColor.clearColor
+                                : ToolbarElementBackgroundColor(isDarkMode);
+    self.layer.shadowColor = nil;
+    self.layer.shadowOpacity = 0.0;
+    self.layer.shadowOffset = CGSizeZero;
+    self.layer.shadowRadius = 0;
+  } else {
+    _backgroundView.backgroundColor = ToolbarElementBackgroundColor(isDarkMode);
+    ConfigureShadowForToolbarElement(self);
+  }
 }
 
 - (void)setForceHidden:(BOOL)forceHidden {
@@ -172,24 +215,18 @@ UIColor* NormalTintColor() {
 
 #pragma mark - Private
 
-// Updates the shadow when the glass prototype is enabled and appearance alters.
-- (void)updateGlassShadow {
-  CHECK(IsToolbarGlassPrototypeEnabled());
-  ConfigureGlassToolbarElementShadow(self, _incognito, self.traitCollection);
-}
-
-// Returns the active background container view.
-- (UIView*)backgroundContainer {
-  return _backgroundView;
-}
-
 // Updates the highlight visibility.
 - (void)updateHighlight {
   if (_iphHighlighted && !_hasBlueDot) {
     if (!_gradientView) {
       _gradientView = CreateIPHGradientView();
-      [_backgroundView addSubview:_gradientView];
-      AddSameConstraints(_backgroundView, _gradientView);
+      if (_backgroundView) {
+        [_backgroundView addSubview:_gradientView];
+        AddSameConstraints(_backgroundView, _gradientView);
+      } else {
+        [self insertSubview:_gradientView belowSubview:self.imageView];
+        AddSameConstraints(self, _gradientView);
+      }
     }
     _gradientView.hidden = NO;
     ConfigureIPHImageStyleForImageView(self.imageView);
@@ -202,7 +239,9 @@ UIColor* NormalTintColor() {
 
 // Updates the mask on the background for the blue dot.
 - (void)updateMask {
-  UpdateBlueDotMaskForView([self backgroundContainer], _hasBlueDot);
+  if (_backgroundView) {
+    UpdateBlueDotMaskForView(_backgroundView, _hasBlueDot);
+  }
 }
 
 // Updates the image visibility based on the visibility of the button.
@@ -254,9 +293,18 @@ UIColor* NormalTintColor() {
 // current size class of the UI. In windows with compact width, the
 // ToolbarButton should be square. Otherwise, they should be circular.
 - (void)updateShape {
-  ConfigureCornerRadiusForToolbarButtonContainer([self backgroundContainer],
-                                                 self.traitCollection);
-  [self updateMask];
+  if (_backgroundView) {
+    ConfigureCornerRadiusForToolbarButtonContainer(_backgroundView,
+                                                   self.traitCollection);
+    [self updateMask];
+  }
+}
+
+// Handles user interface style trait collection changes.
+- (void)userInterfaceStyleDidChange {
+  if (!_shadowAndBackgroundRemoved) {
+    ConfigureShadowForToolbarElement(self);
+  }
 }
 
 @end

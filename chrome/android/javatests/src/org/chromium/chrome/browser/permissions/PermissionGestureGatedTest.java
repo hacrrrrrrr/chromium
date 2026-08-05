@@ -19,6 +19,7 @@ import androidx.test.filters.MediumTest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
@@ -35,6 +36,8 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.components.content_settings.ContentSetting;
 import org.chromium.components.content_settings.ContentSettingsType;
 import org.chromium.components.permissions.PermissionsAndroidFeatureList;
@@ -64,13 +67,18 @@ import org.chromium.ui.test.util.DeviceRestriction;
 @EnableFeatures({
     PermissionsAndroidFeatureList.APPROXIMATE_GEOLOCATION_PERMISSION,
     PermissionsAndroidFeatureList.PERMISSIONS_ANDROID_CLAPPER_LOUD,
-    PermissionsAndroidFeatureList.PERMISSIONS_ANDROID_CLAPPER_QUIET,
     PermissionsAndroidFeatureList.PERMISSIONS_GESTURE_GATED_PROMPTS
 })
 @Batch(Batch.PER_CLASS)
 public class PermissionGestureGatedTest {
 
-    @Rule public PermissionTestRule mPermissionRule = new PermissionTestRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
+    public PermissionTestRule mPermissionRule =
+            new PermissionTestRule(mActivityTestRule.getActivityTestRule());
+
+    @Rule
+    public RuleChain mRuleChain = RuleChain.outerRule(mActivityTestRule).around(mPermissionRule);
 
     private static final String PAGE_URL = "/content/test/data/android/permission_navigation.html";
 
@@ -125,7 +133,7 @@ public class PermissionGestureGatedTest {
             mPermissionRule.runJavaScriptCodeInCurrentTab(
                     "window.onclick = function() { if (window.functionToRun) {"
                             + " eval(window.functionToRun); } };");
-            mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+            mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                     "Notification.requestPermission()");
         } else {
             mPermissionRule.runJavaScriptCodeInCurrentTab("Notification.requestPermission()");
@@ -138,7 +146,7 @@ public class PermissionGestureGatedTest {
             mPermissionRule.runJavaScriptCodeInCurrentTab(
                     "window.onclick = function() { if (window.functionToRun) {"
                             + " eval(window.functionToRun); } };");
-            mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+            mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                     "navigator.geolocation.getCurrentPosition(function(){})");
         } else {
             // Use setTimeout to ensure any transient user gesture from the test runner is lost.

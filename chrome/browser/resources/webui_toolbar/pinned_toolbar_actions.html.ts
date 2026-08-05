@@ -11,7 +11,7 @@ export function getHtml(this: PinnedToolbarActionsElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
 ${repeat(
-    this.keyedStates_,
+    this.keyedStates,
     (keyedState) => keyedState.key,
     (keyedState) => html`
       ${keyedState.state.action === PinnedToolbarAction.kDivider ? html`
@@ -24,8 +24,11 @@ ${repeat(
         <pinned-toolbar-action
             .state="${keyedState.state}"
             class="${keyedState.animateIn ? 'animate-in' : ''}
-                   ${keyedState.exiting ? 'exiting' : ''}"
-            data-key="${keyedState.key}">
+                   ${keyedState.exiting ? 'exiting' : ''}
+                   ${keyedState.dragPlaceholder ? 'drag-placeholder' : ''}"
+            data-key="${keyedState.key}"
+            @dragover="${this.onActionDragover}"
+            @drop="${this.onActionDrop}">
         </pinned-toolbar-action>
       `}
     `,

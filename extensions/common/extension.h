@@ -236,10 +236,8 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // Returns true if this extension or app includes areas within `origin`.
   bool OverlapsWithOrigin(const GURL& origin) const;
 
-  // Get the manifest data associated with the key, or NULL if there is none.
-  // Can only be called after Init is finished.
-  const ManifestData* GetManifestData(std::string_view key) const;
-
+  // Gets the manifest data associated with the key, or null if there is none.
+  // Can only be called after Init() is finished.
   template <class T>
   const T* GetManifestData() const {
     static_assert(std::is_base_of_v<ManifestData, T>,
@@ -260,6 +258,13 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   void SetManifestData(std::string_view key,
                        std::unique_ptr<ManifestData> data);
 
+  template <class T>
+  void SetManifestData(std::unique_ptr<T> data) {
+    static_assert(std::is_base_of_v<ManifestData, T>,
+                  "T must derive from Extension::ManifestData");
+    SetManifestData(T::kManifestDataKey, std::move(data));
+  }
+
   // Sets the GUID for this extension. Note: this should *only* be used when
   // duplicating an existing extension; otherwise, the GUID will be
   // appropriately set during creation (ensuring uniqueness).
@@ -276,7 +281,6 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   const HashedExtensionId& hashed_id() const;
   const ExtensionGuid& guid() const;
   const base::Version& version() const { return version_; }
-  const std::string& version_name() const;
   std::string VersionString() const;
   std::string DifferentialFingerprint() const;
   std::string GetVersionForDisplay() const;
@@ -375,6 +379,10 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   bool LoadSharedFeatures(std::u16string* error);
   bool LoadManifestVersion(std::u16string* error);
   bool LoadShortName(std::u16string* error);
+
+  // Internal variant to get the ManifestData associated with `key`.
+  // External callers should use the templated versions.
+  const ManifestData* GetManifestData(std::string_view key) const;
 
   // The extension's human-readable name. Name is used for display purpose. It
   // might be wrapped with unicode bidi control characters so that it is

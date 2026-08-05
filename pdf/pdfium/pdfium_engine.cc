@@ -731,7 +731,8 @@ sk_sp<const SkData> MakeDataAvoidingCopy(SkStreamAsset* stream) {
 // Caller takes ownership of `page_objects` via the return value.
 std::vector<ScopedFPDFPageObject> RemovePageObjectsFromPage(
     FPDF_PAGE page,
-    std::vector<FPDF_PAGEOBJECT> page_objects) {
+    std::vector<base::RawPtrIfPtrT<FPDF_PAGEOBJECT, DanglingUntriaged>>
+        page_objects) {
   std::vector<ScopedFPDFPageObject> page_object_deleters;
   page_object_deleters.reserve(page_objects.size());
   for (FPDF_PAGEOBJECT page_object : page_objects) {
@@ -741,6 +742,22 @@ std::vector<ScopedFPDFPageObject> RemovePageObjectsFromPage(
     page_object_deleters.push_back(ScopedFPDFPageObject(page_object));
   }
   return page_object_deleters;
+}
+
+bool IsEmojiFont(const SkTypeface* typeface) {
+  constexpr SkFontTableTag kCpalTag = SkSetFourByteTag('C', 'P', 'A', 'L');
+  constexpr SkFontTableTag kColrTag = SkSetFourByteTag('C', 'O', 'L', 'R');
+  constexpr SkFontTableTag kSbixTag = SkSetFourByteTag('s', 'b', 'i', 'x');
+  constexpr SkFontTableTag kCbdtTag = SkSetFourByteTag('C', 'B', 'D', 'T');
+  constexpr SkFontTableTag kCblcTag = SkSetFourByteTag('C', 'B', 'L', 'C');
+  constexpr SkFontTableTag kSvgTag = SkSetFourByteTag('S', 'V', 'G', ' ');
+
+  return (typeface->getTableSize(kColrTag) > 0 &&
+          typeface->getTableSize(kCpalTag) > 0) ||
+         typeface->getTableSize(kSbixTag) > 0 ||
+         (typeface->getTableSize(kCbdtTag) > 0 &&
+          typeface->getTableSize(kCblcTag) > 0) ||
+         typeface->getTableSize(kSvgTag) > 0;
 }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
 
@@ -5297,6 +5314,15 @@ void PDFiumEngine::AddFont(FontId font_id,
                                         font_data_span.size(),
                                         /*font_type=*/font_type,
                                         /*cid=*/true));
+
+  base::UmaHistogramBoolean("PDF.Ink2FontLoaded", font != nullptr);
+  if (!font && IsEmojiFont(typeface.get())) {
+    base::UmaHistogramBoolean("PDF.Ink2EmojiFontLoadFailed", true);
+    // TODO(crbug.com/502468286): Support emoji fonts.
+    bool inserted = font_map_.insert({font_id, nullptr}).second;
+    CHECK(inserted);
+    return;
+  }
   CHECK(font);
 
   bool inserted = font_map_.insert({font_id, std::move(font)}).second;
@@ -5360,12 +5386,18 @@ void PDFiumEngine::DrawText(int page_index,
 
   ascent /= pdf_zoom;
 
-  std::vector<FPDF_PAGEOBJECT> page_objects;
+  std::vector<base::RawPtrIfPtrT<FPDF_PAGEOBJECT, DanglingUntriaged>>
+      page_objects;
   page_objects.reserve(text_info.size());
   FPDF_PAGEOBJECTMARK mark = nullptr;
   for (const InkTextInfo& item : text_info) {
     FPDF_FONT font = GetAddedFont(item.font_id);
-    CHECK(font);
+    if (!font) {
+      // Only possible for emoji fonts.
+      // TODO(crbug.com/502468286): Change to a CHECK once emoji fonts are
+      // supported.
+      continue;
+    }
 
     ScopedFPDFPageObject text_object(
         FPDFPageObj_CreateTextObj(doc(), font, pdf_font_size));
@@ -5424,14 +5456,15 @@ void PDFiumEngine::DrawText(int page_index,
     CHECK(FPDFPageObj_TransformF(text_object.get(), &text_origin_matrix));
     CHECK(FPDFPageObj_TransformF(text_object.get(), &textbox_matrix));
 
-    if (&item == &text_info.front()) {
+    // The metadata mark must be attached to every text object in the
+    // annotation. Initialize it on the first successfully created text object.
+    if (!mark) {
       mark = FPDFPageObj_AddMark(text_object.get(),
                                  kInkTextAnnotationIdentifierKey);
       CHECK(mark);
       AddMetadataToTextObject(doc(), text_object.get(), mark,
                               GetNextTextboxId(), attributes);
     } else {
-      CHECK(mark);
       CHECK(FPDFPageObj_AddExistingMark(text_object.get(), mark));
     }
 
@@ -5500,7 +5533,8 @@ void PDFiumEngine::ApplyStroke(int page_index,
   FPDF_PAGE page = pdfium_page->GetPage();
   CHECK(page);
 
-  std::vector<FPDF_PAGEOBJECT> page_objects = WriteStrokeToPage(page, stroke);
+  std::vector<base::RawPtrIfPtrT<FPDF_PAGEOBJECT, DanglingUntriaged>>
+      page_objects = WriteStrokeToPage(page, stroke);
   CHECK(!page_objects.empty());
   ink_edited_pages_needing_regeneration_.insert(page_index);
 
@@ -5816,7 +5850,8 @@ void PDFiumEngine::UpdateTextActiveAndInvalidateHelper(InkTextData& data,
 
 PDFiumEngine::InkStrokeData::InkStrokeData(
     int page_index,
-    std::vector<FPDF_PAGEOBJECT> page_objects)
+    std::vector<base::RawPtrIfPtrT<FPDF_PAGEOBJECT, DanglingUntriaged>>
+        page_objects)
     : page_index(page_index), page_objects(std::move(page_objects)) {}
 
 PDFiumEngine::InkStrokeData::InkStrokeData(InkStrokeData&&) noexcept = default;
@@ -5828,7 +5863,8 @@ PDFiumEngine::InkStrokeData::~InkStrokeData() = default;
 
 PDFiumEngine::InkTextData::InkTextData(
     int page_index,
-    std::vector<FPDF_PAGEOBJECT> page_objects)
+    std::vector<base::RawPtrIfPtrT<FPDF_PAGEOBJECT, DanglingUntriaged>>
+        page_objects)
     : page_index(page_index), page_objects(std::move(page_objects)) {}
 
 PDFiumEngine::InkTextData::InkTextData(InkTextData&&) noexcept = default;

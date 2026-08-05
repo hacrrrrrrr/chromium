@@ -2873,6 +2873,20 @@ TEST_F(IntegrationTest, RecoveryNoUpdater) {
   ASSERT_NO_FATAL_FAILURE(Uninstall());
 }
 
+TEST_F(IntegrationTest, RecoveryWithUpdater) {
+  ASSERT_NO_FATAL_FAILURE(Install());
+  ASSERT_TRUE(WaitForUpdaterExit());
+  ASSERT_NO_FATAL_FAILURE(ExpectInstalled());
+
+  const std::string appid = "test1";
+  const base::Version version("0.1");
+  ASSERT_NO_FATAL_FAILURE(RunRecoveryComponent(appid, version));
+  ASSERT_TRUE(WaitForUpdaterExit());
+  ASSERT_NO_FATAL_FAILURE(ExpectInstalled());
+  ASSERT_NO_FATAL_FAILURE(ExpectAppVersion(appid, version));
+  ASSERT_NO_FATAL_FAILURE(Uninstall());
+}
+
 TEST_F(IntegrationTest, RegisterApp) {
   ASSERT_NO_FATAL_FAILURE(Install());
   ASSERT_NO_FATAL_FAILURE(ExpectInstalled());
@@ -6486,7 +6500,7 @@ TEST_P(IntegrationInstallerResultsTest, OnDemandTestCases) {
 
   // TODO(crbug.com/382059245): remove this `if` once the older versions are
   // updated to a version that supports a success `kExitCode`.
-  if (base::StartsWith(GetTestCase().command_line_args, "INSTALLER_RESULT=4") &&
+  if (GetTestCase().command_line_args.starts_with("INSTALLER_RESULT=4") &&
       (GetSetup().version != base::Version(kUpdaterVersion))) {
     GTEST_SKIP();
   }

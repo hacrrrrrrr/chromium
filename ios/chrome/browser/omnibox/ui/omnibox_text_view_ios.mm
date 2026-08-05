@@ -126,16 +126,17 @@ const CGFloat kVerticalOffset = 1;
     self.autocorrectionType = UITextAutocorrectionTypeNo;
     self.autocapitalizationType = UITextAutocapitalizationTypeNone;
     self.enablesReturnKeyAutomatically = YES;
-    self.returnKeyType = UIReturnKeyGo;
+    BOOL isCobrowse =
+        _presentationContext == OmniboxPresentationContext::kCobrowse;
+    self.returnKeyType = isCobrowse ? UIReturnKeyDefault : UIReturnKeyGo;
     self.spellCheckingType = UITextSpellCheckingTypeNo;
     self.textAlignment = NSTextAlignmentNatural;
-    self.keyboardType = UIKeyboardTypeWebSearch;
+    self.keyboardType =
+        isCobrowse ? UIKeyboardTypeDefault : UIKeyboardTypeWebSearch;
     self.smartQuotesType = UITextSmartQuotesTypeNo;
     self.dataDetectorTypes = UIDataDetectorTypeNone;
     self.allowsEditingTextAttributes = NO;
-    if (@available(iOS 18, *)) {
-      self.writingToolsBehavior = UIWritingToolsBehaviorNone;
-    }
+    self.writingToolsBehavior = UIWritingToolsBehaviorNone;
     [self updateOmniboxTypingAttributes];
 
     // Disable drag on iPhone because there's nowhere to drag to
@@ -1041,7 +1042,7 @@ const CGFloat kVerticalOffset = 1;
   }
 
   CHECK_LE(self.attributedAdditionalText.length, self.attributedText.length,
-           base::NotFatalUntil::M150);
+           base::NotFatalUntil::M160);
   /// This should not happen, tracking occurences with NotFatalUntil
   /// crbug.com/421229993.
   if (self.attributedText.length < self.attributedAdditionalText.length) {
@@ -1324,7 +1325,9 @@ const CGFloat kVerticalOffset = 1;
   // trigger submission. Other unicode line breaks (e.g. pasted paragraph
   // separators) should be allowed to be inserted as text.
   BOOL isNewline = [text isEqualToString:@"\n"] || [text isEqualToString:@"\r"];
-  if (isNewline && !_insertingNewline) {
+  BOOL isCobrowse =
+      _presentationContext == OmniboxPresentationContext::kCobrowse;
+  if (isNewline && !_insertingNewline && !isCobrowse) {
     return [self.omniboxTextInputDelegate textInputShouldReturn:self];
   }
   return [self.omniboxTextInputDelegate textInput:self

@@ -43,6 +43,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/favicon/favicon_utils.h"
+#include "chrome/browser/page_load_metrics/chrome_initiator_location.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
@@ -53,8 +54,8 @@
 #include "chrome/browser/ui/bookmarks/bookmark_ui_operations_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -414,7 +415,8 @@ END_METADATA
 
 // BookmarkBarView ------------------------------------------------------------
 
-BookmarkBarView::BookmarkBarView(Browser* browser, BrowserView* browser_view)
+BookmarkBarView::BookmarkBarView(BrowserWindowInterface* browser,
+                                 BrowserView* browser_view)
     : AnimationDelegateViews(this),
       browser_(browser),
       browser_view_(browser_view) {
@@ -1450,10 +1452,10 @@ void BookmarkBarView::OnButtonPressed(const bookmarks::BookmarkNode* node,
   DCHECK(node->is_url());
   RecordAppLaunch(browser_->GetProfile(), node->url());
   bookmarks::OpenAllIfAllowed(
-      browser_, {node}, ui::DispositionFromEventFlags(event.flags()),
+      browser_->GetBrowserForMigrationOnly(), {node},
+      ui::DispositionFromEventFlags(event.flags()),
       bookmarks::OpenAllBookmarksContext::kNone,
-      page_load_metrics::NavigationHandleUserData::InitiatorLocation::
-          kBookmarkBar,
+      GetInitiatorLocation(ChromeInitiatorLocation::kBookmarkBar),
       {{BookmarkLaunchLocation::kAttachedBar, base::TimeTicks::Now()}});
   RecordBookmarkLaunch(
       BookmarkLaunchLocation::kAttachedBar,
@@ -1472,10 +1474,10 @@ void BookmarkBarView::OnMenuButtonPressed(const BookmarkParentFolder& folder,
     auto nodes = ToRawPtrVector(bookmark_service_->GetUnderlyingNodes(folder));
 
     bookmarks::OpenAllIfAllowed(
-        browser_, nodes, ui::DispositionFromEventFlags(event.flags()),
+        browser_->GetBrowserForMigrationOnly(), nodes,
+        ui::DispositionFromEventFlags(event.flags()),
         bookmarks::OpenAllBookmarksContext::kNone,
-        page_load_metrics::NavigationHandleUserData::InitiatorLocation::
-            kBookmarkBar,
+        GetInitiatorLocation(ChromeInitiatorLocation::kBookmarkBar),
         {{BookmarkLaunchLocation::kAttachedBar, base::TimeTicks::Now()}});
   } else {
     RecordBookmarkFolderOpen(BookmarkLaunchLocation::kAttachedBar);
@@ -1579,9 +1581,9 @@ void BookmarkBarView::RunContextMenuAt(std::vector<int64_t> node_ids,
 
   context_menu_observation_.Reset();
   context_menu_ = std::make_unique<BookmarkContextMenu>(
-      GetWidget(), browser_, browser_->GetProfile(),
-      BookmarkLaunchLocation::kAttachedBar, ToRawPtrVector(nodes),
-      close_on_remove, can_paste);
+      GetWidget(), browser_->GetBrowserForMigrationOnly(),
+      browser_->GetProfile(), BookmarkLaunchLocation::kAttachedBar,
+      ToRawPtrVector(nodes), close_on_remove, can_paste);
   context_menu_observation_.Observe(context_menu_.get());
   context_menu_->RunMenuAt(point, source_type);
 }
@@ -1999,8 +2001,9 @@ void BookmarkBarView::ShowDropFolderForNode(
   }
 
   drop_info_->is_menu_showing = true;
-  bookmark_drop_menu_ = new BookmarkMenuController(browser_, GetWidget(),
-                                                   folder, start_index, true);
+  bookmark_drop_menu_ =
+      new BookmarkMenuController(browser_->GetBrowserForMigrationOnly(),
+                                 GetWidget(), folder, start_index, true);
   bookmark_drop_menu_->set_observer(this);
   bookmark_drop_menu_->RunMenuAt(this);
 
@@ -2156,8 +2159,9 @@ void BookmarkBarView::ShowFolderMenuForFolder(
       (folder.as_permanent_folder() == PermanentFolderType::kBookmarkBarNode)
           ? first_hidden_node_idx_
           : 0;
-  bookmark_menu_ = new BookmarkMenuController(browser_, GetWidget(), folder,
-                                              start_index, false);
+  bookmark_menu_ =
+      new BookmarkMenuController(browser_->GetBrowserForMigrationOnly(),
+                                 GetWidget(), folder, start_index, false);
   bookmark_menu_->set_observer(this);
   bookmark_menu_->RunMenuAt(this);
 }
@@ -2396,7 +2400,7 @@ void BookmarkBarView::PerformDrop(
                                                &parent_folder)
           .DropBookmarks(browser_->GetProfile(), data, index, copy,
                          chrome::BookmarkReorderDropTarget::kBookmarkBarView,
-                         browser_);
+                         browser_->GetBrowserForMigrationOnly());
 }
 
 int BookmarkBarView::GetDropLocationModelIndexForTesting() const {

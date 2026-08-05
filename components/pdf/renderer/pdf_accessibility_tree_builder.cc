@@ -9,13 +9,13 @@
 
 #include "base/i18n/break_iterator.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "components/pdf/renderer/pdf_accessibility_tree_builder_heuristic.h"
 #include "components/pdf/renderer/pdf_accessibility_tree_builder_structure.h"
 #include "components/strings/grit/components_strings.h"
 #include "pdf/accessibility_structs.h"
 #include "pdf/page_character_index.h"
-#include "pdf/pdf_features.h"
 #include "services/strings/grit/services_strings.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "ui/accessibility/accessibility_features.h"
@@ -87,6 +87,15 @@ bool IsTextRenderModeStroke(
     default:
       return false;
   }
+}
+
+constexpr int kStandardBoldValue = 700;
+constexpr int kMaxValidBoldValue = 900;
+bool IsValidFontWeight(float font_weight) {
+  if (!features::IsPdfAccessibilityHeuristicEnhancementsEnabled()) {
+    return true;
+  }
+  return font_weight <= kMaxValidBoldValue && font_weight >= 0;
 }
 
 }  // namespace
@@ -224,6 +233,49 @@ ui::AXNodeData* PdfAccessibilityTreeBuilder::CreateStaticTextNode(
   return static_text_node;
 }
 
+// static
+bool PdfAccessibilityTreeBuilder::AreStylesEquivalent(
+    const chrome_pdf::AccessibilityTextStyleInfo& style1,
+    const chrome_pdf::AccessibilityTextStyleInfo& style2) {
+  return style1.is_italic == style2.is_italic &&
+         style1.font_weight == style2.font_weight;
+}
+
+// static
+bool PdfAccessibilityTreeBuilder::IsBoldStyle(
+    const chrome_pdf::AccessibilityTextStyleInfo& style) {
+  return IsValidFontWeight(style.font_weight) &&
+         style.font_weight >= kStandardBoldValue;
+}
+
+// static
+float PdfAccessibilityTreeBuilder::GetFontWeight(
+    const chrome_pdf::AccessibilityTextStyleInfo& style) {
+  return IsValidFontWeight(style.font_weight) ? style.font_weight : 0.0f;
+}
+
+void PdfAccessibilityTreeBuilder::AddFontWeightAttributes(
+    const chrome_pdf::AccessibilityTextStyleInfo& style,
+    ui::AXNodeData* ax_node_data) {
+  if (IsBoldStyle(style)) {
+    ax_node_data->AddTextStyle(ax::mojom::TextStyle::kBold);
+  }
+  ax_node_data->AddFloatAttribute(ax::mojom::FloatAttribute::kFontWeight,
+                                  GetFontWeight(style));
+}
+
+ui::AXNodeData* PdfAccessibilityTreeBuilder::CreateStaticTextNodeWithStyle(
+    const chrome_pdf::PageCharacterIndex& page_char_index,
+    const chrome_pdf::AccessibilityTextStyleInfo& style) {
+  ui::AXNodeData* static_text_node = CreateStaticTextNode(page_char_index);
+  if (style.is_italic) {
+    static_text_node->AddTextStyle(ax::mojom::TextStyle::kItalic);
+  }
+  AddFontWeightAttributes(style, static_text_node);
+
+  return static_text_node;
+}
+
 ui::AXNodeData* PdfAccessibilityTreeBuilder::CreateInlineTextBoxNode(
     const chrome_pdf::AccessibilityTextRunInfo& text_run,
     const chrome_pdf::PageCharacterIndex& page_char_index) {
@@ -242,13 +294,9 @@ ui::AXNodeData* PdfAccessibilityTreeBuilder::CreateInlineTextBoxNode(
       ax::mojom::StringAttribute::kFontFamily, text_run.style.font_name);
   inline_text_box_node->AddFloatAttribute(ax::mojom::FloatAttribute::kFontSize,
                                           text_run.style.font_size);
-  inline_text_box_node->AddFloatAttribute(
-      ax::mojom::FloatAttribute::kFontWeight, text_run.style.font_weight);
+  AddFontWeightAttributes(text_run.style, inline_text_box_node);
   if (text_run.style.is_italic) {
     inline_text_box_node->AddTextStyle(ax::mojom::TextStyle::kItalic);
-  }
-  if (text_run.style.is_bold) {
-    inline_text_box_node->AddTextStyle(ax::mojom::TextStyle::kBold);
   }
   if (IsTextRenderModeFill(text_run.style.render_mode)) {
     inline_text_box_node->AddIntAttribute(ax::mojom::IntAttribute::kColor,

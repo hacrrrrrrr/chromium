@@ -130,10 +130,10 @@
     This feature is disabled by your organization
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_INLINE_CUE_MENU" desc="Label for the inline cue menu content setting.">
-    Floating menu on selected text
+    Select text to ask Gemini
   </message>
   <message name="IDS_SITE_SETTINGS_TYPE_INLINE_CUE_MENU_MID_SENTENCE" desc="Label for the inline cue menu content setting when referenced mid-sentence.">
-    floating menu on selected text
+    select text to ask Gemini
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_INLINE_CUE_MENU_ALLOWED" desc="Label for the enabled option of the inline cue menu content setting.">
     Show the floating menu when text is selected
@@ -142,7 +142,7 @@
     Don't show the floating menu when text is selected
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_INLINE_CUE_MENU_DESCRIPTION" desc="Description for the inline cue menu setting page.">
-    Chrome can show a floating menu with actions when you select text on a site.
+    Get a definition or learn more about a topic
   </message>
   <message name="IDS_SETTINGS_SITE_SETTINGS_INLINE_CUE_MENU_BLOCKED_EXCEPTIONS" desc="Header for the list of sites blocked from showing the inline cue menu.">
     Sites where the floating menu is blocked
@@ -211,7 +211,7 @@
     Keep browsing with Gemini when you open new tabs
   </message>
   <message name="IDS_SETTINGS_GLIC_MEDIA_UNDERSTANDING" desc="Name of the media understanding setting.">
-    Turn on media understanding
+    Media Understanding
   </message>
   <message name="IDS_SETTINGS_GLIC_MEDIA_UNDERSTANDING_SUBLABEL" desc="Sublabel describing that this setting will enable media understanding for Gemini.">
     Gemini can answer questions about the video or audio you’ve played on <ph name="LINK_BEGIN">&lt;a&gt;</ph>some websites<ph name="LINK_END">&lt;/a&gt;</ph>.
@@ -283,7 +283,7 @@
     Tabs opened from a chat or a shared tab are also shared with Gemini.
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_DEFAULT_TAB_ACCESS_CONSIDER_1" desc="First point in 'things to consider' column of the 'default tab access' expands" formatter_data="android_java">
-    When tabs are shared, their page contents, media and URLs are sent to Google.
+    When tabs are shared, their page contents, media and URLs are sent to Google and may be reviewed for safety.
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_DEFAULT_TAB_ACCESS_CONSIDER_2" desc="Second point in 'things to consider' column of the 'default tab access' expands">
     Conversations about shared tabs may be seen by human reviewers to improve Gemini.
@@ -303,11 +303,20 @@
   <!-- TODO(crbug.com/397187800): The following Glic experimental triggering strings are temporary
        and will be finalized and replaced next week. This also includes finalizing the links for
        "Learn more about Gemini Spark" and "unexpected actions". -->
+  <message name="IDS_GLIC_EXPERIMENTAL_OPT_IN_TITLE" desc="Title for the experimental opt-in dialog" is_accessibility_with_no_ui="true">
+    First, turn on Chrome auto browse for this device
+  </message>
   <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_TOGGLE" desc="Label for the Gemini experimental triggering setting">
     Let Gemini Spark browse on this device
   </message>
   <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_SUB_LABEL" desc="Sublabel explaining Gemini Spark feature.">
     Gemini Spark can use Chrome auto browse on this device to interact with sites and complete tasks on your behalf. <ph name="LINK_BEGIN">&lt;a href="#"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
+  </message>
+  <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_SUB_LABEL_V2" desc="Sublabel explaining Gemini Spark feature with accessible link attributes.">
+    Gemini Spark can use Chrome auto browse on this device to interact with sites and complete tasks on your behalf. <ph name="LINK_BEGIN">&lt;a href="$1" target="_blank" aria-label="$2" aria-description="$3"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
+  </message>
+  <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_SUB_LABEL_LEARN_MORE_LINK_LABEL" desc="Accessible name for the 'Learn more' link in the Gemini Spark toggle sublabel." is_accessibility_with_no_ui="true">
+    Learn more about Gemini Spark
   </message>
   <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_WHEN_ON_1" desc="Bullet point explaining what happens when Gemini Spark is enabled.">
     Gemini Spark can only use auto browse on this device if the device is awake and Chrome is running.
@@ -324,11 +333,23 @@
   <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_CONSIDER_3" desc="Bullet point explaining user responsibility and risks for Gemini Spark.">
     Gemini Spark is experimental and may do things like share your info or make purchases without asking. <ph name="LINK_BEGIN">&lt;a href="$1" target="_blank"&gt;</ph>Review the risks<ph name="LINK_END">&lt;/a&gt;</ph>.
   </message>
+  <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_CONSIDER_3_V2" desc="Bullet point explaining user responsibility and risks for Gemini Spark with accessible link attributes.">
+    Gemini Spark is experimental and may do things like share your info or make purchases without asking. <ph name="LINK_BEGIN">&lt;a href="$1" target="_blank" aria-label="$2" aria-description="$3"&gt;</ph>Review the risks<ph name="LINK_END">&lt;/a&gt;</ph>.
+  </message>
+  <message name="IDS_SETTINGS_GLIC_EXPERIMENTAL_TRIGGERING_CONSIDER_REVIEW_RISKS_LINK_LABEL_SPARK" desc="Accessible name for the 'Review the risks' link in the Gemini Spark consider section." is_accessibility_with_no_ui="true">
+    Review the risks of Gemini Spark
+  </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_CHROME_WEB_ACTUATION_TOGGLE" desc="Title for the Gemini feature introduction screen" formatter_data="android_java">
     Let Chrome browse for you
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_CHROME_WEB_ACTUATION_TOGGLE_SUBLABEL" desc="Subheader explaining what the Gemini feature does" formatter_data="android_java">
     Gemini in Chrome uses auto browse to work in your tabs and complete tasks you give it. <ph name="LINK_BEGIN">&lt;a href="#"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
+  </message>
+  <message name="IDS_SETTINGS_GLIC_PERMISSIONS_CHROME_WEB_ACTUATION_TOGGLE_SUBLABEL_V2" desc="Subheader explaining what the Gemini feature does (WebUI version)">
+    Gemini in Chrome uses auto browse to work in your tabs and complete tasks you give it. <ph name="LINK_BEGIN">&lt;a href="#" target="_blank" aria-label="$1" aria-description="$2"&gt;</ph>Learn more<ph name="LINK_END">&lt;/a&gt;</ph>
+  </message>
+  <message name="IDS_SETTINGS_GLIC_PERMISSIONS_CHROME_WEB_ACTUATION_TOGGLE_LEARN_MORE_ARIA_LABEL" desc="Accessible label for the 'Learn more' link in the Gemini auto browse sublabel." is_accessibility_with_no_ui="true">
+    Learn more about Chrome auto browse
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_WHEN_ON_1" desc="First point in 'when on' column of the 'let Gemini browse for you' expands" formatter_data="android_java">
     Gemini can help you book appointments, create shopping carts, or do other tasks you give it.
@@ -337,10 +358,19 @@
     Gemini shows its steps and tries to confirm before taking sensitive ones. You can stop or take over anytime.
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_CONSIDER_1" desc="First point in 'things to consider' column of the 'let Gemini browse for you' expands" formatter_data="android_java">
-    The page content and URLs that Gemini uses during a task will be shared with Google.
+    The page content and URLs that Gemini uses during a task will be shared with Google and may be reviewed for safety.
   </message>
   <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_CONSIDER_2" desc="Second point in 'things to consider' column of the 'let Gemini browse for you' expands" formatter_data="android_java">
     Use Gemini carefully and <ph name="BEGIN_LINK1">&lt;a href="$1" target="_blank"&gt;</ph>safely<ph name="LINK_END1">&lt;/a&gt;</ph>. You are responsible for Gemini's actions during a task, including mistakes and <ph name="BEGIN_LINK2">&lt;a href="$2" target="_blank"&gt;</ph>unexpected results<ph name="LINK_END2">&lt;/a&gt;</ph> like purchases.
+  </message>
+  <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_CONSIDER_2_V2" desc="Second point in 'things to consider' column of the 'let Gemini browse for you' expands (WebUI version)">
+    Use Gemini carefully and <ph name="BEGIN_LINK1">&lt;a href="$1" target="_blank" aria-label="$3" aria-description="$5"&gt;</ph>safely<ph name="LINK_END1">&lt;/a&gt;</ph>. You are responsible for Gemini's actions during a task, including mistakes and <ph name="BEGIN_LINK2">&lt;a href="$2" target="_blank" aria-label="$4" aria-description="$5"&gt;</ph>unexpected results<ph name="LINK_END2">&lt;/a&gt;</ph> like purchases.
+  </message>
+  <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_CONSIDER_SAFELY_ARIA_LABEL" desc="Accessible label for the 'safely' link in the Gemini auto browse permissions considerations." is_accessibility_with_no_ui="true">
+    Use Gemini safely
+  </message>
+  <message name="IDS_SETTINGS_GLIC_PERMISSIONS_WEB_ACTUATION_TOGGLE_CONSIDER_UNEXPECTED_RESULTS_ARIA_LABEL" desc="Accessible label for the 'unexpected results' link in the Gemini auto browse permissions considerations." is_accessibility_with_no_ui="true">
+    Unexpected results from Gemini
   </message>
   <message name="IDS_SETTINGS_GLIC_ACTOR_LOGIN_PERMISSIONS_SECTION_TITLE" desc="Title for the Gemini web login linkout." formatter_data="android_java">
     Sites Gemini can sign you in to
@@ -384,6 +414,9 @@
   </message>
   <message name="IDS_SETTINGS_GLIC_LOGIN_PERMISSIONS_REMOVE_ERROR" desc="Toast message to show when a login permission was unable to be removed.">
     Couldn't remove permission. Try again later.
+  </message>
+  <message name="IDS_SETTINGS_GLIC_HOTKEY_SCOPE_GLOBAL" desc="Label for the 'Global' option in the shortcut invocation scope dropdown.">
+    Global
   </message>
 
   <!-- Glic button and tab strip context menu -->
@@ -526,7 +559,19 @@
     Hide for this site
   </message>
   <message name="IDS_GLIC_SELECTION_HIDDEN_TOAST_BODY" desc="Body text for the toast notification when the selection widget is hidden on the current page.">
-    Hidden
+    Hidden until the page refreshes
+  </message>
+  <message name="IDS_GLIC_SELECTION_ASK_MORE_ABOUT_THIS" desc="Label for the button at the bottom of the inline explanation box to open Gemini in the side panel for follow-up questions.">
+    Ask Gemini more about this
+  </message>
+  <message name="IDS_GLIC_SELECTION_MORE_SKILLS" desc="Label for the submenu item showing all user skills in the selection widget context menu.">
+    More
+  </message>
+  <message name="IDS_GLIC_SELECTION_YOUR_SKILLS" desc="Section heading for user-created skills in the selection widget context menu.">
+    Your skills
+  </message>
+  <message name="IDS_GLIC_SELECTION_FOR_THIS_PAGE" desc="Section heading for contextual skills relevant to the current page in the selection widget context menu.">
+    For this page
   </message>
 
   <!-- Educational Tip -->
@@ -559,7 +604,7 @@
 
   <!-- Tab bottom sheet -->
   <message name="IDS_TAB_BOTTOM_SHEET_RESIZING_VIEW_TEXT" desc="Text shown while the web view is resizing." formatter_data="android_java">
-    Resizing Gemini...
+    Gemini
   </message>
   <message name="IDS_GLIC_LOCATION_MISMATCH_NOTICE_HEADER" desc="Headline on the notice when Gemini is unavailable in the current dynamic location.">
     Gemini in Chrome isn't available

@@ -4,8 +4,14 @@
 
 #include "chrome/browser/ui/autofill/payments/payments_churned_users_bubble_controller.h"
 
+#include <utility>
+
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_base.h"
 #include "chrome/browser/ui/autofill/autofill_bubble_handler.h"
+#include "components/autofill/core/browser/ui/payments/payments_ui_closed_reasons.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/tabs/public/tab_interface.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #if !BUILDFLAG(IS_ANDROID)
@@ -27,8 +33,9 @@ PaymentsChurnedUsersBubbleController::PaymentsChurnedUsersBubbleController(
       scoped_unowned_user_data_(tab_interface.GetUnownedUserDataHost(), *this) {
 }
 
-PaymentsChurnedUsersBubbleController::~PaymentsChurnedUsersBubbleController() =
-    default;
+PaymentsChurnedUsersBubbleController::~PaymentsChurnedUsersBubbleController() {
+  HideBubble(/*initiated_by_bubble_manager=*/false);
+}
 
 // static
 PaymentsChurnedUsersBubbleController*
@@ -36,11 +43,20 @@ PaymentsChurnedUsersBubbleController::From(tabs::TabInterface& tab_interface) {
   return Get(tab_interface.GetUnownedUserDataHost());
 }
 
-void PaymentsChurnedUsersBubbleController::Show() {
+void PaymentsChurnedUsersBubbleController::Show(
+    base::OnceClosure accept_callback,
+    base::OnceClosure cancel_callback,
+    base::OnceClosure closed_callback,
+    AccountInfo account_info) {
   if (bubble_view() || !MaySetUpBubble()) {
     return;
   }
   is_reshow_ = false;
+  accept_callback_ = std::move(accept_callback);
+  cancel_callback_ = std::move(cancel_callback);
+  closed_callback_ = std::move(closed_callback);
+  account_info_ = std::move(account_info);
+  should_show_icon_ = true;
   QueueOrShowBubble();
 }
 
@@ -52,10 +68,57 @@ void PaymentsChurnedUsersBubbleController::ReshowBubble() {
   QueueOrShowBubble(/*force_show=*/true);
 }
 
-void PaymentsChurnedUsersBubbleController::OnBubbleDiscarded() {}
-void PaymentsChurnedUsersBubbleController::OnBubbleClosed() {
+void PaymentsChurnedUsersBubbleController::OnBubbleDiscarded() {
+  if (closed_callback_) {
+    std::move(closed_callback_).Run();
+  }
+}
+
+void PaymentsChurnedUsersBubbleController::OnBubbleClosed(
+    PaymentsUiClosedReason closed_reason) {
   ResetBubbleViewAndInformBubbleManager();
+
+  if (closed_reason == PaymentsUiClosedReason::kAccepted ||
+      closed_reason == PaymentsUiClosedReason::kCancelled ||
+      closed_reason == PaymentsUiClosedReason::kClosed) {
+    should_show_icon_ = false;
+  }
+
   UpdatePageActionIcon();
+
+  if (closed_reason == PaymentsUiClosedReason::kAccepted) {
+    if (accept_callback_) {
+      std::move(accept_callback_).Run();
+    }
+  } else if (closed_reason == PaymentsUiClosedReason::kCancelled) {
+    if (cancel_callback_) {
+      std::move(cancel_callback_).Run();
+    }
+  } else {
+    if (closed_callback_) {
+      std::move(closed_callback_).Run();
+    }
+  }
+}
+
+AutofillEnableResurrectingPaymentsUsersTreatmentArm
+PaymentsChurnedUsersBubbleController::
+    GetAutofillEnableResurrectingPaymentsUsersTreatmentArm() const {
+  CHECK(base::FeatureList::IsEnabled(
+      features::kAutofillEnableResurrectingPaymentsUsers));
+  switch (features::kAutofillEnableResurrectingPaymentsUsersTreatment.Get()) {
+    case 1:
+      return AutofillEnableResurrectingPaymentsUsersTreatmentArm::kSecurity;
+    case 2:
+      return AutofillEnableResurrectingPaymentsUsersTreatmentArm::kConvenience;
+    default:
+      return AutofillEnableResurrectingPaymentsUsersTreatmentArm::kSecurity;
+  }
+}
+
+const AccountInfo& PaymentsChurnedUsersBubbleController::GetAccountInfo()
+    const {
+  return account_info_;
 }
 
 bool PaymentsChurnedUsersBubbleController::CanBeReshown() const {
@@ -99,7 +162,7 @@ PaymentsChurnedUsersBubbleController::GetActionIdForPageAction() {
 }
 
 bool PaymentsChurnedUsersBubbleController::ShouldShowPageAction() {
-  return true;
+  return should_show_icon_;
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 

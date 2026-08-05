@@ -115,7 +115,7 @@ public class TabSwitcherLayoutPTTest {
 
     @Rule
     public AutoResetCtaTransitTestRule mCtaTestRule =
-            ChromeTransitTestRules.autoResetCtaActivityRule();
+            ChromeTransitTestRules.fastAutoResetCtaActivityRule();
 
     @Rule
     public ChromeRenderTestRule mRenderTestRule =
@@ -261,7 +261,6 @@ public class TabSwitcherLayoutPTTest {
     @Test
     @MediumTest
     @Feature({"RenderTest"})
-    @DisableIf.Device(DeviceFormFactor.DESKTOP_FREEFORM) // crbug.com/511288349
     public void testRenderGrid_Incognito() throws IOException {
         ChromeTabbedActivity cta = mCtaTestRule.getActivity();
         // Prepare some incognito tabs and enter tab switcher.
@@ -535,10 +534,6 @@ public class TabSwitcherLayoutPTTest {
         // Verify the color icon exists and that the dialog is dismissed via another action
         card.expectColor(TabGroupColorId.GREY);
         watcher.assertExpected();
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -577,10 +572,6 @@ public class TabSwitcherLayoutPTTest {
                 .expectGroupCard(List.of(firstTabId, secondTabId), "Test")
                 .expectColor(TabGroupColorId.BLUE);
         histograms.assertExpected();
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -609,10 +600,6 @@ public class TabSwitcherLayoutPTTest {
                         List.of(firstTabId, secondTabId),
                         TabSwitcherGroupCardFacility.DEFAULT_N_TABS_TITLE)
                 .expectColor(TabGroupColorId.GREY);
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -643,10 +630,6 @@ public class TabSwitcherLayoutPTTest {
                         List.of(firstTabId, secondTabId),
                         TabSwitcherGroupCardFacility.DEFAULT_N_TABS_TITLE)
                 .expectColor(TabGroupColorId.BLUE);
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -680,10 +663,6 @@ public class TabSwitcherLayoutPTTest {
                         List.of(firstTabId, secondTabId),
                         TabSwitcherGroupCardFacility.DEFAULT_N_TABS_TITLE)
                 .expectColor(TabGroupColorId.GREY);
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -713,10 +692,6 @@ public class TabSwitcherLayoutPTTest {
         tabSwitcher
                 .expectGroupCard(List.of(firstTabId, secondTabId), "Test")
                 .expectColor(TabGroupColorId.BLUE);
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     @Test
@@ -754,10 +729,6 @@ public class TabSwitcherLayoutPTTest {
                 List.of(firstTabId, secondTabId),
                 TabSwitcherGroupCardFacility.DEFAULT_N_TABS_TITLE);
         tabSwitcher.verifyTabSwitcherCardCount(1);
-
-        // Open NTP PageStation for InitialStateRule to reset
-        RegularNewTabPageStation ntp = tabSwitcher.openNewTab();
-        assertFinalDestination(ntp);
     }
 
     private <T extends CtaPageStation> T roundtripToHTSWithThumbnailChecks(
@@ -837,7 +808,6 @@ public class TabSwitcherLayoutPTTest {
     @Test
     @MediumTest
     @Feature({"RenderTest"})
-    @DisableIf.Device(DeviceFormFactor.DESKTOP_FREEFORM) // crbug.com/511288349
     public void testRenderGrid_TabGroupColor_Incognito_2TabsInGroup() throws IOException {
         doTestRenderGrid_TabGroupColor_Parameterized(
                 /* isIncognito= */ true,
@@ -858,7 +828,6 @@ public class TabSwitcherLayoutPTTest {
     @Test
     @MediumTest
     @Feature({"RenderTest"})
-    @DisableIf.Device(DeviceFormFactor.DESKTOP_FREEFORM) // crbug.com/511288349
     public void testRenderGrid_TabGroupColor_Incognito_5TabsInGroup() throws IOException {
         doTestRenderGrid_TabGroupColor_Parameterized(
                 /* isIncognito= */ true,

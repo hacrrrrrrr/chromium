@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import type {WebClientInitialState} from '../glic.mojom-webui.js';
-import type {AdditionalContext, AdditionalContextPart, AnnotatedPageData, CaptureRegionErrorReason, CaptureRegionParams, CaptureRegionResult, ChromeVersion, ClientCapabilities, ClientErrorDialogType, ConversationInfo, CounterAbuseVerdict, ErrorReasonTypes, ErrorWithReason, ExperimentalTriggeringUpdate, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFactor, GeminiEnterpriseSettings, GetPinCandidatesOptions, HostCapability, InvokeOptions, MetricUserInputReactionType, MicrophoneStatus, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, TabContextOptions, TabContextResult, TabData, UnpinTabsOptions, UserProfileInfo, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
+import type {AdditionalContext, AdditionalContextPart, AnnotatedPageData, CaptureRegionErrorReason, CaptureRegionParams, CaptureRegionResult, ChromeVersion, ClientCapabilities, ClientErrorDialogType, ConversationInfo, CounterAbuseVerdict, ErrorReasonTypes, ErrorWithReason, ExperimentalTriggeringUpdate, FileUploadPolicyState, FocusedTabDataHasFocus, FocusedTabDataHasNoFocus, FormFactor, GeminiEnterpriseSettings, GetPinCandidatesOptions, HostCapability, InvokeOptions, MetricUserInputReactionType, MicrophoneStatus, OnResponseStoppedDetails, OpenPanelInfo, OpenSettingsOptions, PageMetadata, PanelOpeningData, PanelState, PdfDocumentData, PinCandidate, PinTabsOptions, Platform, ResumeActorTaskResult, Screenshot, TabContextOptions, TabContextResult, TabData, UnpinTabsOptions, UserProfileInfo, WebClientMode, ZeroStateSuggestions, ZeroStateSuggestionsOptions, ZeroStateSuggestionsV2} from '../glic_api/glic_api.js';
 
 import type {ActorClient, ActorHost} from './actor/actor_types.js';
 import type {AnnotationClient, AnnotationHost} from './annotation/annotation_types.js';
@@ -635,6 +635,12 @@ export const WebClientDef = defInterface({
       }>(),
     },
     {
+      name: 'notifyFileUploadStateChanged',
+      request: defMessage<{
+        state: FileUploadPolicyState,
+      }>(),
+    },
+    {
       name: 'notifyFocusedTabChanged',
       request: defMessage<{
         focusedTabDataPrivate: FocusedTabDataPrivate,
@@ -648,9 +654,6 @@ export const WebClientDef = defInterface({
     },
     {
       name: 'checkResponsive',
-      response: defMessage<{
-        clientSendMessageQueueLength: number,
-      }>(),
     },
     {
       name: 'notifyManualResizeChanged',

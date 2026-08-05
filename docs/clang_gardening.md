@@ -1,7 +1,7 @@
 # Clang and Rust Gardening
 
 Chromium is built using a pre-built version of [Clang](clang.md) and
-[Rust](rust.md), which are downloaded from a Google Cloud bucket by depot_tools
+[Rust](/docs/rust/README.md), which are downloaded from a Google Cloud bucket by depot_tools
 as part of `gclient sync`. This is done so that Chromium developers have access
 to the latest and greatest developer tools, fixes and optimizations provided by
 Clang and LLVM (ASan, CFI, coverage, etc). It also means the build is entirely
@@ -313,8 +313,8 @@ work on linker bugs without having to have a Chromium build environment.
 
 To use `ld.lld`'s `--reproduce` flag, follow these steps:
 
-1. Locally (build Chromium with a locally-built
-   clang)[https://chromium.googlesource.com/chromium/src.git/+/main/docs/clang.md#Using-a-custom-clang-binary]
+1. Locally [build Chromium with a locally-built
+   clang](https://chromium.googlesource.com/chromium/src.git/+/main/docs/clang.md#Using-a-custom-clang-binary)
 
 1. After reproducing the link error, build just the failing target with
    ninja's `-v -d keeprsp` flags added:

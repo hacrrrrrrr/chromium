@@ -36,6 +36,14 @@ class MockGlicInstanceCoordinator
               GetInstanceWithGlicWebContents,
               (content::WebContents*),
               (const, override));
+  MOCK_METHOD(GlicInstance*,
+              GetInstanceForTabGroup,
+              (tab_groups::TabGroupId),
+              (const, override));
+  MOCK_METHOD(GlicInstance*,
+              ShowInstanceForTabGroup,
+              (tab_groups::TabGroupId),
+              (override));
 
   MOCK_METHOD(void,
               Toggle,
@@ -89,14 +97,6 @@ class MockGlicInstanceCoordinator
               (),
               (override));
 
-  MOCK_METHOD(void,
-              CreateNewConversationForTabs,
-              (const std::vector<tabs::TabInterface*>&),
-              (override));
-  MOCK_METHOD(void,
-              ShowInstanceForTabs,
-              (const std::vector<tabs::TabInterface*>&, const InstanceId&),
-              (override));
   MOCK_METHOD(std::vector<ConversationInfo>,
               GetRecentlyActiveInstances,
               (size_t, base::TimeDelta),

@@ -26,6 +26,7 @@
 #include "components/autofill/core/browser/data_quality/addresses/profile_token_quality.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/filling/filling_product.h"
+#include "components/autofill/core/browser/form_parsing/autofill_parsing_utils.h"
 #include "components/autofill/core/browser/heuristic_source.h"
 #include "components/autofill/core/browser/metrics/log_event.h"
 #include "components/autofill/core/browser/proto/password_requirements.pb.h"
@@ -494,6 +495,13 @@ class AutofillField : public FormFieldData {
     return ml_supported_types_;
   }
 
+  void set_regex_match_info(std::optional<MatchInfo> match_info) {
+    regex_match_info_ = std::move(match_info);
+  }
+  const std::optional<MatchInfo>& regex_match_info() const LIFETIME_BOUND {
+    return regex_match_info_;
+  }
+
   void UpdateFieldData(const FormFieldData& field_data,
                        base::PassKey<FormStructure> pass_key) {
     UpdateFieldData(field_data);
@@ -581,6 +589,13 @@ class AutofillField : public FormFieldData {
   std::array<FieldType, static_cast<size_t>(HeuristicSource::kMaxValue) + 1>
       local_type_predictions_;
 
+  // Structure that holds the additional information on the regex match (e.g.
+  // matched attribute). The value will be std::nullopt before local heuristics
+  // were executed or there were no matches.
+  // TODO(crbug.com/430258039): Remove once the feature
+  // `AutofillBetterLocalHeuristicPlaceholderSupport` is launched.
+  std::optional<MatchInfo> regex_match_info_;
+
   // The rationalized `GetComputedPredictionResult()`. This is the type used for
   // all autofilling operations. It defaults to `GetComputedPredictionResult()`
   // and is invalidated when `set_heuristic_type()`, `set_server_predictions()`
@@ -625,6 +640,18 @@ class AutofillField : public FormFieldData {
   // Tracks the relative order of all the modifiers of the field. Each
   // `FieldModifier` value is present at most once in the list, and the order of
   // the list depends on the order of events that modified the field's value.
+  //
+  // Only `FillingProduct`s in //components/autofill/ do mutate this, meaning
+  // that products like Password Manager do not append `kAutofill` to this list.
+  //
+  // This attribute is slightly similar to
+  // `FormFieldData::is_autofill_according_to_renderer` with the following
+  // difference in definition:
+  // - `field_modifiers_` is tracked by the browser process using the
+  //   autofill/user-edit signals there.
+  // - `is_autofill_according_to_renderer` is the exact copy of the
+  //   `blink::WebFormControlElement`'s `WebAutofillState` at form extraction
+  //   time in the renderer process.
   std::vector<FieldModifier> field_modifiers_;
 
   // Whether the field should be filled when it is not the highlighted field.

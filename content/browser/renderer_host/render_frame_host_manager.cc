@@ -1198,13 +1198,21 @@ void RenderFrameHostManager::DidChangeOpener(
     if (opener_rfhi) {
       // Ignore this message if |opener_rfhi| is inactive (e.g., in BFCache or
       // pending deletion), or if the FrameTreeNode's current RenderFrameHost
-      // is in a different BrowsingInstance, as it would be incorrect to
-      // establish an opener relationship in those cases.
+      // is in a different BrowsingInstance from the new opener, as it would be
+      // incorrect to establish an opener relationship in those cases.
+      //
+      // Note that `IsInactiveAndDisallowActivation` may return false for
+      // speculative and pending commit RFHs (while killing their renderer
+      // process), because this case is unexpected except for compromised
+      // renderers. As a result, also confirm that opener_rfhi is the current
+      // frame of its FTN, to catch speculative and pending commit cases.
       if (opener_rfhi->IsInactiveAndDisallowActivation(
               DisallowActivationReasonId::kDidChangeOpener) ||
+          opener_rfhi != opener_rfhi->frame_tree_node()->current_frame_host() ||
           !render_frame_host_->GetSiteInstance()
                ->group()
-               ->IsRelatedSiteInstanceGroup(source_site_instance_group)) {
+               ->IsRelatedSiteInstanceGroup(
+                   opener_rfhi->GetSiteInstance()->group())) {
         return;
       }
       opener = opener_rfhi->frame_tree_node();
@@ -4772,6 +4780,33 @@ void RenderFrameHostManager::CreateRenderFrameProxy(
   }
 }
 
+void RenderFrameHostManager::CreateRenderFrameProxyAndAncestorChainIfNeeded(
+    SiteInstanceGroup* group) {
+  // If the frame we need to create a proxy for is a subframe, we need to make
+  // sure the entire ancestor chain exists as proxies as well, otherwise the
+  // subframe proxy would be floating around. Note: we only need to create
+  // ancestors in this frame tree, so we can use IsMainFrame().
+  std::vector<FrameTreeNode*> ancestor_chain;
+  FrameTreeNode* ancestor = frame_tree_node_;
+  while (ancestor) {
+    ancestor_chain.push_back(ancestor);
+    if (ancestor->IsMainFrame()) {
+      ancestor = nullptr;
+    } else {
+      ancestor = ancestor->parent()->frame_tree_node();
+    }
+  }
+
+  // Create proxies, from the top-level frame down to the initially specified
+  // subframe. TODO(crbug.com/40186710): Verify that the behavior is
+  // correct if the frame is pending deletion.
+  for (FrameTreeNode* node : base::Reversed(ancestor_chain)) {
+    node->render_manager()->CreateRenderFrameProxy(
+        group, node->current_frame_host()->browsing_context_state(),
+        /*navigation_metrics_token=*/std::nullopt);
+  }
+}
+
 void RenderFrameHostManager::CreateProxiesForChildFrame(FrameTreeNode* child) {
   TRACE_EVENT_INSTANT(
       "navigation", "RenderFrameHostManager::CreateProxiesForChildFrame_Parent",
@@ -5336,6 +5371,16 @@ void RenderFrameHostManager::CommitPending(
   if (!frame_tree_node_->frame_tree().is_prerendering() &&
       !pending_rfh->IsNestedWithinFencedFrame()) {
     delegate_->CancelModalDialogsForRenderManager();
+  }
+
+  if (is_main_frame && frame_tree_node_->frame_tree().is_primary()) {
+    // Call NotifyPrimaryPageWillBeDeactivated before swapping the
+    // RenderFrameHost. For same-RenderFrameHost navigations,
+    // NotifyPrimaryPageWillBeDeactivated is called by
+    // RenderFrameHostImpl::DidCommitNavigationInternal before resetting the
+    // DocumentAssociatedData.
+    delegate_->NotifyPrimaryPageWillBeDeactivated(
+        render_frame_host_->GetPage());
   }
 
   // Swap in the new frame and make it active. Also ensure the FrameTree

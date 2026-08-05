@@ -98,11 +98,12 @@ bool HTMLMenuItemElement::HasOwnerMenuList() const {
          IsA<HTMLMenuListElement>(*owning_menu_element_);
 }
 
-bool HTMLMenuItemElement::IsCheckable() const {
-  return HasOwnerMenuList() && nearest_ancestor_field_set_ &&
-         nearest_ancestor_field_set_->FastGetAttribute(
-             html_names::kCheckableAttr) &&
-         !GetInvokedSubmenu();
+HTMLMenuItemElement::Checkable HTMLMenuItemElement::CheckableState() const {
+  if (!HasOwnerMenuList() || !nearest_ancestor_field_set_ ||
+      GetInvokedSubmenu()) {
+    return Checkable::None;
+  }
+  return nearest_ancestor_field_set_->CheckableState();
 }
 
 bool HTMLMenuItemElement::checked() const {
@@ -133,12 +134,15 @@ bool HTMLMenuItemElement::IsKeyboardFocusableSlow(
     return true;
   }
 
+  if (owning_menu_element_->IsInDialogMode()) {
+    // Content model is violated, so we make everything tab-focusable.
+    return true;
+  }
+
   // Moving focus between menuitems is done with arrow keys instead of the tab
   // key, so all menuitems are not keyboard focusable except for the first
   // menuitem in a menubar so that using tab to focus into a menubar focuses the
   // first menuitem.
-  // TODO(crbug.com/513637242): Change this behavior when non-conforming
-  // interactive elements are added to the menu.
   if (IsA<HTMLMenuBarElement>(owning_menu_element_.Get())) {
     // If focus is inside of this tree of menu elements, then this menuitem
     // should not be focusable in order to make sure that tabbing or
@@ -311,6 +315,9 @@ void HTMLMenuItemElement::HandleMenuKeyboardEvents(Event& event) {
   // Nothing else below does anything if we're not inside an owner menu that has
   // at least one menu item.
   if (!owning_menu_element_) {
+    return;
+  }
+  if (owning_menu_element_->IsInDialogMode()) {
     return;
   }
   MenuItemList menuitems = owning_menu_element_->ItemList();

@@ -15,7 +15,6 @@
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "base/types/optional_util.h"
-#include "content/browser/interest_group/interest_group_features.h"
 #include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/debug_urls.h"
 #include "content/browser/renderer_host/frame_tree.h"
@@ -49,6 +48,7 @@
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/restore_type.h"
+#include "content/public/browser/web_ui_controller.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
@@ -564,8 +564,9 @@ void Navigator::DidNavigate(
   // Allow main frame paint holding in the following cases:
   //  - We don't have an animated transition. See crbug.com/360844863.
   //  - At least one of the following conditions is true:
-  //    - This is a navigation from the initial document. This part helps with
-  //      tests. See crbug.com/367623929.
+  //    - This is a navigation from the initial document (in cases where this is
+  //      a brand new tab that didn't inherit another origin from an opener).
+  //      This part helps with tests. See crbug.com/367623929.
   //    - This is a same origin navigation (or we're not limiting cross-origin
   //      paint holding)
   //    - There is a user activation. This means that the user interacted with
@@ -578,9 +579,12 @@ void Navigator::DidNavigate(
   // See https://issues.chromium.org/40942531 for reasons we limit paint
   // holding.
   ContentBrowserClient* client = GetContentClient()->browser();
+  const bool allow_paint_holding_for_initial_empty_document =
+      was_on_initial_empty_document && old_frame_origin.opaque() &&
+      !old_frame_origin.GetTupleOrPrecursorTupleIfOpaque().IsValid();
   const bool allow_main_frame_paint_holding =
       !navigation_request->was_initiated_by_animated_transition() &&
-      (was_on_initial_empty_document ||
+      (allow_paint_holding_for_initial_empty_document ||
        old_frame_origin.IsSameOriginWith(params.origin) ||
        old_frame_host->HasStickyUserActivation() ||
        client->AllowNonActivatedCrossOriginPaintHolding() ||
@@ -615,13 +619,6 @@ void Navigator::DidNavigate(
       view_transition_commit_info, navigation_request->GetURL(),
       is_backward_navigation);
 
-  // Reset the old frame host's weak pointer to auction initiator page when it
-  // is a cross-document navigation and the frame does not go into bfcache.
-  if ((base::FeatureList::IsEnabled(features::kDetectInconsistentPageImpl)) &&
-      !was_within_same_document && old_frame_host &&
-      !old_frame_host->IsInBackForwardCache()) {
-    old_frame_host->set_auction_initiator_page(nullptr);
-  }
 
   // The main frame, same site, and cross-site navigation checks for user
   // activation mirror the checks in DocumentLoader::CommitNavigation() (note:
@@ -879,6 +876,7 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
       ongoing_navigation_request->IsRendererInitiated() ==
           request->IsRendererInitiated() &&
       request->GetURL() == ongoing_navigation_request->GetURL() &&
+      request->GetURL().SchemeIsHTTPOrHTTPS() &&
       request->common_params().method == "GET" &&
       ongoing_navigation_request->common_params().method == "GET" &&
       request->GetInitiatorFrameToken() ==
@@ -1152,15 +1150,19 @@ void Navigator::RequestOpenURL(
   params.source_render_process_id =
       render_frame_host->GetProcess()->GetDeprecatedID();
 
-  if (render_frame_host->web_ui()) {
+  if (WebUI* web_ui = render_frame_host->web_ui()) {
     // Note that we hide the referrer for Web UI pages. We don't really want
     // web sites to see a referrer of "chrome://blah" (and some chrome: URLs
     // might have search terms or other stuff we don't want to send to the
     // site), so we send no referrer.
     params.referrer = Referrer();
 
-    // Navigations in Web UI pages count as browser-initiated navigations.
-    params.is_renderer_initiated = false;
+    // Navigations in trusted Web UI pages count as browser-initiated
+    // navigations.
+    if (web_ui->GetController()->GetTrustPolicy() ==
+        WebUIController::TrustPolicy::kTrusted) {
+      params.is_renderer_initiated = false;
+    }
   }
 
   params.blob_url_loader_factory = std::move(blob_url_loader_factory);
@@ -1207,22 +1209,27 @@ void Navigator::NavigateFromFrameProxy(
   // With MPArch there may be multiple main frames and so is_main_frame should
   // not be used to identify outermost main frames.
   if (!delegate_->ShouldAllowRendererInitiatedCrossProcessNavigation(
-          render_frame_host->IsOutermostMainFrame()))
+          render_frame_host, render_frame_host->IsOutermostMainFrame())) {
     return;
+  }
 
   // TODO(creis): Determine if this transfer started as a browser-initiated
   // navigation.  See https://crbug.com/495161.
   bool is_renderer_initiated = true;
   Referrer referrer_to_use(referrer);
-  if (render_frame_host->web_ui()) {
+  if (WebUI* web_ui = render_frame_host->web_ui()) {
     // Note that we hide the referrer for Web UI pages. We don't really want
     // web sites to see a referrer of "chrome://blah" (and some chrome: URLs
     // might have search terms or other stuff we don't want to send to the
     // site), so we send no referrer.
     referrer_to_use = Referrer();
 
-    // Navigations in Web UI pages count as browser-initiated navigations.
-    is_renderer_initiated = false;
+    // Navigations in trusted Web UI pages count as browser-initiated
+    // navigations.
+    if (web_ui->GetController()->GetTrustPolicy() ==
+        WebUIController::TrustPolicy::kTrusted) {
+      is_renderer_initiated = false;
+    }
   }
 
   if (is_renderer_initiated &&

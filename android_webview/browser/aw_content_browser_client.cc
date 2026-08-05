@@ -81,6 +81,7 @@
 #include "components/embedder_support/user_agent_utils.h"
 #include "components/heap_profiling/in_process/heap_profiler_controller.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
+#include "components/network_session_configurator/common/network_switches.h"
 #include "components/page_load_metrics/browser/metrics_navigation_throttle.h"
 #include "components/page_load_metrics/browser/metrics_web_contents_observer.h"
 #include "components/policy/content/policy_blocklist_navigation_throttle.h"
@@ -93,6 +94,8 @@
 #include "components/safe_browsing/core/common/features.h"
 #include "components/safe_browsing/core/common/hashprefix_realtime/hash_realtime_utils.h"
 #include "components/sampling_profiler/process_type.h"
+#include "components/security_state/content/content_utils.h"
+#include "components/security_state/core/security_state.h"
 #include "components/url_matcher/url_matcher.h"
 #include "components/url_matcher/url_util.h"
 #include "components/user_prefs/user_prefs.h"
@@ -125,6 +128,7 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "net/android/network_library.h"
 #include "net/base/features.h"
+#include "net/base/url_util.h"
 #include "net/cookies/cookie_setting_override.h"
 #include "net/cookies/site_for_cookies.h"
 #include "net/http/http_util.h"
@@ -294,18 +298,16 @@ void AwContentBrowserClient::OnNetworkServiceCreated(
   if (net::features::IsDnsPlatformSupported() &&
       base::FeatureList::IsEnabled(features::kWebViewEnableDnsPlatform)) {
     // Using the platform DNS APIs requires:
-    // 1. Enabling the built-in DNS client (insecure_dns_client_enabled = true)
+    // 1. Enabling the built-in DNS in platform mode
+    // (net::InsecureDnsMode::kEnabledPlatform)
     // 2. Disabling DoH queries, these do not yet use the platform DNS APIs
     //    (net::SecureDnsMode::kOff)
-    // 3. Make HostResolverManager use the platform DNS APIs
-    //    (insecure_dns_via_platform_apis_enabled = true)
     network_service->ConfigureStubHostResolver(
-        /*insecure_dns_client_enabled=*/true,
+        net::InsecureDnsMode::kEnabledPlatform,
         /*happy_eyeballs_v3_enabled=*/false, net::SecureDnsMode::kOff,
         net::DnsOverHttpsConfig(),
         /*additional_dns_types_enabled=*/true,
-        /*fallback_doh_nameservers=*/std::vector<net::IPEndPoint>(),
-        /*insecure_dns_via_platform_apis_enabled=*/true);
+        /*fallback_doh_nameservers=*/std::vector<net::IPEndPoint>());
   }
 }
 
@@ -585,6 +587,32 @@ void AwContentBrowserClient::AllowCertificateError(
   }
 }
 
+bool AwContentBrowserClient::IsSecurityLevelAcceptableForWebAuthn(
+    content::RenderFrameHost* rfh,
+    const url::Origin& caller_origin) {
+  if (!base::FeatureList::IsEnabled(
+          android_webview::features::kWebViewWebAuthnRequiresSecureOrigin)) {
+    return true;
+  }
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents) {
+    return false;
+  }
+  if (net::IsLocalhost(caller_origin.GetURL())) {
+    return true;
+  }
+  auto state = security_state::GetVisibleSecurityState(web_contents);
+  if (!state) {
+    return false;
+  }
+  security_state::SecurityLevel security_level =
+      security_state::GetSecurityLevel(*state);
+  return security_level == security_state::SecurityLevel::SECURE ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kIgnoreCertificateErrors);
+}
+
 base::OnceClosure AwContentBrowserClient::SelectClientCertificate(
     content::BrowserContext* browser_context,
     int process_id,
@@ -807,15 +835,16 @@ AwContentBrowserClient::CreateURLLoaderThrottles(
           },
           base::Unretained(this)),
       wc_getter, frame_tree_node_id, navigation_id,
-      // TODO(crbug.com/40663467): rt_lookup_service is
+      // TODO(crbug.com/40663467): url_lookup_service is
       // used to perform real time URL check, which is gated by UKM opted-in.
       // Since AW currently doesn't support UKM, this feature is not enabled.
-      /* rt_lookup_service */ nullptr,
-      /* hash_realtime_service */ nullptr,
-      /* hash_realtime_selection */
+      /*url_lookup_service=*/nullptr,
+      /*hash_realtime_service=*/nullptr,
+      /*hash_realtime_selection=*/
       hash_real_time_selection,
-      /* async_check_tracker */ async_check_tracker,
-      /*referring_app_info=*/std::nullopt));
+      /*async_check_tracker=*/async_check_tracker,
+      /*referring_app_info=*/std::nullopt,
+      /*v5_get_hash_protocol_manager=*/nullptr));
 
   if (browser_context &&
       base::FeatureList::IsEnabled(
@@ -1468,8 +1497,11 @@ bool AwContentBrowserClient::ShouldAnimateBackForwardTransitions() {
 }
 
 bool AwContentBrowserClient::OriginSupportsConcreteCrossOriginIsolation(
+    content::BrowserContext* browser_context,
     const url::Origin& origin) {
-  return false;
+  AwBrowserContext* aw_context =
+      static_cast<AwBrowserContext*>(browser_context);
+  return aw_context->AllowCrossOriginIsolatedApis(origin);
 }
 
 bool AwContentBrowserClient::IsAndroidAdvancedProtectionEnabled() {

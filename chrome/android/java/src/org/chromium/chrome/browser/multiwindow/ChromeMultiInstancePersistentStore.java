@@ -421,6 +421,24 @@ class ChromeMultiInstancePersistentStore extends MultiInstancePersistentStore {
         }
     }
 
+    static int readLastSessionExitType() {
+        return sData != null ? sData.getLastSessionExitType() : 0;
+    }
+
+    static void writeLastSessionExitType(int exitType) {
+        if (sData != null) {
+            sData = sData.toBuilder().setLastSessionExitType(exitType).build();
+            saveProto();
+        }
+    }
+
+    static void clearLastSessionExitType() {
+        if (sData != null) {
+            sData = sData.toBuilder().clearLastSessionExitType().build();
+            saveProto();
+        }
+    }
+
     static List<CrashRecoveryWindowInfo> readCrashRecoveryData() {
         if (sData == null) return Collections.emptyList();
 
@@ -428,9 +446,7 @@ class ChromeMultiInstancePersistentStore extends MultiInstancePersistentStore {
         for (Map.Entry<Integer, InstanceData> entry : sData.getInstancesMap().entrySet()) {
             int instanceId = entry.getKey();
             InstanceData data = entry.getValue();
-            if (data.getIsRecoverable()
-                    && !data.getMarkedForDeletion()
-                    && readNormalTabCount(instanceId) > 0) {
+            if (data.getIsRecoverable() && !data.getMarkedForDeletion()) {
                 crashedInstances.add(new InstanceDataWithId(instanceId, data));
             }
         }

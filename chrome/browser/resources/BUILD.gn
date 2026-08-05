@@ -10,7 +10,6 @@ import("//components/safe_browsing/buildflags.gni")
 import("//content/browser/devtools/features.gni")
 import("//pdf/features.gni")
 import("//printing/buildflags/buildflags.gni")
-import("//third_party/closure_compiler/compile_js.gni")
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 import("//ui/webui/webui_features.gni")
@@ -40,6 +39,7 @@ group("resources") {
   if (enable_extensions_core) {
     public_deps += [
       ":component_extension_resources",
+      "contextual_tasks/extension:resources",
       "omnibox/aim_eligibility_extension:resources",
     ]
   }
@@ -75,6 +75,7 @@ group("resources") {
       "new_tab_footer:resources",
       "omnibox_everywhere:resources",
       "omnibox_popup:resources",
+      "organizer_panel:resources",
       "password_manager:resources",
       "profile_internals:resources",
       "search_engine_choice:resources",
@@ -235,15 +236,6 @@ if (enable_webui_generate_code_cache) {
   }
 }
 
-if (is_chromeos && enable_js_type_check) {
-  group("closure_compile") {
-    deps = [
-      "chromeos:closure_compile",
-      "gaia_auth_host:closure_compile",
-    ]
-  }
-}
-
 if (enable_extensions_core) {
   grit("component_extension_resources") {
     source = "component_extension_resources.grd"
@@ -255,10 +247,7 @@ if (enable_extensions_core) {
 
     # Some resources within component_extension_resources.grd are generated at
     # build time so we include them as explicit dependencies here
-    deps = [
-      "//chrome/browser/resources/contextual_tasks/extension:build_ts",
-      "//chrome/browser/resources/glic/extension:build_ts",
-    ]
+    deps = [ "//chrome/browser/resources/glic/extension:build_ts" ]
 
     if (is_chromeos) {
       deps += [
@@ -280,6 +269,14 @@ if (enable_extensions_core) {
 if (!is_android) {
   grit("app_icon_resources") {
     source = "app_icon/app_icon_resources.grd"
+    inputs = [
+      "app_icon/default_100_percent/app_icon_placeholder_cube.png",
+      "app_icon/default_100_percent/mask/mask.png",
+      "app_icon/default_100_percent/web_app_default_icon.png",
+      "app_icon/default_200_percent/app_icon_placeholder_cube.png",
+      "app_icon/default_200_percent/mask/mask.png",
+      "app_icon/default_200_percent/web_app_default_icon.png",
+    ]
     defines = chrome_grit_defines
     outputs = [
       "grit/app_icon_resources.h",
@@ -294,6 +291,7 @@ if (!is_android) {
   if (is_chromeos) {
     grit("office_web_app_resources") {
       source = "office_web_app/resources.grd"
+      inputs = [ "office_web_app/icons/office_192.png" ]
       defines = chrome_grit_defines
       outputs = [
         "grit/office_web_app_resources.h",
@@ -308,6 +306,23 @@ if (!is_android) {
   if (is_chrome_branded) {
     grit("preinstalled_web_apps_resources") {
       source = "preinstalled_web_apps/resources.grd"
+      inputs = [
+        "preinstalled_web_apps/internal/gmail_192.png",
+        "preinstalled_web_apps/internal/google_chat_192.png",
+        "preinstalled_web_apps/internal/google_docs_192.png",
+        "preinstalled_web_apps/internal/google_drive_192.png",
+        "preinstalled_web_apps/internal/google_sheets_192.png",
+        "preinstalled_web_apps/internal/google_slides_192.png",
+        "preinstalled_web_apps/internal/youtube_192.png",
+      ]
+      if (is_chromeos) {
+        inputs += [
+          "preinstalled_web_apps/internal/gemini_192.png",
+          "preinstalled_web_apps/internal/google_calendar_192.png",
+          "preinstalled_web_apps/internal/notebook_lm_512.png",
+          "preinstalled_web_apps/internal/vids_192.png",
+        ]
+      }
       defines = chrome_grit_defines
       outputs = [
         "grit/preinstalled_web_apps_resources.h",
@@ -324,7 +339,6 @@ group("dev_ui_resources") {
   public_deps = [
     "accessibility:resources",
     "bluetooth_internals:resources",
-    "browsing_topics:resources",
     "chrome_finds_internals:resources",
     "components:resources",
     "context_hub:resources",
@@ -336,7 +350,6 @@ group("dev_ui_resources") {
     "memory_internals:resources",
     "net_internals:resources",
     "omnibox:resources",
-    "personal_context_internals:resources",
     "predictors:resources",
     "subresource_filter:resources",
     "usb_internals:resources",
@@ -346,6 +359,7 @@ group("dev_ui_resources") {
     "//components/download/resources/download_internals:resources",
     "//components/history_clusters/history_clusters_internals/resources",
     "//components/metrics/debug:resources",
+    "//components/notebooks/internals/webui/resources",
     "//components/ntp_tiles/webui/resources",
     "//components/optimization_guide/optimization_guide_internals/resources",
     "//components/policy/resources/webui:resources",
@@ -380,7 +394,6 @@ group("dev_ui_resources") {
       "media_router/internals:resources",
       "multistep_filter_internals:resources",
       "on_device_internals:resources",
-      "personal_context_notice:resources",
       "user_education_internals:resources",
       "webnn_internals:resources",
       "webui_js_error:resources",
@@ -406,7 +419,6 @@ repack("dev_ui_paks") {
   sources = [
     "$root_gen_dir/chrome/accessibility_resources.pak",
     "$root_gen_dir/chrome/bluetooth_internals_resources.pak",
-    "$root_gen_dir/chrome/browsing_topics_internals_resources.pak",
     "$root_gen_dir/chrome/chrome_finds_internals_resources.pak",
     "$root_gen_dir/chrome/components_resources.pak",
     "$root_gen_dir/chrome/context_hub_resources.pak",
@@ -418,7 +430,6 @@ repack("dev_ui_paks") {
     "$root_gen_dir/chrome/memory_internals_resources.pak",
     "$root_gen_dir/chrome/net_internals_resources.pak",
     "$root_gen_dir/chrome/omnibox_resources.pak",
-    "$root_gen_dir/chrome/personal_context_internals_resources.pak",
     "$root_gen_dir/chrome/predictors_resources.pak",
     "$root_gen_dir/chrome/subresource_filter_internals_resources.pak",
     "$root_gen_dir/chrome/usb_internals_resources.pak",
@@ -429,6 +440,7 @@ repack("dev_ui_paks") {
     "$root_gen_dir/components/download_internals_resources.pak",
     "$root_gen_dir/components/history_clusters_internals_resources.pak",
     "$root_gen_dir/components/metrics_internals_resources.pak",
+    "$root_gen_dir/components/notebooks_internals_resources.pak",
     "$root_gen_dir/components/ntp_tiles_internals_resources.pak",
     "$root_gen_dir/components/optimization_guide_internals_resources.pak",
     "$root_gen_dir/components/policy_resources.pak",
@@ -462,7 +474,6 @@ repack("dev_ui_paks") {
       "$root_gen_dir/chrome/media_router_internals_resources.pak",
       "$root_gen_dir/chrome/multistep_filter_internals_resources.pak",
       "$root_gen_dir/chrome/on_device_internals_resources.pak",
-      "$root_gen_dir/chrome/personal_context_notice_resources.pak",
       "$root_gen_dir/chrome/user_education_internals_resources.pak",
       "$root_gen_dir/chrome/webui_js_error_resources.pak",
     ]

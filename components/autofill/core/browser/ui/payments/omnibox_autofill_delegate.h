@@ -15,6 +15,7 @@
 #include "components/autofill/core/browser/ui/autofill_suggestion_delegate.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom.h"
 #include "components/autofill/core/common/unique_ids.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 
 namespace autofill {
 
@@ -47,6 +48,8 @@ class OmniboxAutofillDelegate : public AutofillManager::Observer,
   void OnAfterFormsSeen(AutofillManager& manager,
                         base::span<const FormGlobalId> updated_forms,
                         base::span<const FormGlobalId> removed_forms) override;
+  void OnAfterDidAutofillForm(AutofillManager& manager,
+                              FormGlobalId form) override;
 
   // AutofillSuggestionDelegate:
   bool OnFilterChanged(const std::u16string& filter) override;
@@ -69,6 +72,9 @@ class OmniboxAutofillDelegate : public AutofillManager::Observer,
   // mojom::AutofillVisibilityObserver:
   void OnFieldBecameVisible() override;
 
+  // Called when the omnibox chip is actually shown to the user.
+  void OnChipShown();
+
  private:
   // Returns `true` if `manager`'s AutofillDriver is active, has no parent, and
   // is not embedded. Returns `false` otherwise. Most OmniboxAutofillDelegate
@@ -76,23 +82,29 @@ class OmniboxAutofillDelegate : public AutofillManager::Observer,
   bool IsOutermostMainFrameActiveAutofillManager(AutofillManager& manager);
 
   // Checks if the given `field` is in the main frame.
-  bool FieldIsInMainFrame(AutofillManager& manager,
+  bool IsFieldInMainFrame(AutofillManager& manager,
                           const AutofillField& field) const;
 
-  // Resets the delegate's internal state, clearing `candidate_form_found_`
+  // Checks if `trigger_field_global_id_` is in the frame.
+  bool IsTriggerFieldGlobalIdInFrame(AutofillDriver& driver) const;
+
+  // Fills or previews the card associated with the `suggestion`.
+  void FillOrPreviewCard(const Suggestion& suggestion,
+                         mojom::ActionPersistence action_persistence);
+
+  // Resets the Omnibox Autofill flow. Hides the omnibox chip via the payments
+  // autofill client if it was shown (when `field_became_visible_` is `true`).
+  // Clears `candidate_form_found_`, `field_became_visible_`,
   // `trigger_form_global_id_`, and `trigger_field_global_id_`.
   void Reset();
-
-  // Hides the omnibox autofill chip via the payments autofill client and resets
-  // the delegate's internal state. This is called when the autofill manager
-  // state transitions away from active or when the triggering form is removed
-  // from the DOM.
-  void HideOmniboxAutofillChip();
 
   // If true, the OmniboxAutofillDelegate is likely waiting for the user to
   // scroll the candidate form into the viewport, so parsing logic to find
   // candidate forms should no longer be run.
   bool candidate_form_found_ = false;
+
+  // If true, the IntersectionObserver reported that the field became visible.
+  bool field_became_visible_ = false;
 
   // The global ID of the form for which Omnibox Autofill should trigger.
   FormGlobalId trigger_form_global_id_;
@@ -101,9 +113,15 @@ class OmniboxAutofillDelegate : public AutofillManager::Observer,
   // that this is ensured to be of type CREDIT_CARD_NUMBER.
   FieldGlobalId trigger_field_global_id_;
 
+  // The AutofillManager that contains `trigger_form_global_id_` and
+  // `trigger_field_global_id_`.
+  base::WeakPtr<AutofillManager> trigger_autofill_manager_;
+
   const raw_ref<AutofillClient> client_;
 
   ScopedAutofillManagersObservation autofill_managers_observation_{this};
+
+  mojo::Receiver<mojom::AutofillVisibilityObserver> visibility_receiver_{this};
 
   base::WeakPtrFactory<OmniboxAutofillDelegate> weak_ptr_factory_{this};
 };

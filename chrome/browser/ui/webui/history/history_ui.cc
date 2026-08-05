@@ -47,10 +47,12 @@
 #include "chrome/browser/ui/webui/managed_ui_handler.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/page_not_available_for_guest/page_not_available_for_guest_ui.h"
+#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/history_resources.h"
 #include "chrome/grit/history_resources_map.h"
+#include "components/critical_actions/core/browser/features.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/history/core/browser/features.h"
 #include "components/history/core/common/pref_names.h"
@@ -127,6 +129,9 @@ content::WebUIDataSource* CreateAndAddHistoryUIHTMLSource(Profile* profile) {
   source->AddString("accountPictureUrl",
                     profiles::GetPlaceholderAvatarIconUrl());
 
+  const bool is_critical_actions_enabled = base::FeatureList::IsEnabled(
+      critical_actions::features::kCriticalActionHistory);
+
   // The history page footer can display messages about other forms of
   // browsing history, linking to Google My Activity (GMA) and/or
   // Gemini Apps Activity (GAA). At most one message is shown, depending on
@@ -141,9 +146,11 @@ content::WebUIDataSource* CreateAndAddHistoryUIHTMLSource(Profile* profile) {
                                  chrome::kMyActivityGeminiAppsUrl));
   source->AddString(
       "sidebarFooterGMAAndGAA",
-      l10n_util::GetStringFUTF16(IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA,
-                                 chrome::kMyActivityUrlInHistory,
-                                 chrome::kMyActivityGeminiAppsUrl));
+      l10n_util::GetStringFUTF16(
+          is_critical_actions_enabled
+              ? IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA_CRITICAL_ACTIONS
+              : IDS_HISTORY_OTHER_FORMS_OF_HISTORY_GMA_AND_GAA,
+          chrome::kMyActivityUrlInHistory, chrome::kMyActivityGeminiAppsUrl));
   // Links that are used in the messages above.
   source->AddString("sidebarFooterGMALink", chrome::kMyActivityUrlInHistory);
   source->AddString("sidebarFooterGAALink", chrome::kMyActivityGeminiAppsUrl);
@@ -226,6 +233,7 @@ content::WebUIDataSource* CreateAndAddHistoryUIHTMLSource(Profile* profile) {
   source->AddLocalizedStrings(kHistoryEmbeddingsStrings);
   source->AddBoolean("isBrowsingHistoryActorIntegrationM3Enabled",
                      history::IsBrowsingHistoryActorIntegrationM3Enabled());
+  source->AddBoolean("isCriticalActionsEnabled", is_critical_actions_enabled);
 
   source->AddString("webuiRefresh2026", features::IsWebuiRefresh2026Enabled()
                                             ? "webui-refresh-2026"
@@ -262,6 +270,8 @@ HistoryUI::HistoryUI(content::WebUI* web_ui)
       CreateAndAddHistoryUIHTMLSource(profile);
   ManagedUIHandler::Initialize(web_ui, data_source);
 
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
+
   pref_change_registrar_.Init(profile->GetPrefs());
   pref_change_registrar_.Add(history_clusters::prefs::kVisible,
                              base::BindRepeating(&HistoryUI::UpdateDataSource,
@@ -283,11 +293,10 @@ HistoryUI::~HistoryUI() = default;
 WEB_UI_CONTROLLER_TYPE_IMPL(HistoryUI)
 
 // static
-base::RefCountedMemory* HistoryUI::GetFaviconResourceBytes(
+scoped_refptr<base::RefCountedMemory> HistoryUI::GetFaviconResourceBytes(
     ui::ResourceScaleFactor scale_factor) {
-  return static_cast<base::RefCountedMemory*>(
-      ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
-          IDR_HISTORY_FAVICON, scale_factor));
+  return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
+      IDR_HISTORY_FAVICON, scale_factor);
 }
 
 void HistoryUI::BindInterface(

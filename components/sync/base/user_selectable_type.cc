@@ -57,7 +57,7 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(
   // TODO(crbug.com/476335087): In CL #3, map GEMINI_THREAD to an existing
   // selectable type or to a new one. The first option should be trivial, the
   // second requires touching UI code across platforms.
-  static_assert(65 == syncer::GetNumDataTypes(),
+  static_assert(67 == syncer::GetNumDataTypes(),
                 "Almost always when adding a new Data, you must tie it to "
                 "a UserSelectableType below (new or existing) so the user can "
                 "disable syncing of that data. Today you must also update the "
@@ -91,7 +91,8 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(
     case UserSelectableType::kThemes:
       return {kThemesTypeName, THEMES, {THEMES, THEMES_IOS, THEMES_ANDROID}};
     case UserSelectableType::kHistory: {
-      DataTypeSet types = {HISTORY, HISTORY_DELETE_DIRECTIVES, USER_EVENTS};
+      DataTypeSet types = {HISTORY, HISTORY_DELETE_DIRECTIVES, USER_EVENTS,
+                           JOURNEY};
       // With `kSpellcheckSeparateLocalAndAccountDictionaries` enabled,
       // `DICTIONARY` is controlled by the History opt-in.
       if ((!skip_feature_checks_if_early || base::FeatureList::GetInstance()) &&
@@ -115,17 +116,17 @@ UserSelectableTypeInfo GetUserSelectableTypeInfo(
       return {kReadingListTypeName, READING_LIST, {READING_LIST}};
     case UserSelectableType::kTabs:
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-      return {
-          kTabsTypeName,
-          SESSIONS,
-          {SESSIONS, SAVED_TAB_GROUP, SHARED_COMMENT, SHARED_TAB_GROUP_DATA,
-           COLLABORATION_GROUP, SHARED_TAB_GROUP_ACCOUNT_DATA, WORKSPACE_DESK,
-           ENCRYPTED_TAB_CONTEXT_CONTAINER, ENCRYPTED_TAB_CONTEXT_ITEM}};
+      return {kTabsTypeName,
+              SESSIONS,
+              {SESSIONS, SAVED_TAB_GROUP, SHARED_COMMENT, SHARED_TAB_GROUP_DATA,
+               COLLABORATION_GROUP, SHARED_TAB_GROUP_ACCOUNT_DATA,
+               WORKSPACE_DESK, ENCRYPTED_TAB_CONTEXT_CONTAINER,
+               ENCRYPTED_TAB_CONTEXT_ITEM, NOTEBOOK}};
 #else
       return {kTabsTypeName,
               SESSIONS,
               {SESSIONS, WORKSPACE_DESK, ENCRYPTED_TAB_CONTEXT_CONTAINER,
-               ENCRYPTED_TAB_CONTEXT_ITEM}};
+               ENCRYPTED_TAB_CONTEXT_ITEM, NOTEBOOK}};
 #endif
     case UserSelectableType::kSavedTabGroups:
       // Note: Tab groups is presented as a separate type only on desktop.

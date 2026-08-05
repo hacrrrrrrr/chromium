@@ -306,12 +306,6 @@ class CORE_EXPORT PaintLayerScrollableArea final
   bool IsScrollCornerVisible() const override;
   gfx::Rect ScrollCornerRect() const override;
   void SetScrollCornerNeedsPaintInvalidation() override;
-  gfx::Rect ConvertFromScrollbarToContainingEmbeddedContentView(
-      const Scrollbar&,
-      const gfx::Rect&) const override;
-  gfx::Point ConvertFromScrollbarToContainingEmbeddedContentView(
-      const Scrollbar&,
-      const gfx::Point&) const override;
   gfx::Point ConvertFromContainingEmbeddedContentViewToScrollbar(
       const Scrollbar&,
       const gfx::Point&) const override;
@@ -642,7 +636,7 @@ class CORE_EXPORT PaintLayerScrollableArea final
 
   void SetTickmarksOverride(Vector<gfx::Rect> tickmarks);
 
-  bool MayCompositeScrollbar(const Scrollbar&) const;
+  bool MayCompositeScrollbar(const Scrollbar&) const override;
 
   void EstablishScrollbarRoot(bool freeze_horizontal, bool freeze_vertical);
   void ClearScrollbarRoot();

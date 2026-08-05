@@ -39,6 +39,7 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history_embeddings/history_embeddings_utils.h"
 #include "chrome/browser/omnibox/autocomplete_controller_emitter_factory.h"
+#include "chrome/browser/page_load_metrics/chrome_initiator_location.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/predictors/loading_predictor.h"
@@ -71,7 +72,6 @@
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_tab_helper.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_closer.h"
 #include "chrome/browser/ui/views/search_engines/dse_reset_dialog.h"
 #include "chrome/common/channel_info.h"
@@ -333,7 +333,7 @@ omnibox::OmniboxPopupCloser* ChromeOmniboxClient::GetOmniboxPopupCloser() {
   if (!browser_) {
     return nullptr;
   }
-  auto* bwf = browser_->browser_window_features();
+  auto* bwf = &browser_->GetFeatures();
   if (!bwf) {
     return nullptr;
   }
@@ -592,12 +592,10 @@ void ChromeOmniboxClient::CheckConditionsAndLaunchSurvey() {
     return;
   }
 
-  auto* location_bar_view = browser_view->GetLocationBarView();
+  auto* location_bar = browser_view->GetLocationBar();
 
   // Don't show the HaTS survey if the location bar has focus.
-  if (location_bar_view &&
-      !location_bar_view->Contains(
-          location_bar_view->GetFocusManager()->GetFocusedView())) {
+  if (location_bar && !location_bar->IsFocusWithin()) {
     hats_service->LaunchSurvey(
         survey_trigger, base::DoNothing(), base::DoNothing(), {},
         {{"page classification",
@@ -903,13 +901,10 @@ void ChromeOmniboxClient::OnAutocompleteAccept(
     auto navigation = chrome::OpenCurrentURL(browser_);
     if (navigation) {
       if (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED)) {
-        page_load_metrics::NavigationHandleUserData::
-            AttachOmniboxDirectUrlInputNavigationHandleUserData(*navigation);
+        AttachOmniboxDirectUrlInputNavigationHandleUserData(*navigation);
       } else if (ui::PageTransitionCoreTypeIs(transition,
                                               ui::PAGE_TRANSITION_GENERATED)) {
-        page_load_metrics::NavigationHandleUserData::
-            AttachOmniboxDefaultSearchEngineNavigationHandleUserData(
-                *navigation);
+        AttachOmniboxDefaultSearchEngineNavigationHandleUserData(*navigation);
       }
     }
     ChromeOmniboxNavigationObserver::Create(navigation.get(), profile_, text,

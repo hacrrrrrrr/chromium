@@ -102,6 +102,7 @@ enum class Channel;
 namespace personal_context {
 enum class PersonalContextEligibilityState;
 class PersonalContextEligibilityService;
+class PersonalContextFirstRunService;
 }
 
 namespace subscription_eligibility {
@@ -151,6 +152,7 @@ struct Suggestion;
 enum class SuggestionHidingReason;
 enum class SuggestionType;
 class SingleFieldFillRouter;
+class TouchToFillAutofillDelegate;
 class ValuablesDataManager;
 class AutofillAiPersonalContextAccessManager;
 class VotesUploader;
@@ -436,18 +438,10 @@ class AutofillClient {
   // Autocomplete and merchant promo codes.
   virtual SingleFieldFillRouter& GetSingleFieldFillRouter() = 0;
 
-  // Returns true if Autofill suggestions should include the Personal Context
-  // notice.
-  virtual bool ShouldShowPersonalContextAmbientAutofillNotice() const;
-
-  // Marks the Personal Context notice as acknowledged.
-  virtual void MarkPersonalContextAmbientAutofillNoticeAsAcknowledged();
-
-  // Returns true if AtMemory UI should include the Personal Context notice.
-  virtual bool ShouldShowPersonalContextAtMemoryNotice() const;
-
-  // Marks the AtMemory Personal Context notice as acknowledged.
-  virtual void MarkPersonalContextAtMemoryNoticeAsAcknowledged();
+  // Returns the PersonalContextFirstRunService instance associated with the
+  // client.
+  virtual personal_context::PersonalContextFirstRunService*
+  GetPersonalContextFirstRunService();
 
   // Gets the AutocompleteHistoryManager instance associated with the client.
   virtual AutocompleteHistoryManager* GetAutocompleteHistoryManager() = 0;
@@ -691,11 +685,6 @@ class AutofillClient {
       const base::flat_set<EntityTypeName>& saved_entities,
       const FieldTypeSet& triggering_field_types);
 
-  // Triggers a survey after the user sees an Autofill AI save prompt.
-  virtual void TriggerAutofillAiSavePromptSurvey(
-      bool prompt_accepted,
-      EntityType entity_type,
-      const base::flat_set<EntityTypeName>& saved_entities);
 
   // Returns whether there is an active actor task for this client's tab (if
   // one exists).
@@ -752,11 +741,13 @@ class AutofillClient {
   virtual const AutofillAblationStudy& GetAblationStudy() const;
 
 #if BUILDFLAG(IS_ANDROID)
-  // Shows the @memory bottom sheet. Triggered by keyboard accessory controller.
-  virtual void ShowAtMemoryBottomSheet(
-      base::span<const Suggestion> suggestions,
-      base::WeakPtr<AutofillSuggestionDelegate> delegate);
-  virtual void HideAtMemoryBottomSheet() {}
+  // Shows the Personal Context ambient autofill notice. Returns whether the
+  // notice was successfully shown.
+  virtual bool ShowAmbientAutoFillNotice(
+      base::WeakPtr<TouchToFillAutofillDelegate> delegate);
+
+  // Hides the Personal Context ambient autofill notice.
+  virtual void HideAmbientAutoFillNotice();
 
   // The AutofillSnackbarController is used to show a snackbar notification
   // on Android.
@@ -853,8 +844,11 @@ class AutofillClient {
   // Notifies the user that an Autofill AI operation save to Wallet failed.
   virtual void ShowAutofillAiSaveToWalletFailureNotification();
 
-  // Notifies the user that operation to fetch data from Wallet failed.
-  virtual void ShowAutofillAiFetchFromWalletFailureNotification();
+  // Notifies the user that operation to fetch data failed.
+  virtual void ShowAutofillAiFetchEntityFailureNotification();
+
+  // Notifies the user that an AtMemory operation to fetch PII data failed.
+  virtual void ShowAtMemoryFetchFailureNotification();
 
   // Notifies the user that prefetching Autofill AI entities failed.
   virtual void ShowAutofillAiPreFetchFailureNotification();

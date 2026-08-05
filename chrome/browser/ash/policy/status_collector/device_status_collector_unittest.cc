@@ -67,6 +67,7 @@
 #include "chrome/browser/ash/policy/status_collector/enterprise_activity_storage.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/ash/settings/scoped_testing_cros_settings.h"
+#include "chrome/browser/ash/settings/stub_cros_settings_provider.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/global_features.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
@@ -137,6 +138,7 @@
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/test_windows.h"
+#include "ui/message_center/message_center.h"
 
 namespace policy {
 
@@ -878,6 +880,8 @@ class DeviceStatusCollectorTestBase : public testing::Test {
   ~DeviceStatusCollectorTestBase() override = default;
 
   void SetUp() override {
+    message_center::MessageCenter::Initialize();
+
     scoped_stub_install_attributes_.Get()->SetCloudManaged("managed.com",
                                                            "device_id");
 
@@ -990,6 +994,7 @@ class DeviceStatusCollectorTestBase : public testing::Test {
     content::RunAllTasksUntilIdle();
     storage::ExternalMountPoints::GetSystemInstance()->RevokeAllFileSystems();
     DiskMountManager::Shutdown();
+    message_center::MessageCenter::Shutdown();
   }
 
  protected:

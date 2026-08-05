@@ -117,8 +117,7 @@ bool IsSystemWebUIHost(std::string_view host) {
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-// Add hosts here to be included in chrome://chrome-urls (about:about).
-// These hosts will also be suggested by BuiltinProvider.
+// Add hosts here to be suggested by BuiltinProvider.
 base::span<const base::cstring_view> ChromeURLHosts() {
   static constexpr auto kChromeURLHosts = std::to_array<base::cstring_view>({
       kChromeUIAboutHost,
@@ -129,7 +128,6 @@ base::span<const base::cstring_view> ChromeURLHosts() {
 #endif
       kChromeUIAutofillInternalsHost,
       kChromeUIBluetoothInternalsHost,
-      kChromeUIBrowsingTopicsInternalsHost,
       kChromeUIChromeFindsInternalsHost,
       kChromeUIChromeURLsHost,
       kChromeUIComponentsHost,
@@ -201,7 +199,6 @@ base::span<const base::cstring_view> ChromeURLHosts() {
 #if !BUILDFLAG(IS_ANDROID)
       kChromeUIWebAppInternalsHost,
 #endif
-      content::kChromeUIPrivateAggregationInternalsHost,
       content::kChromeUIBlobInternalsHost,
       content::kChromeUIDinoHost,
       content::kChromeUIGpuHost,
@@ -288,6 +285,7 @@ base::span<const base::cstring_view> ChromeURLHosts() {
       ash::kChromeUIDlpInternalsHost,
 #endif  // BUILDFLAG(IS_CHROMEOS)
 #if !BUILDFLAG(IS_ANDROID)
+      kChromeUIOrganizerPanelHost,
       kChromeUIWebuiBrowserHost,
 #endif  // !BUILDFLAG(IS_ANDROID)
   });

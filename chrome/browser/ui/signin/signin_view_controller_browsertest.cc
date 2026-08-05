@@ -6,9 +6,6 @@
 
 #include <string_view>
 
-#include "chrome/browser/ui/signin/signin_qrcode_infobar.h"
-#include "chrome/browser/ui/signin/signin_qrcode_model.h"
-#include "content/public/test/url_loader_interceptor.h"
 #include "base/scoped_observation.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
@@ -26,6 +23,8 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/signin/chrome_signout_confirmation_prompt.h"
 #include "chrome/browser/ui/signin/cross_device_signin_qr_bubble.h"
+#include "chrome/browser/ui/signin/signin_qrcode_infobar.h"
+#include "chrome/browser/ui/signin/signin_qrcode_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -861,6 +860,11 @@ class SigninViewControllerSignInBanner
     mock_bluetooth_adapter_ = base::MakeRefCounted<AsyncMockBluetoothAdapter>();
     ON_CALL(*mock_bluetooth_adapter_, IsPresent())
         .WillByDefault(testing::Return(true));
+    ON_CALL(*mock_bluetooth_adapter_, IsPowered())
+        .WillByDefault(testing::Return(true));
+    ON_CALL(*mock_bluetooth_adapter_, GetOsPermissionStatus())
+        .WillByDefault(testing::Return(
+            device::BluetoothAdapter::PermissionStatus::kAllowed));
     device::BluetoothAdapterFactory::SetAdapterForTesting(
         mock_bluetooth_adapter_);
     // Other parts of Chrome may keep a reference to the bluetooth adapter.
@@ -1021,7 +1025,7 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerSignInBanner, EndToEndFlow) {
   // 1. Open the sign-in page, which triggers the tab helper and starts the
   // flow.
   signin_ui_util::SignInFromSingleAccountPromo(
-      browser()->profile(), CoreAccountInfo(),
+      browser()->GetProfile(), CoreAccountInfo(),
       signin_metrics::AccessPoint::kPasswordBubble);
 
   content::WebContents* sign_in_tab =
@@ -1090,15 +1094,8 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
   SetPrimaryAccount();
 
   views::AnyWidgetObserver observer(views::test::AnyWidgetTestPasskey{});
-  views::Widget* bubble_widget = nullptr;
-  base::RunLoop run_loop;
-  observer.set_shown_callback(base::BindRepeating(
-      [](views::Widget** out_widget, base::RepeatingClosure quit_closure,
-          views::Widget* widget) {
-        *out_widget = widget;
-        quit_closure.Run();
-      },
-      &bubble_widget, run_loop.QuitClosure()));
+  base::test::TestFuture<views::Widget*> widget_future;
+  observer.set_shown_callback(widget_future.GetRepeatingCallback());
 
   base::MockCallback<base::OnceClosure> closing_callback;
   EXPECT_CALL(closing_callback, Run()).Times(1);
@@ -1115,7 +1112,7 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
       .signin_view_controller()
       ->ShowCrossDeviceSigninQrBubble(closing_callback.Get());
 
-  run_loop.Run();
+  views::Widget* bubble_widget = widget_future.Get();
   ASSERT_TRUE(bubble_widget);
 
   views::WidgetDelegate* delegate = bubble_widget->widget_delegate();
@@ -1168,20 +1165,17 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
                        ClosesOnSignOut) {
   AccountInfo account_info = SetPrimaryAccount();
 
+  views::AnyWidgetObserver observer(views::test::AnyWidgetTestPasskey{});
+  base::test::TestFuture<views::Widget*> widget_future;
+  observer.set_shown_callback(widget_future.GetRepeatingCallback());
+
   base::MockCallback<base::OnceClosure> closing_callback;
   browser()
       ->GetFeatures()
       .signin_view_controller()
       ->ShowCrossDeviceSigninQrBubble(closing_callback.Get());
+  views::Widget* bubble_widget = widget_future.Get();
 
-  views::Widget* bubble_widget =
-      views::ElementTrackerViews::GetInstance()
-          ->GetFirstMatchingView(
-              kCrossDeviceSigninQrBubbleWebViewElementId,
-              views::ElementTrackerViews::GetContextForWidget(
-                  BrowserView::GetBrowserViewForBrowser(browser())
-                      ->GetWidget()))
-          ->GetWidget();
   ASSERT_TRUE(bubble_widget);
   EXPECT_TRUE(bubble_widget->IsVisible());
 
@@ -1194,20 +1188,17 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
                        ClosesOnRefreshTokenRemoved) {
   AccountInfo account_info = SetPrimaryAccount();
 
+  views::AnyWidgetObserver observer(views::test::AnyWidgetTestPasskey{});
+  base::test::TestFuture<views::Widget*> widget_future;
+  observer.set_shown_callback(widget_future.GetRepeatingCallback());
+
   base::MockCallback<base::OnceClosure> closing_callback;
   browser()
       ->GetFeatures()
       .signin_view_controller()
       ->ShowCrossDeviceSigninQrBubble(closing_callback.Get());
+  views::Widget* bubble_widget = widget_future.Get();
 
-  views::Widget* bubble_widget =
-      views::ElementTrackerViews::GetInstance()
-          ->GetFirstMatchingView(
-              kCrossDeviceSigninQrBubbleWebViewElementId,
-              views::ElementTrackerViews::GetContextForWidget(
-                  BrowserView::GetBrowserViewForBrowser(browser())
-                      ->GetWidget()))
-          ->GetWidget();
   ASSERT_TRUE(bubble_widget);
   EXPECT_TRUE(bubble_widget->IsVisible());
 
@@ -1219,27 +1210,25 @@ IN_PROC_BROWSER_TEST_F(SigninViewControllerCrossDeviceSigninBrowserTest,
                        ClosesOnRefreshTokenError) {
   AccountInfo account_info = SetPrimaryAccount();
 
+  views::AnyWidgetObserver observer(views::test::AnyWidgetTestPasskey{});
+  base::test::TestFuture<views::Widget*> widget_future;
+  observer.set_shown_callback(widget_future.GetRepeatingCallback());
+
   base::MockCallback<base::OnceClosure> closing_callback;
   browser()
       ->GetFeatures()
       .signin_view_controller()
       ->ShowCrossDeviceSigninQrBubble(closing_callback.Get());
+  views::Widget* bubble_widget = widget_future.Get();
 
-  views::Widget* bubble_widget =
-      views::ElementTrackerViews::GetInstance()
-          ->GetFirstMatchingView(
-              kCrossDeviceSigninQrBubbleWebViewElementId,
-              views::ElementTrackerViews::GetContextForWidget(
-                  BrowserView::GetBrowserViewForBrowser(browser())
-                      ->GetWidget()))
-          ->GetWidget();
   ASSERT_TRUE(bubble_widget);
   EXPECT_TRUE(bubble_widget->IsVisible());
 
   views::test::WidgetDestroyedWaiter waiter(bubble_widget);
   identity_test_env()->UpdatePersistentErrorOfRefreshTokenForAccount(
       account_info.account_id,
-      GoogleServiceAuthError(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
+      GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+          GoogleServiceAuthError::InvalidGaiaCredentialsReason::UNKNOWN));
   waiter.Wait();
 }
 

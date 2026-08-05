@@ -37,13 +37,10 @@ void CSSPathInterpolationType::ApplyStandardPropertyValue(
     const NonInterpolableValue* non_interpolable_value,
     StyleResolverState& state) const {
   CHECK(non_interpolable_value);
-  StylePath* path = PathInterpolationFunctions::AppliedValue(
+  BasicShapeInfo info = PathInterpolationFunctions::AppliedValue(
       interpolable_value, *non_interpolable_value);
-  CHECK(path);
-  shape_property_functions::SetBasicShape(
-      CssProperty(), *path,
-      PathInterpolationFunctions::GetBox(*non_interpolable_value),
-      state.StyleBuilder());
+  shape_property_functions::SetBasicShape(CssProperty(), info,
+                                          state.StyleBuilder());
 }
 
 void CSSPathInterpolationType::Composite(
@@ -66,7 +63,7 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertInitial(
     const StyleResolverState&,
     ConversionCheckers&) const {
   return PathInterpolationFunctions::ConvertValue(
-      nullptr, PathInterpolationFunctions::kForceAbsolute, {});
+      {}, PathInterpolationFunctions::kForceAbsolute);
 }
 
 class InheritedPathChecker : public CSSInterpolationType::CSSConversionChecker {
@@ -103,8 +100,7 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertInherit(
   conversion_checkers.push_back(MakeGarbageCollected<InheritedPathChecker>(
       CssProperty(), To<StylePath>(parent_info.shape), parent_info.box));
   return PathInterpolationFunctions::ConvertValue(
-      To<StylePath>(parent_info.shape),
-      PathInterpolationFunctions::kForceAbsolute, parent_info.box);
+      parent_info, PathInterpolationFunctions::kForceAbsolute);
 }
 
 InterpolationValue CSSPathInterpolationType::MaybeConvertValue(
@@ -118,8 +114,8 @@ InterpolationValue CSSPathInterpolationType::MaybeConvertValue(
     return nullptr;
   }
   return PathInterpolationFunctions::ConvertValue(
-      path_value->GetStylePath(), PathInterpolationFunctions::kForceAbsolute,
-      css_info.box);
+      {path_value->GetStylePath(), css_info.box},
+      PathInterpolationFunctions::kForceAbsolute);
 }
 
 InterpolationValue
@@ -127,8 +123,7 @@ CSSPathInterpolationType::MaybeConvertStandardPropertyUnderlyingValue(
     const ComputedStyle& style) const {
   auto info = GetPathInfo(CssProperty(), style);
   return PathInterpolationFunctions::ConvertValue(
-      To<StylePath>(info.shape), PathInterpolationFunctions::kForceAbsolute,
-      info.box);
+      info, PathInterpolationFunctions::kForceAbsolute);
 }
 
 PairwiseInterpolationValue CSSPathInterpolationType::MaybeMergeSingles(

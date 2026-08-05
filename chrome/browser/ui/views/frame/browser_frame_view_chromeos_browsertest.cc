@@ -75,7 +75,6 @@
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_coordinator.h"
 #include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/page_action/test_support/page_action_test_support.h"
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view_base.h"
@@ -364,7 +363,7 @@ IN_PROC_BROWSER_TEST_P(BrowserFrameViewChromeOSTest,
                        RestoreMinimizedBrowserUpdatesCaption) {
   // Enable session service.
   SessionStartupPref pref(SessionStartupPref::LAST);
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   SessionStartupPref::SetStartupPref(profile, pref);
 
   SessionServiceTestHelper helper(profile);
@@ -502,21 +501,10 @@ class WebAppFrameViewChromeOSTest
     return web_app_frame_toolbar_->paint_as_active_;
   }
 
-  IconLabelBubbleView* GetPageActionView(
-      std::variant<actions::ActionId, PageActionIconType> action_type) {
-    if (std::holds_alternative<actions::ActionId>(action_type)) {
-      auto action_id = std::get<actions::ActionId>(action_type);
-      auto* provider = browser_view_->toolbar_button_provider();
-      return page_actions::GetIconLabelBubbleViewForTesting(
-          provider->GetPageActionViewInterface(action_id), action_id);
-    } else {
-      PageActionIconType type = std::get<PageActionIconType>(action_type);
-      if (!IsPageActionMigrated(type)) {
-        return browser_view_->toolbar_button_provider()->GetPageActionIconView(
-            type);
-      }
-      return nullptr;
-    }
+  IconLabelBubbleView* GetPageActionView(actions::ActionId action_id) {
+    auto* provider = browser_view_->toolbar_button_provider();
+    return page_actions::GetIconLabelBubbleViewForTesting(
+        provider->GetPageActionViewInterface(action_id), action_id);
   }
 
   ContentSettingImageView* GrantGeolocationPermission() {
@@ -660,7 +648,7 @@ IN_PROC_BROWSER_TEST_P(WebAppFrameViewChromeOSTest, ShowZoomIcon) {
       app_browser_->tab_strip_model()->GetActiveWebContents();
   zoom::ZoomController* zoom_controller =
       zoom::ZoomController::FromWebContents(web_contents);
-  IconLabelBubbleView* zoom_icon = GetPageActionView(kActionZoomNormal);
+  IconLabelBubbleView* zoom_icon = GetPageActionView(kActionShowZoomBubble);
 
   ZoomBubbleCoordinator* zoom_bubble_coordinator =
       ZoomBubbleCoordinator::From(app_browser_);
@@ -2119,7 +2107,7 @@ class BrowserFrameViewAshThemeChangeTest
   }
 
   // Returns the `Profile` associated with the web app under test.
-  Profile* profile() { return browser()->profile(); }
+  Profile* profile() { return browser()->GetProfile(); }
 
  private:
   ui::MockOsSettingsProvider os_settings_provider_;
@@ -2163,7 +2151,10 @@ IN_PROC_BROWSER_TEST_P(BrowserFrameViewAshThemeChangeTest, ThemeChange) {
   // Verify background color is immediately resolved from the app controller
   // despite the fact that the web contents background color hasn't loaded
   // yet.
-  EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+  EXPECT_EQ(contents_web_view->layer()
+                ->AsSolidColor()
+                ->background_color()
+                .toSkColor(),
             web_app::AppBrowserController::From(browser)
                 ->GetBackgroundColor()
                 .value());
@@ -2174,11 +2165,17 @@ IN_PROC_BROWSER_TEST_P(BrowserFrameViewAshThemeChangeTest, ThemeChange) {
   {
     content::BackgroundColorChangeWaiter waiter(web_contents);
     waiter.Wait();
-    EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+    EXPECT_EQ(contents_web_view->layer()
+                  ->AsSolidColor()
+                  ->background_color()
+                  .toSkColor(),
               web_app::AppBrowserController::From(browser)
                   ->GetBackgroundColor()
                   .value());
-    EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+    EXPECT_EQ(contents_web_view->layer()
+                  ->AsSolidColor()
+                  ->background_color()
+                  .toSkColor(),
               web_contents->GetBackgroundColor().value());
   }
 
@@ -2190,11 +2187,17 @@ IN_PROC_BROWSER_TEST_P(BrowserFrameViewAshThemeChangeTest, ThemeChange) {
   // background color and the web contents background color due to the fact
   // that the web contents background color update is async.
   ToggleColorMode();
-  EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+  EXPECT_EQ(contents_web_view->layer()
+                ->AsSolidColor()
+                ->background_color()
+                .toSkColor(),
             web_app::AppBrowserController::From(browser)
                 ->GetBackgroundColor()
                 .value());
-  EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+  EXPECT_EQ(contents_web_view->layer()
+                ->AsSolidColor()
+                ->background_color()
+                .toSkColor(),
             web_contents->GetBackgroundColor().value());
 
   // Verify that the layer associated with the `contents_web_view` native view
@@ -2207,11 +2210,17 @@ IN_PROC_BROWSER_TEST_P(BrowserFrameViewAshThemeChangeTest, ThemeChange) {
   {
     content::BackgroundColorChangeWaiter waiter(web_contents);
     waiter.Wait();
-    EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+    EXPECT_EQ(contents_web_view->layer()
+                  ->AsSolidColor()
+                  ->background_color()
+                  .toSkColor(),
               web_app::AppBrowserController::From(browser)
                   ->GetBackgroundColor()
                   .value());
-    EXPECT_EQ(contents_web_view->layer()->AsSolidColor()->background_color(),
+    EXPECT_EQ(contents_web_view->layer()
+                  ->AsSolidColor()
+                  ->background_color()
+                  .toSkColor(),
               web_contents->GetBackgroundColor().value());
   }
 }

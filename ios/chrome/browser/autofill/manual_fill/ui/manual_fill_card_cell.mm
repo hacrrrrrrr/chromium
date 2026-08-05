@@ -583,7 +583,8 @@ CGFloat GPayIconTopAnchorOffset() {
   if (self.card.canFillDirectly) {
     [self.contentInjector userDidPickContent:number
                                passwordField:NO
-                               requiresHTTPS:YES];
+                               requiresHTTPS:YES
+                             jumpToNextField:YES];
   } else {
     [self.navigationDelegate
         requestFullCreditCard:self.card
@@ -596,7 +597,8 @@ CGFloat GPayIconTopAnchorOffset() {
       [self createMetricsAction:@"SelectCardholderName"]));
   [self.contentInjector userDidPickContent:sender.titleLabel.text
                              passwordField:NO
-                             requiresHTTPS:NO];
+                             requiresHTTPS:NO
+                           jumpToNextField:YES];
 }
 
 - (void)userDidTapExpirationMonth:(UIButton*)sender {
@@ -609,7 +611,8 @@ CGFloat GPayIconTopAnchorOffset() {
   } else {
     [self.contentInjector userDidPickContent:sender.titleLabel.text
                                passwordField:NO
-                               requiresHTTPS:NO];
+                               requiresHTTPS:NO
+                             jumpToNextField:YES];
   }
 }
 
@@ -623,7 +626,8 @@ CGFloat GPayIconTopAnchorOffset() {
   } else {
     [self.contentInjector userDidPickContent:sender.titleLabel.text
                                passwordField:NO
-                               requiresHTTPS:NO];
+                               requiresHTTPS:NO
+                             jumpToNextField:YES];
   }
 }
 
@@ -640,7 +644,8 @@ CGFloat GPayIconTopAnchorOffset() {
     }
     [self.contentInjector userDidPickContent:self.card.CVC
                                passwordField:NO
-                               requiresHTTPS:YES];
+                               requiresHTTPS:YES
+                             jumpToNextField:YES];
   } else {
     [self.navigationDelegate
         requestFullCreditCard:self.card
@@ -818,12 +823,11 @@ CGFloat GPayIconTopAnchorOffset() {
   UIImage* icon;
   // `kGooglePaySymbol` only exists in official builds.
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  NSString* symbol = base::FeatureList::IsEnabled(
-                         autofill::features::kAutofillEnableGradientGoogleLogos)
-                         ? kGooglePayV2Symbol
-                         : kGooglePaySymbol;
-  icon =
-      MakeSymbolMulticolor(CustomSymbolWithPointSize(symbol, kGPayIconWidth));
+  Symbol symbol = base::FeatureList::IsEnabled(
+                      autofill::features::kAutofillEnableGradientGoogleLogos)
+                      ? SymbolGooglePayV2
+                      : SymbolGooglePay;
+  icon = MakeSymbolMulticolor(SymbolWithPointSize(symbol, kGPayIconWidth));
 #else
   icon = NativeImage(IDR_AUTOFILL_GOOGLE_PAY);
 #endif

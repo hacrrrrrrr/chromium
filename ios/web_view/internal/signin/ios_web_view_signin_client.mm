@@ -40,6 +40,14 @@ class IOSWebViewOAuthConsumerRegistry : public signin::OAuthConsumerRegistry {
   signin::OAuthConsumer GetOAuthConsumerForIndigo() const override {
     NOTREACHED();
   }
+
+  signin::OAuthConsumer GetOAuthConsumerForDrivePickerHost() const override {
+    NOTREACHED();
+  }
+
+  signin::OAuthConsumer GetOAuthConsumerForBrowserActuator() const override {
+    NOTREACHED();
+  }
 };
 
 }  // namespace

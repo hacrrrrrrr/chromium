@@ -996,6 +996,50 @@ TEST_P(GLES2DecoderManualInitTest, ReadPixels2RowLengthWorkaround) {
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+TEST_P(GLES2DecoderManualInitTest, ReadPixels2LargeRowLengthWorkaround) {
+  gpu::GpuDriverBugWorkarounds workarounds;
+  workarounds.pack_large_row_length_separately_pack_buffer = true;
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.context_type = CONTEXT_TYPE_OPENGLES3;
+  InitDecoderWithWorkarounds(init, workarounds);
+
+  const GLsizei kWidth = 1;
+  const GLsizei kHeight = 2;
+  const GLenum kFormat = GL_RGBA;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+  const GLint kLargeRowLength = 0x7fffffc;
+  constexpr GLsizeiptr kByteOffsetToVerify = 0x1ffffff0;
+  GLsizeiptr size = kByteOffsetToVerify + 256;
+
+  DoBindBuffer(GL_PIXEL_PACK_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoBufferData(GL_PIXEL_PACK_BUFFER, size);
+
+  DoPixelStorei(GL_PACK_ROW_LENGTH, kLargeRowLength);
+
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  for (GLint ii = 0; ii < kHeight; ++ii) {
+    void* offset = reinterpret_cast<void*>(ii * kByteOffsetToVerify);
+    EXPECT_CALL(*gl_, ReadPixels(0, ii, kWidth, 1, kFormat, kType, offset))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
+  EXPECT_CALL(*gl_, PixelStorei(GL_PACK_ROW_LENGTH, kLargeRowLength))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  cmds::ReadPixels cmd;
+  cmd.Init(0, 0, kWidth, kHeight, kFormat, kType, 0, 0, 0, 0, false);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
 TEST_P(GLES2DecoderManualInitTest, ReadPixels2AlignmentWorkaround) {
   gpu::GpuDriverBugWorkarounds workarounds;
   workarounds.pack_parameters_workaround_with_pack_buffer = true;
@@ -3453,6 +3497,64 @@ TEST_P(GLES2DecoderManualInitTest, ClearBackbufferBitsOnDiscardFramebufferEXT) {
                                   GL_DEPTH_BUFFER_BIT |
                                   GL_STENCIL_BUFFER_BIT),
             GetAndClearBackbufferClearBitsForTest());
+}
+
+TEST_P(GLES3DecoderTest,
+       InvalidatedDefaultReadFramebufferClearedBeforeCopyTexImage2D) {
+  // Invalidate the color buffer of the default framebuffer.
+  const GLsizei count = 1;
+  GLenum attachments[] = {GL_COLOR_EXT};
+  EXPECT_CALL(*gl_, InvalidateFramebuffer(GL_FRAMEBUFFER, count, _))
+      .Times(1)
+      .RetiresOnSaturation();
+  auto& invalidate_cmd =
+      *GetImmediateAs<cmds::InvalidateFramebufferImmediate>();
+  invalidate_cmd.Init(GL_FRAMEBUFFER, count, attachments);
+  EXPECT_EQ(error::kNoError,
+            ExecuteImmediateCmd(invalidate_cmd, sizeof(attachments)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  // Bind a client framebuffer as the draw framebuffer; the default
+  // framebuffer remains bound as the read framebuffer.
+  DoBindFramebuffer(GL_DRAW_FRAMEBUFFER, client_framebuffer_id_,
+                    kServiceFramebufferId);
+
+  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
+
+  // CopyTexImage2D reads from the default framebuffer. The decoder must
+  // bind it to GL_DRAW_FRAMEBUFFER while clearing it after invalidation
+  // and restore the client draw framebuffer afterwards.
+  EXPECT_CALL(*gl_, BindFramebufferEXT(GL_DRAW_FRAMEBUFFER, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, ClearColor(0, 0, 0, 1.0f)).Times(1).RetiresOnSaturation();
+  SetupExpectationsForColorMask(true, true, true, true);
+  EXPECT_CALL(*gl_, ClearStencil(0)).Times(1).RetiresOnSaturation();
+  SetupExpectationsForStencilMask(GLES2Decoder::kDefaultStencilMask,
+                                  GLES2Decoder::kDefaultStencilMask);
+  EXPECT_CALL(*gl_, ClearDepth(1.0f)).Times(1).RetiresOnSaturation();
+  SetupExpectationsForDepthMask(true);
+  SetupExpectationsForEnableDisable(GL_SCISSOR_TEST, false);
+  EXPECT_CALL(*gl_, Clear(GL_COLOR_BUFFER_BIT)).Times(1).RetiresOnSaturation();
+  SetupExpectationsForRestoreClearState(0.0f, 0.0f, 0.0f, 0.0f, 0, 1.0f, false,
+                                        0, 0, kBackBufferWidth,
+                                        kBackBufferHeight);
+  EXPECT_CALL(*gl_,
+              BindFramebufferEXT(GL_DRAW_FRAMEBUFFER, kServiceFramebufferId))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, CopyTexImage2D(GL_TEXTURE_2D, 0, _, 0, 0, 1, 1, 0))
+      .Times(1)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*gl_, GetError())
+      .WillOnce(Return(GL_NO_ERROR))
+      .WillOnce(Return(GL_NO_ERROR))
+      .RetiresOnSaturation();
+  cmds::CopyTexImage2D copy_cmd;
+  copy_cmd.Init(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, 1, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(copy_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
 TEST_P(GLES2DecoderTest, DiscardFramebufferEXTUnsupported) {

@@ -20,7 +20,7 @@
 #include "third_party/blink/renderer/platform/graphics/gpu/canvas_utils.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_mailbox_texture.h"
-#include "third_party/blink/renderer/platform/graphics/gpu/webgpu_recyclable_resource_provider.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/webgpu_shared_image_wrapper.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/skia/include/effects/SkColorMatrix.h"
 #include "third_party/skia/modules/skcms/skcms.h"
@@ -369,7 +369,7 @@ ExternalTexture CreateExternalTexture(
   // Using CopyVideoFrameToSharedImage() is an optional one copy upload path.
   // However, the formats this path supports are quite limited. Check whether
   // the current video frame could be uploaded through this one copy upload
-  // path. If not, fallback to DrawVideoFrameIntoResourceProvider().
+  // path. If not, fallback to drawing the video frame into the shared image.
   // CopyVideoFrameToSharedImage also doesn't support rescaling the image so we
   // cannot use it if the visible_rect isn't the same size as natural_size.
   // TODO(crbug.com/327270287): Expand CopyVideoFrameToSharedImage() to
@@ -386,7 +386,7 @@ ExternalTexture CreateExternalTexture(
   gfx::ColorSpace resource_color_space = src_color_space.GetAsRGB();
 
   // We need to workaround issue crbug.com/1407112. It requires no color space
-  // conversion when drawing video frame to resource provider.
+  // conversion when drawing the video frame to the shared image.
   // Leverage Dawn to do the color space conversion.
   // TODO(crbug.com/1407112): Don't use compatRgbColorSpace but the
   // exact color space after fixing this issue.
@@ -400,36 +400,30 @@ ExternalTexture CreateExternalTexture(
     format = viz::SinglePlaneFormat::kRGBA_F16;
   }
 
-  std::unique_ptr<RecyclableCanvasResource> recyclable_canvas_resource =
-      device->GetDawnControlClient()->GetOrCreateCanvasResource(
-          format, natural_size, resource_color_space,
-          media_video_frame->hdr_metadata(), kPremul_SkAlphaType);
-  if (!recyclable_canvas_resource) {
+  std::unique_ptr<WebGpuSharedImageWrapperLease> wrapper_lease =
+      device->GetDawnControlClient()->LeaseWebGpuSharedImageWrapper(
+          format, natural_size, resource_color_space, kPremul_SkAlphaType);
+  if (!wrapper_lease) {
     return external_texture;
   }
-
-  WebGpuRecyclableResourceProvider* resource_provider =
-      recyclable_canvas_resource->resource_provider();
-  DCHECK(resource_provider);
 
   viz::RasterContextProvider* raster_context_provider =
       context_provider_wrapper->ContextProvider().RasterContextProvider();
 
   if (use_copy_to_shared_image) {
-    gpu::SyncToken sync_token;
-
-    // The size of the resource provider here is the VideoFrame's natural size,
-    // which is guaranteed to be the same size as its visible rect since
+    // The size of the shared image wrapper here is the VideoFrame's natural
+    // size, which is guaranteed to be the same size as its visible rect since
     // `use_copy_to_shared_image` is true. Below we are going to copy the
-    // contents of that visible rect into the resource provider's SharedImage,
-    // completely overwriting the SharedImage.
-    auto client_si = resource_provider->BeginExternalOverwrite(sync_token);
-
-    // The returned sync token is from the SharedGpuContext.
-    sync_token = video_renderer->CopyVideoFrameToSharedImage(
-        raster_context_provider, std::move(media_video_frame), client_si,
-        sync_token, /*use_visible_rect=*/true);
-    resource_provider->EndExternalWrite(sync_token);
+    // contents of that visible rect into the shared image wrapper's
+    // SharedImage, completely overwriting the SharedImage.
+    wrapper_lease->WriteToBackingSharedImage(
+        [&](const scoped_refptr<gpu::ClientSharedImage>& client_si,
+            const gpu::SyncToken& begin_sync_token) {
+          // The returned sync token is from the SharedGpuContext.
+          return video_renderer->CopyVideoFrameToSharedImage(
+              raster_context_provider, std::move(media_video_frame), client_si,
+              begin_sync_token, /*use_visible_rect=*/true);
+        });
   } else {
     // Delegate video transformation to Dawn.
     if (media_video_frame->HasSharedImage()) {
@@ -446,25 +440,26 @@ ExternalTexture CreateExternalTexture(
     media_flags.setBlendMode(SkBlendMode::kSrc);
 
     media::PaintCanvasVideoRenderer::PaintParams params;
-    params.dest_rect = gfx::RectF(resource_provider->Size());
-    resource_provider->DoExternalOverdraw([&](cc::PaintCanvas& canvas) {
+    params.dest_rect = gfx::RectF(wrapper_lease->GetSharedImage()->size());
+    wrapper_lease->DrawToBackingSharedImage([&](cc::PaintCanvas& canvas) {
       video_renderer->Paint(media_video_frame.get(), &canvas, media_flags,
                             params, raster_context_provider);
     });
   }
 
   scoped_refptr<gpu::ClientSharedImage> shared_image =
-      resource_provider->GetSharedImage();
+      wrapper_lease->GetSharedImage();
   if (!shared_image) {
     return {};
   }
+
+  gpu::SyncToken sync_token = wrapper_lease->GetSyncToken();
 
   scoped_refptr<WebGPUMailboxTexture> mailbox_texture =
       WebGPUMailboxTexture::FromCanvasResource(
           device->GetDawnControlClient(), device->GetHandle(),
           wgpu::TextureUsage::TextureBinding, std::move(shared_image),
-          resource_provider->GetSyncToken(),
-          std::move(recyclable_canvas_resource));
+          sync_token, std::move(wrapper_lease));
 
   wgpu::TextureViewDescriptor view_desc = {};
   wgpu::TextureView plane0 =

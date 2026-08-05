@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
@@ -139,6 +140,11 @@ class BrowserTabStripController : public TabStripController,
       std::optional<tab_groups::TabGroupId> new_focused_group_id,
       std::optional<tab_groups::TabGroupId> old_focused_group_id) override;
 
+  // Updates the browser theme when focus mode is active for a tab group.
+  // Triggered when tab group focus changes or when the color of the currently
+  // focused tab group changes.
+  void UpdateFocusModeTheme(std::optional<tab_groups::TabGroupId> group_id);
+
   BrowserFrameView* GetFrameView();
   const BrowserFrameView* GetFrameView() const;
 
@@ -146,6 +152,7 @@ class BrowserTabStripController : public TabStripController,
   void AddTabs(const std::vector<TabStrip::AddTabData>& tabs_data);
 
   void OnDiscardRingTreatmentEnabledChanged();
+  void OnGlassFrameEligibilityChanged(bool is_eligible);
 
   // TabContextMenuController::Delegate:
   bool IsContextMenuCommandChecked(
@@ -179,6 +186,8 @@ class BrowserTabStripController : public TabStripController,
   std::unique_ptr<ImmersiveRevealedLock> immersive_reveal_lock_;
 
   std::unique_ptr<TabMenuModelFactory> menu_model_factory_;
+
+  base::CallbackListSubscription glass_frame_service_subscription_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_BROWSER_TAB_STRIP_CONTROLLER_H_

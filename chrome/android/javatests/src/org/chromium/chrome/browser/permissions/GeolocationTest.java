@@ -11,16 +11,20 @@ import androidx.test.filters.MediumTest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.device.geolocation.LocationProviderOverrider;
 import org.chromium.device.geolocation.MockLocationProvider;
@@ -35,7 +39,13 @@ import org.chromium.ui.base.DeviceFormFactor;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class GeolocationTest {
-    @Rule public PermissionTestRule mPermissionRule = new PermissionTestRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
+    public PermissionTestRule mPermissionRule =
+            new PermissionTestRule(mActivityTestRule.getActivityTestRule());
+
+    @Rule
+    public RuleChain mRuleChain = RuleChain.outerRule(mActivityTestRule).around(mPermissionRule);
 
     private static final String TEST_FILE = "/content/test/data/android/geolocation.html";
 
@@ -73,6 +83,7 @@ public class GeolocationTest {
     @Test
     @MediumTest
     @Feature({"Location", "Main"})
+    @DisableFeatures({"PermissionsGestureGatedPrompts"})
     public void testGeolocationPlumbingAllowedDialogNoGesture() throws Exception {
         runTest("initiate_getCurrentPosition()", 1, false);
     }

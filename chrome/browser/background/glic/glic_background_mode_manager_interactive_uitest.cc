@@ -42,7 +42,6 @@
 #include "ui/events/keycodes/keyboard_codes.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
-#include "ash/shell.h"
 #include "chromeos/constants/chromeos_features.h"
 #endif
 
@@ -93,19 +92,10 @@ class GlicBackgroundModeManagerUiTest : public test::InteractiveGlicTest {
   }
 
   bool IsHotkeySupported() {
-    // ChromeOS uses ash's accelerator controller rather than global accelerator
-    // listener.
-#if BUILDFLAG(IS_CHROMEOS)
-    if (ash::Shell::HasInstance()) {
-      return ash::Shell::Get()->accelerator_controller() != nullptr;
-    }
-    return false;
-#else
     auto* const global_shortcut_listener =
         ui::GlobalAcceleratorListener::GetInstance();
     return global_shortcut_listener != nullptr &&
            !global_shortcut_listener->IsRegistrationHandledExternally();
-#endif
   }
 
   void RegisterLauncherHotkey(ui::Accelerator updated_hotkey) {
@@ -216,9 +206,7 @@ IN_PROC_BROWSER_TEST_F(GlicBackgroundModeManagerUiTest,
   // Registering an invalid hotkey should fail.
   ui::Accelerator updated_hotkey(ui::VKEY_A, ui::EF_NONE);
   RegisterLauncherHotkey(updated_hotkey);
-  EXPECT_NE(updated_hotkey,
-            manager->RegisteredHotkeyForTesting().at(static_cast<size_t>(
-                GlicBackgroundModeManager::HotkeyIndex::kPanelKey)));
+  EXPECT_TRUE(manager->RegisteredHotkeyForTesting().empty());
 }
 
 IN_PROC_BROWSER_TEST_F(GlicBackgroundModeManagerUiTest,

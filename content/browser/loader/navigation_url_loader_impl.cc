@@ -171,12 +171,11 @@ class NavigationLoaderInterceptorBrowserContainer
       const network::ResourceRequest& request,
       network::mojom::URLResponseHeadPtr* response_head,
       mojo::ScopedDataPipeConsumerHandle* response_body,
-      mojo::PendingRemote<network::mojom::URLLoader>* loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
       blink::ThrottlingURLLoader* url_loader,
       bool* skip_other_interceptors) override {
     return browser_interceptor_->MaybeCreateLoaderForResponse(
-        status, request, response_head, response_body, loader, client_receiver,
+        status, request, response_head, response_body, client_receiver,
         url_loader);
   }
 
@@ -339,17 +338,15 @@ std::unique_ptr<network::ResourceRequest> CreateResourceRequest(
   const bool is_same_origin_initiator =
       request_info.begin_params->initiator_frame_token ==
           frame_tree_node->current_frame_host()->GetFrameToken() &&
-      request_info.common_params->initiator_origin &&
-      request_info.common_params->initiator_origin->IsSameOriginWith(
-          request_info.common_params->url);
+      frame_tree_node->current_frame_host()
+          ->GetLastCommittedOrigin()
+          .IsSameOriginWith(request_info.common_params->url);
 
   new_request->storage_access_api_status =
       is_storage_access_grant_eligible && is_same_origin_initiator
           ? net::StorageAccessApiStatus::kAccessViaAPI
           : net::StorageAccessApiStatus::kNone;
 
-  new_request->shared_storage_writable_eligible =
-      request_info.shared_storage_writable_eligible;
   new_request->is_ad_tagged = request_info.is_ad_tagged;
 
   new_request->skip_service_worker =
@@ -568,8 +565,6 @@ void CheckParsedHeadersEquals(const network::mojom::ParsedHeadersPtr& lhs,
   CHECK(mojo::Equals(adjusted_lhs->content_language, rhs->content_language));
   CHECK(mojo::Equals(adjusted_lhs->no_vary_search_with_parse_error,
                      rhs->no_vary_search_with_parse_error));
-  CHECK(mojo::Equals(adjusted_lhs->observe_browsing_topics,
-                     rhs->observe_browsing_topics));
   CHECK(mojo::Equals(adjusted_lhs->allow_cross_origin_event_reporting,
                      rhs->allow_cross_origin_event_reporting));
   CHECK(mojo::Equals(adjusted_lhs->declarative_performance_observer_policy,
@@ -1104,11 +1099,10 @@ NavigationURLLoaderImpl::LoaderHolder::Unbind() {
     // TODO(https://crbug.com/40251638): Clean up this behavior if needed.
     return url_loader_->Unbind();
   } else {
-    // TODO(https://crbug.com/434182226): Turn this to `CHECK()`.
     DUMP_WILL_BE_CHECK_EQ(state_, State::kLoadingViaReceiver);
     state_ = State::kUnbound;
     return network::mojom::URLLoaderClientEndpoints::New(
-        std::move(response_url_loader_), response_loader_receiver_.Unbind());
+        mojo::NullRemote(), response_loader_receiver_.Unbind());
   }
 }
 
@@ -1452,6 +1446,7 @@ void NavigationURLLoaderImpl::OnReceiveResponse(
 
   response_body_ = std::move(response_body);
   received_response_ = true;
+  CancelNavigationTimeout();
 
   if (!head_update_params_.load_timing_info.service_worker_start_time
            .is_null()) {
@@ -1932,8 +1927,8 @@ bool NavigationURLLoaderImpl::MaybeCreateLoaderForResponse(
 
     if (interceptor->MaybeCreateLoaderForResponse(
             status, resource_request(), response, &response_body_,
-            loader_holder_.response_url_loader(), &response_client_receiver,
-            loader_holder_.url_loader(), &skip_other_interceptors)) {
+            &response_client_receiver, loader_holder_.url_loader(),
+            &skip_other_interceptors)) {
       loader_holder_.BindReceiver(
           std::move(response_client_receiver),
           GetUIThreadTaskRunner({BrowserTaskType::kNavigationNetworkResponse}));

@@ -46,7 +46,7 @@ chromium-metrics-reviews@google.com.
 </variants>
 
 <histogram name="Session.Android.TabbedSessionContainedGoogleSearch"
-    enum="Boolean" expires_after="2026-11-15">
+    enum="Boolean" expires_after="2027-01-17">
   <owner>nafisabedin@google.com</owner>
   <owner>yfriedman@chromium.org</owner>
   <summary>
@@ -89,7 +89,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Session.CommandStorageBackend.{SessionType}.{EncryptedStatus}.AppendCommands.{Slice}.Duration"
-    units="ms" expires_after="2026-09-01">
+    units="ms" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -105,7 +105,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Session.CommandStorageBackend.{SessionType}.{EncryptedStatus}.AppendCommands.{Slice}.FileSize"
-    units="bytes" expires_after="2026-09-01">
+    units="bytes" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -121,7 +121,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Session.CommandStorageBackend.{SessionType}.{EncryptedStatus}.AppendCommands.{Slice}.Status"
-    enum="CommandStorageWriteStatus" expires_after="2026-09-01">
+    enum="CommandStorageWriteStatus" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -137,7 +137,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Session.CommandStorageBackend.{SessionType}.{EncryptedStatus}.ReadLastSessionCommands.Duration"
-    units="ms" expires_after="2026-09-01">
+    units="ms" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -151,7 +151,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Session.CommandStorageBackend.{SessionType}.{EncryptedStatus}.ReadLastSessionCommands.Status"
-    enum="CommandStorageReadStatus" expires_after="2026-09-01">
+    enum="CommandStorageReadStatus" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -164,7 +164,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.CommandStorageManager.EncryptedBackendUninitialized"
-    enum="SessionEncryptedBackendUninitialized" expires_after="2026-09-01">
+    enum="SessionEncryptedBackendUninitialized" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -174,7 +174,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.CommandStorageManager.EncryptedReadMatch"
-    enum="SessionReadComparisonResult" expires_after="2026-09-01">
+    enum="SessionReadComparisonResult" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -185,7 +185,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.CommandStorageManager.OnEncryptorReadyDuration"
-    units="ms" expires_after="2026-09-01">
+    units="ms" expires_after="2027-01-01">
   <owner>sammon@google.com</owner>
   <owner>dljames@chromium.org</owner>
   <summary>
@@ -214,7 +214,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.IsActive" enum="BooleanActive"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>rogerm@chromium.org</owner>
   <owner>src/base/metrics/OWNERS</owner>
   <summary>
@@ -236,7 +236,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.IsActive2" enum="BooleanActive"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>rogerm@chromium.org</owner>
   <owner>src/base/metrics/OWNERS</owner>
   <summary>
@@ -302,7 +302,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.OpenedTabCounts" units="operations"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>rohitrao@chromium.org</owner>
   <owner>marq@chromium.org</owner>
   <summary>

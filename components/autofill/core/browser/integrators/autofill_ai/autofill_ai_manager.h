@@ -17,6 +17,7 @@
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
+#include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_type.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
@@ -89,6 +90,7 @@ class AutofillAiManager
       UpdateSuggestionsCallback update_suggestions_callback);
   virtual void OnFormSeen(const FormStructure& form);
   virtual void OnFormInteracted(const FormStructure& form,
+                                const AutofillField& field,
                                 ukm::SourceId ukm_source_id);
   virtual void OnDidFillSuggestion(
       const EntityInstance& entity,
@@ -101,7 +103,9 @@ class AutofillAiManager
                                        ukm::SourceId ukm_source_id);
 
   // AutofillManager::Observer:
-  void OnAfterLoadedServerPredictions(AutofillManager& manager) override;
+  void OnAfterLoadedServerPredictions(
+      AutofillManager& manager,
+      base::span<const FormGlobalId> forms) override;
 
   // AutofillAiPersonalContextAccessManager::Observer:
   void OnPrefetchContextComplete(
@@ -117,10 +121,8 @@ class AutofillAiManager
  private:
   friend class AutofillAiManagerTestApi;
   struct UserSuggestionInteractionDetails {
-    // Upon clicking a field, stores the different entity types used to
-    // generate the suggestions shown.
-    DenseSet<EntityType> suggested_entity_types;
     std::optional<EntityType> entity_type_accepted;
+    std::optional<EntityInstance::RecordType> accepted_entity_record_type;
     // The types of the field where the suggestion was shown or accepted.
     FieldTypeSet autofill_ai_field_types;
   };
@@ -237,6 +239,12 @@ class AutofillAiManager
                                     FieldGlobalId field_id,
                                     UpdateSuggestionsCallback callback);
 
+  // Returns the EntityType for which Autofill AI could potentially offer an
+  // import prompt (based on the field type), if any.
+  std::optional<EntityType> GetSupportedEntityTypeForField(
+      const FormStructure& form,
+      const AutofillField& field) const;
+
   // A raw reference to the client, which owns `this` and therefore outlives
   // it.
   const raw_ref<AutofillClient> client_;
@@ -269,6 +277,11 @@ class AutofillAiManager
   // Tracks the UKM source ID for which the first interaction timing metric was
   // last logged, ensuring it is logged at most once per page.
   ukm::SourceId last_logged_ukm_source_id_for_interaction_ =
+      ukm::kInvalidSourceId;
+
+  // Tracks the UKM source ID for which the prefetch cache readiness metric was
+  // last logged, ensuring it is logged at most once per page.
+  ukm::SourceId last_logged_ukm_source_id_for_cache_readiness_ =
       ukm::kInvalidSourceId;
 
   // Callback to update the shown suggestions.

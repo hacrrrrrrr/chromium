@@ -20,10 +20,13 @@
 #include "chrome/browser/ui/page_action/page_action_triggers.h"
 #include "chrome/browser/ui/side_panel/side_panel_action_callback.h"
 #include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_view_params.h"
 #include "chrome/browser/ui/views/page_action/page_action_view_util.h"
+#include "chrome/grit/generated_resources.h"
 #include "ui/actions/actions.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
 #include "ui/events/event.h"
@@ -179,7 +182,6 @@ void PageActionView::OnPageActionModelChanged(
 
   if (visible) {
     SetLabel(model.GetText(), model.GetAccessibleName());
-    SetTooltipText(model.GetTooltipText());
   }
 
   if (model.GetActionActive() && !highlight_) {
@@ -199,6 +201,8 @@ void PageActionView::OnPageActionModelChanged(
     anchored_message_ = nullptr;
     anchored_message_widget_ = nullptr;
   }
+
+  UpdateTooltipText();
 
   // Announce the chip only if announcements are enabled and the chip was
   // newly shown.
@@ -349,21 +353,14 @@ void PageActionView::NotifyClick(const ui::Event& event) {
   click_callback_.Run(trigger_source);
 
   IconLabelBubbleView::NotifyClick(event);
-  auto builder =
-      actions::ActionInvocationContext::Builder()
-          .SetProperty(kPageActionTriggerKey,
-                       static_cast<std::underlying_type_t<PageActionTrigger>>(
-                           trigger_source))
-          .SetProperty(
-              kPageActionEntryPointKey,
-              static_cast<std::underlying_type_t<PageActionEntryPoint>>(
-                  PageActionEntryPoint::kSuggestionChip));
+  auto builder = actions::ActionInvocationContext::Builder()
+                     .SetProperty(kPageActionTriggerKey, trigger_source)
+                     .SetProperty(kPageActionEntryPointKey,
+                                  PageActionEntryPoint::kSuggestionChip);
   if (auto side_panel_trigger =
           GetSidePanelOpenTriggerForPageAction(action_item_->GetActionId())) {
-    builder = std::move(builder).SetProperty(
-        kSidePanelOpenTriggerKey,
-        static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-            *side_panel_trigger));
+    builder = std::move(builder).SetProperty(kSidePanelOpenTriggerKey,
+                                             *side_panel_trigger);
   }
   action_item_->InvokeAction(std::move(builder).Build());
 }
@@ -469,6 +466,7 @@ const gfx::Insets PageActionView::GetInsetsForNonVectorIcon() const {
 void PageActionView::SetModel(PageActionModelInterface* model) {
   observation_.Reset();
   observation_.Observe(model);
+  UpdateTooltipText();
 }
 
 gfx::Size PageActionView::GetMinimumSize() const {
@@ -548,6 +546,7 @@ void PageActionView::CreateAndShowAnchoredMessage(
 
   if (anchored_message_) {
     anchored_message_->UpdateContent(model);
+    UpdateTooltipText();
     return;
   }
 
@@ -571,15 +570,54 @@ void PageActionView::CreateAndShowAnchoredMessage(
     anchored_message_ = nullptr;
   }
 
+  UpdateTooltipText();
   anchored_message_visibility_changed_callbacks_.Notify(this);
 }
 void PageActionView::OnAnchoredMessageWidgetClose(
     views::Widget::ClosedReason closed_reason) {
-  CHECK(anchored_message_);
+  // If `anchored_message_` is already null, it means we are in the middle of
+  // programmatically destroying the widget (e.g. from
+  // OnPageActionModelChanged). In this case, early return to avoid re-entrancy
+  // crashes.
+  if (!anchored_message_) {
+    return;
+  }
   CHECK(anchored_message_widget_);
   anchored_message_ = nullptr;
-  anchored_message_widget_.reset();
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&PageActionView::CloseWidgetDeferred,
+                                weak_factory_.GetWeakPtr(),
+                                anchored_message_widget_->GetWeakPtr()));
+  UpdateTooltipText();
   anchored_message_visibility_changed_callbacks_.Notify(this);
+
+  if (observation_.IsObserving() &&
+      observation_.GetSource()->ShouldShowAnchoredMessage()) {
+    CloseAnchoredMessage();
+  }
+}
+
+void PageActionView::UpdateTooltipText() {
+  if (!observation_.IsObserving() || !observation_.GetSource() ||
+      !GetVisible()) {
+    SetTooltipText(std::u16string());
+    return;
+  }
+
+  std::u16string tooltip_text = observation_.GetSource()->GetTooltipText();
+  if (IsAnchoredMessageVisible() && !tooltip_text.empty()) {
+    tooltip_text = l10n_util::GetStringFUTF16(
+        IDS_PAGE_ACTION_ANCHORED_MESSAGE_SHOWING, tooltip_text);
+  }
+  SetTooltipText(tooltip_text);
+}
+
+void PageActionView::CloseWidgetDeferred(
+    base::WeakPtr<views::Widget> widget_to_close) {
+  if (anchored_message_widget_ &&
+      anchored_message_widget_.get() == widget_to_close.get()) {
+    anchored_message_widget_.reset();
+  }
 }
 
 void PageActionView::AnchoredMessageChipClick() {
@@ -587,19 +625,13 @@ void PageActionView::AnchoredMessageChipClick() {
   click_callback_.Run(PageActionTrigger::kMouse);
   auto builder =
       actions::ActionInvocationContext::Builder()
-          .SetProperty(kPageActionTriggerKey,
-                       static_cast<std::underlying_type_t<PageActionTrigger>>(
-                           PageActionTrigger::kMouse))
-          .SetProperty(
-              kPageActionEntryPointKey,
-              static_cast<std::underlying_type_t<PageActionEntryPoint>>(
-                  PageActionEntryPoint::kAnchoredMessage));
+          .SetProperty(kPageActionTriggerKey, PageActionTrigger::kMouse)
+          .SetProperty(kPageActionEntryPointKey,
+                       PageActionEntryPoint::kAnchoredMessage);
   if (auto side_panel_trigger =
           GetSidePanelOpenTriggerForPageAction(action_item_->GetActionId())) {
-    builder = std::move(builder).SetProperty(
-        kSidePanelOpenTriggerKey,
-        static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-            *side_panel_trigger));
+    builder = std::move(builder).SetProperty(kSidePanelOpenTriggerKey,
+                                             *side_panel_trigger);
   }
   action_item_->InvokeAction(std::move(builder).Build());
   anchored_message_close_callback_.Run();

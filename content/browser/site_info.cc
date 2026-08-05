@@ -477,8 +477,8 @@ bool SiteInfo::SchemeIs(std::string_view scheme) const {
   return site_url_.SchemeIs(scheme);
 }
 
-std::string SiteInfo::GetHost() const {
-  return site_url_.GetHost();
+std::string_view SiteInfo::GetHost() const {
+  return site_url_.host();
 }
 
 const GURL& SiteInfo::GetDeprecatedSiteURL() const {
@@ -803,6 +803,15 @@ bool SiteInfo::ShouldUseProcessPerSite(BrowserContext* browser_context) const {
     return true;
   }
 
+  // Privileged content (see //chrome's PrivilegedWebContents) uses the
+  // process-per-site model so that privileged WebContents of the same feature
+  // coalesce into a shared process instead of each getting its own. Distinct
+  // features carry distinct feature ids in their SiteInfo, so they still land
+  // in separate processes.
+  if (embedder_isolation_info_.is_privileged()) {
+    return true;
+  }
+
   // Otherwise let the content client decide, defaulting to false.
   return GetContentClient()->browser()->ShouldUseProcessPerSite(browser_context,
                                                                 *this);
@@ -940,6 +949,36 @@ AgentClusterKey SiteInfo::GetAgentClusterKeyForURL(
   OriginAgentClusterIsolationState oac_isolation_state =
       url_info.oac_header_request.value_or(
           isolation_context.default_isolation_state());
+
+  // We want to skip process-isolation if this is an ad URL without an explicit
+  // header.
+  if (url_info.matches_ad_filter_with_host &&
+      base::FeatureList::IsEnabled(features::kExcludeAdsFromOriginIsolation) &&
+      !url_info.oac_header_request.has_value() &&
+      oac_isolation_state.is_origin_agent_cluster()) {
+    oac_isolation_state =
+        OriginAgentClusterIsolationState::CreateForOriginAgentCluster(
+            /*had_oac_request=*/false,
+            /*requires_origin_keyed_process=*/false);
+  }
+
+  // A WebContents created with PrivilegedParams isolates every frame it hosts
+  // to its own origin -- stronger than the default site-keyed process model.
+  // This ensures that a compromise in a same-site but cross-origin subframe
+  // lands in a different process than the main frame and so cannot reach the
+  // privileged capabilities bound there. Force origin-keyed process isolation,
+  // as if the origin had sent an `Origin-Agent-Cluster: ?1` header, overriding
+  // any opt-out. This is only possible where OAC process isolation is available
+  // (see the CHECK below); on configurations where it is disabled (e.g. Android
+  // below the site-isolation memory threshold) privileged frames fall back to
+  // the site-keyed process, which still isolates them from ordinary content.
+  if (url_info.embedder_isolation_info.is_privileged() &&
+      SiteIsolationPolicy::IsProcessIsolationForOriginAgentClusterEnabled()) {
+    oac_isolation_state =
+        OriginAgentClusterIsolationState::CreateForOriginAgentCluster(
+            /*had_oac_request=*/true,
+            /*requires_origin_keyed_process=*/true);
+  }
 
   // Now check if the requested isolation state should be overridden by an OAC
   // isolation state already stored for the BrowsingInstance. This happens when
@@ -1310,6 +1349,12 @@ bool SiteInfo::RequiresDedicatedProcessInternal(
 
   // Isolate MIME handler extension content into per-document processes.
   if (embedder_isolation_info.is_unique_instance()) {
+    return true;
+  }
+
+  // Isolate privileged-feature content (see //chrome's PrivilegedWebContents)
+  // so it never shares a process with ordinary content of the same site.
+  if (embedder_isolation_info.is_privileged()) {
     return true;
   }
 

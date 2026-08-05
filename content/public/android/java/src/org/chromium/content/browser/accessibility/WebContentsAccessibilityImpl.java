@@ -4,7 +4,6 @@
 
 package org.chromium.content.browser.accessibility;
 
-import static androidx.core.view.accessibility.AccessibilityEventCompat.CONTENT_CHANGE_TYPE_PANE_APPEARED;
 import static androidx.core.view.accessibility.AccessibilityEventCompat.CONTENT_CHANGE_TYPE_SORT_DIRECTION;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.ACTION_ARGUMENT_EXTEND_SELECTION_BOOLEAN;
 import static androidx.core.view.accessibility.AccessibilityNodeInfoCompat.ACTION_ARGUMENT_HTML_ELEMENT_STRING;
@@ -76,6 +75,7 @@ import android.graphics.RectF;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcel;
+import android.util.LongSparseArray;
 import android.util.SparseArray;
 import android.view.MotionEvent;
 import android.view.View;
@@ -314,8 +314,8 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
 
     // A map of native helper objects to their Java counterparts allows unlimited scaling in number
     // of tabs.
-    private static final Map<Long, WeakReference<WebContentsAccessibilityImpl>> sNativeHelperMap =
-            new HashMap<>();
+    private static final LongSparseArray<WeakReference<WebContentsAccessibilityImpl>>
+            sNativeHelperMap = new LongSparseArray<>();
 
     @CalledByNative
     private static @Nullable WebContentsAccessibilityImpl get(long nativeObj) {
@@ -597,7 +597,8 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
     @CalledByNative
     protected void onNativeObjectDestroyed() {
         if (mNativeObj == 0) return;
-        WeakReference<WebContentsAccessibilityImpl> oldValue = sNativeHelperMap.remove(mNativeObj);
+        WeakReference<WebContentsAccessibilityImpl> oldValue = sNativeHelperMap.get(mNativeObj);
+        sNativeHelperMap.remove(mNativeObj);
         assert oldValue != null;
         assert oldValue.get() == this;
         mNativeObj = 0;
@@ -1512,22 +1513,19 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             return true;
         } else if (action == ACTION_CLICK.getId()) {
             if (!mView.hasFocus()) mView.requestFocus();
-            performClick(virtualViewId);
-            return true;
+            return performClick(virtualViewId);
         } else if (action == ACTION_FOCUS.getId()) {
             if (!mView.hasFocus()) mView.requestFocus();
-            WebContentsAccessibilityImplJni.get().focus(mNativeObj, virtualViewId);
-            return true;
+            return WebContentsAccessibilityImplJni.get().focus(mNativeObj, virtualViewId);
         } else if (action == ACTION_CLEAR_FOCUS.getId()) {
             if (ContentFeatureMap.isEnabled(ContentFeatureList.ACCESSIBILITY_SEQUENTIAL_FOCUS)
                     && mAccessibilityFocusId != View.NO_ID) {
                 mPendingSetSequentialFocus = true;
-                WebContentsAccessibilityImplJni.get()
+                return WebContentsAccessibilityImplJni.get()
                         .setSequentialFocusStartingPoint(mNativeObj, mAccessibilityFocusId);
             } else {
-                WebContentsAccessibilityImplJni.get().blur(mNativeObj);
+                return WebContentsAccessibilityImplJni.get().blur(mNativeObj);
             }
-            return true;
         } else if (action == ACTION_NEXT_HTML_ELEMENT.getId()) {
             if (arguments == null) return false;
             String elementType = arguments.getString(ACTION_ARGUMENT_HTML_ELEMENT_STRING);
@@ -1559,12 +1557,13 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                     arguments.getCharSequence(ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE);
             if (bundleText == null) return false;
             String newText = bundleText.toString();
-            WebContentsAccessibilityImplJni.get()
-                    .setTextFieldValue(mNativeObj, virtualViewId, newText);
+            if (!WebContentsAccessibilityImplJni.get()
+                    .setTextFieldValue(mNativeObj, virtualViewId, newText)) {
+                return false;
+            }
             // Match Android framework and set the cursor to the end of the text field.
-            WebContentsAccessibilityImplJni.get()
+            return WebContentsAccessibilityImplJni.get()
                     .setSelection(mNativeObj, virtualViewId, newText.length(), newText.length());
-            return true;
         } else if (action == ACTION_SET_SELECTION.getId()) {
             if (!WebContentsAccessibilityImplJni.get().isEditableText(mNativeObj, virtualViewId)) {
                 return false;
@@ -1575,9 +1574,8 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 selectionStart = arguments.getInt(ACTION_ARGUMENT_SELECTION_START_INT);
                 selectionEnd = arguments.getInt(ACTION_ARGUMENT_SELECTION_END_INT);
             }
-            WebContentsAccessibilityImplJni.get()
+            return WebContentsAccessibilityImplJni.get()
                     .setSelection(mNativeObj, virtualViewId, selectionStart, selectionEnd);
-            return true;
         } else if (action == ACTION_NEXT_AT_MOVEMENT_GRANULARITY.getId()) {
             if (arguments == null) return false;
             int granularity = arguments.getInt(ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT);
@@ -1641,17 +1639,13 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             }
             return false;
         } else if (action == ACTION_EXPAND.getId()) {
-            WebContentsAccessibilityImplJni.get().expand(mNativeObj, virtualViewId);
-            return true;
+            return WebContentsAccessibilityImplJni.get().expand(mNativeObj, virtualViewId);
         } else if (action == ACTION_COLLAPSE.getId()) {
-            WebContentsAccessibilityImplJni.get().collapse(mNativeObj, virtualViewId);
-            return true;
+            return WebContentsAccessibilityImplJni.get().collapse(mNativeObj, virtualViewId);
         } else if (action == ACTION_SHOW_ON_SCREEN.getId()) {
-            scrollToMakeNodeVisible(virtualViewId);
-            return true;
+            return scrollToMakeNodeVisible(virtualViewId);
         } else if (action == ACTION_CONTEXT_CLICK.getId() || action == ACTION_LONG_CLICK.getId()) {
-            WebContentsAccessibilityImplJni.get().showContextMenu(mNativeObj, virtualViewId);
-            return true;
+            return WebContentsAccessibilityImplJni.get().showContextMenu(mNativeObj, virtualViewId);
         } else if (action == ACTION_SCROLL_UP.getId() || action == ACTION_PAGE_UP.getId()) {
             return WebContentsAccessibilityImplJni.get()
                     .scroll(
@@ -1709,9 +1703,8 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             // TODO(crbug.com/443078007): Add tests for this case and below.
             if (arguments == null) {
                 // Per API specification, clear selection if no argument is provided.
-                WebContentsAccessibilityImplJni.get()
+                return WebContentsAccessibilityImplJni.get()
                         .clearExtendedSelection(mNativeObj, virtualViewId);
-                return true;
             }
 
             // Since `delegate.isActionSetExtendedSelectionSupported()` is true, extended
@@ -1719,18 +1712,16 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             // that `node.getSelection()` has returned null.
             var selectionStart = delegate.getActionSetExtendedSelectionStartArgument(arguments);
             if (selectionStart == null) {
-                WebContentsAccessibilityImplJni.get()
+                return WebContentsAccessibilityImplJni.get()
                         .clearExtendedSelection(mNativeObj, virtualViewId);
-                return true;
             }
 
             var selectionEnd = delegate.getActionSetExtendedSelectionEndArgument(arguments);
             // This is not expected since start node is not null, but since the error is
             // from the platform, assume selection is cleared.
             if (selectionEnd == null) {
-                WebContentsAccessibilityImplJni.get()
+                return WebContentsAccessibilityImplJni.get()
                         .clearExtendedSelection(mNativeObj, virtualViewId);
-                return true;
             }
 
             // Get the offset type for the start and end of the selection.
@@ -2020,21 +2011,21 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 traverseEvent, WindowContentChangedSubtype.NONE, mAccessibilityFocusId);
     }
 
-    private void scrollToMakeNodeVisible(int virtualViewId) {
+    private boolean scrollToMakeNodeVisible(int virtualViewId) {
         if (mDelegate.getNativeAXTree() != 0) {
-            mDelegate.scrollToMakeNodeVisible(getAbsolutePositionForNode(virtualViewId));
+            return mDelegate.scrollToMakeNodeVisible(getAbsolutePositionForNode(virtualViewId));
         } else {
             mPendingScrollToMakeNodeVisible = true;
-            WebContentsAccessibilityImplJni.get()
+            return WebContentsAccessibilityImplJni.get()
                     .scrollToMakeNodeVisible(mNativeObj, virtualViewId);
         }
     }
 
-    private void performClick(int virtualViewId) {
+    private boolean performClick(int virtualViewId) {
         if (mDelegate.getNativeAXTree() != 0) {
-            mDelegate.performClick(getAbsolutePositionForNode(virtualViewId));
+            return mDelegate.performClick(getAbsolutePositionForNode(virtualViewId));
         } else {
-            WebContentsAccessibilityImplJni.get().click(mNativeObj, virtualViewId);
+            return WebContentsAccessibilityImplJni.get().click(mNativeObj, virtualViewId);
         }
     }
 
@@ -2161,60 +2152,6 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             return;
         }
 
-        if (mFakeAndroidCache != null) {
-            if (virtualViewId == getCurrentRootIdForExperiment()) {
-                // We clear the whole cache when the event is on the root
-                mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ true);
-            }
-            switch (eventType) {
-                case AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED:
-                    {
-                        mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ false);
-                    }
-                    break;
-
-                case AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED:
-                    {
-                        mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ false);
-                    }
-                    break;
-
-                case AccessibilityEvent.TYPE_VIEW_FOCUSED:
-                    {
-                        mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ false);
-                    }
-                    break;
-
-                case AccessibilityEvent.TYPE_VIEW_SELECTED:
-                case AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED:
-                case AccessibilityEvent.TYPE_VIEW_CLICKED:
-                case AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED:
-                    {
-                        mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ false);
-                    }
-                    break;
-
-                case AccessibilityEvent.TYPE_VIEW_SCROLLED:
-                    {
-                        mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ true);
-                    }
-                    break;
-
-                case AccessibilityEvent.TYPE_WINDOWS_CHANGED:
-                    {
-                        mFakeAndroidCache.clearNode(
-                                getCurrentRootIdForExperiment(), /* recursive= */ true);
-                    }
-                    break;
-                case AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED:
-                    {
-                        mFakeAndroidCache.clearNode(
-                                getCurrentRootIdForExperiment(), /* recursive= */ true);
-                    }
-                    break;
-            }
-        }
-
         mHistogramRecorder.incrementEnqueuedEvents();
         mEventDispatcher.enqueueEvent(virtualViewId, eventType, /* setSubtreeChanged= */ false);
     }
@@ -2227,10 +2164,6 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
         if (virtualViewId == View.NO_ID) {
             mView.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
             return;
-        }
-
-        if (mFakeAndroidCache != null) {
-            mFakeAndroidCache.clearNode(virtualViewId, /* recursive= */ setSubtreeChanged);
         }
 
         mHistogramRecorder.incrementEnqueuedEvents();
@@ -2537,7 +2470,6 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
     }
 
     @CalledByNative
-    @SuppressLint("WrongConstant")
     protected void handlePaneOpened(int virtualViewId) {
         if (isAccessibilityEnabled()) {
             AccessibilityEvent event =
@@ -2546,7 +2478,22 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 return;
             }
 
-            event.setContentChangeTypes(CONTENT_CHANGE_TYPE_PANE_APPEARED);
+            event.setContentChangeTypes(AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_APPEARED);
+            event.setSource(mView, virtualViewId);
+            requestSendAccessibilityEvent(event, WindowContentChangedSubtype.NONE, virtualViewId);
+        }
+    }
+
+    @CalledByNative
+    protected void handlePaneClosed(int virtualViewId) {
+        if (isAccessibilityEnabled()) {
+            AccessibilityEvent event =
+                    AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
+            if (event == null) {
+                return;
+            }
+
+            event.setContentChangeTypes(AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_DISAPPEARED);
             event.setSource(mView, virtualViewId);
             requestSendAccessibilityEvent(event, WindowContentChangedSubtype.NONE, virtualViewId);
         }
@@ -2646,6 +2593,9 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
             if (mTracker != null) mTracker.addEvent(event, subtype, virtualViewId);
             try {
                 mView.getParent().requestSendAccessibilityEvent(mView, event);
+                if (mFakeAndroidCache != null) {
+                    mFakeAndroidCache.clearNodeOnEvent(event, virtualViewId);
+                }
                 mDidSendAnyEvent = true;
             } catch (IllegalStateException ignored) {
                 // During boot-up of some content shell tests, events will erroneously be sent even
@@ -2903,15 +2853,15 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 int id,
                 int eventType);
 
-        void click(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean click(long nativeWebContentsAccessibilityAndroid, int id);
 
-        void focus(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean focus(long nativeWebContentsAccessibilityAndroid, int id);
 
-        void blur(long nativeWebContentsAccessibilityAndroid);
+        boolean blur(long nativeWebContentsAccessibilityAndroid);
 
         int getFocus(long nativeWebContentsAccessibilityAndroid);
 
-        void scrollToMakeNodeVisible(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean scrollToMakeNodeVisible(long nativeWebContentsAccessibilityAndroid, int id);
 
         int findElementType(
                 long nativeWebContentsAccessibilityAndroid,
@@ -2923,9 +2873,11 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 boolean isTalkbackEnabled,
                 boolean isOnlyTalkbackEnabled);
 
-        void setTextFieldValue(long nativeWebContentsAccessibilityAndroid, int id, String newValue);
+        boolean setTextFieldValue(
+                long nativeWebContentsAccessibilityAndroid, int id, String newValue);
 
-        void setSelection(long nativeWebContentsAccessibilityAndroid, int id, int start, int end);
+        boolean setSelection(
+                long nativeWebContentsAccessibilityAndroid, int id, int start, int end);
 
         boolean setExtendedSelection(
                 long nativeWebContentsAccessibilityAndroid,
@@ -2937,7 +2889,7 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
                 int endNodeOffset,
                 int endOffsetType);
 
-        void clearExtendedSelection(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean clearExtendedSelection(long nativeWebContentsAccessibilityAndroid, int id);
 
         boolean moveAtGranularity(
                 long nativeWebContentsAccessibilityAndroid,
@@ -2952,7 +2904,7 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
         void moveAccessibilityFocus(
                 long nativeWebContentsAccessibilityAndroid, int oldId, int newId);
 
-        void setSequentialFocusStartingPoint(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean setSequentialFocusStartingPoint(long nativeWebContentsAccessibilityAndroid, int id);
 
         boolean isSlider(long nativeWebContentsAccessibilityAndroid, int id);
 
@@ -2966,11 +2918,11 @@ public class WebContentsAccessibilityImpl extends AccessibilityNodeProviderCompa
 
         String getSupportedHtmlElementTypes(long nativeWebContentsAccessibilityAndroid);
 
-        void expand(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean expand(long nativeWebContentsAccessibilityAndroid, int id);
 
-        void collapse(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean collapse(long nativeWebContentsAccessibilityAndroid, int id);
 
-        void showContextMenu(long nativeWebContentsAccessibilityAndroid, int id);
+        boolean showContextMenu(long nativeWebContentsAccessibilityAndroid, int id);
 
         boolean showTooltip(long nativeWebContentsAccessibilityAndroid, int id);
 

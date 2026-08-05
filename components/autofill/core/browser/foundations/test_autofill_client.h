@@ -80,6 +80,8 @@
 #include "components/optimization_guide/core/feature_registry/feature_registration.h"
 #include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #include "components/personal_context/core/personal_context_types.h"
+#include "components/personal_context/first_run/personal_context_first_run_service.h"
+#include "components/personal_context/first_run/test_personal_context_first_run_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_registry.h"
 #include "components/prefs/pref_service.h"
@@ -525,6 +527,9 @@ class TestAutofillClientTemplate : public T {
 
   std::unique_ptr<device_reauth::DeviceAuthenticator> GetDeviceAuthenticator(
       std::string histogram) const override {
+    if (device_authenticator_) {
+      return std::move(device_authenticator_);
+    }
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID) || \
     BUILDFLAG(IS_CHROMEOS)
     return std::make_unique<device_reauth::MockDeviceAuthenticator>();
@@ -559,32 +564,30 @@ class TestAutofillClientTemplate : public T {
     return test_addresses_;
   }
 
-  bool ShouldShowPersonalContextAmbientAutofillNotice() const override {
-    return should_show_personal_context_ambient_autofill_notice_;
-  }
-  void set_should_show_personal_context_ambient_autofill_notice(
-      bool should_show) {
-    should_show_personal_context_ambient_autofill_notice_ = should_show;
-  }
-  void MarkPersonalContextAmbientAutofillNoticeAsAcknowledged() override {
-    is_personal_context_ambient_autofill_notice_acknowledged_ = true;
-  }
-  bool is_personal_context_ambient_autofill_notice_acknowledged() const {
-    return is_personal_context_ambient_autofill_notice_acknowledged_;
+  personal_context::TestPersonalContextFirstRunService*
+  GetPersonalContextFirstRunService() override {
+    return &personal_context_first_run_service_;
   }
 
-  bool ShouldShowPersonalContextAtMemoryNotice() const override {
-    return should_show_personal_context_at_memory_notice_;
+#if BUILDFLAG(IS_ANDROID)
+  bool ShowAmbientAutoFillNotice(
+      base::WeakPtr<TouchToFillAutofillDelegate> delegate) override {
+    show_ambient_autofill_notice_called_ = true;
+    return show_ambient_autofill_notice_result_;
   }
-  void set_should_show_personal_context_at_memory_notice(bool should_show) {
-    should_show_personal_context_at_memory_notice_ = should_show;
+  bool show_ambient_autofill_notice_called() const {
+    return show_ambient_autofill_notice_called_;
   }
-  void MarkPersonalContextAtMemoryNoticeAsAcknowledged() override {
-    is_personal_context_at_memory_notice_acknowledged_ = true;
+  void set_show_ambient_autofill_notice_result(bool result) {
+    show_ambient_autofill_notice_result_ = result;
   }
-  bool is_personal_context_at_memory_notice_acknowledged() const {
-    return is_personal_context_at_memory_notice_acknowledged_;
+  void HideAmbientAutoFillNotice() override {
+    hide_ambient_autofill_notice_called_ = true;
   }
+  bool hide_ambient_autofill_notice_called() const {
+    return hide_ambient_autofill_notice_called_;
+  }
+#endif
 
   personal_context::PersonalContextEligibilityService*
   GetPersonalContextEligibilityService() const override {
@@ -644,6 +647,7 @@ class TestAutofillClientTemplate : public T {
     identity_test_environment().MakePrimaryAccountAvailable(
         "foo@gmail.com", signin::ConsentLevel::kSignin);
     SetCanUseModelExecutionFeatures(true);
+    SetSupportsWalletPrivatePassesInAutofill(true);
     SetVariationConfigCountryCode(GeoIpCountryCode("US"));
     return SetAutofillAiOptInStatus(*this, AutofillAiOptInStatus::kOptedIn);
   }
@@ -657,6 +661,18 @@ class TestAutofillClientTemplate : public T {
     CHECK(!account_info.account_id.empty());
     AccountCapabilitiesTestMutator(&account_info)
         .set_can_use_model_execution_features(can_use_model_execution);
+    signin::UpdateAccountInfoForAccount(GetIdentityManager(), account_info);
+  }
+
+  // Updates whether the currently signed in primary account has the Wallet
+  // private passes capability enabled.
+  void SetSupportsWalletPrivatePassesInAutofill(bool supported) {
+    AccountInfo account_info = GetIdentityManager()->FindExtendedAccountInfo(
+        GetIdentityManager()->GetPrimaryAccountInfo(
+            signin::ConsentLevel::kSignin));
+    CHECK(!account_info.account_id.empty());
+    AccountCapabilitiesTestMutator(&account_info)
+        .set_supports_wallet_private_passes_in_autofill(supported);
     signin::UpdateAccountInfoForAccount(GetIdentityManager(), account_info);
   }
 
@@ -752,6 +768,11 @@ class TestAutofillClientTemplate : public T {
 
   void set_supports_device_reauth(bool supports_device_reauth) {
     supports_device_reauth_ = supports_device_reauth;
+  }
+
+  void set_device_authenticator(
+      std::unique_ptr<device_reauth::DeviceAuthenticator> authenticator) {
+    device_authenticator_ = std::move(authenticator);
   }
 
   void set_crowdsourcing_manager(
@@ -922,12 +943,17 @@ class TestAutofillClientTemplate : public T {
 
   bool supports_device_reauth_ = true;
 
+  mutable std::unique_ptr<device_reauth::DeviceAuthenticator>
+      device_authenticator_;
+
   bool is_tab_in_actor_mode_ = false;
 
-  bool should_show_personal_context_ambient_autofill_notice_ = false;
-  bool is_personal_context_ambient_autofill_notice_acknowledged_ = false;
-  bool should_show_personal_context_at_memory_notice_ = false;
-  bool is_personal_context_at_memory_notice_acknowledged_ = false;
+  bool show_ambient_autofill_notice_called_ = false;
+  bool show_ambient_autofill_notice_result_ = false;
+  bool hide_ambient_autofill_notice_called_ = false;
+
+  personal_context::TestPersonalContextFirstRunService
+      personal_context_first_run_service_;
 
   bool is_glic_enabled_ = false;
 

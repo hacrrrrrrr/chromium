@@ -16,11 +16,10 @@
 #include "components/browser_apis/bookmarks/bookmarks_api.mojom.h"
 #include "url/gurl.h"
 
-namespace bookmarks {
-class BookmarkModelObserver;
-}  // namespace bookmarks
-
 namespace bookmarks_api {
+
+class BookmarkEventTranslator;
+class BookmarksViewObserver;
 
 // Represents a hierarchical view of bookmark nodes and supports operations on
 // that view. This interface allows injecting different view models (such as
@@ -31,8 +30,8 @@ class BookmarksView {
   virtual ~BookmarksView() = default;
 
   // Observers.
-  virtual void AddObserver(bookmarks::BookmarkModelObserver* observer) = 0;
-  virtual void RemoveObserver(bookmarks::BookmarkModelObserver* observer) = 0;
+  virtual void AddObserver(BookmarksViewObserver* observer) = 0;
+  virtual void RemoveObserver(BookmarksViewObserver* observer) = 0;
   virtual bool IsDoingExtensiveChanges() const = 0;
 
   // Tree queries and lookups.
@@ -44,7 +43,9 @@ class BookmarksView {
   virtual bool IsPermanentNode(const bookmarks::BookmarkNode* node) const = 0;
   virtual mojom::PermanentFolderType GetPermanentFolderType(
       const bookmarks::BookmarkNode* node) const = 0;
+  virtual base::Uuid GetUuid(const bookmarks::BookmarkNode* node) const = 0;
   virtual bool IsSynced(const bookmarks::BookmarkNode* node) const = 0;
+  virtual const BookmarkEventTranslator& GetEventTranslator() const = 0;
 
   // Hierarchical mutations (all indices are visual view indices).
   virtual const bookmarks::BookmarkNode* AddURL(

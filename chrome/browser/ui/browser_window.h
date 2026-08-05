@@ -122,7 +122,6 @@ class BrowserWindow : public ui::BaseWindow {
   // invoking this method.
   // virtual void Close() = 0;
 
-  // Browser::OnWindowDidShow should be called after showing the window.
   // virtual void Show() = 0;
 
   //////////////////////////////////////////////////////////////////////////////
@@ -227,8 +226,6 @@ class BrowserWindow : public ui::BaseWindow {
   // if the window is visible.
   virtual void UpdateLoadingAnimations(bool is_visible) = 0;
 
-  // Sets the starred state for the current tab.
-  virtual void SetStarredState(bool is_starred) = 0;
 
   // Called when the active tab changes.  Subclasses which implement
   // TabStripModelObserver should implement this instead of ActiveTabChanged();
@@ -256,16 +253,9 @@ class BrowserWindow : public ui::BaseWindow {
   // `WebContents`.
   virtual void SetContentsSize(const gfx::Size& size) = 0;
 
-  // Updates the visual state of the specified page action icon if present on
-  // the window.
-  virtual void UpdatePageActionIcon(PageActionIconType type) = 0;
-
   // Returns the AutofillBubbleHandler responsible for handling all
   // Autofill-related bubbles.
   virtual autofill::AutofillBubbleHandler* GetAutofillBubbleHandler() = 0;
-
-  // Executes the action for the specified page action icon.
-  virtual void ExecutePageActionIconForTesting(PageActionIconType type) = 0;
 
   // Returns the location bar.
   virtual LocationBar* GetLocationBar() const = 0;

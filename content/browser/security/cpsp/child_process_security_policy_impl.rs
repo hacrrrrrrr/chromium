@@ -2,26 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// By default, unsafe code should be disallowed, and only the FFI code below
-// needs to make an exception to allow it.
-//
-// TODO(crbug.com/482216433): Move this to lib.rs once this crate is large
-// enough to have one.
-#![deny(unsafe_code)]
-
-chromium::import! {
-    "//base:feature";
-}
-
 use cxx::UniquePtr;
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{LazyLock, Mutex, MutexGuard};
-use storage_common::FileSystemType;
-use url::Origin;
 
 use content_browser_id_types::BrowsingInstanceId;
-use content_common_id_types::ChildProcessId;
+use storage_common::FileSystemType;
+use unguessable_token::UnguessableToken;
+use url::Origin;
+
+use crate::process_state::ProcessStateMaps;
 
 /// This block defines the Foreign Function Interface for C++ code to call the
 /// specified Rust functions. The functions operate on a
@@ -30,11 +20,14 @@ use content_common_id_types::ChildProcessId;
 mod ffi {
     #![allow(unsafe_code)]
     unsafe extern "C++" {
+        include!("base/unguessable_token.h");
         include!("url/origin.rs.h");
         include!("content/browser/isolated_origin_util.h");
         include!("storage/common/file_system/file_system_types.h");
         include!("content/public/browser/browsing_instance_id.h");
-        include!("content/public/common/child_process_id.h");
+
+        #[namespace = "base"]
+        type UnguessableToken = unguessable_token::UnguessableToken;
 
         // Gives us access to C++ url::Origin and all methods exposed in the origin
         // bridge file without having to redefine them here.
@@ -64,20 +57,9 @@ mod ffi {
 
         #[namespace = "content"]
         type BrowsingInstanceId = content_browser_id_types::BrowsingInstanceId;
-        #[namespace = "content"]
-        type ChildProcessId = content_common_id_types::ChildProcessId;
     }
 
     extern "Rust" {
-        // Per-child security state methods
-        fn add_process(child_id: ChildProcessId);
-        fn remove_process(child_id: ChildProcessId);
-
-        fn grant_send_midi_message(child_id: ChildProcessId);
-        fn grant_send_midi_sysex_message(child_id: ChildProcessId);
-        fn can_send_midi_message(child_id: ChildProcessId) -> bool;
-        fn can_send_midi_sysex_message(child_id: ChildProcessId) -> bool;
-
         // Global state APIs
         fn register_web_safe_scheme(scheme: &str);
         fn register_web_safe_request_only_scheme(scheme: &str);
@@ -107,14 +89,16 @@ mod ffi {
         ) -> bool;
 
         fn record_origin_agent_cluster_request_if_new(
-            browser_context_id: &str,
+            browser_context_token: UnguessableToken,
             origin: UniquePtr<Origin>,
         ) -> bool;
         fn has_origin_ever_requested_origin_agent_cluster_value(
-            browser_context_id: &str,
+            browser_context_token: UnguessableToken,
             origin: UniquePtr<Origin>,
         ) -> bool;
-        fn remove_origin_agent_cluster_requests_for_browser_context(browser_context_id: &str);
+        fn remove_origin_agent_cluster_requests_for_browser_context(
+            browser_context_token: UnguessableToken,
+        );
 
         fn lookup_origin_agent_cluster_state(
             browsing_instance_id: BrowsingInstanceId,
@@ -125,11 +109,11 @@ mod ffi {
             browsing_instance_id: BrowsingInstanceId,
             origin: UniquePtr<Origin>,
             oac_state: OriginAgentClusterIsolationState,
-            is_oac_enabled_by_default: bool,
+            default_oac_state: OriginAgentClusterIsolationState,
         );
         fn record_default_origin_agent_cluster_origin_if_new(
             browsing_instance_id: BrowsingInstanceId,
-            browser_context_id: &str,
+            browser_context_token: UnguessableToken,
             origin: UniquePtr<Origin>,
             oac_state: OriginAgentClusterIsolationState,
             is_global_walk_or_frame_removal: bool,
@@ -193,90 +177,6 @@ impl ffi::OriginAgentClusterIsolationState {
                 | ffi::OriginAgentClusterIsolationState::OriginKeyedProcessIsolatedByHeader
         )
     }
-}
-
-#[allow(unsafe_code)]
-// On Windows component builds, `blink_common` is a separate DLL. Accessing its
-// global variables requires specifying the library name and dylib link kind
-// for the linker to resolve the import symbol correctly.
-#[cfg_attr(
-    all(target_os = "windows", component_build),
-    link(name = "blink_common", kind = "dylib")
-)]
-unsafe extern "C" {
-    pub static kBlockMidiByDefault: feature::Feature;
-}
-
-fn add_process(child_id: ChildProcessId) {
-    let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    match cpsp.process_states.entry(child_id) {
-        Entry::Occupied(_) => {
-            panic!("Child process {:?} has already been registered.", child_id);
-        }
-        Entry::Vacant(entry) => {
-            entry.insert(ProcessState::new());
-        }
-    }
-}
-
-fn remove_process(child_id: ChildProcessId) {
-    // TODO(crbug.com/482216433): Rust currently does not have a concept of a
-    // "pending removal state", which would allow this to be queried but not
-    // modified. This will need to be added, as right now this can be modified
-    // in the pending removal state.
-    let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    match cpsp.process_states.entry(child_id) {
-        Entry::Occupied(entry) => {
-            entry.remove();
-        }
-        Entry::Vacant(_) => {
-            panic!("Removing a process {:?} that was not previously registered.", child_id);
-        }
-    }
-}
-
-#[allow(unsafe_code)]
-fn grant_send_midi_message(child_id: ChildProcessId) {
-    // SAFETY: `kBlockMidiByDefault` is defined in C++ via `BASE_FEATURE`
-    // and is thread-safe to query.
-    let block_midi_by_default = unsafe { kBlockMidiByDefault.is_enabled() };
-    if !block_midi_by_default {
-        return;
-    }
-
-    let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    if let Some(state) = cpsp.process_states.get_mut(&child_id) {
-        state.grant_send_midi_message();
-    }
-}
-
-fn grant_send_midi_sysex_message(child_id: ChildProcessId) {
-    let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    if let Some(state) = cpsp.process_states.get_mut(&child_id) {
-        state.grant_send_midi_sysex_message();
-    }
-}
-
-#[allow(unsafe_code)]
-fn can_send_midi_message(child_id: ChildProcessId) -> bool {
-    // SAFETY: `kBlockMidiByDefault` is defined in C++ via `BASE_FEATURE`
-    // and is thread-safe to query.
-    let block_midi_by_default = unsafe { kBlockMidiByDefault.is_enabled() };
-    if !block_midi_by_default {
-        return true;
-    }
-
-    let cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    cpsp.process_states.get(&child_id).is_some_and(|state| state.can_send_midi_message())
-}
-
-fn can_send_midi_sysex_message(child_id: ChildProcessId) -> bool {
-    // Note: The C++ version asserts that a process cannot have SysEx permission
-    // without also having normal MIDI permission. In Rust, this invariant is
-    // guaranteed by construction through the `MidiPermission` tri-state enum on
-    // `ProcessState`, making a runtime check unnecessary here.
-    let cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
-    cpsp.process_states.get(&child_id).is_some_and(|state| state.can_send_midi_sysex_message())
 }
 
 // Note that there is an implicit string copy happening here: the C++ side
@@ -402,14 +302,14 @@ fn find_permissions_for_file_system_type(
 }
 
 fn record_origin_agent_cluster_request_if_new(
-    browser_context_id: &str,
+    browser_context_token: UnguessableToken,
     origin: UniquePtr<ffi::Origin>,
 ) -> bool {
     if !ffi::IsolatedOriginUtil::is_valid_origin_for_origin_agent_cluster_opt_in(&origin) {
         return false;
     }
 
-    let browser_context_id = BrowserContextId(browser_context_id.to_string());
+    let browser_context_id = BrowserContextId(browser_context_token);
     let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
     let origins = cpsp.origin_agent_cluster_opt_ins_and_outs.entry(browser_context_id).or_default();
 
@@ -422,54 +322,20 @@ fn record_origin_agent_cluster_request_if_new(
 }
 
 fn has_origin_ever_requested_origin_agent_cluster_value(
-    browser_context_id: &str,
+    browser_context_token: UnguessableToken,
     origin: UniquePtr<ffi::Origin>,
 ) -> bool {
-    let browser_context_id = BrowserContextId(browser_context_id.to_string());
+    let browser_context_id = BrowserContextId(browser_context_token);
     let cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
     cpsp.origin_agent_cluster_opt_ins_and_outs
         .get(&browser_context_id)
         .is_some_and(|origins| origins.contains(&origin))
 }
 
-/// Holds security state specific to each child process.
-// TODO(crbug.com/482216433): Move ProcessState into its own file.
-#[derive(Debug)]
-struct ProcessState {
-    /// Determines if a child process can send MIDI messages.
-    midi_permission: MidiPermission,
-}
-
-impl ProcessState {
-    fn new() -> Self {
-        ProcessState { midi_permission: MidiPermission::CannotSendMidi }
-    }
-
-    fn grant_send_midi_message(&mut self) {
-        // MidiPermission::CanSendMidiSysEx is a superset of
-        // MidiPermission::CanSendMidi, so no need to update the permission for
-        // that case.
-        if self.midi_permission == MidiPermission::CannotSendMidi {
-            self.midi_permission = MidiPermission::CanSendMidi;
-        }
-    }
-
-    fn grant_send_midi_sysex_message(&mut self) {
-        self.midi_permission = MidiPermission::CanSendMidiSysEx;
-    }
-
-    fn can_send_midi_message(&self) -> bool {
-        self.midi_permission == MidiPermission::CanSendMidi
-            || self.midi_permission == MidiPermission::CanSendMidiSysEx
-    }
-
-    fn can_send_midi_sysex_message(&self) -> bool {
-        self.midi_permission == MidiPermission::CanSendMidiSysEx
-    }
-}
-
-fn remove_origin_agent_cluster_requests_for_browser_context(browser_context_id: &str) {
-    let browser_context_id = BrowserContextId(browser_context_id.to_string());
+fn remove_origin_agent_cluster_requests_for_browser_context(
+    browser_context_token: UnguessableToken,
+) {
+    let browser_context_id = BrowserContextId(browser_context_token);
     let mut cpsp = ChildProcessSecurityPolicyImpl::get_locked_instance();
     cpsp.origin_agent_cluster_opt_ins_and_outs.remove(&browser_context_id);
 }
@@ -495,17 +361,16 @@ fn add_origin_agent_cluster_state_for_browsing_instance(
     browsing_instance_id: BrowsingInstanceId,
     origin: UniquePtr<ffi::Origin>,
     oac_state: ffi::OriginAgentClusterIsolationState,
-    is_oac_enabled_by_default: bool,
+    default_oac_state: ffi::OriginAgentClusterIsolationState,
 ) {
-    // We should only explicitly record states from OAC header requests, either
-    // opt-ins or opt-outs. Opt-outs only make sense if OAC is enabled by
-    // default.
+    // We should only be registering an isolation state if it deviates from the
+    // default isolation state (e.g., if it's explicitly requested by a header or
+    // if an ad frame's process isolation is being bypassed).
     assert!(
-        oac_state.is_origin_keyed_agent_cluster_by_header()
-            || (oac_state == ffi::OriginAgentClusterIsolationState::SiteKeyedByHeader
-                && is_oac_enabled_by_default),
-        "Trying to add invalid OAC state: {:?}",
-        oac_state
+        oac_state != default_oac_state,
+        "Trying to add invalid OAC state: {:?} (default: {:?})",
+        oac_state,
+        default_oac_state
     );
 
     let is_valid_opt_in = oac_state.is_origin_keyed_agent_cluster_by_header()
@@ -538,7 +403,7 @@ fn add_origin_agent_cluster_state_for_browsing_instance(
 
 fn record_default_origin_agent_cluster_origin_if_new(
     browsing_instance_id: BrowsingInstanceId,
-    browser_context_id: &str,
+    browser_context_token: UnguessableToken,
     origin: UniquePtr<ffi::Origin>,
     oac_state: ffi::OriginAgentClusterIsolationState,
     is_global_walk_or_frame_removal: bool,
@@ -559,7 +424,7 @@ fn record_default_origin_agent_cluster_origin_if_new(
     // during global walks and frame removals, since we do want to track the
     // origin's non-isolated status in those cases.
     if !is_global_walk_or_frame_removal {
-        let browser_context_id = BrowserContextId(browser_context_id.to_string());
+        let browser_context_id = BrowserContextId(browser_context_token);
         let has_ever_requested_oac = cpsp
             .origin_agent_cluster_opt_ins_and_outs
             .get(&browser_context_id)
@@ -600,12 +465,11 @@ fn erase_origin_agent_cluster_state(browsing_instance_id: BrowsingInstanceId) {
 /// This object supports being accessed from different threads and guards access
 /// to its internal data with a Mutex.
 pub struct ChildProcessSecurityPolicyImpl {
-    // Tracks all per-process security states.
-    //
-    // TODO(crbug.com/522872468): Separately track states for RenderProcessHosts
-    // that have been deleted, while Handles still exist for them. Such states
-    // can be queried but not modified.
-    process_states: HashMap<ChildProcessId, ProcessState>,
+    // Tracks all per-process security states, including while the
+    // RenderProcessHost exists and the state can be modified, and after it has
+    // been deleted until all of the ChildProcessSecurityPolicy::Handles are
+    // gone (when the state can be queried but not modified).
+    pub(crate) process_states: ProcessStateMaps,
 
     /// Tracks the schemes that are ok to request or commit, or are pseudo
     /// schemes that are generally not allowed to commit.
@@ -676,7 +540,7 @@ impl ChildProcessSecurityPolicyImpl {
     /// `get_locked_instance()`.
     fn new() -> Self {
         Self {
-            process_states: HashMap::new(),
+            process_states: ProcessStateMaps::new(),
             known_schemes: HashMap::new(),
             v8_optimization_verdict_map: BTreeMap::new(),
             file_system_policy_map: BTreeMap::new(),
@@ -711,7 +575,7 @@ impl ChildProcessSecurityPolicyImpl {
     /// ChildProcessSecurityPolicyImpl is provided by the FFI functions above,
     /// which use this to operate on the underlying
     /// ChildProcessSecurityPolicyImpl.
-    fn get_locked_instance() -> MutexGuard<'static, ChildProcessSecurityPolicyImpl> {
+    pub(crate) fn get_locked_instance() -> MutexGuard<'static, ChildProcessSecurityPolicyImpl> {
         // `unwrap` is ok, because Chromium is always built with `-Cpanic=abort`
         // which means that a Mutex cannot be poisoned when unwinding a panic
         // while holding the mutex.
@@ -722,30 +586,16 @@ impl ChildProcessSecurityPolicyImpl {
     }
 }
 
-/// A unique identifier for a `BrowserContext`. Currently, this is based on the
-/// string representation of the C++ `BrowserContext::UniqueToken()`.
-// TODO(crbug.com/522298905): Add FFI for UnguessableToken so that
-// `UniqueToken()` can be used by both Rust and C++.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct BrowserContextId(String);
+/// A unique identifier for a `BrowserContext`, wrapping C++
+/// `base::UnguessableToken` returned by `BrowserContext::UniqueToken()`.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone, Debug, Hash)]
+pub struct BrowserContextId(pub UnguessableToken);
 
 /// An enum tracking whether v8 optimizations are enabled or disabled.
 #[derive(PartialEq, Eq)]
 enum V8OptimizationVerdict {
     Enabled,
     Disabled,
-}
-
-/// Determines if a child process can send MIDI messages.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MidiPermission {
-    /// Does not permit a child process to send messages to MIDI devices.
-    CannotSendMidi,
-    /// Permits a child process to send messages to any MIDI device.
-    CanSendMidi,
-    /// Permits a child process to send system exclusive (SysEx) messages to any
-    /// MIDI device. Granting this also grants `MidiPermission::CanSendMidi`.
-    CanSendMidiSysEx,
 }
 
 /// Represents what behavior is allowed for a given known scheme.

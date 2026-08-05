@@ -41,6 +41,9 @@
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/ash/login/session/user_session_manager.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/global_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/login/login_screen_client_impl.h"
 #include "chrome/browser/ui/ash/login/user_adding_screen.h"
@@ -91,13 +94,11 @@ bool IsFingerprintAvailableForUser(
 }
 
 // Observer to start ScreenLocker when locking the screen is requested.
-class ScreenLockObserver : public SessionManagerClient::StubDelegate,
-                           public UserAddingScreen::Observer,
+class ScreenLockObserver : public UserAddingScreen::Observer,
                            public session_manager::SessionManagerObserver {
  public:
   ScreenLockObserver() : session_started_(false) {
     session_manager::SessionManager::Get()->AddObserver(this);
-    SessionManagerClient::Get()->SetStubDelegate(this);
   }
 
   ScreenLockObserver(const ScreenLockObserver&) = delete;
@@ -105,17 +106,9 @@ class ScreenLockObserver : public SessionManagerClient::StubDelegate,
 
   ~ScreenLockObserver() override {
     session_manager::SessionManager::Get()->RemoveObserver(this);
-    if (SessionManagerClient::Get()) {
-      SessionManagerClient::Get()->SetStubDelegate(nullptr);
-    }
   }
 
   bool session_started() const { return session_started_; }
-
-  // SessionManagerClient::StubDelegate overrides:
-  void LockScreenForStub() override {
-    ScreenLocker::HandleShowLockScreenRequest();
-  }
 
   // session_manager::SessionManagerObserver:
   void OnSessionStateChanged() override {
@@ -174,7 +167,9 @@ ScreenLocker* ScreenLocker::screen_locker_ = nullptr;  // Only on UI thread
 // ScreenLocker, public:
 
 ScreenLocker::ScreenLocker(const user_manager::UserList& users)
-    : users_(users) {
+    : users_(users),
+      // TODO(crbug.com/404133029): Avoid using g_browser_process.
+      challenge_response_auth_keys_loader_(g_browser_process->local_state()) {
   CHECK(base::CurrentUIThread::IsSet());
   CHECK(!screen_locker_);
   screen_locker_ = this;
@@ -212,7 +207,17 @@ void ScreenLocker::Init() {
 
   // Create ViewScreenLocker that calls into the views-based lock screen via
   // mojo.
-  views_screen_locker_ = std::make_unique<ViewsScreenLocker>();
+  // TODO(crbug.com/404133029): Avoid using g_browser_process.
+  PrefService* local_state = g_browser_process->local_state();
+  ApplicationLocaleStorage* application_locale_storage =
+      g_browser_process->GetFeatures()->application_locale_storage();
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory =
+      g_browser_process->shared_url_loader_factory();
+  policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash =
+      g_browser_process->platform_part()->browser_policy_connector_ash();
+  views_screen_locker_ = std::make_unique<ViewsScreenLocker>(
+      local_state, application_locale_storage,
+      std::move(shared_url_loader_factory), browser_policy_connector_ash);
 
   // Create and display lock screen.
   CHECK(LoginScreenClientImpl::HasInstance());
@@ -413,7 +418,9 @@ void ScreenLocker::AuthenticateWithChallengeResponse(
     return;
   }
 
-  if (!ChallengeResponseAuthKeysLoader::CanAuthenticateUser(account_id)) {
+  // TODO(crbug.com/404133029): Avoid using g_browser_process.
+  if (!ChallengeResponseAuthKeysLoader::CanAuthenticateUser(
+          CHECK_DEREF(g_browser_process->local_state()), account_id)) {
     LOG(ERROR)
         << "Challenge-response authentication isn't supported for the user";
     if (auth_status_consumer_) {

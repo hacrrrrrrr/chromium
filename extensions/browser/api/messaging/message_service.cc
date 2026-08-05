@@ -13,6 +13,7 @@
 #include <variant>
 
 #include "base/containers/span.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/json/json_writer.h"
@@ -58,6 +59,7 @@
 #include "extensions/common/api/messaging/messaging_util.h"
 #include "extensions/common/api/messaging/port_context.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -525,9 +527,7 @@ void MessageService::OpenChannelToExtension(
     // information (so that it's always present, even for extensions that don't
     // have an explicit key); we should.
     const ExternallyConnectableInfo* externally_connectable =
-        static_cast<const ExternallyConnectableInfo*>(
-            target_extension->GetManifestData(
-                manifest_keys::kExternallyConnectable));
+        target_extension->GetManifestData<ExternallyConnectableInfo>();
     bool is_externally_connectable = false;
 
     if (externally_connectable) {
@@ -651,7 +651,9 @@ void MessageService::OpenChannelToExtension(
     // - Only for extensions that can't normally be enabled in incognito, since
     //   that surface (e.g. chrome://extensions) should be the only one for
     //   enabling in incognito. In practice this means platform apps only.
-    if (relationship != MessagingEndpoint::Relationship::kExternalWebPage ||
+    if (base::FeatureList::IsEnabled(
+            extensions_features::kExtensionAutoRejectIncognitoConnectability) ||
+        relationship != MessagingEndpoint::Relationship::kExternalWebPage ||
         IncognitoInfo::IsSplitMode(target_extension) ||
         util::CanBeIncognitoEnabled(target_extension)) {
       OnOpenChannelAllowed(std::move(params), false);

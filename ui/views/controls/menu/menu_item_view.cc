@@ -64,6 +64,7 @@
 #include "ui/views/style/typography_provider.h"
 #include "ui/views/vector_icons.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_tracker.h"
 #include "ui/views/view_utils.h"
 #include "ui/views/widget/widget.h"
 
@@ -791,11 +792,17 @@ MenuItemView* MenuItemView::GetMenuItemByID(int id) {
 }
 
 void MenuItemView::ChildrenChanged() {
-  MenuController* controller = GetMenuController();
-  if (controller) {
+  auto* const controller_ptr = GetMenuController();
+  if (controller_ptr) {
     UpdateEmptyMenusAndMetrics();
 
+    // Certain accessibility callbacks could destroy the menu indirectly through
+    // activation changes.
+    const auto controller = controller_ptr->AsWeakPtr();
     controller->MenuChildrenChanged(this);
+    if (!controller) {
+      return;
+    }
 
     if (submenu_) {
       // Force a paint and a synchronous layout. This needs a synchronous layout
@@ -1064,24 +1071,34 @@ void MenuItemView::UpdateEmptyMenusAndMetrics() {
   // visible items. Copy the children, since we may mutate them as we go.
   const Views children = submenu_->children();
   bool has_visible_menu_items = false;
+
+  // Making changes to selection, etc. can cause `this` to be deleted. Track the
+  // continued existence of this object while updating.
+  ViewTracker tracker(this);
+
   for (View* child : children) {
     MenuItemView* const child_menu = AsViewClass<MenuItemView>(child);
     if (!child_menu) {
       continue;
     }
     if (IsViewClass<EmptyMenuMenuItem>(child)) {
+      const bool selected = child_menu->IsSelected();
       // Prevent view destruction until selection is updated.
       // We remove the child before updating selection in case of re-entrancy.
       std::unique_ptr<View> removed_child = submenu_->RemoveChildViewT(child);
-      if (child_menu->IsSelected()) {
+      if (tracker && selected) {
         // Update selection to this menu before deleting the currently
         // selected child.
         GetMenuController()->SetSelection(
             this, MenuController::SELECTION_UPDATE_IMMEDIATELY);
+        // This can also delete `this`, so check for that.
+        if (!tracker) {
+          return;
+        }
       }
-      submenu_
-          ->InvalidateLayout();  // Ideally the submenu would have a layout
-                                 // manager that would do this automatically.
+      // TODO(https://crbug.com/537701460): Remove after SubmenuView gets a
+      // proper layout.
+      submenu_->InvalidateLayout();
     } else {
       has_visible_menu_items |= child->GetVisible();
     }
@@ -1146,13 +1163,14 @@ void MenuItemView::OnPaintImpl(gfx::Canvas* canvas, PaintMode mode) {
   const gfx::FontList& font_list = GetFontList();
 
   // Calculate the margins.
-  const int vertical_margin = GetVerticalMargin();
-  const int available_height = height() - vertical_margin * 2;
+  const int top_margin_val = GetTopMargin();
+  const int bottom_margin_val = GetBottomMargin();
+  const int available_height = height() - top_margin_val - bottom_margin_val;
   const int text_height = font_list.GetHeight();
   const int total_text_height =
       secondary_title().empty() ? text_height : text_height * 2;
   const int top_margin =
-      vertical_margin + (available_height - total_text_height) / 2;
+      top_margin_val + (available_height - total_text_height) / 2;
 
   // Render the foreground.
   const SubmenuView* const submenu = GetContainingSubmenu();
@@ -1200,7 +1218,20 @@ void MenuItemView::PaintBackground(gfx::Canvas* canvas,
     flags.setStyle(cc::PaintFlags::kFill_Style);
     flags.setColor(
         GetColorProvider()->GetColor(background_info.background_color_id));
-    canvas->DrawRoundRect(bounds, background_info.corner_radius, flags);
+
+    SkVector radii[4] = {
+        {SkIntToScalar(background_info.top_radius),
+         SkIntToScalar(background_info.top_radius)},
+        {SkIntToScalar(background_info.top_radius),
+         SkIntToScalar(background_info.top_radius)},
+        {SkIntToScalar(background_info.bottom_radius),
+         SkIntToScalar(background_info.bottom_radius)},
+        {SkIntToScalar(background_info.bottom_radius),
+         SkIntToScalar(background_info.bottom_radius)},
+    };
+    SkRRect rrect;
+    rrect.setRectRadii(gfx::RectToSkRect(bounds), radii);
+    canvas->sk_canvas()->drawRRect(rrect, flags);
   }
   const auto& config = MenuConfig::instance();
   if (type_ == Type::kHighlighted || is_alerted_ ||
@@ -1234,10 +1265,13 @@ void MenuItemView::PaintBackground(gfx::Canvas* canvas,
     SkVector radii[4]{{0, 0}, {0, 0}, {0, 0}, {0, 0}};
     if (menu_item_background_.has_value()) {
       highlight_bounds.Inset(gfx::InsetsF::VH(0, GetItemHorizontalBorder()));
-      const float radius = menu_item_background_->corner_radius;
-      for (auto& i : radii) {
-        i.set(radius, radius);
-      }
+      const SkScalar top_r = SkIntToScalar(menu_item_background_->top_radius);
+      const SkScalar bot_r =
+          SkIntToScalar(menu_item_background_->bottom_radius);
+      radii[0] = {top_r, top_r};
+      radii[1] = {top_r, top_r};
+      radii[2] = {bot_r, bot_r};
+      radii[3] = {bot_r, bot_r};
     } else {
       radii[2].set(bottom_rounded_corners_.lower_right(),
                    bottom_rounded_corners_.lower_right());
@@ -1264,9 +1298,7 @@ void MenuItemView::PaintBackground(gfx::Canvas* canvas,
     AdjustBoundsForRTLUI(&item_bounds);
 
     ui::NativeTheme::MenuItemExtraParams menu_item_extra_params;
-    menu_item_extra_params.corner_radius =
-        menu_item_background_.has_value() ? menu_item_background_->corner_radius
-                                          : config.item_corner_radius;
+    menu_item_extra_params.corner_radius = config.item_corner_radius;
     GetNativeTheme()->Paint(
         canvas->sk_canvas(), GetColorProvider(),
         ui::NativeTheme::kMenuItemBackground, ui::NativeTheme::kHovered,
@@ -1502,7 +1534,7 @@ MenuItemView::MenuItemDimensions MenuItemView::CalculateDimensions() const {
     return dimensions;
   }
 
-  const int vertical_margins = GetVerticalMargin() * 2;
+  const int vertical_margins = GetTopMargin() + GetBottomMargin();
   dimensions.height = ApplyMinIconHeight(dimensions.height) + vertical_margins;
 
   // Determine the length of the right-side text.

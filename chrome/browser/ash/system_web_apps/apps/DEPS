@@ -68,6 +68,7 @@ include_rules = [
   "+chrome/browser/signin/identity_manager_factory.h",
   "+chrome/browser/ui/ash",
   "+chrome/browser/ui/browser_commands.h",
+  "+chrome/browser/ui/browser_init_state.h",
   "+chrome/browser/ui/browser_window.h",
   "+chrome/browser/ui/browser_window/public/profile_browser_collection.h",
   "+chrome/browser/ui/chrome_pages.h",
@@ -115,6 +116,7 @@ specific_include_rules = {
   ],
   "personalization_app_utils_unittest\\.cc": [
     "+chrome/browser/signin/identity_manager_factory.h",
+    "+chrome/browser/ash/browser_delegate/browser_controller_impl.h",
   ],
   "demo_mode_app_integration_browsertest\\.cc": [
     "+chrome/browser/ash/policy/core/device_local_account.h",
@@ -138,5 +140,8 @@ specific_include_rules = {
   ],
   ".*test.*\\.cc": [
     "+chrome/browser/ui/browser.h",
+  ],
+  "chrome_file_manager_ui_delegate\\.cc": [
+    "+chrome/browser/ui/webui/theme_source.h",
   ],
 }

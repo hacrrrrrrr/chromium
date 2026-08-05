@@ -18,6 +18,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.DefaultBrowserMenuUtils;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
@@ -89,7 +90,8 @@ class ChromeContextMenuItem {
         Item.READING_MODE,
         Item.SEND_TAB_TO_SELF,
         Item.TRANSLATE,
-        Item.CREATE_QR_CODE
+        Item.CREATE_QR_CODE,
+        Item.ASK_GEMINI
     })
     @Retention(RetentionPolicy.SOURCE)
     public @interface Item {
@@ -157,8 +159,9 @@ class ChromeContextMenuItem {
         int SEND_TAB_TO_SELF = 50;
         int TRANSLATE = 51;
         int CREATE_QR_CODE = 52;
+        int ASK_GEMINI = 53;
         // ALWAYS UPDATE!
-        int NUM_ENTRIES = 53;
+        int NUM_ENTRIES = 54;
     }
 
     /** Mapping from {@link Item} to the ID found in the ids.xml. */
@@ -216,6 +219,7 @@ class ChromeContextMenuItem {
         R.id.contextmenu_send_tab_to_self, // Item.SEND_TAB_TO_SELF
         R.id.contextmenu_translate, // Item.TRANSLATE
         R.id.contextmenu_create_qr_code, // Item.CREATE_QR_CODE
+        R.id.contextmenu_ask_gemini, // Item.ASK_GEMINI
     };
 
     /** Mapping from {@link Item} to the ID of the string that describes the action of the item. */
@@ -273,6 +277,7 @@ class ChromeContextMenuItem {
         R.string.menu_send_to_devices, // Item.SEND_TAB_TO_SELF
         R.string.contextmenu_translate, // Item.TRANSLATE
         R.string.contextmenu_create_qr_code, // Item.CREATE_QR_CODE
+        R.string.glic_button_entrypoint_ask_gemini_label, // Item.ASK_GEMINI
     };
 
     /**
@@ -297,6 +302,10 @@ class ChromeContextMenuItem {
         return STRING_IDS[item];
     }
 
+    private static boolean isSaveAsEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.ENABLE_DOWNLOAD_SAVE_AS_CONTEXT_MENU);
+    }
+
     /**
      * Transforms the id of the item into a string. It manages special cases that need minor changes
      * due to templating.
@@ -310,6 +319,21 @@ class ChromeContextMenuItem {
     public static CharSequence getTitle(
             Context context, Profile profile, @Item int item, boolean showInProductHelp) {
         switch (item) {
+            case Item.SAVE_LINK_AS:
+                if (isSaveAsEnabled()) {
+                    return context.getString(R.string.contextmenu_save_link_as);
+                }
+                break;
+            case Item.SAVE_IMAGE:
+                if (isSaveAsEnabled()) {
+                    return context.getString(R.string.contextmenu_save_image_as);
+                }
+                break;
+            case Item.SAVE_VIDEO:
+                if (isSaveAsEnabled()) {
+                    return context.getString(R.string.contextmenu_save_video_as);
+                }
+                break;
             case Item.OPEN_IN_BROWSER_ID:
                 return DefaultBrowserMenuUtils.getTitleOpenInDefaultBrowser(false);
             case Item.SEARCH_BY_IMAGE:
@@ -361,6 +385,9 @@ class ChromeContextMenuItem {
                 }
                 break;
             case Item.DOWNLOAD_VIDEO_FRAME:
+                if (isSaveAsEnabled()) {
+                    return context.getString(R.string.contextmenu_save_video_frame_as);
+                }
                 return context.getString(R.string.contextmenu_download_video_frame);
             case Item.TRANSLATE:
                 // Language of the user's translate preference

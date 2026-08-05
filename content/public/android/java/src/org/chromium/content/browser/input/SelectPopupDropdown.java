@@ -37,10 +37,13 @@ public class SelectPopupDropdown implements SelectPopup.Ui {
             List<SelectPopupItem> items,
             int[] selected,
             boolean rightAligned,
+            int itemHeight,
+            double fontSize,
             WebContents webContents) {
         mSelectionChangedCallback = selectionChangedCallback;
         mDropdownPopupWindow = new DropdownPopupWindow(context, anchorView);
         mDropdownPopupWindow.setFocusable(true);
+        mDropdownPopupWindow.setListSelectorTransparent();
         mDropdownPopupWindow.setOnItemClickListener(
                 new AdapterView.OnItemClickListener() {
                     @Override
@@ -56,7 +59,7 @@ public class SelectPopupDropdown implements SelectPopup.Ui {
             initialSelection = selected[0];
         }
         mDropdownPopupWindow.setInitialSelection(initialSelection);
-        mDropdownPopupWindow.setAdapter(new DropdownAdapter(context, items));
+        mDropdownPopupWindow.setAdapter(new DropdownAdapter(context, items, itemHeight, fontSize));
         mDropdownPopupWindow.setRtl(rightAligned);
         mDropdownPopupWindow.setOnDismissListener(
                 new PopupWindow.OnDismissListener() {

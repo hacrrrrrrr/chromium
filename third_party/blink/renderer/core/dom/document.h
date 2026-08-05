@@ -75,6 +75,7 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
+#include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
 #include "third_party/blink/renderer/core/dom/live_node_list_registry.h"
 #include "third_party/blink/renderer/core/dom/node_list_invalidation_type.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
@@ -243,7 +244,6 @@ class ResizeObserver;
 class Resource;
 class ResourceFetcher;
 class RootScrollerController;
-class RouteMap;
 class SVGDocumentExtensions;
 class SVGUseElement;
 class ScriptElementBase;
@@ -817,16 +817,6 @@ class CORE_EXPORT Document : public ContainerNode,
   void UpdateStyleAndLayoutForNode(const Node*, DocumentUpdateReason);
   void UpdateStyleAndLayoutForRange(const Range*, DocumentUpdateReason);
 
-  // Ensures that location-based data will be valid for a given node.
-  //
-  // This will run style and layout if they are currently dirty, and it may also
-  // run compositing inputs if the node is in a sticky subtree (as the sticky
-  // offset may change the node's position).
-  //
-  // Due to this you should only call this if you definitely need valid location
-  // data, otherwise use one of the |UpdateStyleAndLayout...| methods above.
-  void EnsurePaintLocationDataValidForNode(const Node*,
-                                           DocumentUpdateReason reason);
 
   // Gets the description for the specified page. This includes preferred page
   // size and margins in pixels, assuming 96 pixels per inch. Updates layout as
@@ -1661,8 +1651,8 @@ class CORE_EXPORT Document : public ContainerNode,
            IsInOutermostMainFrame();
   }
 
-  int RequestAnimationFrame(FrameCallback*);
-  void CancelAnimationFrame(int id);
+  int RequestAnimationFrame(FrameCallback*, FrameCallbackType type);
+  void CancelAnimationFrame(int id, FrameCallbackType type);
 
   ScriptedAnimationController& GetScriptedAnimationController();
 
@@ -1795,11 +1785,6 @@ class CORE_EXPORT Document : public ContainerNode,
   // different.  Having it be a distinct method also makes it clearer why
   // callers are using it.
   PopoverStack& MenuStack() { return popover_auto_stack_; }
-
-  // https://crbug.com/1453291
-  // The DOM Parts API:
-  // https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md.
-  RouteMap* routeMap();
 
   void SetHasCaptureListener() { has_capture_listener_ = true; }
   bool HasCaptureListener() const { return has_capture_listener_; }
@@ -2345,6 +2330,12 @@ class CORE_EXPORT Document : public ContainerNode,
       return CreateViewTransitions();
     }
   }
+
+  bool IsOverscrollCommandTarget(Element& element) const;
+  void UpdateOverscrollCommandTargets();
+  void MarkOverscrollCommandTargetsDirty();
+  void AddOverscrollCommandInvoker(Element& invoker);
+  void RemoveOverscrollCommandInvoker(Element& invoker);
 
   void UpdateActiveState(bool is_active, bool update_active_chain, Element*);
   void UpdateHoverState(Element*);
@@ -3283,6 +3274,14 @@ class CORE_EXPORT Document : public ContainerNode,
 
   bool responsive_embedded_sizing_ = false;
   bool text_scale_meta_tag_present_ = false;
+
+  // `overscroll_command_targets_` is a set of elements that are currently the
+  // targets of command invokers that have `command=toggle-overscroll`.
+  // The `overscroll_command_invokers_` set contains the associated list of
+  // command invokers themselves.
+  HeapHashSet<Member<Element>> overscroll_command_targets_;
+  HeapHashSet<Member<Element>> overscroll_command_invokers_;
+  bool overscroll_command_targets_dirty_ = false;
 
   // Data on the currently active safe-triangle (if any), for HTML menu
   // elements, that is delaying interest gain/loss.

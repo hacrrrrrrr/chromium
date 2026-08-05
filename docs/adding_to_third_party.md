@@ -41,10 +41,15 @@ Regardless of where you add a third party dependency, you should use the
 
 # Before you start
 
+NOTE: You can skip this step when you are only moving existing directories in
+Chromium to //third_party/.
+
 To make sure the inclusion of a new //third_party project makes sense for the
 Chromium project, you should first obtain approval from Chrome's Technical
-Steering Council. Please include the following topics in an email to
-chromium-third-party-libraries at chromium.org:
+Steering Council and Chrome Security. Please include the following topics in an
+email to chromium-third-party-libraries at chromium.org (this will trigger a
+review by both parties - you're good to go once you have both signoffs on the
+email thread):
 
 1.  Link to the upstream repository.
 
@@ -65,12 +70,12 @@ chromium-third-party-libraries at chromium.org:
     latter case, please explain why it can't be built from source, as you'll need
     explicit approval.
 
-
 4.  Maintenance:
 
     You will be responsible for [owning the dependency](#add-owners), keeping it
-    up to date with security and stability fixes. Ideally you'll autoroll the
-    dependency; any other strategy will require an exception, as discussed in
+    up to date with security and stability fixes. Third party dependencies must
+    be [kept up to date](#fresh-deps), so you'll need a plan to autoroll it. If
+    it cannot be autorolled, you will need an exception, as discussed in
     "[Update Mechanism](#update-mechanism)" and
     "[Autoroll Exceptions](#autoroll-exceptions)" below.
 
@@ -147,12 +152,29 @@ in third_party/OWNERS for help.
 
 See [Chrome Code Policy](https://goto.google.com/chrome-code-policy)
 
+# Keeping dependencies up to date (fresh) {#fresh-deps}
+
+It is Chromium policy that third party dependencies be kept up to date, or
+"fresh". Fresh means:
+
+* There is no newer minor or patch version that has been available for 3+ months.
+* There is no newer major version that has been available for 1 year or more.
+* The upstream project has had a release within the last 2 years.
+
+The easiest way to ensure your dependency meets this criteria is to onboard it
+to an autoroller. Refer to
+[managing-third-party](https://chromium.googlesource.com/chromium/src/+/main/docs/managing-third-party/)
+for options and user guides. While the autoroller will detect new versions as
+they become available and attempt to roll them into Chromium, OWNERS are
+responsible for resolving any issues which arise as a result of the update and
+landing the update as soon as feasible. If you cannot autoroll your dependency,
+you will need an [autoroll exception](#autoroll-exception).
 
 # Get the code
 
 There are two common ways to depend on third-party code: you can reference a
 Git repo directly (via entries in the DEPS file) or you can check in a
-snapshot. The former is preferable in most cases:
+snapshot (vendor the code). The former is preferable in most cases:
 
 1. If you are actively developing in the upstream repo, then having the DEPS
    file include the upstream (that's been mirrored to GoB, see [here](/docs/dependencies.md#adding-to-GoB))
@@ -171,7 +193,7 @@ snapshot. The former is preferable in most cases:
 Checking in a snapshot is useful if this is effectively taking on maintenance
 of an unmaintained project (e.g. an ancient library that we're going to GN-ify
 that hasn't been updated in years). And, of course, if the code you need isn't
-in a Git repo, then you have to snapshot.
+in a Git repo, then you have to snapshot/vendor.
 
 ## Node packages
 
@@ -280,6 +302,11 @@ you're re-using code. See
 for a list of fields to include. A presubmit check will check this has the right
 format.
 
+Make sure to document all security considerations, concerns, and risks in the
+`Description:` field of the README.chromium. Third party code is a hot spot
+for security vulnerabilities. Help people make informed decisions about
+relying on this package by highlighting security considerations.
+
 ## Security Critical {#security-critical}
 README.chromium files contain a field indicating whether the package is
 security-critical or not. A package is security-critical if it is compiled
@@ -292,9 +319,6 @@ into the product and does any of the following:
 * Influences or sets security-related policy (including the user experience)
 
 ## Update Mechanism {#update-mechanism}
-
-We aim to eventually autoroll as many dependencies as is feasible, and track those
-that can't with an [exception](https://issues.chromium.org/issues/new?component=1801247&template=2135097).
 
 The `Update Mechanism:` field specifies how this dependency is kept up-to-date.
 You will use one of the following values below. The bug link should be an
@@ -345,7 +369,7 @@ has diverged from the upstream, and is no longer updatable.
 > from the upstream. This may return some false positives but ensures
 > coverage is optimal.
 
-### Autoroll Exceptions
+### Autoroll Exceptions {#autoroll-exceptions}
 
 You can request your dependency to be exempted from autorolling. You MUST
 demonstrate a strong technical need for doing so.
@@ -414,7 +438,7 @@ or not.
 #### Add a LICENSE file and run related checks
 
 You need a LICENSE file. Example:
-[//third_party/libjpeg/LICENSE](../third_party/libjpeg/LICENSE). Dependencies
+[//third_party/libpng/LICENSE](../third_party/libpng/LICENSE). Dependencies
 should not be added without a license file and license type, even if they are
 not shipped in a final product. Existing dependencies without a license file or
 license type are currently being cleaned up as part of the metadata uplift
@@ -526,15 +550,8 @@ following sign-offs. Some of these are accessible to Googlers only.
 Non-Googlers can email one of the people in
 [//third_party/OWNERS](../third_party/OWNERS) for help.
 
-* Make sure you have the approval from Chrome ATLs as mentioned
-  [above](#before-you-start).
-* Get security@chromium.org (or chrome-security@google.com, Google-only)
-  approval. Document all security considerations, concerns, and risks in the
-  `Description:` field of the README.chromium. Third party code is a hot spot
-  for security vulnerabilities. Help people make informed decisions about
-  relying on this package by highlighting security considerations.
-    * Rust dependencies do not need separate security review - the Rust review
-      process will cover security aspects.
+* Make sure you have the approval from Chrome TSC and Chrome Security as
+mentioned [above](#before-you-start).
 * Add chromium-third-party@google.com as a reviewer on your change. This
   will trigger automatic assignment to a reviewer who will check license use,
   metadata compliance and verify long term dependency maintenance plans.
@@ -546,10 +563,6 @@ Non-Googlers can email one of the people in
   process, ask one of the [//third_party/OWNERS](../third_party/OWNERS) instead.
 * Lastly, if all other steps are complete, get a positive code review from a
   member of [//third_party/OWNERS](../third_party/OWNERS) to land the change.
-
-Please send separate emails to the ATLs and security@chromium.org.
-You can skip the ATL review and security@chromium.org when you are only moving
-existing directories in Chromium to //third_party/.
 
 Subsequent changes don't normally require third-party-owners or security
 approval; you can modify the code as much as you want. When you update code, be
@@ -564,7 +577,7 @@ right credit and attributions for all of the third_party code we use.
 To view this in chrome, you can open chrome://credits.
 
 That page displays a resource embedded in the browser as part of the
-[//components/resources/components_resources.grd](../components/resources/components_resource.grd)
+[//components/resources/components_resources.grd](../components/resources/components_resources.grd)
 GRIT file; the actual HTML text is generated in the
 [//components/resources:about_credits](../components/resources/BUILD.gn)
 build target using a template from the output of the

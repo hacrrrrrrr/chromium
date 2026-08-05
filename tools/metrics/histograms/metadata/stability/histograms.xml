@@ -97,7 +97,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ChildProcess.Launched.UtilityProcessHash"
-    enum="UtilityProcessNameHash" expires_after="2026-11-15">
+    enum="UtilityProcessNameHash" expires_after="2027-01-17">
   <owner>wfh@chromium.org</owner>
   <summary>
     Count of child utility process launches, bucketed by the hash of their
@@ -384,7 +384,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Stability.Android.RendererCrash" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>wnwen@chromium.org</owner>
   <summary>
     Counts renderer crashes including OOMs. Android only. Mirrors old stability
@@ -513,7 +513,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Stability.ChildFrameCrash.PageWillReload" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>kawasin@google.com</owner>
   <owner>boliu@chromium.org</owner>
   <summary>
@@ -560,13 +560,54 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Stability.ChildFrameCrash.Visibility" enum="CrashVisibility"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>alexmos@chromium.org</owner>
   <owner>boliu@chromium.org</owner>
   <owner>lukasza@chromium.org</owner>
   <summary>
     Logged after detecting that a sad subframe is shown (logged at most once per
     crash).
+  </summary>
+</histogram>
+
+<histogram name="Stability.CommitLimitTerminatedTab.ReloadResult"
+    enum="CommitLimitTerminatedTabReloadResult" expires_after="2026-11-01">
+  <owner>aattar@google.com</owner>
+  <owner>chrome-stability-core@google.com</owner>
+  <summary>
+    Records the outcome of a user's attempt to reload a tab that was terminated
+    due to system commit limits
+    (CHROME_RESULT_CODE_TERMINATED_BY_OTHER_PROCESS_ON_COMMIT_FAILURE). Windows
+    only.
+
+    At most one sample is recorded per commit-limit termination.
+
+    The exact emission points for each bucket are:
+
+    - Success: A hidden tab was discarded after the termination and, once made
+    visible again, its reload navigation committed without an error page.
+
+    - Failed: Repeated OOM / Other Error: The renderer exited again (with a
+    commit-limit or other abnormal exit, respectively) while the recovery was
+    being tracked.
+
+    - Failed: Hidden Tab Not Discarded: The hidden tab was not discarded and
+    became visible again, which shows a sad tab.
+
+    Unrecorded cases (no sample recorded): Navigating to a different URL, hiding
+    the tab during tracking, or closing the tab (normal termination).
+  </summary>
+</histogram>
+
+<histogram name="Stability.CommitLimitTerminatedTab.Visibility"
+    enum="CommitLimitTerminatedTabVisibility" expires_after="2026-11-01">
+  <owner>aattar@google.com</owner>
+  <owner>chrome-stability-core@google.com</owner>
+  <summary>
+    Records the visibility of a tab when its renderer was terminated due to
+    system commit limits
+    (CHROME_RESULT_CODE_TERMINATED_BY_OTHER_PROCESS_ON_COMMIT_FAILURE). Logged
+    once at termination time. Windows only.
   </summary>
 </histogram>
 

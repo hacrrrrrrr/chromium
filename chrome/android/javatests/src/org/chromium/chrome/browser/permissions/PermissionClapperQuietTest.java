@@ -22,6 +22,7 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
@@ -43,6 +44,8 @@ import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.omnibox.LocationBarCoordinator;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.components.content_settings.ContentSetting;
 import org.chromium.components.content_settings.ContentSettingsType;
@@ -58,13 +61,18 @@ import org.chromium.content_public.common.ContentSwitches;
 })
 @DisableFeatures({ChromeFeatureList.SETTINGS_MULTI_COLUMN})
 @EnableFeatures({
-    PermissionsAndroidFeatureList.PERMISSIONS_ANDROID_CLAPPER_QUIET,
     PermissionsAndroidFeatureList.PERMISSIONS_ANDROID_CLAPPER_LOUD
 })
 @Batch(Batch.PER_CLASS)
 public class PermissionClapperQuietTest {
 
-    @Rule public PermissionTestRule mPermissionRule = new PermissionTestRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
+    public PermissionTestRule mPermissionRule =
+            new PermissionTestRule(mActivityTestRule.getActivityTestRule());
+
+    @Rule
+    public RuleChain mRuleChain = RuleChain.outerRule(mActivityTestRule).around(mPermissionRule);
 
     private static final String PAGE_URL = "/content/test/data/android/permission_navigation.html";
 
@@ -140,17 +148,8 @@ public class PermissionClapperQuietTest {
         // Wait for the security state to stabilize before triggering the permission.
         waitForSecurityIcon();
 
-        // Inject a click handler to satisfy the User Gesture (Transient Activation) requirement.
-        // Notification.requestPermission() must be called from a user interaction.
-        // PermissionTestRule.runJavaScriptCodeInCurrentTabWithGesture() simulates a tap,
-        // but permission_navigation.html is a generic page without an onclick listener.
-        // This injection ensures the tap executes the function stored in 'window.functionToRun'.
-        mPermissionRule.runJavaScriptCodeInCurrentTab(
-                "window.onclick = function() { if (window.functionToRun) {"
-                        + " eval(window.functionToRun); } };");
-
         // Trigger notification permission with a gesture.
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "Notification.requestPermission()");
     }
 
@@ -260,7 +259,7 @@ public class PermissionClapperQuietTest {
 
         // We trigger the notification and immediately update window.promiseResolved when it
         // resolves/rejects
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "Notification.requestPermission().then(() => { window.promiseResolved = true;"
                         + " }).catch(() => { window.promiseResolved = true; })");
 
@@ -301,17 +300,6 @@ public class PermissionClapperQuietTest {
                 ContentSettingsType.NOTIFICATIONS, ContentSetting.ASK, PAGE_URL);
     }
 
-    @Test
-    @MediumTest
-    @Feature({"Permissions"})
-    @DisableFeatures({PermissionsAndroidFeatureList.PERMISSIONS_ANDROID_CLAPPER_QUIET})
-    public void testStandardQuietUiShowsMessage() throws Exception {
-
-        mPermissionRule.setupPageAndTriggerNotificationPermissionRequest(PAGE_URL);
-
-        // With Clapper disabled, the standard Quiet UI (Message) should be shown.
-        mPermissionRule.waitForMessageShownState(true);
-    }
 
     @Test
     @MediumTest
@@ -644,7 +632,7 @@ public class PermissionClapperQuietTest {
         waitForQuietIcon();
 
         // Trigger a high-priority permission request (Microphone) to preempt the quiet one.
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "navigator.mediaDevices.getUserMedia({audio: true})");
 
         // The Microphone prompt (Loud UI) should be shown.
@@ -671,7 +659,7 @@ public class PermissionClapperQuietTest {
         mPermissionRule.waitForPageInfoOpen();
 
         // Trigger a high-priority permission request (Microphone) to preempt the quiet one.
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "navigator.mediaDevices.getUserMedia({audio: true})");
         // The Microphone prompt (Loud UI) should be shown.
         mPermissionRule.waitForDialogShownState(true);
@@ -710,7 +698,7 @@ public class PermissionClapperQuietTest {
         mPermissionRule.waitForPageInfoOpen();
 
         // Trigger preemption.
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "navigator.mediaDevices.getUserMedia({audio: true})");
         mPermissionRule.waitForDialogShownState(true);
 
@@ -748,7 +736,7 @@ public class PermissionClapperQuietTest {
         mPermissionRule.waitForPageInfoOpen();
 
         // Trigger preemption.
-        mPermissionRule.runJavaScriptCodeInCurrentTabWithGesture(
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
                 "navigator.mediaDevices.getUserMedia({audio: true})");
         mPermissionRule.waitForDialogShownState(true);
 

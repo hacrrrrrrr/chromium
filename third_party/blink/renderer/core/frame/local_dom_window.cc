@@ -132,7 +132,7 @@
 #include "third_party/blink/renderer/core/page/scrolling/sync_scroll_attempt_heuristic.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/core/route_matching/route_map.h"
+#include "third_party/blink/renderer/core/route_matching/navigation_state.h"
 #include "third_party/blink/renderer/core/scheduler/scripted_idle_task_controller.h"
 #include "third_party/blink/renderer/core/scheduler/task_attribution_util.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
@@ -197,7 +197,8 @@ int RequestAnimationFrame(Document* document,
 
   auto* frame_callback = MakeGarbageCollected<V8FrameCallback>(callback);
   frame_callback->SetUseLegacyTimeBase(legacy);
-  return document->RequestAnimationFrame(frame_callback);
+  return document->RequestAnimationFrame(frame_callback,
+                                         FrameCallbackType::kWebExposed);
 }
 
 }  // namespace
@@ -406,10 +407,6 @@ bool LocalDOMWindow::IsContextThread() const {
   return IsMainThread();
 }
 
-bool LocalDOMWindow::ShouldInstallV8Extensions() const {
-  return GetFrame()->Client()->AllowScriptExtensions();
-}
-
 ContentSecurityPolicy* LocalDOMWindow::GetContentSecurityPolicyForWorld(
     const DOMWrapperWorld* world) {
   if (!world || !world->IsIsolatedWorld()) {
@@ -525,11 +522,8 @@ bool LocalDOMWindow::AllowInlineJavascriptUrl(const DOMWrapperWorld* world,
 
   // AllowInline below will check the source's hash against CSP, which is why
   // it needs an exact script_source.
-  const int kJavascriptSchemeLength = sizeof("javascript:") - 1;
   String decoded_url = DecodeUrlEscapeSequences(
       url.GetString(), DecodeUrlMode::kUtf8OrIsomorphic);
-  String script_source =
-      decoded_url.DeprecatedSubstring(kJavascriptSchemeLength);
 
   // Check the CSP of the caller (the "source browsing context") if required,
   // as per https://html.spec.whatwg.org/C/#javascript-protocol.
@@ -610,6 +604,11 @@ KURL LocalDOMWindow::OutgoingReferrerUrl() const {
 
   // Step: 3.1.4: "Let referrerSource be document's URL."
   return referrer_document->OutgoingReferrerUrl();
+}
+
+void LocalDOMWindow::SetInitiatorStateToken(
+    const base::UnguessableToken& initiator_state_token) {
+  initiator_state_token_ = initiator_state_token;
 }
 
 CoreProbeSink* LocalDOMWindow::GetProbeSink() {
@@ -1035,10 +1034,10 @@ void LocalDOMWindow::DispatchPagehideEvent(
     return;
   }
 
-  if (auto* route_map = RouteMap::Get(document_)) {
+  if (RuntimeEnabledFeatures::NavigationStateEnabled()) {
     // In case we come back to this document later via BFCache, there must not
     // be a dangling active navigation.
-    route_map->OnNavigationDone();
+    NavigationState::AttemptFinishNavigationAndDestroy(document_);
   }
 
   // The navigation that triggered this pagehide is past the point of being
@@ -2217,7 +2216,7 @@ int LocalDOMWindow::webkitRequestAnimationFrame(
 }
 
 void LocalDOMWindow::cancelAnimationFrame(int id) {
-  document()->CancelAnimationFrame(id);
+  document()->CancelAnimationFrame(id, FrameCallbackType::kWebExposed);
 }
 
 bool LocalDOMWindow::originAgentCluster() const {
@@ -2431,8 +2430,8 @@ void LocalDOMWindow::FinishedLoading(FrameLoader::NavigationFinishState state) {
     print(nullptr);
   }
 
-  if (auto* route_map = RouteMap::Get(document_)) {
-    route_map->OnNavigationDone();
+  if (RuntimeEnabledFeatures::NavigationStateEnabled()) {
+    NavigationState::AttemptFinishNavigationAndDestroy(document_);
   }
 }
 

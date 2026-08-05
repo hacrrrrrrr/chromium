@@ -6,6 +6,7 @@ package org.chromium.content_public.browser;
 
 import android.os.Build;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.MutableBooleanParamWithSafeDefault;
 import org.chromium.base.MutableFlagWithSafeDefault;
 import org.chromium.base.MutableIntParamWithSafeDefault;
@@ -14,6 +15,7 @@ import org.chromium.components.cached_flags.CachedFlag;
 import org.chromium.content.common.ContentInternalFeatures;
 import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.ui.accessibility.AccessibilityFeatures;
+import org.chromium.ui.base.DeviceInput;
 
 import java.util.List;
 
@@ -133,11 +135,28 @@ public class ContentFeatureList {
             sAccessibilityDeprecateJavaNodeCacheDisableCache =
                     sAccessibilityDeprecateJavaNodeCache.newBooleanParam("disable_cache", false);
 
-    public static final MutableFlagWithSafeDefault sAccessibilityMagnificationFollowsFocus =
-            new MutableFlagWithSafeDefault(
-                    ContentFeatureMap.getInstance(),
-                    AccessibilityFeatures.ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS,
-                    true);
+    public static final MutableFlagWithSafeDefault
+            sAccessibilityMagnificationFollowsFocusKeyboardAttached =
+                    new MutableFlagWithSafeDefault(
+                            ContentFeatureMap.getInstance(),
+                            AccessibilityFeatures
+                                    .ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_KEYBOARD_ATTACHED,
+                            true);
+
+    public static final MutableFlagWithSafeDefault
+            sAccessibilityMagnificationFollowsFocusNoKeyboard =
+                    new MutableFlagWithSafeDefault(
+                            ContentFeatureMap.getInstance(),
+                            AccessibilityFeatures
+                                    .ACCESSIBILITY_MAGNIFICATION_FOLLOWS_FOCUS_NO_KEYBOARD,
+                            true);
+
+    public static boolean isAccessibilityMagnificationFollowsFocusEnabled() {
+        if (DeviceInput.supportsKeyboard(ContextUtils.getApplicationContext())) {
+            return sAccessibilityMagnificationFollowsFocusKeyboardAttached.isEnabled();
+        }
+        return sAccessibilityMagnificationFollowsFocusNoKeyboard.isEnabled();
+    }
 
     public static final MutableFlagWithSafeDefault sAccessibilityRequestScopedContentChangedEvents =
             new MutableFlagWithSafeDefault(
@@ -150,6 +169,12 @@ public class ContentFeatureList {
                     ContentFeatureMap.getInstance(),
                     ContentInternalFeatures.STRICT_HIGH_RANK_PROCESS_LRU,
                     true);
+
+    public static final MutableFlagWithSafeDefault sEarlyTopAppForSandboxedRenderer =
+            new MutableFlagWithSafeDefault(
+                    ContentFeatureMap.getInstance(),
+                    ContentInternalFeatures.EARLY_TOP_APP_FOR_SANDBOXED_RENDERER,
+                    false);
 
     public static final MutableFlagWithSafeDefault sSpareRendererProcessPriority =
             new MutableFlagWithSafeDefault(

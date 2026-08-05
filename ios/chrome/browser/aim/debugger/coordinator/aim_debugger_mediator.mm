@@ -54,6 +54,8 @@
                           _service->IsAimAllowedByDse());
   eligibility.PutOrRemove(AimEligibilityCheck::kIsServerEligibilityEnabled,
                           _service->IsServerEligibilityEnabled());
+  eligibility.PutOrRemove(AimEligibilityCheck::kIsCobrowseEligible,
+                          _service->IsCobrowseEligible());
   eligibility.PutOrRemove(AimEligibilityCheck::kIsFuseboxEligible,
                           _service->IsFuseboxEligible());
 
@@ -108,11 +110,11 @@
 }
 
 - (void)didTapCopyViewLink:(NSString*)base64Response {
-  NSString* url =
-      [NSString stringWithFormat:@"http://protoshop/"
-                                 @"embed?tabs=textproto&type=gws.searchbox."
-                                 @"chrome.AimEligibilityResponse&protobytes=%@",
-                                 base64Response];
+  NSString* url = [NSString
+      stringWithFormat:@"http://protoshop/"
+                       @"embed?tabs=textproto&type=com.google.gws.plugins.aim."
+                       @"AimEligibilityResponse&protobytes=%@",
+                       base64Response];
   UIPasteboard.generalPasteboard.string = url;
   [self.snackbarHandler showSnackbarWithMessage:@"Link Copied"
                                      buttonText:nil
@@ -122,7 +124,7 @@
 
 - (void)didTapCopyDraftLink {
   NSString* url =
-      @"http://protoshop/gws.searchbox.chrome.AimEligibilityResponse";
+      @"http://protoshop/com.google.gws.plugins.aim.AimEligibilityResponse";
   UIPasteboard.generalPasteboard.string = url;
   [self.snackbarHandler showSnackbarWithMessage:@"Link Copied"
                                      buttonText:nil

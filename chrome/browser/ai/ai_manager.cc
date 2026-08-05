@@ -27,7 +27,6 @@
 #include "base/types/pass_key.h"
 #include "base/version_info/channel.h"
 #include "base/version_info/version_info.h"
-#include "chrome/browser/ai/ai_classifier.h"
 #include "chrome/browser/ai/ai_context_bound_object.h"
 #include "chrome/browser/ai/ai_context_bound_object_set.h"
 #include "chrome/browser/ai/ai_language_model.h"
@@ -74,7 +73,6 @@
 #include "services/on_device_model/public/mojom/download_observer.mojom.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "third_party/blink/public/common/features_generated.h"
-#include "third_party/blink/public/mojom/ai/ai_classifier.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_common.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_language_model.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom.h"
@@ -94,12 +92,18 @@ constexpr float kMostPredictableTemperature = 0.0f;
 constexpr uint32_t kMostPredictableTopK = 1;
 
 constexpr float kPredictableTemperature = 0.3f;
-constexpr uint32_t kPredictableTopK = 30;
+constexpr uint32_t kPredictableTopK = 32;
 
-constexpr float kBalancedTemperature = 0.7f;
+constexpr float kSlightlyPredictableTemperature = 0.7f;
+constexpr uint32_t kSlightlyPredictableTopK = 64;
+
+constexpr float kBalancedTemperature = 1.0f;
 constexpr uint32_t kBalancedTopK = 64;
 
-constexpr float kCreativeTemperature = 1.1f;
+constexpr float kSlightlyCreativeTemperature = 1.1f;
+constexpr uint32_t kSlightlyCreativeTopK = 72;
+
+constexpr float kCreativeTemperature = 1.15f;
 constexpr uint32_t kCreativeTopK = 80;
 
 constexpr float kMostCreativeTemperature = 1.2f;
@@ -165,6 +169,10 @@ ConvertModelNotSupportedReasonToModelAvailabilityCheckResult(
       return blink::mojom::ModelAvailabilityCheckResult::
           kUnavailableInsufficientDiskSpace;
     case optimization_guide::mojom::ModelNotSupportedDetailedReason::
+        kInsufficientDiskSpaceForCaches:
+      return blink::mojom::ModelAvailabilityCheckResult::
+          kUnavailableInsufficientDiskSpaceForCaches;
+    case optimization_guide::mojom::ModelNotSupportedDetailedReason::
         kModelAdaptationNotAvailable:
       return blink::mojom::ModelAvailabilityCheckResult::
           kUnavailableModelAdaptationNotAvailable;
@@ -229,6 +237,27 @@ bool HasInvalidOutputTypes(
     }
   }
   return false;
+}
+
+bool IsSpeculativeDecodingCompatibleWithSampling(
+    const blink::mojom::AILanguageModelCreateOptionsPtr& options) {
+  if (!base::FeatureList::IsEnabled(
+          on_device_model::features::kOnDeviceModelSpeculativeDecoding)) {
+    return true;
+  }
+  if (!options) {
+    return true;
+  }
+  if (options->sampling_params && options->sampling_params->top_k > 1 &&
+      options->sampling_params->temperature > 0.0f) {
+    return false;
+  }
+  if (options->sampling_mode.has_value() &&
+      options->sampling_mode.value() !=
+          blink::mojom::AILanguageModelSamplingMode::kMostPredictable) {
+    return false;
+  }
+  return true;
 }
 
 on_device_model::Capabilities GetExpectedInputCapabilities(
@@ -761,6 +790,12 @@ void AIManager::CanCreateLanguageModel(
       }
       input_capabilities.Put(on_device_model::CapabilityFlags::kToolUse);
     }
+    if (!IsSpeculativeDecodingCompatibleWithSampling(options)) {
+      std::move(callback).Run(
+          blink::mojom::ModelAvailabilityCheckResult::
+              kUnavailableIncompatibleSpeculativeDecodingOptions);
+      return;
+    }
   }
 
   if (!CheckAndFixLanguages(
@@ -802,11 +837,12 @@ void AIManager::CreateLanguageModel(
           options, "LanguageModel",
           AILanguageModel::GetEnabledLanguageBaseCodes(),
           AILanguageModel::GetDefaultSupportedLanguageBaseCodes())) {
-    mojo::Remote<blink::mojom::AIManagerCreateLanguageModelClient>
-        client_remote(std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage);
+    receivers_.ReportBadMessage("Unsupported language options");
+    return;
+  }
+
+  if (!IsSpeculativeDecodingCompatibleWithSampling(options)) {
+    receivers_.ReportBadMessage("Incompatible speculative decoding options");
     return;
   }
 
@@ -892,6 +928,14 @@ void AIManager::CreateLanguageModelInternal(
         params->temperature = kMostCreativeTemperature;
         params->top_k = kMostCreativeTopK;
         break;
+      case blink::mojom::AILanguageModelSamplingMode::kSlightlyPredictable:
+        params->temperature = kSlightlyPredictableTemperature;
+        params->top_k = kSlightlyPredictableTopK;
+        break;
+      case blink::mojom::AILanguageModelSamplingMode::kSlightlyCreative:
+        params->temperature = kSlightlyCreativeTemperature;
+        params->top_k = kSlightlyCreativeTopK;
+        break;
     }
   } else if (sampling_params) {
     params->temperature = sampling_params->temperature;
@@ -920,11 +964,7 @@ void AIManager::CreateLanguageModelInternal(
   // Models can generate text and tool calls, but not multimodal content or
   // tool responses.
   if (HasInvalidOutputTypes(options->expected_outputs)) {
-    mojo::Remote<blink::mojom::AIManagerCreateLanguageModelClient>
-        client_remote(std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnableToCreateSession);
+    receivers_.ReportBadMessage("Invalid output types");
     return;
   }
   if (!params->capabilities.empty()) {
@@ -1041,11 +1081,7 @@ void AIManager::CreateSummarizer(
   if (!CheckAndFixLanguages(
           options, "Summarizer", AISummarizer::GetEnabledLanguageBaseCodes(),
           AISummarizer::GetDefaultSupportedLanguageBaseCodes())) {
-    mojo::Remote<blink::mojom::AIManagerCreateSummarizerClient> client_remote(
-        std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -1059,11 +1095,7 @@ void AIManager::CreateSummarizer(
     }
     auto result = IsSpeedPreferenceCompatible(options);
     if (!result.has_value()) {
-      mojo::Remote<blink::mojom::AIManagerCreateSummarizerClient> client_remote(
-          std::move(client));
-      on_device_ai::SendClientRemoteError(
-          client_remote, blink::mojom::AIManagerCreateClientError::
-                             kIncompatiblePreferenceOptions);
+      receivers_.ReportBadMessage("Incompatible speed preference options");
       return;
     }
     if (options->format == blink::mojom::AISummarizerFormat::kMarkDown) {
@@ -1188,11 +1220,7 @@ void AIManager::CreateProofreader(
   if (!CheckAndFixLanguages(
           options, "Proofreader", AIProofreader::GetEnabledLanguageBaseCodes(),
           AIProofreader::GetDefaultSupportedLanguageBaseCodes())) {
-    mojo::Remote<blink::mojom::AIManagerCreateProofreaderClient> client_remote(
-        std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -1338,11 +1366,7 @@ void AIManager::CreateWriter(
   if (!CheckAndFixLanguages(options, "Writer",
                             AIWriter::GetEnabledLanguageBaseCodes(),
                             AIWriter::GetDefaultSupportedLanguageBaseCodes())) {
-    mojo::Remote<blink::mojom::AIManagerCreateWriterClient> client_remote(
-        std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -1449,11 +1473,7 @@ void AIManager::CreateRewriter(
   if (!CheckAndFixLanguages(
           options, "Rewriter", AIRewriter::GetEnabledLanguageBaseCodes(),
           AIRewriter::GetDefaultSupportedLanguageBaseCodes())) {
-    mojo::Remote<blink::mojom::AIManagerCreateRewriterClient> client_remote(
-        std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -1506,66 +1526,6 @@ void AIManager::CreateRewriter(
         optimization_guide::mojom::OnDeviceFeature::kWritingAssistanceApi,
         ::optimization_guide::SessionConfigParams{}, std::move(callback));
   }
-}
-
-void AIManager::CanCreateClassifier(
-    blink::mojom::AIClassifierCreateOptionsPtr options,
-    CanCreateClassifierCallback callback) {
-  if (!base::FeatureList::IsEnabled(blink::features::kAIClassifierAPI)) {
-    std::move(callback).Run(blink::mojom::ModelAvailabilityCheckResult::
-                                kUnavailableFeatureNotEnabled);
-    return;
-  }
-  // TODO(crbug.com/499365168): Enforce permissions policy and
-  // CheckAndFixLanguages.
-  if (auto pref_blocked_result = GetPrefBlockedResult()) {
-    std::move(callback).Run(*pref_blocked_result);
-    return;
-  }
-  CanCreateSession(optimization_guide::mojom::OnDeviceFeature::kClassifier,
-                   on_device_model::Capabilities(), std::move(callback));
-}
-
-void AIManager::CreateClassifier(
-    mojo::PendingRemote<blink::mojom::AIManagerCreateClassifierClient> client,
-    blink::mojom::AIClassifierCreateOptionsPtr options,
-    // TODO(crbug.com/481796902): Implement download monitor for classifier.
-    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor) {
-  if (!base::FeatureList::IsEnabled(blink::features::kAIClassifierAPI)) {
-    receivers_.ReportBadMessage("Feature not enabled");
-    return;
-  }
-  // TODO(crbug.com/499365168): Enforce permissions policy and
-  // CheckAndFixLanguages.
-  if (IsBlocked()) {
-    receivers_.ReportBadMessage("Policy or user setting disabled");
-    return;
-  }
-
-  CheckAndLogEligibility(
-      browser_context_,
-      optimization_guide::mojom::OnDeviceFeature::kClassifier);
-
-  if (!model_broker_client_) {
-    mojo::Remote<blink::mojom::AIManagerCreateClassifierClient> client_remote(
-        std::move(client));
-    on_device_ai::SendClientRemoteError(
-        client_remote,
-        blink::mojom::AIManagerCreateClientError::kUnableToCreateSession);
-    return;
-  }
-
-  auto callback =
-      base::BindOnce(&AIManager::OnSessionCreated<
-                         AIClassifier, blink::mojom::AIClassifier,
-                         blink::mojom::AIManagerCreateClassifierClient,
-                         blink::mojom::AIClassifierCreateOptionsPtr>,
-                     weak_factory_.GetWeakPtr(), std::move(options),
-                     /*initial_request=*/std::nullopt, std::move(client));
-  tried_init_.insert(optimization_guide::mojom::OnDeviceFeature::kClassifier);
-  model_broker_client_->CreateSession(
-      optimization_guide::mojom::OnDeviceFeature::kClassifier,
-      ::optimization_guide::SessionConfigParams{}, std::move(callback));
 }
 
 void AIManager::CanCreateSession(
@@ -1894,10 +1854,8 @@ void AIManager::CanCreateSemanticEmbedder(
 
 void AIManager::CreateSemanticEmbedder(
     mojo::PendingRemote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
-        client) {
-  mojo::Remote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
-      client_remote(std::move(client));
-
+        client,
+    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor) {
   if (!base::FeatureList::IsEnabled(blink::features::kAIEmbeddingsAPI)) {
     receivers_.ReportBadMessage("Feature not enabled");
     return;
@@ -1908,7 +1866,31 @@ void AIManager::CreateSemanticEmbedder(
     return;
   }
 
+  if (!AISemanticEmbedderServiceLauncher::Get()->AllowedToLaunch()) {
+    mojo::Remote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
+        client_remote(std::move(client));
+    client_remote->OnError(
+        blink::mojom::AIManagerCreateClientError::kUnableToCreateSession);
+    return;
+  }
+
+  if (monitor) {
+    AISemanticEmbedderServiceLauncher::Get()->AddDownloadObserver(
+        std::move(monitor));
+  }
+
+  AISemanticEmbedderServiceLauncher::Get()->WaitForModelAvailable(
+      base::BindOnce(&AIManager::OnSemanticEmbedderModelReady,
+                     weak_factory_.GetWeakPtr(), std::move(client)));
+}
+
+void AIManager::OnSemanticEmbedderModelReady(
+    mojo::PendingRemote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
+        client) {
+  mojo::Remote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
+      client_remote(std::move(client));
   auto* service_launcher = AISemanticEmbedderServiceLauncher::Get();
+
   if (!service_launcher->controller()->IsModelAvailable()) {
     client_remote->OnError(
         blink::mojom::AIManagerCreateClientError::kUnableToCreateSession);

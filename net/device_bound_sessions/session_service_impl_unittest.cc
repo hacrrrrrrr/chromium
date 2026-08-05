@@ -44,6 +44,7 @@
 #include "net/url_request/device_bound_session_mode.h"
 #include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_test_util.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -55,6 +56,7 @@ using ::testing::InSequence;
 using ::testing::Invoke;
 using ::testing::IsEmpty;
 using ::testing::Not;
+using ::testing::Property;
 using ::testing::Return;
 using ::testing::SaveArgByMove;
 using ::testing::StrictMock;
@@ -2091,6 +2093,32 @@ TEST_F(SessionServiceImplTest, NoDebugHeaderOnSuccess) {
   EXPECT_FALSE(debug_header.has_value());
 }
 
+TEST_F(SessionServiceImplTest, NoDebugHeaderOnInScopeRefreshNotYetNeeded) {
+  AddSessionsForTesting({{kSessionId, kRefreshUrlString, kOrigin}});
+
+  net::TestDelegate delegate;
+  std::unique_ptr<URLRequest> request =
+      context()->CreateRequest(kTestUrl, IDLE, &delegate, kDummyAnnotation,
+                               net::handles::kInvalidNetworkHandle);
+
+  request->set_site_for_cookies(SiteForCookies::FromUrl(kTestUrl));
+
+  request->AddDeviceBoundSessionDeferral(
+      SessionKey{SchemefulSite(kTestUrl), Session::Id(kSessionId)},
+      RefreshResult::kInScopeRefreshNotYetNeeded);
+
+  HttpRequestHeaders extra_headers;
+  DbscRequest dbsc_request(request.get());
+  std::optional<SessionService::DeferralParams> maybe_deferral =
+      service().ShouldDefer(dbsc_request, &extra_headers,
+                            FirstPartySetMetadata());
+  EXPECT_FALSE(maybe_deferral);
+
+  std::optional<std::string> debug_header =
+      extra_headers.GetHeader("Secure-Session-Skipped");
+  EXPECT_FALSE(debug_header.has_value());
+}
+
 TEST_F(SessionServiceImplTestWithFederatedSessions,
        FederatedRegistrationSuccess) {
   // Create the provider session
@@ -2597,6 +2625,15 @@ class SessionServiceImplWithStoreTest : public TestWithTaskEnvironment {
   size_t GetSiteSessionsCount(const SchemefulSite& site) {
     auto [begin, end] = service().GetSessionsForSite(site);
     return std::distance(begin, end);
+  }
+
+  SessionError::ErrorType OnRefreshRequestCompletionInternal(
+      SessionService::OnAccessCallback on_access_callback,
+      const SessionKey& session_key,
+      RegistrationFetcher* fetcher,
+      RegistrationResult result) {
+    return service().OnRefreshRequestCompletionInternal(
+        std::move(on_access_callback), session_key, fetcher, std::move(result));
   }
 
   URLRequestContext* context() { return context_.get(); }
@@ -3189,6 +3226,87 @@ TEST_F(SessionServiceImplWithStoreTest,
   EXPECT_NE(service().GetSession({site, Session::Id(kSessionId)}), nullptr);
   histograms.ExpectUniqueSample("Net.DeviceBoundSessions.RegistrationResult",
                                 SessionError::kSuccess, 1);
+}
+
+TEST_F(SessionServiceImplWithStoreTest, RefreshNoConfigChangeSavesToStore) {
+  EXPECT_CALL(store(), LoadSessions).Times(1);
+  service().LoadSessionsAsync();
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Session> session,
+                       Session::CreateIfValid(SessionParams{
+                           .session_id = "session_id",
+                           .fetcher_url = kTestUrl,
+                           .refresh_url = kRefreshUrlString,
+                           .scope = {.origin = kOrigin},
+                       }));
+  ASSERT_TRUE(session);
+  base::Time original_expiry = session->expiry_date();
+  SchemefulSite site(kTestUrl);
+  SessionKey session_key{site, session->id()};
+  SessionStore::SessionsMap session_map;
+  session_map.insert({session_key, std::move(session)});
+  FinishLoadingSessions(std::move(session_map));
+
+  base::TimeDelta delay = base::Days(1);
+  FastForwardBy(delay);
+  base::Time expected_expiry = original_expiry + delay;
+
+  EXPECT_CALL(
+      store(),
+      SaveSession(site, Property(&Session::expiry_date, Eq(expected_expiry)),
+                  SessionStore::SaveSessionMode::kRefresh))
+      .Times(1);
+
+  OnRefreshRequestCompletionInternal(
+      base::NullCallback(), session_key,
+      /*fetcher=*/nullptr,
+      RegistrationResult(RegistrationResult::NoSessionConfigChange(), {}));
+
+  Session* stored_session = service().GetSession(session_key);
+  ASSERT_TRUE(stored_session);
+  EXPECT_EQ(stored_session->expiry_date(), expected_expiry);
+}
+
+TEST_F(SessionServiceImplWithStoreTest,
+       RefreshNoConfigChangeDisabledByKillSwitch) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      features::kDeviceBoundSessionsPersistExpiryOnRefresh);
+
+  EXPECT_CALL(store(), LoadSessions).Times(1);
+  service().LoadSessionsAsync();
+
+  ASSERT_OK_AND_ASSIGN(std::unique_ptr<Session> session,
+                       Session::CreateIfValid(SessionParams{
+                           .session_id = "session_id",
+                           .fetcher_url = kTestUrl,
+                           .refresh_url = kRefreshUrlString,
+                           .scope = {.origin = kOrigin},
+                       }));
+  ASSERT_TRUE(session);
+  base::Time original_expiry = session->expiry_date();
+  SchemefulSite site(kTestUrl);
+  SessionKey session_key{site, session->id()};
+  SessionStore::SessionsMap session_map;
+  session_map.insert({session_key, std::move(session)});
+  FinishLoadingSessions(std::move(session_map));
+
+  base::TimeDelta delay = base::Days(1);
+  FastForwardBy(delay);
+  base::Time expected_expiry = original_expiry + delay;
+
+  EXPECT_CALL(store(),
+              SaveSession(site, _, SessionStore::SaveSessionMode::kRefresh))
+      .Times(0);
+
+  OnRefreshRequestCompletionInternal(
+      base::NullCallback(), session_key,
+      /*fetcher=*/nullptr,
+      RegistrationResult(RegistrationResult::NoSessionConfigChange(), {}));
+
+  Session* stored_session = service().GetSession(session_key);
+  ASSERT_TRUE(stored_session);
+  EXPECT_EQ(stored_session->expiry_date(), expected_expiry);
 }
 
 TEST_F(SessionServiceImplTest, GoogleRegistrationLog) {

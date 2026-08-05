@@ -26,6 +26,7 @@
 #include "headless/public/switches.h"
 #include "headless/test/headless_browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/register_basic_auth_handler.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -301,19 +302,13 @@ HEADLESS_PROTOCOL_TEST(Geolocation, "emulation/geolocation-crash.js")
 
 HEADLESS_PROTOCOL_TEST(DragStarted, "input/dragIntercepted.js")
 
-// https://crbug.com/1414190
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
-#define MAYBE_InputClipboardOps DISABLED_InputClipboardOps
-#else
-#define MAYBE_InputClipboardOps InputClipboardOps
-#endif
-HEADLESS_PROTOCOL_TEST(MAYBE_InputClipboardOps, "input/input-clipboard-ops.js")
+HEADLESS_PROTOCOL_TEST(InputClipboardOps, "shared/input-clipboard-ops.js")
 
 HEADLESS_PROTOCOL_TEST(ClipboardApiCopyPaste,
                        "input/clipboard-api-copy-paste.js")
 
 HEADLESS_PROTOCOL_TEST(FocusBlurNotifications,
-                       "input/focus-blur-notifications.js")
+                       "shared/focus-blur-notifications.js")
 
 HEADLESS_PROTOCOL_TEST(HeadlessSessionBasicsTest,
                        "sessions/headless-session-basics.js")
@@ -518,6 +513,45 @@ HEADLESS_PROTOCOL_TEST_F(HeadlessProtocolBrowserTestWithProxy,
                          BrowserSetProxyConfig,
                          "sanity/browser-set-proxy-config.js")
 
+class HeadlessProtocolBrowserTestWithAuthProxy
+    : public HeadlessProtocolBrowserTest {
+ public:
+  HeadlessProtocolBrowserTestWithAuthProxy()
+      : proxy_server_(net::EmbeddedTestServer::TYPE_HTTP) {
+    net::test_server::RegisterProxyBasicAuthHandler(proxy_server_, "user",
+                                                    "pass");
+    proxy_server_.AddDefaultHandlers(
+        base::FilePath(FILE_PATH_LITERAL("headless/test/data")));
+  }
+
+  void SetUp() override {
+    ASSERT_TRUE(proxy_server_.Start());
+    HeadlessProtocolBrowserTest::SetUp();
+  }
+
+  void TearDown() override {
+    EXPECT_TRUE(proxy_server_.ShutdownAndWaitUntilComplete());
+    HeadlessProtocolBrowserTest::TearDown();
+  }
+
+  net::EmbeddedTestServer* proxy_server() { return &proxy_server_; }
+
+ protected:
+  base::DictValue GetPageUrlExtraParams() override {
+    std::string proxy = proxy_server()->host_port_pair().ToString();
+    base::DictValue dict;
+    dict.Set("proxy", proxy);
+    return dict;
+  }
+
+ private:
+  net::EmbeddedTestServer proxy_server_;
+};
+
+HEADLESS_PROTOCOL_TEST_F(HeadlessProtocolBrowserTestWithAuthProxy,
+                         DevtoolsInterceptionWithAuthProxy,
+                         "sanity/devtools-interception-with-auth-proxy.js")
+
 class PopupWindowOpenTest : public HeadlessProtocolBrowserTest,
                             public testing::WithParamInterface<bool> {
  protected:
@@ -694,6 +728,8 @@ HEADLESS_PROTOCOL_TEST(WindowOpenShiftClickOpenerId,
 
 HEADLESS_PROTOCOL_TEST(BlockNewWebContents, "sanity/block-new-web-contents.js")
 
+HEADLESS_PROTOCOL_TEST(ContextDisposal, "sanity/context-disposal.js")
+
 HEADLESS_PROTOCOL_TEST(ScreenRotationSecondaryScreen,
                        "sanity/screen-rotation-secondary-screen.js")
 
@@ -813,5 +849,7 @@ HEADLESS_PROTOCOL_TEST(RangeMouseEventAfterNodeRemoval,
 
 HEADLESS_PROTOCOL_TEST(GetCanvasContextWebGL,
                        "shared/get-canvas-context-webgl.js")
+
+HEADLESS_PROTOCOL_TEST(GetBrowserContexts, "shared/get-browser-contexts.js")
 
 }  // namespace headless

@@ -7,17 +7,15 @@
 
 #include <string>
 
-#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
-
-class PrefService;
 
 namespace password_manager {
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused. Needs to stay in sync with the
-// PasswordManagerPromoCard enum in enums.xml.
-enum class PromoCardType {
+// PasswordManagerNotificationCard enum in enums.xml.
+// LINT.IfChange(NotificationCardType)
+enum class NotificationCardType {
   // Password Checkup promo bubble.
   kCheckup = 0,
   // Password on the web promo bubble.
@@ -27,60 +25,68 @@ enum class PromoCardType {
   // Access passwords on iOS/Android promo bubble.
   kAccessOnAnyDevice = 3,
   // Relaunch Chrome to fix the keychain issue.
-  kRelauchChrome = 4,
+  kRelaunchChrome = 4,
   // Move passwords stored only on this device to the account.
   kMovePasswords = 5,
   // kScreenlockReauth = 6, Obsolete
   kMaxValue = kMovePasswords,
 };
+// LINT.ThenChange(//chrome/browser/resources/password_manager/notification_cards/notification_card.ts:NotificationCardMetricId)
 
-// This is the base class for all password manager promo cards. It has a basic
-// implementation to read/write to PrefService as well as basic properties
-// needed for each promo card. Each subclass must override GetPromoID() and the
-// content to be displayed.
-class PasswordPromoCardBase {
+enum class NotificationSeverity {
+  kCritical = 0,
+  kPromo = 1,
+};
+
+struct NotificationCardPrefState {
+  bool was_dismissed = false;
+  int number_of_times_shown = 0;
+  base::Time last_time_shown;
+};
+
+// This is the base class for all password manager notification cards. Each
+// subclass must override GetCardID() and the content to be displayed.
+class PasswordNotificationCardBase {
  public:
-  PasswordPromoCardBase(const PasswordPromoCardBase&) = delete;
-  PasswordPromoCardBase& operator=(const PasswordPromoCardBase&) = delete;
+  PasswordNotificationCardBase(const PasswordNotificationCardBase&) = delete;
+  PasswordNotificationCardBase& operator=(const PasswordNotificationCardBase&) =
+      delete;
 
-  virtual ~PasswordPromoCardBase();
+  virtual ~PasswordNotificationCardBase();
 
-  // The upper limit on how many times Chrome will show the promo card.
+  // The upper limit on how many times Chrome will show the notification card.
   static constexpr int kPromoDisplayLimit = 3;
 
-  // Unique ID for a promo card. This is also used by the WebUI to display
-  // banner image.
-  virtual std::string GetPromoID() const = 0;
+  // Unique ID for a notification card. This is also used by the WebUI to
+  // display banner image.
+  virtual std::string GetCardID() const = 0;
 
-  // Used to distinguish promo cards.
-  virtual PromoCardType GetPromoCardType() const = 0;
+  // Used to distinguish notification cards.
+  virtual NotificationCardType GetNotificationCardType() const = 0;
 
-  // Whether promo can be shown. For most of the promos once it's dismissed it
-  // can't be shown again.
-  virtual bool ShouldShowPromo() const = 0;
+  // Used to distinguish notification tiers (critical alerts vs standard
+  // promos).
+  virtual NotificationSeverity GetNotificationSeverity() const;
 
-  // Title of the promo card to be shown in the WebUI.
+  // Whether promo can be shown given its preference state.
+  virtual bool ShouldShowCard(
+      const NotificationCardPrefState& pref_state) const = 0;
+
+  // Whether the close ('X') button should be shown for this card.
+  virtual bool IsDismissible() const;
+
+  // Title of the notification card to be shown in the WebUI.
   virtual std::u16string GetTitle() const = 0;
 
-  // Description of the promo card to be shown in the WebUI.
+  // Description of the notification card to be shown in the WebUI.
   virtual std::u16string GetDescription() const = 0;
 
   // Text for an actionable button if one exists. Returns empty string by
   // default.
   virtual std::u16string GetActionButtonText() const;
 
-  void OnPromoCardDismissed();
-  void OnPromoCardShown();
-
-  base::Time last_time_shown() const { return last_time_shown_; }
-
  protected:
-  PasswordPromoCardBase(const std::string& id, PrefService* prefs);
-
-  int number_of_times_shown_ = 0;
-  base::Time last_time_shown_;
-  bool was_dismissed_ = false;
-  raw_ptr<PrefService> prefs_;
+  PasswordNotificationCardBase();
 };
 
 }  // namespace password_manager

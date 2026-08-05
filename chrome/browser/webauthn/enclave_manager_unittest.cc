@@ -602,8 +602,35 @@ TEST_F(EnclaveManagerTest, Basic) {
   DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr,
               GetAssertionResponseExpectation());
   histogram_tester.ExpectBucketCount(
-      "WebAuthentication.EnclaveTransactionResult",
+      "WebAuthentication.EnclaveTransaction.Result",
       device::enclave::EnclaveTransactionResult::kSuccess, 2);
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyCreate.Result",
+      device::enclave::EnclaveTransactionResult::kSuccess, 1);
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyAssert.Result",
+      device::enclave::EnclaveTransactionResult::kSuccess, 1);
+
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.Latency", 2);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyCreate.Latency", 1);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyAssert.Latency", 1);
+
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.RequestSize", 2);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyCreate.RequestSize", 1);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyAssert.RequestSize", 1);
+
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.ResponseSize", 2);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyCreate.ResponseSize", 1);
+  histogram_tester.ExpectTotalCount(
+      "WebAuthentication.EnclaveTransaction.PasskeyAssert.ResponseSize", 1);
 }
 
 TEST_F(EnclaveManagerTest,
@@ -2273,6 +2300,24 @@ TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsUnusable) {
             EnclaveManager::GpmPinAvailability::kGpmPinSetButNotUsable);
 }
 
+TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenWrappedPinIsInvalid) {
+  const std::string pin = "123456";
+  ASSERT_TRUE(Register());
+
+  BoolFuture setup_future;
+  manager_.SetupWithPIN(pin, setup_future.GetCallback());
+  EXPECT_TRUE(setup_future.Wait());
+  ASSERT_TRUE(manager_.IsReady());
+  ASSERT_TRUE(manager_.has_wrapped_pin());
+  security_domain_service_->SetPinMemberWrappedPin("invalid wrapped pin");
+
+  base::test::TestFuture<EnclaveManager::GpmPinAvailability> future;
+  auto request = manager_.CheckGpmPinAvailability(future.GetCallback());
+  EXPECT_TRUE(future.Wait());
+  EXPECT_EQ(future.Get(),
+            EnclaveManager::GpmPinAvailability::kGpmPinSetButNotUsable);
+}
+
 TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsNotAvailable) {
   ASSERT_TRUE(Register());
 
@@ -3204,7 +3249,7 @@ TEST_F(EnclaveUVTest, UnregisterOnFailedDeferredUVKeyCreation) {
   UseFailingUVKeySupport();
   EnclaveManager::EnableInvariantChecksForTesting(false);
 
-  base::RunLoop run_loop;
+  base::test::TestFuture<bool> unenroll_future;
   auto ui_request = std::make_unique<enclave::CredentialRequest>();
   ui_request->signing_callback = manager_.IdentityKeySigningCallback();
   ui_request->wrapped_secret =
@@ -3220,15 +3265,14 @@ TEST_F(EnclaveUVTest, UnregisterOnFailedDeferredUVKeyCreation) {
       manager_.UserVerifyingKeyCreationCallback();
   ui_request->unregister_callback =
       base::BindOnce(&EnclaveManager::Unenroll, manager_.GetWeakPtr(),
-                     base::BindLambdaForTesting(
-                         [&run_loop](bool) { run_loop.QuitWhenIdle(); }));
+                     unenroll_future.GetCallback());
 
   GetAssertionResponseExpectation expected_response;
   expected_response.result = device::GetAssertionStatus::kEnclaveError;
   expected_response.size = 0;
   DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr, expected_response,
               std::move(ui_request));
-  run_loop.Run();
+  EXPECT_TRUE(unenroll_future.Wait());
 
   EXPECT_FALSE(manager_.IsRegistered());
 }
@@ -3298,7 +3342,7 @@ TEST_F(EnclaveUVTest, UnregisterOnMissingUserVerifyingKey) {
       base::MakeRefCounted<crypto::RefCountedUserVerifyingSigningKey>(
           std::move(key_temp));
 
-  base::RunLoop run_loop;
+  base::test::TestFuture<bool> unenroll_future;
   auto ui_request = std::make_unique<enclave::CredentialRequest>();
   ui_request->signing_callback =
       manager_.UserVerifyingKeySigningCallback(/*options=*/{});
@@ -3312,19 +3356,18 @@ TEST_F(EnclaveUVTest, UnregisterOnMissingUserVerifyingKey) {
       device::enclave::UserPresentAndVerifiedBits::kPresentAndVerified;
   ui_request->unregister_callback =
       base::BindOnce(&EnclaveManager::Unenroll, manager_.GetWeakPtr(),
-                     base::BindLambdaForTesting(
-                         [&run_loop](bool) { run_loop.QuitWhenIdle(); }));
+                     unenroll_future.GetCallback());
 
   GetAssertionResponseExpectation expected_response;
   expected_response.result = device::GetAssertionStatus::kEnclaveError;
   expected_response.size = 0;
   DoAssertion(GetTestEntity(), /*claimed_pin=*/nullptr, expected_response,
               std::move(ui_request));
-  run_loop.Run();
+  EXPECT_TRUE(unenroll_future.Wait());
 
   EXPECT_FALSE(manager_.IsRegistered());
   histogram_tester.ExpectBucketCount(
-      "WebAuthentication.EnclaveTransactionResult",
+      "WebAuthentication.EnclaveTransaction.Result",
       device::enclave::EnclaveTransactionResult::kMissingKey, 1);
 }
 

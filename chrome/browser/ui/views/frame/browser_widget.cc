@@ -138,7 +138,8 @@ void BrowserWidget::InitBrowserWidget() {
   params.delegate = browser_view_;
 
   Browser* browser = browser_view_->browser();
-  if (browser->is_type_picture_in_picture()) {
+  if (browser->GetType() ==
+      BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE) {
     params.z_order = ui::ZOrderLevel::kFloatingWindow;
     params.visible_on_all_workspaces = true;
 #if !BUILDFLAG(IS_WIN)
@@ -170,14 +171,16 @@ void BrowserWidget::InitBrowserWidget() {
 
 #if BUILDFLAG(IS_OZONE)
   params.inhibit_keyboard_shortcuts =
-      browser->is_type_app() || browser->is_type_app_popup();
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP;
 
   params.session_data = browser->platform_session_data();
 #endif
 
   if (browser_native_widget_->ShouldRestorePreviousBrowserWidgetState()) {
-    if (browser->is_type_normal() || browser->is_type_devtools() ||
-        browser->is_type_app()) {
+    if (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL ||
+        browser->GetType() == BrowserWindowInterface::Type::TYPE_DEVTOOLS ||
+        browser->GetType() == BrowserWindowInterface::Type::TYPE_APP) {
       // Typed panel/popup can only return a size once the widget has been
       // created.
       // DevTools counts as a popup, but DevToolsWindow::CreateDevToolsBrowser
@@ -309,6 +312,18 @@ bool BrowserWidget::GetAccelerator(int command_id,
 }
 
 const ui::ThemeProvider* BrowserWidget::GetThemeProvider() const {
+  // If there is a user color override (e.g., Focus Mode is active),
+  // fallback to the un-themed baseline provider so custom extension
+  // theme images are suppressed.
+  if (user_color_override().has_value()) {
+    Profile* profile = browser_view_->browser()->GetProfile();
+    return &ThemeServiceFactory::GetForProfile(profile)
+                ->GetDefaultThemeProvider();
+  }
+  return GetBaseThemeProvider();
+}
+
+const ui::ThemeProvider* BrowserWidget::GetBaseThemeProvider() const {
   Browser* browser = browser_view_->browser();
   auto* app_controller = web_app::AppBrowserController::From(browser);
   // Ignore the system theme for web apps with window-controls-overlay as the
@@ -324,8 +339,9 @@ const ui::ThemeProvider* BrowserWidget::GetThemeProvider() const {
 
 ui::ColorProviderKey::ThemeInitializerSupplier* BrowserWidget::GetCustomTheme()
     const {
-  // Do not return any custom theme if this is an incognito browser.
-  if (IsIncognitoBrowser()) {
+  // Do not return any custom theme if this is an incognito browser or if there
+  // is a user color override (e.g. Focus Mode).
+  if (IsIncognitoBrowser() || user_color_override().has_value()) {
     return nullptr;
   }
 
@@ -377,7 +393,8 @@ void BrowserWidget::ShowContextMenuForViewImpl(
 
   // Do not show context menu for Document picture-in-picture browser. Context:
   // http://b/274862709.
-  if (browser_view_->browser()->is_type_picture_in_picture()) {
+  if (browser_view_->browser()->GetType() ==
+      BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE) {
     return;
   }
 
@@ -447,11 +464,12 @@ void BrowserWidget::OnNativeThemeUpdated(ui::NativeTheme* observed_theme) {
 ui::ColorProviderKey BrowserWidget::GetColorProviderKey() const {
   auto key = Widget::GetColorProviderKey();
 
-  Profile* profile = browser_view_->browser()->profile();
+  Profile* profile = browser_view_->browser()->GetProfile();
   const auto* theme_service = ThemeServiceFactory::GetForProfile(profile);
   CHECK(theme_service);
 
   key = theme_service->GetColorProviderKey(key, profile);
+  key.custom_theme = GetCustomTheme();
 
   // Re-apply Widget overrides because GetColorProviderKey might have
   // overwritten them.
@@ -567,5 +585,5 @@ bool BrowserWidget::RegenerateFrameOnThemeChange(
 }
 
 bool BrowserWidget::IsIncognitoBrowser() const {
-  return browser_view_->browser()->profile()->IsIncognitoProfile();
+  return browser_view_->browser()->GetProfile()->IsIncognitoProfile();
 }

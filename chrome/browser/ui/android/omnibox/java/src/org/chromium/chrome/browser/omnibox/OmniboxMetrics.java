@@ -70,6 +70,14 @@ public class OmniboxMetrics {
     public static final String HISTOGRAM_SEARCH_PREFETCH_TOUCH_DOWN_PROCESS_TIME =
             "Android.Omnibox.SearchPrefetch.TouchDownProcessTime.NavigationPrefetch";
 
+    /**
+     * The amount of time from touch down on an omnibox suggestion to when a prefetch may start.
+     * Specifically, this compares the event time of the first ACTION_DOWN event to when
+     * `AutocompleteMediator.onSuggestionTouchDown` is reached.
+     */
+    public static final String HISTOGRAM_SEARCH_PREFETCH_SUGGESTION_TOUCH_DOWN_DELAY =
+            "Android.Omnibox.SearchPrefetch.TouchDownDelay.NavigationPrefetch";
+
     /** The number of prefetches started in an omnibox session via the touch down trigger. */
     public static final String HISTOGRAM_SEARCH_PREFETCH_NUM_PREFETCHES_STARTED_IN_OMNIBOX_SESSION =
             "Android.Omnibox.SearchPrefetch.NumPrefetchesStartedInOmniboxSession.NavigationPrefetch";
@@ -171,13 +179,13 @@ public class OmniboxMetrics {
         return TimingMetric.shortThreadTime("Android.Omnibox.SuggestionView.CreateTime3");
     }
 
-    /** Record thread time spent inflating the Suggestion dropdown on async background thread. */
-    public static @Nullable TimingMetric recordSuggestionsDropdownAsyncInflationThreadTime() {
+    /** Record thread time spent inflating the Suggestion dropdown. */
+    public static @Nullable TimingMetric recordSuggestionsDropdownInflationThreadTime() {
         return TimingMetric.shortThreadTime("Android.Omnibox.SuggestionsDropdown.InflationTime2");
     }
 
-    /** Record wall time spent inflating the Suggestion dropdown on async background thread. */
-    public static @Nullable TimingMetric recordSuggestionsDropdownAsyncInflationWallTime() {
+    /** Record wall time spent inflating the Suggestion dropdown. */
+    public static @Nullable TimingMetric recordSuggestionsDropdownInflationWallTime() {
         return TimingMetric.shortUptime("Android.Omnibox.SuggestionsDropdown.InflationTime3");
     }
 
@@ -472,6 +480,15 @@ public class OmniboxMetrics {
     }
 
     /**
+     * Records the delay from physical touch down on a suggestion in the suggestions dropdown to the
+     * start of prefetch processing on the Java main thread.
+     */
+    public static void recordSuggestionTouchDownDelay(long delayMs) {
+        RecordHistogram.recordMediumTimesHistogram(
+                HISTOGRAM_SEARCH_PREFETCH_SUGGESTION_TOUCH_DOWN_DELAY, delayMs);
+    }
+
+    /**
      * Records the number of prefetches started by touch down events in an omnibox session.
      *
      * @param numPrefetchesStarted the number of prefetches started wihin the omnibox session.
@@ -555,6 +572,7 @@ public class OmniboxMetrics {
                 break;
 
             case PageClassification.ANDROID_HUB_VALUE:
+            case PageClassification.ANDROID_TAB_SEARCH_OVERLAY_VALUE:
                 suffix = "HUB";
                 break;
 

@@ -5,6 +5,7 @@
 #ifndef BASE_FEATURE_LIST_H_
 #define BASE_FEATURE_LIST_H_
 
+#include <compare>
 #include <functional>
 #include <map>
 #include <memory>
@@ -28,6 +29,10 @@
 #include "base/synchronization/lock.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
+
+namespace variations {
+class VariationsService;
+}  // namespace variations
 
 namespace metrics {
 class RuntimeMutableFeaturesHandlerBase;
@@ -155,6 +160,19 @@ class BASE_EXPORT FeatureList {
   using FeatureOverrideInfo =
       std::pair<const std::reference_wrapper<const Feature>, OverrideState>;
 
+  // Describes information about the trial controlling a feature's state.
+  struct ControllingTrialInfo {
+    // Name of the trial controlling the feature. Empty string if the feature is
+    // not being controlled by any trial.
+    std::string trial_name;
+    // Whether this trial is a runtime override or not. Defaults to false if
+    // the feature is not being controlled by any trial.
+    bool is_runtime_override = false;
+
+    friend auto operator<=>(const ControllingTrialInfo&,
+                            const ControllingTrialInfo&) = default;
+  };
+
   // Callback to be invoked when a runtime mutable feature's OverrideState
   // changes at runtime.
   using OnRuntimeMutableFeatureStateChangedCallback =
@@ -269,13 +287,38 @@ class BASE_EXPORT FeatureList {
   //
   // Returns true if the feature state was updated successfully, false
   // otherwise.
-  //
-  // TODO: http://crbug.com/482451383 - Add a base::PassKey to this method to
-  // ensure it is only called by the variations framework.
-  bool UpdateRuntimeMutableFeatureState(std::string_view field_trial_name,
-                                        std::string_view group_name,
-                                        std::string_view feature_name,
-                                        OverrideState override_state);
+  bool UpdateRuntimeMutableFeatureState(
+      base::PassKey<variations::VariationsService>,
+      std::string_view field_trial_name,
+      std::string_view group_name,
+      std::string_view feature_name,
+      OverrideState override_state);
+
+  // Returns whether the feature with the given `feature_name` has runtime
+  // mutability enabled.
+  bool HasRuntimeMutabilityEnabledByFeatureName(
+      std::string_view feature_name) const;
+
+  // Returns the name of the runtime FieldTrial override associated with the
+  // given runtime-mutability-enabled `feature_name`. Returns an empty string
+  // if there is currently no override.
+  std::string_view GetAssociatedRuntimeFieldTrialOverrideByFeatureName(
+      std::string_view feature_name) const;
+
+  // Returns information about the field trial controlling or associated with
+  // the given `feature_name`. If the feature has runtime mutability enabled and
+  // has an active runtime override, returns the runtime override trial name and
+  // sets `is_runtime_override` to true. Otherwise returns the associated field
+  // trial name (if any) and `is_runtime_override` set to false. If no trial is
+  // associated with the feature, `trial_name` will be empty. Must be called on
+  // the main sequence.
+  ControllingTrialInfo GetControllingTrialInfoByFeatureName(
+      std::string_view feature_name) const;
+
+  // Returns the names of all features associated with the field trial described
+  // by `controlling_trial_info`.
+  base::flat_set<std::string> GetFeaturesAssociatedWithTrial(
+      const ControllingTrialInfo& controlling_trial_info) const;
 
   // Adds extra overrides (not associated with a field trial). Should be called
   // before SetInstance().
@@ -314,7 +357,9 @@ class BASE_EXPORT FeatureList {
                                       std::string* disable_overrides) const;
 
   // Returns the field trial associated with the given feature |name|. Used for
-  // getting the FieldTrial without requiring a struct Feature.
+  // getting the FieldTrial without requiring a struct Feature. For
+  // runtime mutable features, this does not return the override trial, but
+  // rather the "original" trial associated with the feature.
   base::FieldTrial* GetAssociatedFieldTrialByFeatureName(
       std::string_view name) const;
 

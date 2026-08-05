@@ -622,9 +622,11 @@ bool ResourceLoader::WillFollowRedirect(
                              new_request->GetRedirectInfo());
 
     if (std::optional<AdProvenance> ad_provenance =
-            Context().CalculateIfAdSubresource(
-                *new_request, /*alias_url=*/std::nullopt, resource_type,
-                options.initiator_info, /*scan_stack_for_ads=*/false)) {
+            Context()
+                .CalculateResourceAnnotations(
+                    *new_request, /*alias_url=*/std::nullopt, resource_type,
+                    options.initiator_info, /*scan_javascript_stack=*/false)
+                .ad_provenance) {
       new_request->SetIsAdResource(std::move(*ad_provenance));
     }
 
@@ -673,21 +675,6 @@ bool ResourceLoader::WillFollowRedirect(
   DCHECK_EQ(new_request->GetMode(), request_mode);
   DCHECK_EQ(new_request->GetCredentialsMode(), credentials_mode);
 
-  // If `Shared-Storage-Writable` eligibity has changed, update the headers.
-  bool previous_shared_storage_writable_eligible =
-      resource_->LastResourceRequest().GetSharedStorageWritableEligible();
-  bool new_shared_storage_writable_eligible =
-      new_request->GetSharedStorageWritableEligible();
-  if (new_shared_storage_writable_eligible !=
-      previous_shared_storage_writable_eligible) {
-    if (new_shared_storage_writable_eligible) {
-      CHECK(new_request->GetSharedStorageWritableOptedIn());
-      modified_headers.SetHeader(http_names::kSecSharedStorageWritable.Ascii(),
-                                 "?1");
-    } else if (removed_headers) {
-      removed_headers->push_back(http_names::kSecSharedStorageWritable.Ascii());
-    }
-  }
 
   if (new_request->Url() != KURL(new_url)) {
     CancelForRedirectAccessCheckError(new_request->Url(),
@@ -1562,9 +1549,11 @@ bool ResourceLoader::ShouldBlockRequestBasedOnSubresourceFilterDnsAliasCheck(
 
     if (!resource_->GetResourceRequest().IsAdResource()) {
       if (std::optional<AdProvenance> ad_provenance =
-              Context().CalculateIfAdSubresource(
-                  resource_->GetResourceRequest(), alias_url, resource_type,
-                  options.initiator_info, /*scan_stack_for_ads=*/false)) {
+              Context()
+                  .CalculateResourceAnnotations(
+                      resource_->GetResourceRequest(), alias_url, resource_type,
+                      options.initiator_info, /*scan_javascript_stack=*/false)
+                  .ad_provenance) {
         resource_->SetIsAdResource(std::move(*ad_provenance));
         cname_alias_info_for_testing_.was_ad_tagged_based_on_alias = true;
       }

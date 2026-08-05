@@ -72,20 +72,6 @@ using FederatedApiPermissionStatus =
     FederatedIdentityApiPermissionContextDelegate::PermissionStatus;
 using LoginState = IdentityRequestAccount::LoginState;
 
-// static
-std::unique_ptr<UserInfoRequest> UserInfoRequest::Create(
-    std::unique_ptr<IdpNetworkRequestManager> network_manager,
-    FederatedIdentityPermissionContextDelegate* permission_delegate,
-    FederatedIdentityApiPermissionContextDelegate* api_permission_delegate,
-    RenderFrameHost* render_frame_host,
-    blink::mojom::IdentityProviderConfigPtr provider) {
-  std::unique_ptr<UserInfoRequest> request =
-      base::WrapUnique<UserInfoRequest>(new UserInfoRequest(
-          std::move(network_manager), permission_delegate,
-          api_permission_delegate, render_frame_host, std::move(provider)));
-  return request;
-}
-
 UserInfoRequest::~UserInfoRequest() {
   CompleteWithError(UserInfoRequestResult::kUnhandledRequest);
 }
@@ -221,10 +207,6 @@ void UserInfoRequest::OnAccountsResponseReceived(
     CompleteWithError(UserInfoRequestResult::kInvalidAccountsResponse);
     return;
   }
-
-  GetPageData(render_frame_host_->GetPage())
-      ->SetUserInfoAccountsResponseTime(idp_config_url_,
-                                        base::TimeTicks::Now());
 
   IdentityRequestAccount::ComputeIdpClaimedLoginStates(client_id_,
                                                        accounts.accounts);

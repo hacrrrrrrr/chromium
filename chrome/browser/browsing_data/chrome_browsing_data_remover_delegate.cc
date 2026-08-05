@@ -44,6 +44,8 @@
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/downgrade/snapshot_file_collector.h"
 #include "chrome/browser/downgrade/user_data_downgrade.h"  // nogncheck
+#include "chrome/browser/download/download_core_service.h"
+#include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/file_system_access/chrome_file_system_access_permission_context.h"
@@ -68,6 +70,8 @@
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service.h"
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service_factory.h"
 #include "chrome/browser/privacy_sandbox/privacy_sandbox_settings_factory.h"
+#include "chrome/browser/private_verification_tokens/private_verification_tokens_service.h"
+#include "chrome/browser/private_verification_tokens/private_verification_tokens_service_factory.h"
 #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
@@ -160,6 +164,7 @@
 #include "media/mojo/services/webrtc_video_perf_history.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "net/base/features.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/net_buildflags.h"
@@ -319,6 +324,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     base::OnceCallback<void(uint64_t)> callback) {
   CHECK(((remove_mask &
           ~content::BrowsingDataRemover::DATA_TYPE_AVOID_CLOSING_CONNECTIONS &
+          ~content::BrowsingDataRemover::DATA_TYPE_LOGICAL_CLEAR &
           ~constants::FILTERABLE_DATA_TYPES) == 0) ||
         filter_builder->MatchesAllOriginsAndDomains());
   TRACE_EVENT0("browsing_data",
@@ -563,7 +569,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
         delete_begin_, delete_end_);
 
     FindBarStateFactory::GetForBrowserContext(profile_)->SetLastSearchText(
-        std::u16string());
+        std::u16string(), /*web_contents=*/nullptr);
 
 #if BUILDFLAG(IS_ANDROID)
     if (auto* share_history = sharing::ShareHistory::Get(profile_))
@@ -600,6 +606,11 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   // DATA_TYPE_DOWNLOADS
   if ((remove_mask & content::BrowsingDataRemover::DATA_TYPE_DOWNLOADS) &&
       may_delete_history) {
+    DownloadCoreService* service =
+        DownloadCoreServiceFactory::GetForBrowserContext(profile_);
+    if (service) {
+      service->InitializeHistory();
+    }
     DownloadPrefs* download_prefs =
         DownloadPrefs::FromDownloadManager(profile_->GetDownloadManager());
     download_prefs->SetSaveFilePath(download_prefs->DownloadPath());
@@ -715,6 +726,30 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
       ash::SystemProxyManager::Get()->ClearUserCredentials();
     }
 #endif  // BUILDFLAG(IS_CHROMEOS)
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+  // DATA_TYPE_PRIVATE_VERIFICATION_TOKENS
+  if (remove_mask & constants::DATA_TYPE_PRIVATE_VERIFICATION_TOKENS) {
+    if (base::FeatureList::IsEnabled(
+            net::features::kEnablePrivateVerificationTokens)) {
+      if (auto* pvt_service =
+              PrivateVerificationTokensServiceFactory::GetForProfile(
+                  profile_)) {
+        auto done_closure = CreateTaskCompletionClosure(
+            TracingDataType::kPrivateVerificationTokens);
+
+        if (filter_builder->MatchesAllOriginsAndDomains()) {
+          pvt_service->DeleteTokens(delete_begin_, delete_end_,
+                                    std::move(done_closure),
+                                    /*issuers=*/std::nullopt);
+        } else {
+          pvt_service->DeleteTokensByFilter(
+              delete_begin_, delete_end_,
+              filter_builder->BuildStorageKeyFilter(), std::move(done_closure));
+        }
+      }
+    }
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -898,6 +933,10 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
         ContentSettingsType::SUSPICIOUS_NOTIFICATION_SHOW_ORIGINAL,
         delete_begin_, delete_end_, website_settings_filter);
+
+    host_content_settings_map_->ClearSettingsForOneTypeWithPredicate(
+        ContentSettingsType::SUSPICIOUS_SITE_WARNING_DATA, delete_begin_,
+        delete_end_, website_settings_filter);
 
     PermissionDecisionAutoBlockerFactory::GetForProfile(profile_)
         ->RemoveEmbargoAndResetCounts(filter);
@@ -1623,6 +1662,8 @@ const char* ChromeBrowsingDataRemoverDelegate::GetHistogramSuffix(
       return "WebrtcVideoPerfHistory";
     case TracingDataType::kMediaDeviceSalts:
       return "MediaDeviceSalts";
+    case TracingDataType::kPrivateVerificationTokens:
+      return "PrivateVerificationTokens";
   }
 }
 // LINT.ThenChange(//tools/metrics/histograms/metadata/history/histograms.xml:History.ClearBrowsingData.Duration.ChromeTask.Task)

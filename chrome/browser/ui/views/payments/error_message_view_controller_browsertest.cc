@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/views/payments/payment_handler_web_flow_view_controller.h"
 #include "chrome/browser/ui/views/payments/payment_request_browsertest_base.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
+#include "chrome/browser/ui/views/payments/payment_request_dialog_view_test_api.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/payments/core/features.h"
 #include "content/public/test/browser_test.h"
@@ -25,23 +26,31 @@ using PaymentRequestErrorMessageTest = PaymentRequestBrowserTestBase;
 // Testing the use of the complete('fail') JS API and the error message.
 IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageTest, CompleteFail) {
   std::string payment_method_name;
-  InstallPaymentApp("a.com", "/payment_request_success_responder.js",
-                    &payment_method_name);
+  InstallPaymentApp("a.com", "/payment_handler_sw.js", &payment_method_name);
 
   NavigateTo("/payment_request_fail_complete_test.html");
 
-  InvokePaymentRequestUIWithJs("buyWithMethods([{supportedMethods:'" +
-                               payment_method_name + "'}]);");
-
-  // We are ready to pay.
-  ASSERT_TRUE(IsPayButtonEnabled());
-
-  // Once "Pay" is clicked, the page will call complete('fail') and the error
+  // Trigger PaymentRequest. Since there is only one payment app, the payment
+  // sheet UI is skipped and the payment handler window opens automatically.
+  // When the app confirms and the merchant calls complete('fail'), the error
   // message should be shown.
-  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_HIDDEN,
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::DIALOG_OPENED,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED,
+                               DialogEvent::PAYMENT_HANDLER_TITLE_SET,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
                                DialogEvent::ERROR_MESSAGE_SHOWN});
-  ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
-  EXPECT_FALSE(dialog_view()->throbber_overlay_for_testing()->GetVisible());
+  ASSERT_TRUE(content::ExecJs(
+      GetActiveWebContents(),
+      content::JsReplace("buyWithMethods([{supportedMethods:$1}]);",
+                         payment_method_name)));
+  ASSERT_TRUE(WaitForObservedEvent());
+
+  EXPECT_FALSE(test_api(dialog_view()).throbber_overlay()->GetVisible());
 
   // The user can only close the dialog at this point.
   ResetEventWaiter(DialogEvent::DIALOG_CLOSED);
@@ -52,22 +61,29 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageTest, CompleteFail) {
 IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageTest,
                        EnterKeyClosesErrorDialog) {
   std::string payment_method_name;
-  InstallPaymentApp("a.com", "/payment_request_success_responder.js",
-                    &payment_method_name);
+  InstallPaymentApp("a.com", "/payment_handler_sw.js", &payment_method_name);
 
   NavigateTo("/payment_request_fail_complete_test.html");
 
-  InvokePaymentRequestUIWithJs("buyWithMethods([{supportedMethods:'" +
-                               payment_method_name + "'}]);");
-
-  // We are ready to pay.
-  ASSERT_TRUE(IsPayButtonEnabled());
-
-  // Once "Pay" is clicked, the page will call complete('fail') and the error
+  // Trigger PaymentRequest. Since there is only one payment app, the payment
+  // sheet UI is skipped and the payment handler window opens automatically.
+  // When the app confirms and the merchant calls complete('fail'), the error
   // message should be shown.
-  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_HIDDEN,
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::DIALOG_OPENED,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED,
+                               DialogEvent::PAYMENT_HANDLER_TITLE_SET,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
                                DialogEvent::ERROR_MESSAGE_SHOWN});
-  ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
+  ASSERT_TRUE(content::ExecJs(
+      GetActiveWebContents(),
+      content::JsReplace("buyWithMethods([{supportedMethods:$1}]);",
+                         payment_method_name)));
+  ASSERT_TRUE(WaitForObservedEvent());
 
   // Trigger the 'Enter' accelerator, which should be present and mapped to
   // close the dialog.
@@ -82,27 +98,34 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageTest,
 IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageTest,
                        ContentViewNotScrollable) {
   std::string payment_method_name;
-  InstallPaymentApp("a.com", "/payment_request_success_responder.js",
-                    &payment_method_name);
+  InstallPaymentApp("a.com", "/payment_handler_sw.js", &payment_method_name);
 
   NavigateTo("/payment_request_fail_complete_test.html");
 
-  InvokePaymentRequestUIWithJs("buyWithMethods([{supportedMethods:'" +
-                               payment_method_name + "'}]);");
-
-  // We are ready to pay.
-  ASSERT_TRUE(IsPayButtonEnabled());
-
-  // Once "Pay" is clicked, the page will call complete('fail') and the error
+  // Trigger PaymentRequest. Since there is only one payment app, the payment
+  // sheet UI is skipped and the payment handler window opens automatically.
+  // When the app confirms and the merchant calls complete('fail'), the error
   // message should be shown.
-  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_HIDDEN,
+  ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::DIALOG_OPENED,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                               DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED,
+                               DialogEvent::PAYMENT_HANDLER_TITLE_SET,
+                               DialogEvent::PROCESSING_SPINNER_SHOWN,
+                               DialogEvent::PROCESSING_SPINNER_HIDDEN,
                                DialogEvent::ERROR_MESSAGE_SHOWN});
-  ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
+  ASSERT_TRUE(content::ExecJs(
+      GetActiveWebContents(),
+      content::JsReplace("buyWithMethods([{supportedMethods:$1}]);",
+                         payment_method_name)));
+  ASSERT_TRUE(WaitForObservedEvent());
 
   // We always push the initial browser sheet to the stack, even if it isn't
   // shown. Since it also defines a CONTENT_VIEW, we have to explicitly test the
   // front PaymentHandler view here.
-  views::View* top_view = dialog_view()->view_stack_for_testing()->top();
+  views::View* top_view = test_api(dialog_view()).view_stack()->top();
 
   views::View* sheet_view =
       GetChildByDialogViewID(top_view, DialogViewID::ERROR_SHEET);
@@ -141,9 +164,11 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageMandatoryUiEnabledTest,
   ResetEventWaiterForSequence(
       {DialogEvent::PROCESSING_SPINNER_SHOWN,
        DialogEvent::PROCESSING_SPINNER_HIDDEN, DialogEvent::DIALOG_OPENED,
-       DialogEvent::LOADING_VIEW_SHOWN, DialogEvent::LOADING_VIEW_HIDDEN,
+       DialogEvent::LOADING_VIEW_SHOWN,
+       // Note: LOADING_VIEW_HIDDEN comes after PAYMENT_HANDLER_WINDOW_OPENED
+       // because the loading view is hidden asynchronously.
        DialogEvent::PAYMENT_HANDLER_WINDOW_OPENED,
-       DialogEvent::PAYMENT_HANDLER_TITLE_SET,
+       DialogEvent::LOADING_VIEW_HIDDEN, DialogEvent::PAYMENT_HANDLER_TITLE_SET,
        DialogEvent::PROCESSING_SPINNER_HIDDEN,
        DialogEvent::ERROR_MESSAGE_SHOWN});
   ASSERT_EQ(
@@ -161,9 +186,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestErrorMessageMandatoryUiEnabledTest,
   views::View* content_view =
       GetChildByDialogViewID(error_sheet, DialogViewID::CONTENT_VIEW);
   ASSERT_NE(nullptr, content_view);
-  ASSERT_EQ(1u, content_view->children().size());
+  ASSERT_EQ(2u, content_view->children().size());
 
-  views::Label* label = static_cast<views::Label*>(content_view->children()[0]);
+  views::Label* label = static_cast<views::Label*>(content_view->children()[1]);
   std::u16string_view label_text = label->GetText();
 
   EXPECT_TRUE(label_text.contains(base::ASCIIToUTF16(kMerchantOrigin)));

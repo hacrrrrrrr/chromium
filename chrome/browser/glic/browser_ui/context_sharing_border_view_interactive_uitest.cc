@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/glic/browser_ui/context_sharing_border_view.h"
+
 #include <math.h>
 
 #include "base/numerics/ranges.h"
@@ -14,7 +16,6 @@
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/ui/actor_ui_tab_controller.h"
 #include "chrome/browser/glic/actor/glic_actor_test_util.h"
-#include "chrome/browser/glic/browser_ui/context_sharing_border_view.h"
 #include "chrome/browser/glic/browser_ui/context_sharing_border_view_controller_impl.h"
 #include "chrome/browser/glic/test_support/glic_test_util.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
@@ -342,21 +343,22 @@ IN_PROC_BROWSER_TEST_F(ContextSharingBorderViewUiTest, BorderResize) {
   ui_test_utils::ViewBoundsWaiter border_bounds_waiter(border);
   border_bounds_waiter.WaitForNonEmptyBounds();
 
-  auto* contents_web_view = browser()->GetBrowserView().contents_web_view();
+  auto* contents_web_view =
+      BrowserView::GetBrowserViewForBrowser(browser())->contents_web_view();
   EXPECT_EQ(border->GetVisibleBounds(), contents_web_view->GetVisibleBounds());
 
   // Resize the browser view to closer to its minimum size.
   //
   // Note: the widget will often be larger (for example, if it needs to render
   // a shadow border; this is especially true on Linux.
-  const auto& browser_view = browser()->GetBrowserView();
+  const auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
   const int widget_additional_width =
-      browser_view.GetWidget()->GetWindowBoundsInScreen().width() -
-      browser_view.width();
+      browser_view->GetWidget()->GetWindowBoundsInScreen().width() -
+      browser_view->width();
   const int widget_additional_height =
-      browser_view.GetWidget()->GetWindowBoundsInScreen().height() -
-      browser_view.height();
-  const auto minimum_size = browser_view.browser_widget()->GetMinimumSize();
+      browser_view->GetWidget()->GetWindowBoundsInScreen().height() -
+      browser_view->height();
+  const auto minimum_size = browser_view->browser_widget()->GetMinimumSize();
   const int minimum_width = minimum_size.width() + widget_additional_width;
   const int minimum_height =
       std::max(minimum_size.height() + widget_additional_height, 600);
@@ -682,8 +684,9 @@ IN_PROC_BROWSER_TEST_F(ContextSharingBorderViewUiTest, FocusedWindowChange) {
 
   // Start the animation in the first browser window.
   browser()->GetWindow()->Show();
-  views::test::WaitForWidgetActive(browser()->GetBrowserView().GetWidget(),
-                                   /*active=*/true);
+  views::test::WaitForWidgetActive(
+      BrowserView::GetBrowserViewForBrowser(browser())->GetWidget(),
+      /*active=*/true);
   StartBorderAnimation();
   tester->WaitForAnimationStart();
   EXPECT_TRUE(border->IsShowing());
@@ -698,8 +701,9 @@ IN_PROC_BROWSER_TEST_F(ContextSharingBorderViewUiTest, FocusedWindowChange) {
 
   // Focus on the new window.
   browser2->GetWindow()->Show();
-  views::test::WaitForWidgetActive(browser2->GetBrowserView().GetWidget(),
-                                   /*active=*/true);
+  views::test::WaitForWidgetActive(
+      BrowserView::GetBrowserViewForBrowser(browser2)->GetWidget(),
+      /*active=*/true);
 
   // Flush out the ramp down animation in the old browser window.
   tester->WaitForRampDownStarted();

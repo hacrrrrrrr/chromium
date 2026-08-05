@@ -23,33 +23,46 @@ namespace env_vars {
 // On Posix systems, this variable contains the location of the user's home
 // directory. (e.g, /home/username/).
 inline constexpr char kHome[] = "HOME";
+inline constexpr char kTmpDir[] = "TMPDIR";
+#endif
+
+#if BUILDFLAG(IS_APPLE)
+// Used to customize the path provided by NSTemporaryDirectory() and other paths
+// retrieved from dirhelper (e.g., via confstr) on macOS.
+inline constexpr char kDirHelperUserDirSuffix[] = "DIRHELPER_USER_DIR_SUFFIX";
+
+// Historical environment variable set by build infrastructure for macOS temp
+// dir.
+inline constexpr char kMacChromiumTmpDir[] = "MAC_CHROMIUM_TMPDIR";
 #endif
 
 }  // namespace env_vars
 
 class BASE_EXPORT Environment {
  public:
-  virtual ~Environment();
-
-  // Returns the appropriate platform-specific instance.
+  // TODO(crbug.com/40943356): Remove and just create on the stack instead.
   static std::unique_ptr<Environment> Create();
+
+  Environment();
+  virtual ~Environment();
 
   // Returns an environment variable's value.
   // Returns std::nullopt if the key is unset.
   // Note that the variable may be set to an empty string.
-  virtual std::optional<std::string> GetVar(cstring_view variable_name) = 0;
+  //
+  // Most methods in this class are virtual for testing purposes.
+  virtual std::optional<std::string> GetVar(cstring_view variable_name);
 
   // Syntactic sugar for GetVar(variable_name).has_value();
   bool HasVar(cstring_view variable_name);
 
   // Returns true on success, otherwise returns false. This method should not
   // be called in a multi-threaded process.
-  virtual bool SetVar(cstring_view variable_name,
-                      const std::string& new_value) = 0;
+  virtual bool SetVar(cstring_view variable_name, const std::string& new_value);
 
   // Returns true on success, otherwise returns false. This method should not
   // be called in a multi-threaded process.
-  virtual bool UnSetVar(cstring_view variable_name) = 0;
+  virtual bool UnSetVar(cstring_view variable_name);
 };
 
 #if BUILDFLAG(IS_WIN)

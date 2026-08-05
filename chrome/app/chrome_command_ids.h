@@ -21,7 +21,7 @@
 // NOTE: Within each of the following sections, the IDs are ordered roughly by
 // how they appear in the GUI/menus (left to right, top to bottom, etc.).
 
-// LINT.IfChange(BrowserCommandIds)
+// LINT.IfChange
 // =============================================================================
 // When adding a new IDC_* command below, you MUST also create
 // a corresponding declarative ActionItem in the modern Actions framework.
@@ -50,11 +50,14 @@
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
 #define IDC_NEW_INCOGNITO_WINDOW        34001
+#define IDC_NEW_ISOLATED_WINDOW         34002
 #define IDC_CLOSE_WINDOW                34012
 #define IDC_NEW_TAB                     34014
 #define IDC_CLOSE_TAB                   34015
 #define IDC_SELECT_NEXT_TAB             34016
 #define IDC_SELECT_PREVIOUS_TAB         34017
+#define IDC_CYCLE_TO_NEXT_TAB           34062
+#define IDC_CYCLE_TO_PREV_TAB           34063
 #define IDC_SELECT_TAB_0                34018
 #define IDC_SELECT_TAB_1                34019
 #define IDC_SELECT_TAB_2                34020
@@ -124,7 +127,6 @@
 #define IDC_FOCUS_PREV_TAB_GROUP      34103
 #define IDC_CLOSE_TAB_GROUP           34104
 #define IDC_GROUP_UNGROUPED_TABS      34105
-#define IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL 34106
 #define IDC_ADD_NEW_TAB_RECENT_GROUP  34107
 #define IDC_UNFOCUS_TAB_GROUP         34108
 
@@ -285,7 +287,6 @@
 #define IDC_SHOW_COMMENTS_SIDE_PANEL  40297
 #define IDC_RECENT_TABS_SEE_DEVICE_TABS  40298
 #define IDC_SHOW_AI_MODE_OMNIBOX_BUTTON 40299
-#define IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI 40300
 #define IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS 40301
 #define IDC_REPORT_UNSAFE_SITE 40302
 #define IDC_SHOW_READING_MODE_KEYBOARD 40303
@@ -439,8 +440,6 @@
 #define IDC_BOOKMARK_BAR_SUBMENU_ONLY_ON_NTP 51027
 
 // Context menu items for Sharing
-#define IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_SINGLE_DEVICE 51032
-#define IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_MULTIPLE_DEVICES 51033
 #define IDC_CONTENT_CONTEXT_GENERATE_QR_CODE 51034
 #define IDC_CONTENT_CONTEXT_SHARING_SUBMENU 51035
 #define IDC_CONTENT_CONTEXT_SEND_TAB_TO_SELF_DEVICE1 51040
@@ -507,7 +506,6 @@
 // Autofill feedback.
 #define IDC_CONTENT_CONTEXT_AUTOFILL_FEEDBACK 52990
 // Autofill context menu commands
-#define IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS 52994
 #define IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD 52998
 #define IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_IMPORT_PASSWORDS 52999
 #define IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SUGGEST_PASSWORD 53000
@@ -533,7 +531,6 @@
 // Glic button context menu and tabstrip context menu
 #define IDC_GLIC_TOGGLE_PIN 53320
 #define IDC_TAB_SEARCH_TOGGLE_PIN 53321
-#define IDC_PROJECTS_PANEL_TOGGLE_PIN 53322
 #define IDC_EVERYTHING_MENU_TOGGLE_PIN 53323
 
 // Omnibox context menu

@@ -49,48 +49,55 @@ class DlpInternalsUi extends PolymerElement {
   }
 
   // Names of the top level page tabs.
-  private tabNames_: string[] = [
-    'Clipboard',
-    'OnScreen',
-    'Files',
-    'Reporting',
-  ];
+  declare private tabNames_: string[];
 
   // Whether the profle is off the record.
-  private isOtr_: boolean = false;
+  declare private isOtr_: boolean;
 
   // Whether DLP rules manager exists.
-  private doRulesManagerExist_: boolean = false;
+  declare private doRulesManagerExist_: boolean;
 
   // Whether the page tabs show be added.
-  private showTabs_: boolean = false;
+  declare private showTabs_: boolean;
 
   // Index of the selected top level page tab.
-  private selectedTabIdx_: number = 0;
+  declare private selectedTabIdx_: number;
 
   // Clipboard source type string.
-  private clipboardSourceType_: string;
+  declare private clipboardSourceType_: string;
 
   // Clipboard source url.
-  private clipboardSourceUrl_: string;
+  declare private clipboardSourceUrl_: string;
 
   // Reporting events array.
-  private reportingEvents_: DlpEvent[] = [];
+  declare private reportingEvents_: DlpEvent[];
 
   // Web Contents Info.
-  private webContentsElements_: WebContentsElement[] = [];
+  declare private webContentsElements_: WebContentsElement[];
 
   // Files Database Entries.
   private filesEntries_: FileDatabaseEntry[] = [];
 
   // Selected file inode number.
-  private selectedFileInode_: bigint;
+  private selectedFileInode_: bigint = 0n;
 
   private readonly pageHandler_: PageHandlerInterface;
   private readonly reportingObserver_: ReportingObserverReceiver;
 
   constructor() {
     super();
+    this.tabNames_ = [
+        'Clipboard',
+        'OnScreen',
+        'Files',
+        'Reporting',
+      ];
+    this.isOtr_ = false;
+    this.doRulesManagerExist_ = false;
+    this.showTabs_ = false;
+    this.selectedTabIdx_ = 0;
+    this.reportingEvents_ = [];
+    this.webContentsElements_ = [];
 
     if (loadTimeData.valueExists('isOtr')) {
       this.isOtr_ = loadTimeData.getBoolean('isOtr');
@@ -267,7 +274,7 @@ class DlpInternalsUi extends PolymerElement {
           if (value.inode) {
             this.selectedFileInode_ = value.inode;
           } else {
-            this.selectedFileInode_ = BigInt(0);
+            this.selectedFileInode_ = 0n;
           }
         })
         .catch((e: object) => {

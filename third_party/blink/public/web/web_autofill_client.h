@@ -103,7 +103,16 @@ class WebAutofillClient {
   // moves outside the frame.
   virtual void DidCompleteFocusChangeInFrame() {}
 
+  // Called immediately after a left mousedown event or gesture tap has been
+  // dispatched to the DOM node, after element focus has been updated.
   virtual void DidReceiveLeftMouseDownOrGestureTapInNode(const WebNode&) {}
+
+  // Called immediately before initiating DOM dispatch for a left
+  // pointerdown/mousedown event. This is called exactly once per event for the
+  // innermost hit-tested node (`target_node`) before DOM event propagation
+  // begins or webpage JavaScript event listeners execute.
+  virtual void DidReceiveLeftPointerDownBeforeDispatch(
+      const WebNode& target_node) {}
 
   // Called when the given form element is reset.
   virtual void FormElementReset(const WebFormElement&) {}

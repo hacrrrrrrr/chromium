@@ -306,7 +306,7 @@ class TestLocationBar : public LocationBar {
   }
 
   ui::TrackedElement* GetAnchorOrNull() override { return nullptr; }
-  Browser* GetBrowser() override { return nullptr; }
+  BrowserWindowInterface* GetBrowser() override { return nullptr; }
   Profile* GetProfile() override { return profile_; }
   bool IsInitialized() const override { return true; }
   bool IsVisible() const override { return true; }
@@ -323,6 +323,7 @@ class TestLocationBar : public LocationBar {
   void Update(content::WebContents* contents) override {}
   void ResetTabState(content::WebContents* contents) override {}
   bool HasSecurityStateChanged() override { return false; }
+  void AnnounceAlert(const std::u16string& announcement) override {}
 
   raw_ptr<LocationBarModel> location_bar_model_;
   raw_ptr<OmniboxViewViews> omnibox_view_ = nullptr;
@@ -1147,8 +1148,16 @@ TEST_F(OmniboxViewViewsTest, SchemeStrikethrough) {
 }
 
 #if BUILDFLAG(SUPPORTS_AX_TEXT_OFFSETS)
+#if BUILDFLAG(IS_WIN) && defined(ARCH_CPU_ARM64)
+// TODO(crbug.com/533683545): Fix this test on Win ARM64.
+#define MAYBE_AccessibleTextOffsetsUpdatesAfterElideBehaviorChange \
+  DISABLED_AccessibleTextOffsetsUpdatesAfterElideBehaviorChange
+#else
+#define MAYBE_AccessibleTextOffsetsUpdatesAfterElideBehaviorChange \
+  AccessibleTextOffsetsUpdatesAfterElideBehaviorChange
+#endif
 TEST_F(OmniboxViewViewsTest,
-       AccessibleTextOffsetsUpdatesAfterElideBehaviorChange) {
+       MAYBE_AccessibleTextOffsetsUpdatesAfterElideBehaviorChange) {
   EnableDeferredLoadingAccessibility();
   CHECK(omnibox_view()->GetViewAccessibility().is_initialized());
 

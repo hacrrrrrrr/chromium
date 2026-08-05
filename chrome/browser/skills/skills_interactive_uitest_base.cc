@@ -231,19 +231,36 @@ SkillsInteractiveUiTestBase::UpdateSkill(const std::string* skill_id_ptr) {
 
 ui::test::InteractiveTestApi::MultiStep
 SkillsInteractiveUiTestBase::VerifyInvocationInWebUI(
-    const std::string& expected_prompt) {
-  return Steps(
-      Log("Verifying Glic Panel Opened via Toast Interaction"),
-      WaitForShow(glic::kGlicHostElementId),
-
-      WaitForJsResult(
-          glic::kGlicContentsElementId,
-          base::StringPrintf(
-              "() => {"
-              "  const input = document.getElementById('skillPromptInput');"
-              "  return !!input && input.value === '%s';"
-              "}",
-              expected_prompt.c_str())));
+    const std::string& expected_prompt,
+    const std::string& expected_name,
+    const std::string& expected_icon) {
+  if (base::FeatureList::IsEnabled(features::kSkillsWebViewV2Enabled)) {
+    return Steps(
+        Log("Verifying Glic Panel Opened via Toast Interaction (V2)"),
+        WaitForShow(glic::kGlicHostElementId),
+        WaitForJsResult(
+            glic::kGlicContentsElementId,
+            base::StringPrintf(
+                "() => {"
+                "  const nameInput = document.getElementById('skillNameInput');"
+                "  const iconInput = document.getElementById('skillIconInput');"
+                "  return !!nameInput && nameInput.value === '%s' &&"
+                "         !!iconInput && iconInput.value === '%s';"
+                "}",
+                expected_name.c_str(), expected_icon.c_str())));
+  } else {
+    return Steps(Log("Verifying Glic Panel Opened via Toast Interaction (V1)"),
+                 WaitForShow(glic::kGlicHostElementId),
+                 WaitForJsResult(
+                     glic::kGlicContentsElementId,
+                     base::StringPrintf(
+                         "() => {"
+                         "  const promptInput = "
+                         "document.getElementById('skillPromptInput');"
+                         "  return !!promptInput && promptInput.value === '%s';"
+                         "}",
+                         expected_prompt.c_str())));
+  }
 }
 
 ui::test::InteractiveTestApi::StepBuilder
@@ -392,7 +409,11 @@ SkillsInteractiveUiTestBase::WaitForTabOpenedTo(int tab, GURL url) {
             if (model->active_index() != tab) {
               return GURL();
             }
-            return model->GetTabAtIndex(tab)->GetContents()->GetVisibleURL();
+            GURL url =
+                model->GetTabAtIndex(tab)->GetContents()->GetVisibleURL();
+            GURL::Replacements clear_query;
+            clear_query.ClearQuery();
+            return url.ReplaceComponents(clear_query);
           }),
       WaitForState(kOpenedTabUrlState, url),
       StopObservingState(kOpenedTabUrlState));

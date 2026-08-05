@@ -77,6 +77,8 @@ class TabView : public views::View,
   bool IsHoverAnimationActive() const;
 
   std::optional<SkColor> GetBackgroundColor();
+  SkColor GetCurrentTabBackgroundColor(
+      TabStyle::TabSelectionState selection_state) const;
   SkPath GetPath() const;
 
   const TabCollectionNode* collection_node() const { return collection_node_; }
@@ -86,6 +88,8 @@ class TabView : public views::View,
   bool IsActive() const { return active_; }
 
   TabCloseButton* close_button_for_testing() { return close_button_; }
+  TabIcon* GetTabIconForTesting() { return icon_; }
+  void SetDataForTesting(tabs::TabData data);
 
   // HoverCardAnchorTarget:
   bool NeedsToShowThumbnail() const override;
@@ -95,6 +99,7 @@ class TabView : public views::View,
 
  private:
   // views::View
+  gfx::Size GetMinimumSize() const override;
   void Layout(PassKey) override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   bool OnKeyReleased(const ui::KeyEvent& event) override;

@@ -4,8 +4,11 @@
 
 #include "ui/accessibility/platform/inspect/ax_tree_formatter_mac.h"
 
+#include <ApplicationServices/ApplicationServices.h>
+
 #include <string>
 
+#include "base/apple/bridging.h"
 #include "base/files/file_path.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -21,6 +24,8 @@
 #include "ui/accessibility/platform/inspect/ax_script_instruction.h"
 #include "ui/accessibility/platform/inspect/ax_transform_mac.h"
 #include "ui/gfx/native_ui_types.h"
+
+using base::apple::CFToNSPtrCast;
 
 // TODO(https://crbug.com/406190900): Remove this deprecation pragma.
 #pragma clang diagnostic push
@@ -45,8 +50,10 @@ AXTreeFormatterMac::~AXTreeFormatterMac() = default;
 void AXTreeFormatterMac::AddDefaultFilters(
     std::vector<AXPropertyFilter>* property_filters) {
   static NSArray* default_attributes = @[
-    @"AXAutocompleteValue", @"AXDescription", @"AXRole", @"AXSubrole",
-    @"AXTitle", @"AXTitleUIElement", @"AXValue"
+    @"AXAutocompleteValue", CFToNSPtrCast(kAXDescriptionAttribute),
+    CFToNSPtrCast(kAXRoleAttribute), CFToNSPtrCast(kAXSubroleAttribute),
+    CFToNSPtrCast(kAXTitleAttribute), CFToNSPtrCast(kAXTitleUIElementAttribute),
+    CFToNSPtrCast(kAXValueAttribute)
   ];
 
   for (NSString* attribute : default_attributes) {
@@ -66,8 +73,7 @@ base::DictValue AXTreeFormatterMac::BuildTree(
 
 base::DictValue AXTreeFormatterMac::BuildTreeForSelector(
     const AXTreeSelector& selector) const {
-  base::apple::ScopedCFTypeRef<AXUIElementRef> node;
-  std::tie(node, std::ignore) = FindAXUIElement(selector);
+  auto [node, _] = FindAXUIElement(selector);
   if (!node) {
     return base::DictValue();
   }
@@ -98,10 +104,10 @@ base::DictValue AXTreeFormatterMac::BuildTree(id root) const {
 std::string AXTreeFormatterMac::EvaluateScript(
     const AXTreeSelector& selector,
     const AXInspectScenario& scenario) const {
-  base::apple::ScopedCFTypeRef<AXUIElementRef> root;
-  std::tie(root, std::ignore) = FindAXUIElement(selector);
-  if (!root)
+  auto [root, _] = FindAXUIElement(selector);
+  if (!root) {
     return "";
+  }
 
   std::string result =
       EvaluateScript((__bridge id)root.get(), scenario.script_instructions, 0,
@@ -172,8 +178,7 @@ base::DictValue AXTreeFormatterMac::BuildNode(
 
 base::DictValue AXTreeFormatterMac::BuildNodeForSelector(
     const AXTreeSelector& selector) const {
-  base::apple::ScopedCFTypeRef<AXUIElementRef> node;
-  std::tie(node, std::ignore) = FindAXUIElement(selector);
+  auto [node, _] = FindAXUIElement(selector);
   if (!node) {
     return base::DictValue();
   }

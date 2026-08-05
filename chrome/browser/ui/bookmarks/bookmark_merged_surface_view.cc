@@ -13,6 +13,8 @@
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/bookmarks/browser/scoped_group_bookmark_actions.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
+#include "components/browser_apis/bookmarks/bookmark_event_translator.h"
+#include "components/browser_apis/bookmarks/bookmarks_view_observer.h"
 #include "url/gurl.h"
 
 BookmarkMergedSurfaceView::BookmarkMergedSurfaceView(
@@ -23,18 +25,20 @@ BookmarkMergedSurfaceView::BookmarkMergedSurfaceView(
           base::Uuid::GenerateRandomV4(),
           GURL())) {
   CHECK(service_);
+  service_observation_.Observe(service_);
+  translator_.Init();
 }
 
 BookmarkMergedSurfaceView::~BookmarkMergedSurfaceView() = default;
 
 void BookmarkMergedSurfaceView::AddObserver(
-    bookmarks::BookmarkModelObserver* observer) {
-  service_->bookmark_model()->AddObserver(observer);
+    bookmarks_api::BookmarksViewObserver* observer) {
+  observers_.AddObserver(observer);
 }
 
 void BookmarkMergedSurfaceView::RemoveObserver(
-    bookmarks::BookmarkModelObserver* observer) {
-  service_->bookmark_model()->RemoveObserver(observer);
+    bookmarks_api::BookmarksViewObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 bool BookmarkMergedSurfaceView::IsDoingExtensiveChanges() const {
@@ -128,12 +132,28 @@ BookmarkMergedSurfaceView::GetPermanentFolderType(
   return bookmarks_api::mojom::PermanentFolderType::kUnknown;
 }
 
+base::Uuid BookmarkMergedSurfaceView::GetUuid(
+    const bookmarks::BookmarkNode* node) const {
+  if (!node) {
+    return base::Uuid();
+  }
+  if (node == synthetic_root_node_.get()) {
+    return synthetic_root_node_->uuid();
+  }
+  return node->uuid();
+}
+
 bool BookmarkMergedSurfaceView::IsSynced(
     const bookmarks::BookmarkNode* node) const {
   if (node == synthetic_root_node_.get()) {
     return false;
   }
   return !service_->bookmark_model()->IsLocalOnlyNode(*node);
+}
+
+const bookmarks_api::BookmarkEventTranslator&
+BookmarkMergedSurfaceView::GetEventTranslator() const {
+  return translator_;
 }
 
 const bookmarks::BookmarkNode* BookmarkMergedSurfaceView::AddURL(
@@ -229,4 +249,108 @@ void BookmarkMergedSurfaceView::RemoveNodes(
   for (const auto* node : nodes) {
     service_->bookmark_model()->Remove(node, source, location);
   }
+}
+
+void BookmarkMergedSurfaceView::BookmarkMergedSurfaceServiceLoaded() {}
+
+void BookmarkMergedSurfaceView::BookmarkMergedSurfaceServiceBeingDeleted() {
+  for (auto& observer : observers_) {
+    observer.OnBookmarksViewBeingDeleted(this);
+  }
+}
+
+void BookmarkMergedSurfaceView::BookmarkNodeAdded(
+    const BookmarkParentFolder& parent,
+    size_t index) {
+  const bookmarks::BookmarkNode* parent_node = GetNodeForParentFolder(parent);
+  if (!parent_node) {
+    return;
+  }
+  std::vector<bookmarks_api::mojom::BookmarksEventPtr> events;
+  events.push_back(translator_.CreateAddedEvent(parent_node, index));
+  Notify(std::move(events));
+}
+
+void BookmarkMergedSurfaceView::BookmarkNodesRemoved(
+    const BookmarkParentFolder& parent,
+    const base::flat_set<const bookmarks::BookmarkNode*>& nodes) {
+  std::vector<bookmarks_api::mojom::BookmarksEventPtr> events;
+  for (const auto* node : nodes) {
+    events.push_back(translator_.OnNodeRemoved(node));
+  }
+  Notify(std::move(events));
+}
+
+void BookmarkMergedSurfaceView::BookmarkNodeMoved(
+    const BookmarkParentFolder& old_parent,
+    size_t old_index,
+    const BookmarkParentFolder& new_parent,
+    size_t new_index) {
+  const bookmarks::BookmarkNode* old_parent_node =
+      GetNodeForParentFolder(old_parent);
+  const bookmarks::BookmarkNode* new_parent_node =
+      GetNodeForParentFolder(new_parent);
+  if (!old_parent_node || !new_parent_node) {
+    return;
+  }
+  std::vector<bookmarks_api::mojom::BookmarksEventPtr> events;
+  events.push_back(translator_.CreateMovedEvent(old_parent_node, old_index,
+                                                new_parent_node, new_index));
+  Notify(std::move(events));
+}
+
+void BookmarkMergedSurfaceView::BookmarkNodeChanged(
+    const bookmarks::BookmarkNode* node) {
+  std::vector<bookmarks_api::mojom::BookmarksEventPtr> events;
+  events.push_back(translator_.CreateChangedEvent(node));
+  Notify(std::move(events));
+}
+
+void BookmarkMergedSurfaceView::BookmarkNodeFaviconChanged(
+    const bookmarks::BookmarkNode* node) {
+  // Favicon changes are not propagated as Mojo events.
+}
+
+void BookmarkMergedSurfaceView::BookmarkParentFolderChildrenReordered(
+    const BookmarkParentFolder& folder) {}
+
+void BookmarkMergedSurfaceView::BookmarkAllUserNodesRemoved() {}
+
+void BookmarkMergedSurfaceView::ExtensiveBookmarkChangesBeginning() {
+  // Extensive changes are handled internally by queueing events.
+}
+
+void BookmarkMergedSurfaceView::ExtensiveBookmarkChangesEnded() {
+  if (!queued_events_.empty()) {
+    for (auto& observer : observers_) {
+      observer.OnBookmarksEvents(this, queued_events_);
+    }
+    queued_events_.clear();
+  }
+}
+
+void BookmarkMergedSurfaceView::Notify(
+    std::vector<bookmarks_api::mojom::BookmarksEventPtr> events) {
+  if (events.empty()) {
+    return;
+  }
+  if (IsDoingExtensiveChanges()) {
+    std::move(events.begin(), events.end(), std::back_inserter(queued_events_));
+    return;
+  }
+  for (auto& observer : observers_) {
+    observer.OnBookmarksEvents(this, events);
+  }
+}
+
+const bookmarks::BookmarkNode*
+BookmarkMergedSurfaceView::GetNodeForParentFolder(
+    const BookmarkParentFolder& folder) const {
+  if (folder.as_non_permanent_folder()) {
+    return folder.as_non_permanent_folder();
+  }
+  if (service_->IsParentFolderManaged(folder)) {
+    return service_->GetParentForManagedNode(folder);
+  }
+  return service_->GetDefaultParentForNewNodes(folder);
 }

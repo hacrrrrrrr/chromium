@@ -141,6 +141,7 @@ bool MemoryBankTable::AddOrUpdateEntry(const MemoryBankEntry& entry) {
   } else {
     statement.BindNull(6);
   }
+
   return statement.Run();
 }
 
@@ -165,6 +166,21 @@ std::optional<MemoryBankEntry> MemoryBankTable::GetEntry(int64_t id) {
   return ToMemoryBankEntry(statement);
 }
 
+std::vector<MemoryBankEntry> MemoryBankTable::GetEntriesByIds(
+    base::span<const int64_t> ids) {
+  if (!db_ || ids.empty()) {
+    return {};
+  }
+  std::vector<MemoryBankEntry> entries;
+  for (int64_t id : ids) {
+    auto entry = GetEntry(id);
+    if (entry.has_value()) {
+      entries.push_back(std::move(*entry));
+    }
+  }
+  return entries;
+}
+
 std::vector<MemoryBankEntry> MemoryBankTable::GetAllEntries() {
   if (!db_) {
     return {};
@@ -184,6 +200,20 @@ std::vector<MemoryBankEntry> MemoryBankTable::GetAllEntries() {
   }
 
   return entries;
+}
+
+size_t MemoryBankTable::GetEntryCount() {
+  if (!db_) {
+    return 0;
+  }
+
+  sql::Statement statement;
+  sql::CachedSelectBuilder(SQL_FROM_HERE, *db_, statement,
+                           kMemoryBankEntriesTable, /*columns=*/{"COUNT(*)"});
+  if (statement.Step()) {
+    return static_cast<size_t>(statement.ColumnInt64(0));
+  }
+  return 0;
 }
 
 bool MemoryBankTable::DeleteEntries(base::span<const int64_t> ids) {

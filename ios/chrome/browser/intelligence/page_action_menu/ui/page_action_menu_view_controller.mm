@@ -337,9 +337,9 @@ const CGFloat kDividerWidth = 1.0;
   buttonContentStack.userInteractionEnabled = NO;
 
   // Add leading icon.
-  UIView* leadingIconContainer = [self
-      createIconWithImage:DefaultSymbolWithPointSize(GetReaderModeSymbolName(),
-                                                     kSmallButtonIconSize)];
+  UIView* leadingIconContainer =
+      [self createIconWithImage:SymbolWithPointSize(SymbolReaderMode,
+                                                    kSmallButtonIconSize)];
   [buttonContentStack addArrangedSubview:leadingIconContainer];
 
   // Add stack with title and subtitle.
@@ -434,8 +434,8 @@ const CGFloat kDividerWidth = 1.0;
 
   // Create the small buttons and add them to the stack view.
   _lensButton = [self
-      createSmallButtonWithIcon:CustomSymbolWithPointSize(kCameraLensSymbol,
-                                                          kSmallButtonIconSize)
+      createSmallButtonWithIcon:SymbolWithPointSize(SymbolCameraLens,
+                                                    kSmallButtonIconSize)
                           title:l10n_util::GetNSString(
                                     IDS_IOS_AI_HUB_LENS_LABEL)
                         enabled:[self.mutator lensEntryPointForTraitCollection:
@@ -451,8 +451,8 @@ const CGFloat kDividerWidth = 1.0;
     // TODO(crbug.com/465505814): Add smart tab grouping strings for
     // translation.
     UIButton* smartTabGroupingButton =
-        [self createSmallButtonWithIcon:DefaultSymbolWithPointSize(
-                                            kTabsSymbol, kSmallButtonIconSize)
+        [self createSmallButtonWithIcon:SymbolWithPointSize(
+                                            SymbolTabs, kSmallButtonIconSize)
                                   title:@"Organize Tabs"
                                 enabled:YES
                 accessibilityIdentifier:
@@ -464,10 +464,9 @@ const CGFloat kDividerWidth = 1.0;
     [stackView addArrangedSubview:smartTabGroupingButton];
   }
 
-  if ([self.mutator isReaderModeAvailable] &&
-      ![self.mutator isReaderModeActive]) {
-    UIImage* readerModeImage = DefaultSymbolWithPointSize(
-        GetReaderModeSymbolName(), kSmallButtonIconSize);
+  if (![self.mutator isReaderModeActive]) {
+    UIImage* readerModeImage =
+        SymbolWithPointSize(SymbolReaderMode, kSmallButtonIconSize);
 
     NSString* readerModeLabelText =
         l10n_util::GetNSString(IDS_IOS_AI_HUB_READER_MODE_LABEL);
@@ -606,11 +605,9 @@ const CGFloat kDividerWidth = 1.0;
 // Returns the symbol for the Ask Gemini button.
 - (UIImage*)askGeminiIcon {
 #if BUILDFLAG(IOS_USE_BRANDED_ASSETS)
-  return CustomSymbolWithPointSize(kGeminiBrandedLogoSymbol,
-                                   kSmallButtonIconSize);
+  return SymbolWithPointSize(SymbolGeminiBrandedLogo, kSmallButtonIconSize);
 #else
-  return DefaultSymbolWithPointSize(kGeminiNonBrandedLogoSymbol,
-                                    kSmallButtonIconSize);
+  return SymbolWithPointSize(SymbolGeminiNonBrandedLogo, kSmallButtonIconSize);
 #endif
 }
 
@@ -835,8 +832,7 @@ const CGFloat kDividerWidth = 1.0;
     // If Reader Mode is available but inactive, we use a 3-button UI.
     // Otherwise, we just show the `buttonsStackView`, with an additional Reader
     // mode section (above) if Reader mode is available and active.
-    if ([self.mutator isReaderModeAvailable] &&
-        ![self.mutator isReaderModeActive]) {
+    if (![self.mutator isReaderModeActive]) {
       // Adds the large Gemini entry point button.
       _geminiButton = [self createGeminiButton];
       [_contentStackView addArrangedSubview:_geminiButton];
@@ -1012,8 +1008,8 @@ const CGFloat kDividerWidth = 1.0;
 // Creates a navigation chevron icon.
 - (UIImageView*)createNavigationChevron {
   UIImageView* chevronIcon = [[UIImageView alloc]
-      initWithImage:DefaultSymbolWithPointSize(kChevronForwardSymbol,
-                                               kSmallButtonIconSize)];
+      initWithImage:SymbolWithPointSize(SymbolChevronForward,
+                                        kSmallButtonIconSize)];
   chevronIcon.translatesAutoresizingMaskIntoConstraints = NO;
   chevronIcon.tintColor = [UIColor colorNamed:kTextQuaternaryColor];
   return chevronIcon;

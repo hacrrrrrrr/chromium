@@ -69,6 +69,7 @@
 #include "third_party/blink/renderer/core/css/css_shape_value.h"
 #include "third_party/blink/renderer/core/css/css_string_value.h"
 #include "third_party/blink/renderer/core/css/css_superellipse_value.h"
+#include "third_party/blink/renderer/core/css/css_symbols_value.h"
 #include "third_party/blink/renderer/core/css/css_timing_function_value.h"
 #include "third_party/blink/renderer/core/css/css_unparsed_declaration_value.h"
 #include "third_party/blink/renderer/core/css/css_unset_value.h"
@@ -5202,6 +5203,7 @@ CSSValue* ConsumeBackgroundSize(CSSParserTokenStream& stream,
   if (!stream.AtEnd()) {
     if (stream.Peek().Id() == CSSValueID::kAuto) {  // `auto' is the default
       stream.ConsumeIncludingWhitespace();
+      vertical = CSSIdentifierValue::Create(CSSValueID::kAuto);
     } else {
       vertical = ConsumeLengthOrPercent(
           stream, context, local_context,
@@ -5213,6 +5215,22 @@ CSSValue* ConsumeBackgroundSize(CSSParserTokenStream& stream,
     vertical = horizontal;
   }
   if (!vertical) {
+    // No explicit second value for this layer (end of value, or a following
+    // comma / unrelated token). Legacy syntax preserves its historical behavior
+    // of returning the single value; modern syntax defaults the omitted second
+    // value to `auto`.
+    if (parsing_style == ParsingStyle::kLegacy) {
+      return horizontal;
+    }
+    vertical = CSSIdentifierValue::Create(CSSValueID::kAuto);
+  }
+  // Collapse to a single value only when both axes are `auto` (`auto auto` ->
+  // `auto`). Otherwise the pair must be preserved, so e.g. `1px` serializes as
+  // `1px auto`. https://github.com/w3c/csswg-drafts/issues/7802
+  auto* horizontal_ident = DynamicTo<CSSIdentifierValue>(horizontal);
+  auto* vertical_ident = DynamicTo<CSSIdentifierValue>(vertical);
+  if (horizontal_ident && horizontal_ident->GetValueID() == CSSValueID::kAuto &&
+      vertical_ident && vertical_ident->GetValueID() == CSSValueID::kAuto) {
     return horizontal;
   }
   return MakeGarbageCollected<CSSValuePair>(horizontal, vertical,
@@ -6826,9 +6844,10 @@ bool IsSupportedKeywordTech(CSSValueID keyword) {
       return true;
     case CSSValueID::kAvar2:
       return RuntimeEnabledFeatures::FontFormatAvar2Enabled();
+    case CSSValueID::kIncremental:
+      return RuntimeEnabledFeatures::IncrementalFontTransferEnabled();
     case CSSValueID::kFeaturesGraphite:
     case CSSValueID::kColorSVG:
-    case CSSValueID::kIncremental:
       return false;
     default:
       return false;
@@ -9836,6 +9855,61 @@ CSSCustomIdentValue* ConsumeCounterStyleName(CSSParserTokenStream& stream,
     name = name.ToAsciiLower();
   }
   return MakeGarbageCollected<CSSCustomIdentValue>(name);
+}
+
+CSSValue* ConsumeCounterStyleSymbolsFunction(CSSParserTokenStream& stream) {
+  if (!RuntimeEnabledFeatures::CSSCounterStyleSymbolsFunctionEnabled()) {
+    return nullptr;
+  }
+  if (stream.Peek().FunctionId() != CSSValueID::kSymbols) {
+    return nullptr;
+  }
+
+  CSSValueID system = CSSValueID::kSymbolic;
+  CSSValueList* symbols = CSSValueList::CreateSpaceSeparated();
+  {
+    CSSParserTokenStream::RestoringBlockGuard guard(stream);
+    stream.ConsumeWhitespace();
+
+    // Optional <symbols-type>. Unlike the @counter-style 'system' descriptor,
+    // 'additive' and 'extends' are rejected here, and 'fixed' does not take a
+    // first-symbol-value integer (it is always 1).
+    if (CSSIdentifierValue* system_value =
+            ConsumeIdent<CSSValueID::kCyclic, CSSValueID::kNumeric,
+                         CSSValueID::kAlphabetic, CSSValueID::kSymbolic,
+                         CSSValueID::kFixed>(stream)) {
+      system = system_value->GetValueID();
+    }
+
+    // [ <string> ]+. Unlike the @counter-style 'symbols' descriptor,
+    // <custom-ident> symbols are not allowed in the symbols() function.
+    // The spec also permits <image> symbols here, but those are not yet
+    // implemented and are rejected for now; only <string> is accepted.
+    // https://drafts.csswg.org/css-counter-styles-3/#funcdef-symbols
+    while (!stream.AtEnd()) {
+      CSSStringValue* symbol = ConsumeString(stream);
+      if (!symbol) {
+        return nullptr;
+      }
+      symbols->Append(*symbol);
+    }
+
+    // The 'alphabetic' and 'numeric' systems require at least two symbols;
+    // every system requires at least one.
+    wtf_size_t length = symbols->length();
+    if (length == 0u || ((system == CSSValueID::kAlphabetic ||
+                          system == CSSValueID::kNumeric) &&
+                         length < 2u)) {
+      return nullptr;
+    }
+
+    if (!guard.Release()) {
+      return nullptr;
+    }
+  }
+  stream.ConsumeWhitespace();
+
+  return MakeGarbageCollected<cssvalue::CSSSymbolsValue>(system, symbols);
 }
 
 AtomicString ConsumeCounterStyleNameInPrelude(CSSParserTokenStream& stream,

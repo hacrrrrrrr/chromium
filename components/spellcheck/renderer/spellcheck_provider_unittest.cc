@@ -628,6 +628,50 @@ TEST_P(CombineSpellCheckResultsTest, ShouldCorrectlyCombineHybridResults) {
     }
   }
 }
+
+// Verifies that the per-document custom word set is applied on the Windows
+// hybrid path.
+TEST_F(SpellCheckProviderTest, DocumentCustomDictionaryFiltersHybridResults) {
+  blink::WebRuntimeFeatures::EnableFeatureFromString(
+      "SpellCheckCustomDictionaryAPI", true);
+
+  // Configure a hybrid check: one native locale and one Hunspell locale.
+  provider_.spellcheck()->InitializeSpellCheckForLocale("en-US",
+                                                        /*use_hunspell=*/false);
+  provider_.spellcheck()->InitializeSpellCheckForLocale("en-US",
+                                                        /*use_hunspell=*/true);
+
+  // Push a custom word through the per-frame web API entry point.
+  static_cast<blink::WebTextCheckClient*>(&provider_)
+      ->SpellCheckCustomDictionaryChanged({"Pikachu"}, {});
+
+  FakeTextCheckingResult completion;
+  SpellCheckProvider::HybridSpellCheckRequestInfo request_info = {
+      /*used_hunspell=*/true, /*used_native=*/true, base::TimeTicks::Now()};
+  int check_id = provider_.AddCompletionForTest(
+      std::make_unique<FakeTextCheckingCompletion>(&completion), request_info);
+
+  // The native spell checker flags both "Pikachu" (offset 7) and "soem"
+  // (offset 15). Only "Pikachu" is a custom word; "soem" is misspelled in the
+  // en-US Hunspell dictionary as well.
+  std::vector<SpellCheckResult> native_results = {
+      SpellCheckResult(spellcheck::Decoration::SPELLING, /*loc=*/7, /*len=*/7),
+      SpellCheckResult(spellcheck::Decoration::SPELLING, /*loc=*/15,
+                       /*len=*/4)};
+  provider_.OnRespondTextCheck(check_id, u"i love Pikachu soem",
+                               native_results);
+
+  EXPECT_EQ(completion.completion_count_, 1u);
+  EXPECT_EQ(completion.cancellation_count_, 0u);
+
+  // "Pikachu" was dropped by the custom word filter. "soem" went through the
+  // Hunspell re-check, which agreed it is misspelled, so it is still reported.
+  ASSERT_EQ(completion.results_.size(), 1u);
+  EXPECT_EQ(completion.results_[0].location, 15);
+  EXPECT_EQ(completion.results_[0].length, 4);
+  EXPECT_EQ(completion.results_[0].decoration,
+            blink::WebTextDecorationType::kWebTextDecorationTypeSpelling);
+}
 #endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 
 #if BUILDFLAG(USE_BROWSER_SPELLCHECKER) && !BUILDFLAG(IS_WIN)
@@ -753,6 +797,67 @@ TEST_F(SpellCheckProviderTest,
 
 #endif  // BUILDFLAG(USE_BROWSER_SPELLCHECKER) && !BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(USE_RENDERER_SPELLCHECKER) && !BUILDFLAG(IS_WIN)
+// Verifies that a word added through the SpellCheckCustomDictionary web API is
+// dropped from results returned via the enhanced spelling service path.
+TEST_F(SpellCheckProviderTest,
+       DocumentCustomDictionaryFiltersSpellingServiceResults) {
+  blink::WebRuntimeFeatures::EnableFeatureFromString(
+      "SpellCheckCustomDictionaryAPI", true);
+
+  // Push a custom word through the per-frame web API entry point.
+  static_cast<blink::WebTextCheckClient*>(&provider_)
+      ->SpellCheckCustomDictionaryChanged({"Pikachu"}, {});
+
+  FakeTextCheckingResult completion_result;
+  int check_id = provider_.AddCompletionForTest(
+      std::make_unique<FakeTextCheckingCompletion>(&completion_result));
+
+  // Simulate the enhanced spelling service reporting "Pikachu" (offset 7,
+  // length 7 in "i love Pikachu") as a misspelling.
+  std::vector<SpellCheckResult> service_results = {
+      SpellCheckResult(spellcheck::Decoration::SPELLING, /*loc=*/7, /*len=*/7)};
+  provider_.OnRespondSpellingService(check_id, u"i love Pikachu",
+                                     /*success=*/true, service_results);
+
+  // The post-filter dropped "Pikachu", so Blink sees no misspellings.
+  EXPECT_EQ(completion_result.completion_count_, 1u);
+  EXPECT_EQ(completion_result.cancellation_count_, 0u);
+  EXPECT_TRUE(completion_result.results_.empty());
+}
+
+// Companion to the test above: the post-filter must be selective. A word that
+// is NOT in the per-document custom dictionary should still be reported as a
+// misspelling.
+TEST_F(SpellCheckProviderTest,
+       DocumentCustomDictionaryKeepsNonCustomSpellingServiceResults) {
+  blink::WebRuntimeFeatures::EnableFeatureFromString(
+      "SpellCheckCustomDictionaryAPI", true);
+
+  // Only "Pikachu" is in the document custom dictionary.
+  static_cast<blink::WebTextCheckClient*>(&provider_)
+      ->SpellCheckCustomDictionaryChanged({"Pikachu"}, {});
+
+  FakeTextCheckingResult completion_result;
+  int check_id = provider_.AddCompletionForTest(
+      std::make_unique<FakeTextCheckingCompletion>(&completion_result));
+
+  // The enhanced spelling service flags both words.
+  std::vector<SpellCheckResult> service_results = {
+      SpellCheckResult(spellcheck::Decoration::SPELLING, /*loc=*/0, /*len=*/7),
+      SpellCheckResult(spellcheck::Decoration::SPELLING, /*loc=*/8, /*len=*/8)};
+  provider_.OnRespondSpellingService(check_id, u"Pikachu Squirtle",
+                                     /*success=*/true, service_results);
+
+  // "Pikachu" was dropped, but "Squirtle" survives as a misspelling.
+  EXPECT_EQ(completion_result.completion_count_, 1u);
+  EXPECT_EQ(completion_result.cancellation_count_, 0u);
+  ASSERT_EQ(completion_result.results_.size(), 1u);
+  EXPECT_EQ(completion_result.results_[0].location, 8);
+  EXPECT_EQ(completion_result.results_[0].length, 8);
+}
+#endif  // BUILDFLAG(USE_RENDERER_SPELLCHECKER) && !BUILDFLAG(IS_WIN)
+
 // Verifies the WordCount histogram is emitted with the count of accepted API
 // additions for the outgoing document when a new document is committed.
 TEST_F(SpellCheckProviderTest, DocumentCustomDictionaryRecordsWordCountUma) {
@@ -825,14 +930,14 @@ TEST_F(SpellCheckProviderTest, DocumentCustomDictionaryEnforcesWordCountCap) {
                                 1);
 }
 
-// Verifies that a word exceeding kMaxCustomDictionaryWordBytes is dropped on
-// insert even when there is room in the per-document set.
+// Verifies that a word exceeding kMaxDocumentCustomDictionaryWordBytes is
+// dropped on insert even when there is room in the per-document set.
 TEST_F(SpellCheckProviderTest, DocumentCustomDictionaryRejectsOverlongWord) {
   blink::WebRuntimeFeatures::EnableFeatureFromString(
       "SpellCheckCustomDictionaryAPI", true);
 
-  const std::string overlong(spellcheck::kMaxCustomDictionaryWordBytes + 1,
-                             'a');
+  const std::string overlong(
+      spellcheck::kMaxDocumentCustomDictionaryWordBytes + 1, 'a');
   base::HistogramTester histograms;
   // The overlong word is dropped; the well-formed word is accepted.
   static_cast<blink::WebTextCheckClient*>(&provider_)

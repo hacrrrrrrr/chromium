@@ -8,6 +8,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -36,6 +37,7 @@ import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.services.AccountPreviewDataService;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.ProfileDataCache;
 import org.chromium.chrome.browser.signin.services.SigninManager;
@@ -76,6 +78,7 @@ public class SigninPromoMediatorTest {
     private @Mock SigninPromoMediator.Delegate mMediatorDelegate;
     private @Mock Profile mProfile;
     private @Mock SigninManager mSigninManager;
+    private @Mock AccountPreviewDataService mAccountPreviewDataService;
     private @Mock SigninAndHistorySyncActivityLauncher mLauncher;
     private @Mock HistorySyncHelper mHistorySyncHelper;
     private ProfileDataCache mProfileDataCache;
@@ -101,6 +104,7 @@ public class SigninPromoMediatorTest {
         mContext.setTheme(R.style.Theme_BrowserUI_DayNight);
         HistorySyncHelper.setInstanceForTesting(mHistorySyncHelper);
         lenient().doReturn(true).when(mHistorySyncHelper).shouldDisplayHistorySync();
+        lenient().doReturn(true).when(mSigninManager).isSigninSupported(anyBoolean());
     }
 
     @Test
@@ -397,6 +401,7 @@ public class SigninPromoMediatorTest {
                 new SigninPromoMediator(
                         mIdentityManager,
                         mSigninManager,
+                        mAccountPreviewDataService,
                         mSyncService,
                         mProfileDataCache,
                         delegate,

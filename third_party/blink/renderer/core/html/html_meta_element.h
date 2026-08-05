@@ -77,6 +77,11 @@ class CORE_EXPORT HTMLMetaElement final : public HTMLElement {
   const AtomicString& Itemprop() const;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(HTMLMetaElementSimTest,
+                           ResponsiveEmbeddedSizingAllowOrigins);
+  FRIEND_TEST_ALL_PREFIXES(HTMLMetaElementSimTest,
+                           ResponsiveEmbeddedSizingAllowOriginsHttp);
+
   static void ProcessViewportKeyValuePair(Document*,
                                           bool report_warnings,
                                           const StringView& key,
@@ -140,6 +145,7 @@ class CORE_EXPORT HTMLMetaElement final : public HTMLElement {
   void ProcessViewportContentAttribute(const String& content,
                                        ViewportDescription::Type origin);
   void ProcessColorScheme(const AtomicString& content);
+  bool IsAllowOrigins() const;
   void FinishParsingChildren() final;
 
   // ClientHintsPreferences::UpdateFromMetaCH needs to know if the synchronous

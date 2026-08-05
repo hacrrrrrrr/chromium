@@ -3,10 +3,13 @@
 // found in the LICENSE file.
 
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
+#include "chrome/browser/page_load_metrics/chrome_initiator_location.h"
 #include "chrome/browser/preloading/chrome_preloading.h"
 #include "chrome/browser/preloading/prerender/prerender_manager.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/search_test_utils.h"
@@ -42,7 +45,8 @@ void AttachInitiatorLocation(
     page_load_metrics::NavigationHandleUserData::InitiatorLocation location,
     content::NavigationHandle& navigation_handle) {
   page_load_metrics::NavigationHandleUserData::CreateForNavigationHandle(
-      navigation_handle, location);
+      navigation_handle, location,
+      StringifyChromeInitiatorLocation(GetChromeInitiatorLocation(location)));
 }
 
 }  // namespace
@@ -57,6 +61,14 @@ class NavigationInitiatorPageLoadMetricsBrowserTest
                                 base::Unretained(this))) {}
 
   void SetUp() override {
+    scoped_feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove these two Features.
+        {omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
+
     prerender_helper_.RegisterServerRequestMonitor(embedded_test_server());
     InProcessBrowserTest::SetUp();
   }
@@ -79,6 +91,7 @@ class NavigationInitiatorPageLoadMetricsBrowserTest
 
  private:
   content::test::PrerenderTestHelper prerender_helper_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
@@ -86,10 +99,9 @@ IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
   base::HistogramTester histogram_tester;
 
   base::RepeatingCallback<void(content::NavigationHandle&)>
-      navigation_handle_callback =
-          base::BindRepeating(&AttachInitiatorLocation,
-                              page_load_metrics::NavigationHandleUserData::
-                                  InitiatorLocation::kNewTabPage);
+      navigation_handle_callback = base::BindRepeating(
+          &AttachInitiatorLocation,
+          GetInitiatorLocation(ChromeInitiatorLocation::kNewTabPage));
 
   GURL url = embedded_test_server()->GetURL("/empty.html");
   GetActiveWebContents()->OpenURL(
@@ -103,13 +115,11 @@ IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
 
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.All",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kNewTabPage),
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kNewTabPage)),
       1);
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.SRP",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kNewTabPage),
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kNewTabPage)),
       0);
 }
 
@@ -121,13 +131,13 @@ IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest, Basic) {
 
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.All",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
       1);
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.SRP",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
       0);
 }
 
@@ -140,13 +150,13 @@ IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
 
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.All",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
       1);
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.SRP",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
       1);
 }
 
@@ -159,13 +169,113 @@ IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
 
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.All",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
       1);
   histogram_tester.ExpectBucketCount(
       "Navigation.InitiatorType.SRP",
-      MetricValue(page_load_metrics::NavigationHandleUserData::
-                      InitiatorLocation::kOther),
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
+      0);
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
+                       LinkClick) {
+  base::HistogramTester histogram_tester;
+
+  GURL url = embedded_test_server()->GetURL("www.example.com", "/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+
+  // Simulate a link click from the renderer.
+  GURL link_url =
+      embedded_test_server()->GetURL("www.example.com", "/simple.html");
+  content::TestNavigationManager navigation_manager(GetActiveWebContents(),
+                                                    link_url);
+  EXPECT_TRUE(
+      content::ExecJs(GetActiveWebContents(),
+                      content::JsReplace(R"(let a = document.createElement('a');
+                                            a.href = $1;
+                                            document.body.appendChild(a);
+                                            a.click();)",
+                                         link_url.spec())));
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
+
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.All",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
+      1);
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.SRP",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
+      0);
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
+                       LinkClickSRP) {
+  base::HistogramTester histogram_tester;
+
+  GURL url = embedded_test_server()->GetURL("www.example.com", "/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+
+  // Simulate a link click from the renderer to SRP.
+  GURL link_url =
+      embedded_test_server()->GetURL("www.google.com", "/search?q=test");
+  content::TestNavigationManager navigation_manager(GetActiveWebContents(),
+                                                    link_url);
+  EXPECT_TRUE(
+      content::ExecJs(GetActiveWebContents(),
+                      content::JsReplace(R"(let a = document.createElement('a');
+                                            a.href = $1;
+                                            document.body.appendChild(a);
+                                            a.click();)",
+                                         link_url.spec())));
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
+
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.All",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
+      1);
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.SRP",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
+      1);
+}
+
+IN_PROC_BROWSER_TEST_F(NavigationInitiatorPageLoadMetricsBrowserTest,
+                       LinkClick_NoUserGesture) {
+  base::HistogramTester histogram_tester;
+
+  GURL url = embedded_test_server()->GetURL("www.example.com", "/empty.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+
+  // Simulate a link click from the renderer without a user gesture.
+  GURL link_url =
+      embedded_test_server()->GetURL("www.example.com", "/simple.html");
+  content::TestNavigationManager navigation_manager(GetActiveWebContents(),
+                                                    link_url);
+  EXPECT_TRUE(
+      content::ExecJs(GetActiveWebContents(),
+                      content::JsReplace("location = $1;", link_url.spec()),
+                      content::EXECUTE_SCRIPT_NO_USER_GESTURE));
+  ASSERT_TRUE(navigation_manager.WaitForNavigationFinished());
+
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.All",
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
+      2);
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.SRP",
+      MetricValue(
+          page_load_metrics::NavigationHandleUserData::kInitiatorLocationOther),
+      0);
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.All",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
+      0);
+  histogram_tester.ExpectBucketCount(
+      "Navigation.InitiatorType.SRP",
+      MetricValue(GetInitiatorLocation(ChromeInitiatorLocation::kLinkClick)),
       0);
 }
 

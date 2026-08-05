@@ -2643,6 +2643,15 @@ TEST(DanglingPtrTest, DetectAndDestructor) {
   EXPECT_EQ(instrumentation->dangling_ptr_released(), 1u);
 }
 
+TEST(DanglingPtrTest, ReportIfDanglingOnNoOpImpl) {
+  // Ensure ReportIfDangling compiles cleanly when RawPtrNoOpImpl is selected,
+  // such as for UnprotectedInRelease on non-BRP release builds.
+  int x = 42;
+  raw_ptr<int, base::RawPtrTraits::kNoOpImpl> no_op_ptr = &x;
+  no_op_ptr.ReportIfDangling();
+  EXPECT_EQ(no_op_ptr.get(), &x);
+}
+
 TEST(DanglingPtrTest, DetectResetAndDestructor) {
   auto instrumentation = test::DanglingPtrInstrumentation::Create();
   if (!instrumentation.has_value()) {
@@ -2988,5 +2997,39 @@ TEST(RawPtrInstanceTracerTest, MoveConversionAssignment) {
 }
 #endif  // PA_BUILDFLAG(ENABLE_BACKUP_REF_PTR_INSTANCE_TRACER) &&
         // PA_BUILDFLAG(USE_RAW_PTR_BACKUP_REF_IMPL)
+
+// Check that RawPtrIfPtrT distinguishes both pointers and scalars, as this
+// helps where an API may be conditionally-smuggling pointers.
+static_assert(std::is_same_v<uintptr_t, RawPtrIfPtrT<uintptr_t>>);
+static_assert(std::is_same_v<raw_ptr<char>, RawPtrIfPtrT<char*>>);
+static_assert(std::is_same_v<raw_ptr<char>, RawPtrIfPtrT<raw_ptr<char>>>);
+
+// Check that RawPtrIfPtrT allows const for both pointers and scalars.
+static_assert(std::is_same_v<const uintptr_t, RawPtrIfPtrT<const uintptr_t>>);
+static_assert(std::is_same_v<raw_ptr<const char>, RawPtrIfPtrT<const char*>>);
+static_assert(
+    std::is_same_v<raw_ptr<const char>, RawPtrIfPtrT<raw_ptr<const char>>>);
+
+// Check that RawPtrIfPtrT allows traits for both pointers and scalars.
+static_assert(
+    std::is_same_v<uintptr_t, RawPtrIfPtrT<uintptr_t, DanglingUntriaged>>);
+static_assert(std::is_same_v<raw_ptr<char, DanglingUntriaged>,
+                             RawPtrIfPtrT<char*, DanglingUntriaged>>);
+static_assert(std::is_same_v<raw_ptr<char, DanglingUntriaged>,
+                             RawPtrIfPtrT<raw_ptr<char>, DanglingUntriaged>>);
+
+// Check that  RawPtrIfPtrT allows combinations of traits   for both pointers
+// and scalars.
+static_assert(
+    std::is_same_v<
+        uintptr_t,
+        RawPtrIfPtrT<uintptr_t, AllowPtrArithmetic | UnprotectedInRelease>>);
+static_assert(std::is_same_v<
+              raw_ptr<char, AllowPtrArithmetic | UnprotectedInRelease>,
+              RawPtrIfPtrT<char*, AllowPtrArithmetic | UnprotectedInRelease>>);
+static_assert(
+    std::is_same_v<raw_ptr<char, AllowPtrArithmetic | UnprotectedInRelease>,
+                   RawPtrIfPtrT<raw_ptr<char>,
+                                AllowPtrArithmetic | UnprotectedInRelease>>);
 
 }  // namespace base::internal

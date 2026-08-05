@@ -580,15 +580,6 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
         ),
     ),
     BanRule(
-        r'/v8::Extension\(',
-        (
-            'Do not introduce new v8::Extensions into the code base, use',
-            'gin::Wrappable instead. See http://crbug.com/334679',
-        ),
-        True,
-        (r'extensions/renderer/safe_builtins\.*', ),
-    ),
-    BanRule(
         '#pragma comment(lib,',
         ('Specify libraries to link with in build files and not in the source.',
          ),
@@ -791,7 +782,7 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             # Needed for interop with third-party library.
             r'^third_party/blink/renderer/core/typed_arrays/array_buffer/' +
             r'array_buffer_contents\.(cc|h)',
-            r'^third_party/blink/renderer/core/inspector/devtools_session\.h',
+            r'^third_party/blink/renderer/core/inspector/v8_session_holder\.h',
             r'^third_party/blink/renderer/core/typed_arrays/dom_array_buffer\.cc',
             '^third_party/blink/renderer/bindings/core/v8/' +
             'v8_wasm_response_extensions.cc',
@@ -1007,8 +998,16 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             # Needed to implement Dawn wire interfaces.
             r'gpu/command_buffer/client/dawn_client_memory_transfer_service\.cc',
             r'gpu/command_buffer/client/dawn_client_memory_transfer_service\.h',
+            r'gpu/command_buffer/client/dawn_client_serializer\.cc',
+            r'gpu/command_buffer/client/dawn_client_serializer\.h',
+            r'gpu/command_buffer/client/dawn_wire_client\.cc',
             r'gpu/command_buffer/service/dawn_service_memory_transfer_service\.cc',
             r'gpu/command_buffer/service/dawn_service_memory_transfer_service\.h',
+            r'gpu/command_buffer/service/dawn_service_serializer\.cc',
+            r'gpu/command_buffer/service/dawn_service_serializer\.h',
+            r'gpu/command_buffer/service/dawn_wire_server\.cc',
+            r'third_party/blink/renderer/platform/graphics/gpu/dawn_command_serializers\.cc',
+            r'third_party/blink/renderer/platform/graphics/gpu/dawn_command_serializers\.h',
 
             # Needed to implement and use Dawn caching interfaces.
             r'gpu/command_buffer/service/dawn_caching_interface\.cc',
@@ -1306,9 +1305,12 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
         [_THIRD_PARTY_EXCEPT_BLINK],  # Don't warn in third_party folders.
     ),
     BanRule(
-        pattern='std::views',
-        explanation=('Use of std::views is banned in Chrome. If you need this '
-                     'functionality, please contact cxx@chromium.org.', ),
+        pattern=r'/std::views::(?!(?:reverse|zip|as_rvalue)\b)\w+|std::views(?!\s*::)',
+        explanation=(
+            'Use of std::views is banned in Chrome (except std::views::reverse, '
+            'std::views::zip, and std::views::as_rvalue). If you need this '
+            'functionality, please contact cxx@chromium.org.',
+        ),
         treat_as_error=True,
         excluded_paths=[
             # Don't warn in third_party folders.
@@ -1466,6 +1468,12 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             # Views
             'subrange',
             'subrange_kind',
+            'reverse_view',
+            'zip_view',
+            'as_rvalue_view',
+            'views::reverse',
+            'views::zip',
+            'views::as_rvalue',
             # Banned: Range factories
             # Banned: Range adaptors
             # Incidentally listed on
@@ -1624,8 +1632,10 @@ _BANNED_CPP_FUNCTIONS: Sequence[BanRule] = (
             # disallowed (and matches the regex).
         )) + r')\b)\w+',
         explanation=(
-            'Use of range views and associated helpers is banned in Chrome. '
-            'If you need this functionality, please contact cxx@chromium.org.',
+            'Use of range views and associated helpers is banned in Chrome '
+            '(except reverse_view, zip_view, as_rvalue_view, and views:: '
+            'helpers reverse, zip, as_rvalue). If you need this '
+            'functionality, please contact cxx@chromium.org.',
         ),
         treat_as_error=True,
         excluded_paths=[
@@ -2645,6 +2655,7 @@ _GENERIC_PYDEPS_FILES = [
     'build/fuchsia/starview/run_cuttlefish_test.pydeps',
     'build/fuchsia/test/component_storage_test.pydeps',
     'build/protoc_java.pydeps',
+    'chrome/browser/resources/glic/glic_api_impl/generate_impl/parse.pydeps',
     'chrome/test/chromedriver/log_replay/client_replay_unittest.pydeps',
     'chrome/test/chromedriver/test/run_py_tests.pydeps',
     'chrome/test/media/performance/openscreen_cast_performance_test.pydeps',
@@ -3067,6 +3078,7 @@ def CheckNoOzonePlatformMacrosInTests(input_api, output_api):
     These are compile-time macros and do not reflect the runtime environment.
     Tests should use runtime checks instead.
     """
+
     def FilterFile(affected_file):
         res = input_api.FilterSourceFile(
             affected_file,
@@ -3081,8 +3093,7 @@ def CheckNoOzonePlatformMacrosInTests(input_api, output_api):
     for f in input_api.AffectedSourceFiles(FilterFile):
         for line_num, line in f.ChangedContents():
             if ozone_macro_pattern.search(line):
-                problems.append(
-                    f'{f.LocalPath()}:{line_num}: {line.strip()}')
+                problems.append(f'{f.LocalPath()}:{line_num}: {line.strip()}')
 
     if not problems:
         return []
@@ -3095,8 +3106,7 @@ def CheckNoOzonePlatformMacrosInTests(input_api, output_api):
             'check if the\n'
             'test is running on Wayland or X11 at runtime. Please '
             'use runtime checks\n'
-            'instead (e.g., checking the ozone platform).',
-            problems)
+            'instead (e.g., checking the ozone platform).', problems)
     ]
 
 
@@ -3209,30 +3219,6 @@ def CheckNoDEPSGIT(input_api, output_api):
     return []
 
 
-def CheckCrosApiNeedBrowserTest(input_api, output_api):
-    """Check new crosapi should add browser test."""
-    has_new_crosapi = False
-    has_browser_test = False
-    for f in input_api.AffectedFiles():
-        path = f.UnixLocalPath()
-        if (path.startswith('chromeos/crosapi/mojom')
-                and _IsMojomFile(input_api, path) and f.Action() == 'A'):
-            has_new_crosapi = True
-        if path.endswith('browsertest.cc') or path.endswith('browser_test.cc'):
-            has_browser_test = True
-    if has_new_crosapi and not has_browser_test:
-        return [
-            output_api.PresubmitPromptWarning(
-                'You are adding a new crosapi, but there is no file ends with '
-                'browsertest.cc file being added or modified. It is important '
-                'to add crosapi browser test coverage to avoid version '
-                ' skew issues.\n'
-                'Check //docs/lacros/test_instructions.md for more information.'
-            )
-        ]
-    return []
-
-
 def _GetMessageForMatchingType(input_api, affected_file, line_number, line,
                                ban_rule):
     """Helper method for checking for banned constructs.
@@ -3270,11 +3256,10 @@ def CheckNoBannedPatterns(input_api, output_api):
     """Make sure that banned patterns are not used."""
     results = []
 
-    def IsExcludedFile(affected_file, excluded_paths):
+    def IsExcludedFile(local_path, excluded_paths):
         if not excluded_paths:
             return False
 
-        local_path = affected_file.UnixLocalPath()
         for item in excluded_paths:
             if input_api.re.match(item, local_path):
                 return True
@@ -3295,11 +3280,8 @@ def CheckNoBannedPatterns(input_api, output_api):
 
     def CheckForMatch(affected_file, line_num: int, line: str,
                       ban_rule: BanRule):
-        if IsExcludedFile(affected_file, ban_rule.excluded_paths):
-            return
-
-        message = _GetMessageForMatchingType(input_api, f, line_num, line,
-                                             ban_rule)
+        message = _GetMessageForMatchingType(input_api, affected_file, line_num,
+                                             line, ban_rule)
         if message:
             result_loc = []
             if ban_rule.surface_as_gerrit_lint:
@@ -3321,58 +3303,58 @@ def CheckNoBannedPatterns(input_api, output_api):
                         'A banned pattern was used.\n' + '\n'.join(message),
                         locations=result_loc))
 
-    file_filter = lambda f: f.LocalPath().endswith(('.java'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_JAVA_FUNCTIONS + _BANNED_JAVA_IMPORTS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    def MatchingBanRules(affected_file, ban_rules):
+        matching_ban_rules = []
+        local_path = affected_file.UnixLocalPath()
+        for ban_rule in ban_rules:
+            if IsExcludedFile(local_path, ban_rule.excluded_paths):
+                continue
+            matching_ban_rules.append(ban_rule)
+        return matching_ban_rules
 
-    file_filter = lambda f: f.LocalPath().endswith(('.js', '.ts'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_JAVASCRIPT_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    def CheckFilesForFormat(file_filter, ban_rules):
+        for f in input_api.AffectedFiles(file_filter=file_filter):
+            matching_ban_rules = MatchingBanRules(f, ban_rules)
+            if matching_ban_rules:
+                for line_num, line in f.ChangedContents():
+                    for ban_rule in matching_ban_rules:
+                        CheckForMatch(f, line_num, line, ban_rule)
 
-    file_filter = lambda f: f.LocalPath().endswith(('.mm', '.m', '.h'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_OBJC_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.java')),
+        ban_rules=_BANNED_JAVA_FUNCTIONS + _BANNED_JAVA_IMPORTS)
 
-    for f in input_api.AffectedFiles(file_filter=IsIosObjcFile):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_IOS_OBJC_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.js', '.ts')),
+        ban_rules=_BANNED_JAVASCRIPT_FUNCTIONS)
 
-    egtest_filter = lambda f: f.LocalPath().endswith(('_egtest.mm'))
-    for f in input_api.AffectedFiles(file_filter=egtest_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_IOS_EGTEST_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.mm', '.m', '.h')),
+        ban_rules=_BANNED_OBJC_FUNCTIONS)
 
-    file_filter = lambda f: f.LocalPath().endswith(('.cc', '.mm', '.h'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_CPP_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=IsIosObjcFile,
+        ban_rules=_BANNED_IOS_OBJC_FUNCTIONS)
 
-    file_filter = lambda f: (f.LocalPath().endswith(('.cc', '.mm', '.h')))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _DEPRECATED_SYNC_CONSENT_CPP_FUNCTIONS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('_egtest.mm')),
+        ban_rules=_BANNED_IOS_EGTEST_FUNCTIONS)
 
-    file_filter = lambda f: f.LocalPath().endswith(('.mojom'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_MOJOM_PATTERNS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.cc', '.mm', '.h')),
+        ban_rules=_BANNED_CPP_FUNCTIONS)
 
-    file_filter = lambda f: f.LocalPath().endswith(('.gn', '.gni'))
-    for f in input_api.AffectedFiles(file_filter=file_filter):
-        for line_num, line in f.ChangedContents():
-            for ban_rule in _BANNED_GN_PATTERNS:
-                CheckForMatch(f, line_num, line, ban_rule)
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.cc', '.mm', '.h')),
+        ban_rules=_DEPRECATED_SYNC_CONSENT_CPP_FUNCTIONS)
+
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.mojom')),
+        ban_rules=_BANNED_MOJOM_PATTERNS)
+
+    CheckFilesForFormat(
+        file_filter=lambda f: f.LocalPath().endswith(('.gn', '.gni')),
+        ban_rules=_BANNED_GN_PATTERNS)
 
     return results
 
@@ -4049,7 +4031,8 @@ def CheckAddedDepsHaveTargetApprovals(input_api, output_api):
             # Skip OWNERS check when Owners-Override label is approved. This is
             # intended for global owners, trusted bots, and on-call sheriffs.
             # Review is still required for these changes.
-            if input_api.gerrit.IsOwnersOverrideApproved(input_api.change.issue):
+            if input_api.gerrit.IsOwnersOverrideApproved(
+                    input_api.change.issue):
                 return []
         except Exception as e:
             return [
@@ -4740,6 +4723,7 @@ def _CheckChangeForIpcSecurityOwners(input_api):
         '*.mojom',
         '*_mojom_traits*.*',
         '*_type_converter*.*',
+        '*_extension_binder_provider*.*',
         # Android native IPC:
         '*.aidl',
     ]
@@ -6113,6 +6097,66 @@ def CheckFuzzTargetsOnUpload(input_api, output_api):
                                           items=files_with_missing_header,
                                           long_text=long_text)
     ]
+
+
+def CheckNewLLVMStyleFuzzersOnUpload(input_api, output_api):
+    """Nudges developers to use FUZZ_TEST instead of legacy LLVM-style fuzzers for new targets."""
+    fuzzer_targets = []
+    fuzzer_sources = []
+
+    # Regex to match fuzzer_test target definition in BUILD.gn
+    fuzzer_test_re = input_api.re.compile(r'^\s*fuzzer_test\s*\(')
+    # Regex to match LLVMFuzzerTestOneInput or
+    # DEFINE_LLVM_FUZZER_TEST_ONE_INPUT_SPAN in C++ files.
+    # TODO(crbug.com/505034799): Add LPM fuzzers once we fully support using
+    # FuzzTests with protos.
+    llvm_fuzzer_re = input_api.re.compile(
+        r'\b(LLVMFuzzerTestOneInput|'
+        r'DEFINE_LLVM_FUZZER_TEST_ONE_INPUT_SPAN)\b')
+
+    for f in input_api.AffectedFiles(include_deletes=False):
+        filename = f.LocalPath()
+        if filename.endswith('BUILD.gn'):
+            for line_num, line in f.ChangedContents():
+                if fuzzer_test_re.match(line):
+                    fuzzer_targets.append(f"{filename}:{line_num}")
+        elif filename.endswith(('.cc', '.cpp', '.h')):
+            for line_num, line in f.ChangedContents():
+                if llvm_fuzzer_re.search(line):
+                    fuzzer_sources.append(f"{filename}:{line_num}")
+
+    results = []
+    if fuzzer_targets or fuzzer_sources:
+        message = (
+            "You are adding a new LLVM Style Fuzzer (detected via "
+            "LLVMFuzzerTestOneInput, DEFINE_LLVM_FUZZER_TEST_ONE_INPUT_SPAN, "
+            "or fuzzer_test in BUILD.gn).\n\n"
+            "FuzzTest is now recommended for all new fuzzers in Chromium.\n\n"
+            "Please consider using FUZZ_TEST instead of an LLVM-style fuzzer. "
+            "FuzzTest integrates with GTest and can be written in _unittest.cc "
+            "files next to existing unit tests. They are easier to write and maintain.\n\n"
+            "See the Getting Started with FuzzTest guide for details on how to "
+            "write a FuzzTest and configure the GN build target:\n"
+            "https://chromium.googlesource.com/chromium/src/+/main/testing/libfuzzer/getting_started.md\n\n"
+            "If you need to use MojoLPM, or are modifying an existing fuzzer, "
+            "you may bypass this warning."
+        )
+        items = []
+        if fuzzer_targets:
+            items.append("GN targets:")
+            items.extend(fuzzer_targets)
+        if fuzzer_sources:
+            items.append("C++ sources:")
+            items.extend(fuzzer_sources)
+
+        results.append(
+            output_api.PresubmitPromptWarning(
+                message=message,
+                items=items
+            )
+        )
+
+    return results
 
 
 def _CheckNewImagesWarning(input_api, output_api):

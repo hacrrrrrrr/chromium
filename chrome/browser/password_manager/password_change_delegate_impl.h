@@ -37,7 +37,7 @@ class PasswordFormManager;
 
 class CrossOriginNavigationObserver;
 class DetachedWebContents;
-enum class LoginCheckResult;
+struct LoginCheckResult;
 class LoginStateChecker;
 class Profile;
 
@@ -108,7 +108,8 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate {
   void OnTabWillDetach(tabs::TabInterface* tab_interface,
                        tabs::TabInterface::DetachReason reason);
 
-  void OnLoginStateCheckResult(LoginCheckResult login_status);
+  void OnLoginStateCheckedWithoutPIResult(LoginCheckResult login_status);
+  void OnLoginStateCheckedWithPIResult(LoginCheckResult login_status);
   // Updates `current_state_` and notifies `observers_`.
   void UpdateState(State new_state);
 
@@ -132,6 +133,8 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate {
   // Resets all helpers. `hidden_executor_` is kept as it is as user might want
   // to open it.
   void ResetInternalState();
+
+  void ObserveCrossOriginNavigationInOriginator();
 
   const GURL change_password_url_;
   const std::u16string username_;
@@ -167,6 +170,10 @@ class PasswordChangeDelegateImpl : public PasswordChangeDelegate {
 
   // Helper class for checking the login state in the main tab.
   std::unique_ptr<LoginStateChecker> login_state_checker_;
+
+  // Stores the login state check result when check is performed via Private
+  // Inference before the user accepts the feature.
+  std::unique_ptr<LoginCheckResult> login_check_result_;
 
   base::ObserverList<PasswordChangeDelegate::Observer, /*check_empty=*/true>
       observers_;

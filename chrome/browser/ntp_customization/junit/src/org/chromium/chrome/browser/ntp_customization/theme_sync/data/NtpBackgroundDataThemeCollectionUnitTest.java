@@ -9,6 +9,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -28,7 +29,6 @@ import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundType;
 import org.chromium.chrome.browser.ntp_customization.theme.theme_collections.CustomBackgroundInfo;
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.BackgroundImageInfo;
-import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase.PlatformType;
 import org.chromium.url.GURL;
 import org.chromium.url.JUnitTestGURLs;
 
@@ -52,7 +52,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
                         /* isDailyRefreshEnabled= */ false);
         NtpBackgroundDataThemeCollection data1 =
                 new NtpBackgroundDataThemeCollection(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info1,
                         /* backgroundImageInfo= */ null,
                         /* bitmap= */ null,
@@ -60,7 +60,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
                         /* fileIdHash= */ null);
         NtpBackgroundDataThemeCollection data2 =
                 new NtpBackgroundDataThemeCollection(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info2,
                         /* backgroundImageInfo= */ null,
                         /* bitmap= */ null,
@@ -68,7 +68,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
                         /* fileIdHash= */ null);
         NtpBackgroundDataThemeCollection data3 =
                 new NtpBackgroundDataThemeCollection(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info1,
                         /* backgroundImageInfo= */ null,
                         /* bitmap= */ null,
@@ -77,6 +77,11 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
 
         assertEquals(data1, data2);
         assertNotEquals(data1, data3);
+        assertEquals(data1.hashCode(), data2.hashCode());
+
+        // isBitmapSaved should not affect equality.
+        data1.setIsBitmapSaved(/* isBitmapSaved= */ true);
+        assertEquals(data1, data2);
         assertEquals(data1.hashCode(), data2.hashCode());
     }
 
@@ -100,7 +105,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
                         /* isDailyRefreshEnabled= */ false);
         NtpBackgroundDataThemeCollection data =
                 new NtpBackgroundDataThemeCollection(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info,
                         /* backgroundImageInfo= */ null,
                         /* bitmap= */ null,
@@ -123,7 +128,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
                         /* isDailyRefreshEnabled= */ false);
         NtpBackgroundDataThemeCollection data =
                 new NtpBackgroundDataThemeCollection(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info,
                         /* backgroundImageInfo= */ null,
                         bitmap,
@@ -135,7 +140,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
 
     @Test
     public void testNullBackgroundImageInfo() throws JSONException {
-        @PlatformType int platformType = PlatformType.ANDROID_LOCAL;
+        @PlatformType int platformType = PlatformType.ANDROID;
         @NtpBackgroundType int backgroundType = NtpBackgroundType.THEME_COLLECTION;
         @ColorInt Integer primaryColor = Color.BLUE;
         GURL url = JUnitTestGURLs.URL_1;
@@ -161,7 +166,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
     }
 
     private void testToJsonAndFromJsonImpl(@Nullable String fileIdHash) throws JSONException {
-        @PlatformType int platformType = PlatformType.ANDROID_LOCAL;
+        @PlatformType int platformType = PlatformType.ANDROID;
         @NtpBackgroundType int backgroundType = NtpBackgroundType.THEME_COLLECTION;
         @ColorInt Integer primaryColor = Color.BLUE;
         GURL url = JUnitTestGURLs.URL_1;
@@ -201,6 +206,7 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
         assertEquals(
                 isDailyRefreshEnabled, restored.getCustomBackgroundInfo().isDailyRefreshEnabled);
         assertEquals(primaryColor, restored.getPrimaryColor());
+        assertEquals(data.isBitmapSaved(), restored.isBitmapSaved());
 
         assertNotNull(restored.getBackgroundImageInfo());
         assertEquals(
@@ -217,5 +223,33 @@ public class NtpBackgroundDataThemeCollectionUnitTest {
         } else {
             assertNull(restored.getLastUploadImageFilePath());
         }
+    }
+
+    @Test
+    public void testIsBitmapSaved() throws JSONException {
+        CustomBackgroundInfo info =
+                new CustomBackgroundInfo(
+                        GURL.emptyGURL(),
+                        "id",
+                        /* isUploadedImage= */ false,
+                        /* isDailyRefreshEnabled= */ false);
+        NtpBackgroundDataThemeCollection data =
+                new NtpBackgroundDataThemeCollection(
+                        PlatformType.ANDROID,
+                        info,
+                        /* backgroundImageInfo= */ null,
+                        /* bitmap= */ null,
+                        Color.RED,
+                        /* fileIdHash= */ null);
+
+        // Should default to false.
+        assertFalse(data.isBitmapSaved());
+
+        data.setIsBitmapSaved(/* isBitmapSaved= */ true);
+        assertTrue(data.isBitmapSaved());
+
+        JSONObject json = data.toJson();
+        NtpBackgroundDataThemeCollection restored = NtpBackgroundDataThemeCollection.fromJson(json);
+        assertTrue(restored.isBitmapSaved());
     }
 }

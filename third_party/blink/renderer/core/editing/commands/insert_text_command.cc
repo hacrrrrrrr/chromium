@@ -402,7 +402,7 @@ void InsertTextCommand::DoApply(EditingState* editing_state) {
       RemovePlaceholderAt(placeholder);
     }
     auto* text_node = To<Text>(start_position.ComputeContainerNode());
-    const unsigned offset = start_position.OffsetInContainerNode();
+    const wtf_size_t offset = start_position.OffsetInContainerNode();
 
     InsertTextIntoNode(text_node, offset, text_, password_echo_behavior_);
     end_position = Position(text_node, offset + text_.length());
@@ -455,8 +455,7 @@ void InsertTextCommand::DoApply(EditingState* editing_state) {
   }
 
   SelectionInDomTree::Builder builder;
-  if (RuntimeEnabledFeatures::CaretWithTextAffinityUpstreamEnabled() &&
-      text_ == " " && !IsRichlyEditablePosition(start_position)) {
+  if (text_ == " " && !IsRichlyEditablePosition(start_position)) {
     builder.SetAffinity(TextAffinity::kUpstreamIfPossible);
   } else {
     builder.SetAffinity(selection_affinity);
@@ -480,7 +479,7 @@ Position InsertTextCommand::InsertTab(const Position& pos,
 
   Node* node = insert_pos.ComputeContainerNode();
   auto* text_node = DynamicTo<Text>(node);
-  unsigned offset = text_node ? insert_pos.OffsetInContainerNode() : 0;
+  wtf_size_t offset = text_node ? insert_pos.OffsetInContainerNode() : 0;
 
   // keep tabs coalesced in tab span
   if (IsTabSpanElementTextNode(node)) {

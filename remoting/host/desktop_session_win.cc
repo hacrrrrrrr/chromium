@@ -18,7 +18,6 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -31,6 +30,7 @@
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/trust_util.h"
 #include "remoting/base/auto_thread_task_runner.h"
 #include "remoting/host/base/screen_resolution.h"
 #include "remoting/host/base/switches.h"
@@ -42,7 +42,6 @@
 // MIDL-generated declarations and definitions.
 #include "remoting/host/win/chromoting_lib.h"
 #include "remoting/host/win/host_service.h"
-#include "remoting/host/win/trust_util.h"
 #include "remoting/host/win/wts_session_process_delegate.h"
 #include "remoting/host/win/wts_terminal_monitor.h"
 #include "remoting/host/win/wts_terminal_observer.h"
@@ -350,7 +349,10 @@ void RdpSession::OnRdpClosed() {
 
 void RdpSession::SetScreenResolution(const ScreenResolution& resolution) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
-  DCHECK(!resolution.IsEmpty());
+  if (resolution.IsEmpty()) {
+    LOG(ERROR) << "Invalid resolution specified: " << resolution;
+    return;
+  }
 
   webrtc::DesktopSize bounded_size = GetBoundedRdpDesktopSize(
       resolution.dimensions().width(), resolution.dimensions().height());
@@ -649,7 +651,7 @@ void DesktopSessionWin::OnSessionAttached(uint32_t session_id) {
   base::FilePath desktop_binary;
   bool result = GetInstalledBinaryPath(kDesktopBinaryName, &desktop_binary);
 
-  if (!result || !IsBinaryTrusted(desktop_binary)) {
+  if (!result || !base::win::IsBinaryTrusted(desktop_binary)) {
     result = GetInstalledBinaryPath(kHostBinaryName, &desktop_binary);
   }
 
@@ -740,10 +742,14 @@ void DesktopSessionWin::ReportElapsedTime(const std::string& event) {
                                 (now - last_timestamp_).InSecondsF());
   }
 
-  VLOG(1) << base::StringPrintf(
-      "session(%d): %s at %s%s", id(), event.c_str(),
-      base::UnlocalizedTimeFormatWithPattern(now, "HH:mm:ss.SSS").c_str(),
-      passed.c_str());
+  base::Time::Exploded exploded;
+  now.LocalExplode(&exploded);
+  std::string time_str =
+      base::StringPrintf("%02d:%02d:%02d.%03d", exploded.hour, exploded.minute,
+                         exploded.second, exploded.millisecond);
+
+  VLOG(1) << base::StringPrintf("session(%d): %s at %s%s", id(), event.c_str(),
+                                time_str.c_str(), passed.c_str());
 
   last_timestamp_ = now;
 }

@@ -27,9 +27,11 @@
 #include "chrome/browser/ui/extensions/extension_action_test_helper.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/window_feature_controller/window_feature_controller.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/sessions/content/session_tab_helper.h"
@@ -176,7 +178,10 @@ class PopupHostWatcher : public ExtensionHostRegistry::Observer {
 // window be focused/active).
 class BrowserActionInteractiveTest : public ExtensionApiTest {
  public:
-  BrowserActionInteractiveTest() = default;
+  BrowserActionInteractiveTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        features::kExtensionsPinnedByDefault);
+  }
 
   BrowserActionInteractiveTest(const BrowserActionInteractiveTest&) = delete;
   BrowserActionInteractiveTest& operator=(const BrowserActionInteractiveTest&) =
@@ -285,19 +290,28 @@ class BrowserActionInteractiveTest : public ExtensionApiTest {
   }
 
   ExtensionsToolbarDesktop* extensions_container() {
-    return browser()->GetBrowserView().toolbar()->extensions_container();
+    return BrowserView::GetBrowserViewForBrowser(browser())
+        ->toolbar()
+        ->extensions_container();
   }
 
   int num_popup_hosts_created() const { return host_watcher_->created(); }
 
  private:
   std::unique_ptr<PopupHostWatcher> host_watcher_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests opening a popup using the chrome.browserAction.openPopup API. This test
 // opens a popup in the starting window, closes the popup, creates a new window
 // and opens a popup in the new window. Both popups should succeed in opening.
-IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, TestOpenPopup) {
+// TODO(crbug.com/542682193): Flaky on Linux.
+#if BUILDFLAG(IS_LINUX)
+#define MAYBE_TestOpenPopup DISABLED_TestOpenPopup
+#else
+#define MAYBE_TestOpenPopup TestOpenPopup
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, MAYBE_TestOpenPopup) {
   auto browserActionBar = ExtensionActionTestHelper::Create(browser());
   // Setup extension message listener to wait for javascript to finish running.
   ExtensionTestMessageListener listener("ready", ReplyBehavior::kWillReply);
@@ -851,8 +865,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, OpenPopupOnPopup) {
 #endif
   EXPECT_FALSE(browser()->GetWindow()->IsActive());
   EXPECT_FALSE(
-      popup_browser->GetBrowserForMigrationOnly()->SupportsWindowFeature(
-          Browser::WindowFeature::kFeatureToolbar));
+      WindowFeatureController::From(popup_browser)
+          ->SupportsWindowFeature(
+              WindowFeatureController::WindowFeature::kFeatureToolbar));
   EXPECT_EQ(popup_browser,
             ProfileBrowserCollection::GetForProfile(browser()->GetProfile())
                 ->GetLastActiveBrowser());

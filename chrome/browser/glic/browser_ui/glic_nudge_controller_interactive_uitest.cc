@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/glic/browser_ui/glic_nudge_controller.h"
+
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/contextual_cueing/features.h"
-#include "chrome/browser/glic/browser_ui/glic_nudge_controller.h"
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/suggestions/contextual_cueing_features.h"
@@ -28,6 +29,7 @@
 
 namespace glic {
 
+// TODO(crbug.com/537847029): Migrate this test suite to GlicBrowserTest.
 class GlicNudgeControllerInteractiveUiTest : public test::InteractiveGlicTest {
  public:
   GlicNudgeControllerInteractiveUiTest() {
@@ -39,8 +41,8 @@ class GlicNudgeControllerInteractiveUiTest : public test::InteractiveGlicTest {
   void SetUpOnMainThread() override {
     InteractiveBrowserTest::SetUpOnMainThread();
     GlicEnabling::SetBypassEnablementChecksForTesting(true);
-    browser()->profile()->GetPrefs()->SetBoolean(prefs::kGlicPinnedToTabstrip,
-                                                 true);
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
+        prefs::kGlicPinnedToTabstrip, true);
 
     ASSERT_TRUE(tab_strip_action_container());
   }
@@ -50,7 +52,7 @@ class GlicNudgeControllerInteractiveUiTest : public test::InteractiveGlicTest {
   }
 
   GlicNudgeController* nudge_controller() {
-    return browser()->browser_window_features()->glic_nudge_controller();
+    return browser()->GetFeatures().glic_nudge_controller();
   }
 
   TabStripActionContainer* tab_strip_action_container() {

@@ -59,6 +59,7 @@ bool UserActionIsRequiredToHaveTabSyncWork(syncer::SyncService* sync_service) {
 
     // These errors effectively amount to disabled sync or effectively paused.
     case syncer::SyncService::UserActionableError::kSignInNeedsUpdate:
+    case syncer::SyncService::UserActionableError::kDeviceManagementError:
     case syncer::SyncService::UserActionableError::kNeedsPassphrase:
     case syncer::SyncService::UserActionableError::
         kNeedsTrustedVaultKeyForEverything:
@@ -88,7 +89,7 @@ bool UserActionIsRequiredToHaveTabSyncWork(syncer::SyncService* sync_service) {
 }  // namespace
 
 @interface RecentTabsMediator () <AuthenticationServiceObserving,
-                                  IdentityManagerObserverBridgeDelegate,
+                                  IdentityManagerObserving,
                                   SyncedSessionsObserver> {
   std::unique_ptr<synced_sessions::SyncedSessionsObserverBridge>
       _syncedSessionsObserver;
@@ -210,9 +211,9 @@ bool UserActionIsRequiredToHaveTabSyncWork(syncer::SyncService* sync_service) {
   [self refreshSessionsView];
 }
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
-- (void)onPrimaryAccountChanged:
+- (void)primaryAccountDidChange:
     (const signin::PrimaryAccountChangeEvent&)event {
   switch (event.GetEventTypeFor(signin::ConsentLevel::kSignin)) {
     case signin::PrimaryAccountChangeEvent::Type::kNone:

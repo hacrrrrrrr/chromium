@@ -10,10 +10,12 @@ export function getHtml(this: ToolbarChipButtonElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
     <button id="button"
+      tabindex="-1"
       ?disabled="${this.disabled}"
       aria-label="${this.ariaLabel}"
       aria-description="${this.ariaDescription}"
       aria-haspopup="${this.ariaHasPopup || nothing}"
+      aria-expanded="${this.ariaExpanded || nothing}"
       title="${this.tooltip || ''}">
       <slot name="prefix-icon" @slotchange="${this.onPrefixIconSlotchange_}">
       </slot>

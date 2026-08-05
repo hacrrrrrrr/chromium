@@ -307,10 +307,12 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
                     @Override
                     public void onTabUnregistered(Tab tab) {
                         if (!tab.isDestroyed()) {
-                            assumeNonNull(
-                                            TabStateAttributesRegistry.getAttributesFor(
-                                                    tab, TabPersistentStoreImpl.class))
-                                    .removeObserver(attributesObserver);
+                            TabStateAttributes attributes =
+                                    TabStateAttributesRegistry.getAttributesFor(
+                                            tab, TabPersistentStoreImpl.class);
+                            if (attributes != null) {
+                                attributes.removeObserver(attributesObserver);
+                            }
                         }
                         if (tab.isClosing()) {
                             PersistedTabData.onTabClose(tab);
@@ -825,6 +827,13 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
             mSeenTabIds.add(tabId);
         } else {
             Log.w(TAG, "Failed to restore TabState; creating Tab with last known URL.");
+            if (!isIncognito) {
+                TabCreator tabCreator = mTabCreatorManager.getTabCreator(isIncognito);
+                if (tabCreator instanceof RecordingTabCreator recordingTabCreator) {
+                    recordingTabCreator
+                            .recordFallbackTab(tabToRestore.id, tabToRestore.url);
+                }
+            }
             Tab fallbackTab =
                     mTabCreatorManager
                             .getTabCreator(isIncognito)
@@ -924,9 +933,8 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
     private void addTabToSaveQueueIfApplicable(@Nullable Tab tab) {
         if (tab == null || tab.isDestroyed()) return;
         TabStateAttributes tabStateAttributes =
-                assumeNonNull(
-                        TabStateAttributesRegistry.getAttributesFor(
-                                tab, TabPersistentStoreImpl.class));
+                TabStateAttributesRegistry.getAttributesFor(tab, TabPersistentStoreImpl.class);
+        if (tabStateAttributes == null) return;
         @DirtinessState int dirtinessState = tabStateAttributes.getDirtinessState();
         if (mTabsToSave.contains(tab) || dirtinessState == DirtinessState.CLEAN) {
             return;
@@ -1170,15 +1178,17 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
     @VisibleForTesting
     void saveNextTab() {
         if (mSaveTabTask != null) return;
-        if (!mTabsToSave.isEmpty()) {
+        while (!mTabsToSave.isEmpty()) {
             Tab tab = mTabsToSave.removeFirst();
-            mSaveTabTask = new SaveTabTask(tab);
-            mSaveTabTask.executeOnTaskRunner(mSequencedTaskRunner);
-            migrateNextTabIfApplicable(1);
-            deleteLegacyTabStateFilesIfApplicable();
-        } else {
-            saveTabListAsynchronously();
+            if (tab != null && !tab.isDestroyed()) {
+                mSaveTabTask = new SaveTabTask(tab);
+                mSaveTabTask.executeOnTaskRunner(mSequencedTaskRunner);
+                migrateNextTabIfApplicable(1);
+                deleteLegacyTabStateFilesIfApplicable();
+                return;
+            }
         }
+        saveTabListAsynchronously();
     }
 
     private void migrateNextTabIfApplicable(int numMigration) {
@@ -1279,11 +1289,12 @@ public class TabPersistentStoreImpl implements TabPersistentStore {
 
         @Override
         protected void onPreExecute() {
-            if (mDestroyed || isCancelled()) return;
-            assumeNonNull(
-                            TabStateAttributesRegistry.getAttributesFor(
-                                    mTab, TabPersistentStoreImpl.class))
-                    .clearTabStateDirtiness();
+            if (mDestroyed || mTab.isDestroyed() || isCancelled()) return;
+            TabStateAttributes attributes =
+                    TabStateAttributesRegistry.getAttributesFor(mTab, TabPersistentStoreImpl.class);
+            if (attributes != null) {
+                attributes.clearTabStateDirtiness();
+            }
             mState = TabStateExtractor.from(mTab);
         }
 

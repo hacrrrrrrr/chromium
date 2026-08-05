@@ -65,7 +65,7 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
         maybeMarkReadingListItemAsRead(item);
         recordMetricsForOpenBookmarkInCurrentTab(item);
 
-        Intent intent = createBasicOpenIntent(item, incognito);
+        Intent intent = createBasicOpenIntent(item, incognito, /* opensNewTabByDefault= */ false);
         IntentHandler.startActivityForTrustedIntent(mContext, intent);
 
         return true;
@@ -101,8 +101,8 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
         if (firstItem == null) return false;
         recordMetricsForOpenBookmarksInNewTabs(items);
 
-        Intent intent = createBasicOpenIntent(firstItem, incognito);
-        intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
+        Intent intent =
+                createBasicOpenIntent(firstItem, incognito, /* opensNewTabByDefault= */ true);
         intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, incognito);
         intent.putExtra(IntentHandler.EXTRA_ADDITIONAL_URLS, additionalUrls);
         if (tabLaunchType != null) {
@@ -126,12 +126,14 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
         if (title != null) {
             extras.putString(IntentHandler.EXTRA_TAB_GROUP_TITLE, title);
         }
+        extras.putBoolean(IntentHandler.EXTRA_DISABLE_INITIALIZE_RENDERER, true);
         return openBookmarksInNewTabs(
                 bookmarkIds, incognito, TabLaunchType.FROM_LONGPRESS_BACKGROUND_IN_GROUP, extras);
     }
 
     @Override
-    public boolean openBookmarksInNewWindow(List<BookmarkId> bookmarkIds, boolean incognito) {
+    public boolean openBookmarksInNewWindow(
+            List<BookmarkId> bookmarkIds, boolean incognito, @Nullable Bundle extras) {
         if (bookmarkIds.isEmpty()) return false;
 
         BookmarkModel bookmarkModel = assumeNonNull(mBookmarkModelSupplier.get());
@@ -154,9 +156,10 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
         if (firstItem == null) return false;
         recordMetricsForOpenBookmarksInNewTabs(items);
 
-        Intent intent = createBasicOpenIntent(firstItem, incognito);
-        intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
+        Intent intent =
+                createBasicOpenIntent(firstItem, incognito, /* opensNewTabByDefault= */ true);
         intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_WINDOW, incognito);
+        intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, incognito);
         intent.putExtra(IntentHandler.EXTRA_ADDITIONAL_URLS, additionalUrls);
 
         Activity activity = ContextUtils.activityFromContext(mContext);
@@ -173,6 +176,7 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
             }
         }
 
+        if (extras != null) intent.putExtras(extras);
         IntentHandler.startActivityForTrustedIntent(mContext, intent);
 
         return true;
@@ -189,7 +193,8 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
         return MultiWindowUtils.isLinkNavigationToNewWindowSupported() || supportedPreApi31;
     }
 
-    private Intent createBasicOpenIntent(BookmarkItem item, boolean incognito) {
+    private Intent createBasicOpenIntent(
+            BookmarkItem item, boolean incognito, boolean opensNewTabByDefault) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.getUrl().getSpec()));
         intent.putExtra(
                 Browser.EXTRA_APPLICATION_ID, mContext.getApplicationContext().getPackageName());
@@ -213,6 +218,12 @@ public class BookmarkOpenerImpl implements BookmarkOpener {
             IntentHandler.setTabLaunchType(intent, TabLaunchType.FROM_READING_LIST);
             intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
             intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, incognito);
+        } else if (opensNewTabByDefault) {
+            intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
+        } else {
+            intent.putExtra(
+                    IntentHandler.EXTRA_TAB_OPEN_TYPE,
+                    IntentHandler.TabOpenType.CLOBBER_CURRENT_TAB);
         }
 
         IntentUtils.addTrustedIntentExtras(intent);

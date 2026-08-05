@@ -23,9 +23,6 @@ PYLINT_FILES_TO_SKIP = [
     'cpp_type_generator.py',
     'cpp_type_generator_test.py',
     'cc_generator.py',
-    'features_cc_generator.py',
-    'features_compiler.py',
-    'features_h_generator.py',
     'highlighters/hilite_me_highlighter.py',
     'highlighters/none_highlighter.py',
     'highlighters/pygments_highlighter.py',
@@ -74,9 +71,22 @@ def CheckExterns(input_api, output_api):
 
 
 def CheckPylint(input_api, output_api):
-  return input_api.canned_checks.RunPylint(
-      input_api, output_api, version='2.7', files_to_skip=PYLINT_FILES_TO_SKIP
-  )
+  disabled_warnings = [
+      'bad-indentation',
+      'consider-using-dict-items',
+      'duplicate-code',
+      'function-redefined',
+      'missing-module-docstring',
+      'protected-access',
+      'superfluous-parens',
+      'unspecified-encoding',
+      'unused-import',
+  ]
+  return input_api.canned_checks.RunPylint(input_api,
+                                           output_api,
+                                           disabled_warnings=disabled_warnings,
+                                           version='3.2',
+                                           files_to_skip=PYLINT_FILES_TO_SKIP)
 
 
 def CheckTests(input_api, output_api):

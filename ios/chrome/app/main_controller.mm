@@ -111,7 +111,6 @@
 #import "ios/chrome/browser/share_extension/model/share_extension_controller.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_delegate.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
-#import "ios/chrome/browser/shared/coordinator/scene/scene_state_options.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_util.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -159,7 +158,7 @@
 #import "ui/base/device_form_factor.h"
 
 #if BUILDFLAG(IOS_CREDENTIAL_PROVIDER_ENABLED)
-#import "ios/chrome/app/credential_provider_migrator_app_agent.h"
+#import "ios/chrome/browser/credential_provider/model/credential_provider_migrator_app_agent.h"
 #endif
 
 #if BUILDFLAG(IOS_ENABLE_SANDBOX_DUMP)
@@ -226,10 +225,6 @@ NSString* const kLogInstallAttribution = @"LogInstallAttribution";
 
 // Constant for enabling  multi-profile.
 NSString* const kMultiprofileKey = @"MultiprofileKey";
-
-// Constant for enabling the swap of confirmation button order.
-NSString* const kConfirmationButtonSwapOrderKey =
-    @"ConfirmationButtonSwapOrderKey";
 
 // Adapted from chrome/browser/ui/browser_init.cc.
 void RegisterComponentsForUpdate() {
@@ -1444,10 +1439,6 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
       kFieldTrialValueKey : @(AreSeparateProfilesForManagedAccountsEnabled()),
       kFieldTrialVersionKey : @1,
     },
-    kConfirmationButtonSwapOrderKey : @{
-      kFieldTrialValueKey : @(IsConfirmationButtonSwapOrderEnabled()),
-      kFieldTrialVersionKey : @1,
-    },
   };
   [sharedDefaults setObject:fieldTrialValues
                      forKey:app_group::kChromeExtensionFieldTrialPreference];
@@ -1837,7 +1828,7 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
            attributesStorage:(ProfileAttributesStorageIOS*)storage
                   localState:(PrefService*)localState {
   // Determine the identifier for the SceneState.
-  std::string sceneStateID = SessionIdentifierForScene(sceneState.scene);
+  const std::string sceneStateID = SessionIdentifierForScene(sceneState.scene);
 
   // Determine which profile to use. The logic is to take the first valid
   // profile (i.e. the value is set and the profile is known) amongst the
@@ -1892,9 +1883,8 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
   DCHECK(iterator->second.state != nil);
 
   // Connects the SceneState to the ProfileState.
-  [sceneState.controller
-      connectWithOptions:{.profile_state = iterator->second.state,
-                          .identifier = std::move(sceneStateID)}];
+  [sceneState.controller connectWithProfileState:iterator->second.state
+                                  sceneSessionID:sceneStateID];
 }
 
 // Drops all unused profile controllers. This will cause the corresponding

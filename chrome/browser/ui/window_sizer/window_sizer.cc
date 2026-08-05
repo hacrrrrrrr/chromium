@@ -113,8 +113,9 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
     // Legacy Applications and Devtools are always restored with the same
     // position.
     if (browser_ && !web_app::AppBrowserController::IsWebApp(browser_) &&
-        (browser_->is_type_app() || browser_->is_type_app_popup() ||
-         browser_->is_type_devtools())) {
+        (browser_->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+         browser_->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP ||
+         browser_->GetType() == BrowserWindowInterface::Type::TYPE_DEVTOOLS)) {
       return false;
     }
 
@@ -448,12 +449,15 @@ ui::mojom::WindowShowState WindowSizer::GetWindowDefaultShowState(
 
   // Only tabbed browsers and dev tools use the command line.
   bool use_command_line =
-      browser->is_type_normal() || browser->is_type_devtools();
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_DEVTOOLS;
 
 #if defined(USE_AURA)
   // We use the apps save state as well on aura.
-  use_command_line = use_command_line || browser->is_type_app() ||
-                     browser->is_type_app_popup();
+  use_command_line =
+      use_command_line ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP;
 #endif
 
   if (use_command_line && base::CommandLine::ForCurrentProcess()->HasSwitch(

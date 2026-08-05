@@ -44,6 +44,15 @@ class TabGroup;
 // Hides the Guided Tour on the tab grid.
 - (void)hideTabGridGuidedTour;
 
+// Presents an IPH bubble to highlight pinning the active tab in the Tab Grid.
+- (void)presentPinTabBubble;
+
+// Presents an IPH bubble to highlight creating a tab group in the Tab Grid.
+- (void)presentCreateTabGroupBubble;
+
+// Displays the IPH instructing the user to swipe right to switch to incognito.
+- (void)showSwipeToIncognitoIPH;
+
 // Presents the page action menu from the tab grid, registering the source.
 - (void)showPageActionMenuFromTabGrid;
 

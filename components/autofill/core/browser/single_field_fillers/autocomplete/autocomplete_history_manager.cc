@@ -195,6 +195,8 @@ bool IsFieldTypeSaveable(const FormStructure* form, FieldGlobalId field_id) {
       case FLIGHT_RESERVATION_FLIGHT_NUMBER:
       case FLIGHT_RESERVATION_CONFIRMATION_CODE:
       case FLIGHT_RESERVATION_TICKET_NUMBER:
+      case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
+      case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
       case FLIGHT_RESERVATION_DEPARTURE_DATE:
       case ADDRESS_HOME_ZIP_AND_CITY:
       case ORDER_ID:
@@ -316,15 +318,8 @@ void AutocompleteHistoryManager::OnGetSingleFieldSuggestions(
     std::move(on_suggestions_returned).Run(trigger_field.global_id(), {});
     return;
   }
-  const GURL& main_frame_url = client.GetLastCommittedPrimaryMainFrameURL();
-  const GURL& field_url = trigger_field.origin().GetURL();
-  const bool is_enabled =
-      MayPerformAtMemoryAction(AtMemoryAction::kShowAutocompleteAtMemoryButton,
-                               client, main_frame_url) &&
-      MayPerformAtMemoryAction(AtMemoryAction::kShowAutocompleteAtMemoryButton,
-                               client, field_url);
-  suggestion_generator_ = std::make_unique<AutocompleteSuggestionGenerator>(
-      profile_database_, is_enabled);
+  suggestion_generator_ =
+      std::make_unique<AutocompleteSuggestionGenerator>(profile_database_);
 
   auto on_suggestions_generated = base::BindOnce(
       [](SingleFieldFillRouter::OnSuggestionsReturnedCallback callback,
@@ -367,10 +362,12 @@ void AutocompleteHistoryManager::CancelPendingQuery() {
 
 void AutocompleteHistoryManager::OnRemoveCurrentSingleFieldSuggestion(
     const std::u16string& field_name,
+    const std::u16string& field_label,
     const std::u16string& value,
     SuggestionType type) {
   if (profile_database_) {
-    profile_database_->RemoveFormValueForElementName(field_name, value);
+    profile_database_->RemoveFormValueForElementNameAndLabel(
+        field_name, field_label, value);
   }
 }
 

@@ -23,8 +23,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kAllowContentInitiatedDataUrlNavigations);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAncestorThrottleEvaluateRedirectSource);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidDesktopStyleScrollbars);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kAndroidDownloadableFontsMatching);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(
-    kAndroidRemoveSetLocalFocusWorkaroundOnBaklava);
 #if BUILDFLAG(IS_WIN)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kArabicIndicDigitInput);
 #endif
@@ -83,6 +81,9 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kDisableAutoResizeOutputSurface);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kDocumentIsolationPolicyWithoutSiteIsolation);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDocumentPolicyNegotiation);
+#if BUILDFLAG(IS_ANDROID)
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kEarlyTopAppForSandboxedRenderer);
+#endif
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEditContextSelectionSync);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kKillOnUnexpectedOriginHeader);
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -100,18 +101,7 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kFilterInstalledAppsWebAppMatching);
 #if BUILDFLAG(IS_WIN)
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kFilterInstalledAppsWinMatching);
 #endif  // BUILDFLAG(IS_WIN)
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kFledgeLimitNumAuctions);
-CONTENT_EXPORT extern const base::FeatureParam<int>
-    kFledgeLimitNumAuctionsParam;
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kFledgeDelayPostAuctionInterestGroupUpdate);
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kFledgeSellerWorkletThreadPool);
-CONTENT_EXPORT extern const base::FeatureParam<int>
-    kFledgeSellerWorkletThreadPoolSize;
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kFledgeBidderWorkletThreadPool);
-CONTENT_EXPORT extern const base::FeatureParam<double>
-    kFledgeBidderWorkletThreadPoolSizeLogarithmicScalingFactor;
 #if BUILDFLAG(IS_ANDROID)
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kFledgeAndroidWorkletOffMainThread);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(
     kFocusRenderWidgetHostViewAndroidOnMouseDown);
 #endif
@@ -212,6 +202,9 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kReduceMojoURLLoaderFactoryCloning);
 CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(
     bool,
     kUseLazyURLLoaderFactoryForServiceWorkerFallback);
+CONTENT_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    bool,
+    kUseLazyURLLoaderFactoryForSubresourceProxying);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kReloadHiddenTabsWithCrashedSubframes);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPreferWarmRendererProcess);
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kReusePrerenderingProcessForMainFrames);

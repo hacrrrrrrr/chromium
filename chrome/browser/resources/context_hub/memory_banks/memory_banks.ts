@@ -5,12 +5,13 @@
 import '//resources/cr_elements/cr_icon/cr_icon.js';
 import '//resources/cr_elements/cr_button/cr_button.js';
 import '//resources/cr_elements/cr_checkbox/cr_checkbox.js';
+import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import '//resources/cr_elements/icons.html.js';
 import '//resources/cr_elements/cr_search_field/cr_search_field.js';
 
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 
-import {BrowserProxyImpl} from '../browser_proxy.js';
-import {EntryType} from '../context_hub.mojom-webui.js';
+import {browserProxyFactory, EntryType} from '../context_hub.mojom-webui.js';
 import type {MemoryBankEntry} from '../context_hub.mojom-webui.js';
 
 import {getCss} from './memory_banks.css.js';
@@ -34,12 +35,19 @@ export class MemoryBanksElement extends CrLitElement {
       entries: {type: Array},
       selectedIds: {type: Object},
       searchQuery: {type: String},
+      geminiResponse_: {type: String},
+      isAskingGemini_: {type: Boolean},
+      showGeminiPanel_: {type: Boolean},
     };
   }
 
   accessor entries: MemoryBankEntry[] = [];
   accessor selectedIds: Set<bigint> = new Set();
   accessor searchQuery: string = '';
+  protected accessor geminiResponse_: string = '';
+  protected accessor isAskingGemini_: boolean = false;
+  protected accessor showGeminiPanel_: boolean = false;
+
 
   override connectedCallback() {
     super.connectedCallback();
@@ -47,8 +55,8 @@ export class MemoryBanksElement extends CrLitElement {
   }
 
   private async fetchEntries() {
-    const {entries} =
-        await BrowserProxyImpl.getInstance().handler.getAllMemoryBankEntries();
+    const {entries} = await browserProxyFactory.getInstance()
+                          .handler.getAllMemoryBankEntries();
     this.entries = entries;
   }
 
@@ -155,11 +163,46 @@ export class MemoryBanksElement extends CrLitElement {
 
   protected async onDeleteClick_() {
     const ids = Array.from(this.selectedIds);
-    await BrowserProxyImpl.getInstance().handler.deleteMemoryBankEntries(ids);
+    await browserProxyFactory.getInstance().handler.deleteMemoryBankEntries(
+        ids);
     this.selectedIds = new Set();
     await this.fetchEntries();
   }
 
+  protected onAskGeminiClick_() {
+    this.showGeminiPanel_ = !this.showGeminiPanel_;
+  }
+
+  protected onClosePanelClick_() {
+    this.showGeminiPanel_ = false;
+    this.geminiResponse_ = '';
+  }
+
+  protected onCloseResponseClick_() {
+    this.geminiResponse_ = '';
+  }
+
+  protected async onQuickOptionClick_(e: Event) {
+    const target = e.currentTarget as HTMLElement;
+    const action = target.dataset['option'];
+    if (!action || this.selectedIds.size === 0 || this.isAskingGemini_) {
+      return;
+    }
+    this.isAskingGemini_ = true;
+    this.geminiResponse_ = '';
+    const memoryBankEntryIds = Array.from(this.selectedIds);
+    try {
+      const {response} =
+          await browserProxyFactory.getInstance().handler.askGeminiWithContext(
+              action, memoryBankEntryIds);
+      this.geminiResponse_ = response ? response.content : '';
+    } catch (err) {
+      console.error('Failed to ask Gemini:', err);
+      this.geminiResponse_ = 'Error generating response from Gemini.';
+    } finally {
+      this.isAskingGemini_ = false;
+    }
+  }
 
   private getSelectedEntriesAsText_(): string {
     return this.entries.filter(entry => this.selectedIds.has(entry.id))

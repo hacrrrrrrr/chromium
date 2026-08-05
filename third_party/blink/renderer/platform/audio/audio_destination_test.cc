@@ -7,17 +7,19 @@
 #include <array>
 #include <memory>
 
-#include "base/test/scoped_feature_list.h"
-#include "base/test/test_simple_task_runner.h"
-#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
+#include "base/run_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/task_environment.h"
+#include "base/test/test_simple_task_runner.h"
 #include "base/thread_annotations.h"
+#include "base/threading/thread_restrictions.h"
 #include "media/audio/audio_features.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_glitch_info.h"
+#include "media/base/audio_timestamp_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_audio_device.h"
@@ -27,6 +29,7 @@
 #include "third_party/blink/renderer/platform/audio/audio_callback_metric_reporter.h"
 #include "third_party/blink/renderer/platform/audio/audio_io_callback.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 
 namespace blink {
@@ -53,6 +56,24 @@ class MockWebAudioDevice : public WebAudioDevice {
   explicit MockWebAudioDevice(double sample_rate, int frames_per_buffer)
       : sample_rate_(sample_rate), frames_per_buffer_(frames_per_buffer) {}
 
+  ~MockWebAudioDevice() override {
+    if (expected_destruction_thread_id_.has_value()) {
+      EXPECT_EQ(base::PlatformThread::CurrentId(),
+                expected_destruction_thread_id_.value());
+    }
+    if (quit_closure_) {
+      std::move(quit_closure_).Run();
+    }
+  }
+
+  void ExpectDestructionOnThread(base::PlatformThreadId thread_id) {
+    expected_destruction_thread_id_ = thread_id;
+  }
+
+  void SetQuitClosure(base::OnceClosure quit_closure) {
+    quit_closure_ = std::move(quit_closure);
+  }
+
   MOCK_METHOD(void, Start, (), (override));
   MOCK_METHOD(void, Stop, (), (override));
   MOCK_METHOD(void, Pause, (), (override));
@@ -69,6 +90,8 @@ class MockWebAudioDevice : public WebAudioDevice {
  private:
   double sample_rate_;
   int frames_per_buffer_;
+  std::optional<base::PlatformThreadId> expected_destruction_thread_id_;
+  base::OnceClosure quit_closure_;
 };
 
 class TestPlatform : public TestingPlatformSupport {
@@ -103,7 +126,7 @@ class TestPlatform : public TestingPlatformSupport {
     return kDefaultHardwareOutputChannelNumber;
   }
 
-  const MockWebAudioDevice& web_audio_device() {
+  MockWebAudioDevice& web_audio_device() {
     CHECK(webaudio_device_)
         << "Finish setting up expectations before calling CreateAudioDevice "
            "(via AudioDestination::Create).";
@@ -328,7 +351,7 @@ TEST_P(AudioDestinationTest, GlitchAndDelay) {
   // delay.
   const int priming_frames = RoundUpToRenderQuantum(requested_frames);
 #endif
-  base::TimeDelta priming_delay = audio_utilities::FramesToTime(
+  base::TimeDelta priming_delay = media::AudioTimestampHelper::FramesToTime(
       priming_frames, Platform::Current()->AudioHardwareSampleRate());
 
   auto audio_bus = media::AudioBus::Create(kDefaultHardwareOutputChannelNumber,
@@ -677,6 +700,58 @@ TEST_F(AudioDestinationTest,
 
   // Clean up.
   audio_destination->Stop();
+}
+
+TEST_F(AudioDestinationTest, DestructOnMainThread) {
+  base::test::TaskEnvironment task_environment;
+  ScopedTestingPlatformSupport<TestPlatform> platform;
+  platform->CreateMockWebAudioDevice(kDefaultHardwareSampleRate,
+                                     kDefaultHardwareBufferSize);
+
+  base::RunLoop run_loop;
+
+  // We expect the mock device (and thus AudioDestination) to be destroyed
+  // on the main thread.
+  platform->web_audio_device().ExpectDestructionOnThread(
+      base::PlatformThread::CurrentId());
+  platform->web_audio_device().SetQuitClosure(run_loop.QuitClosure());
+
+  scoped_refptr<AudioDestination> audio_destination = CreateAudioDestination(
+      44100, WebAudioLatencyHint(WebAudioLatencyHint::kCategoryInteractive));
+
+  std::unique_ptr<NonMainThread> background_thread =
+      NonMainThread::CreateThread(
+          ThreadCreationParams(ThreadType::kTestThread));
+
+  base::WaitableEvent release_done;
+
+  // Post a task to background thread to hold a reference.
+  background_thread->GetTaskRunner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](scoped_refptr<AudioDestination> destination,
+             base::WaitableEvent* event) {
+            // Keep the reference until main thread releases its reference.
+            // We use the event to coordinate.
+            event->Wait();
+            // destination goes out of scope here, releasing the last reference
+            // on the background thread.
+          },
+          audio_destination, &release_done));
+
+  // Release the main thread reference.
+  audio_destination = nullptr;
+
+  // Signal the background thread to release its reference.
+  release_done.Signal();
+
+  // Wait for the background thread to finish task execution.
+  // This ensures the release has happened.
+  background_thread.reset();
+
+  // Run the loop. It will be quit when MockWebAudioDevice is destroyed on the
+  // main thread.
+  run_loop.Run();
 }
 
 }  // namespace

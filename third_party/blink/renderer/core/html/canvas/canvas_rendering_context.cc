@@ -114,19 +114,17 @@ CanvasRenderingContext::GetEnclosingContextForDrawElement(
     Element* element,
     const String& func_name,
     ExceptionState& exception_state) {
-  HTMLCanvasElement* canvas =
-      DynamicTo<HTMLCanvasElement>(element->parentNode());
+  auto* canvas = DynamicTo<HTMLCanvasElement>(element->parentNode());
   if (!canvas) {
-    exception_state.ThrowTypeError(
-        "Only immediate children of the <canvas> element can be passed to " +
-        func_name + ".");
-
+    exception_state.ThrowTypeError(StrCat(
+        {"Only immediate children of the <canvas> element can be passed to ",
+         func_name, "."}));
     return nullptr;
   }
   CanvasRenderingContext* context = canvas->RenderingContext();
   if (!context) {
-    exception_state.ThrowTypeError(
-        func_name + ": containing canvas does not have a rendering context.");
+    exception_state.ThrowTypeError(StrCat(
+        {func_name, ": containing canvas does not have a rendering context."}));
     return nullptr;
   }
   if (!context->IsDrawElementImageEligible(element, func_name,
@@ -319,7 +317,6 @@ void CanvasRenderingContext::DidProcessTask(
 
   // The end of a script task that drew content to the canvas is the point
   // at which the current frame may be considered complete.
-  PreFinalizeFrame();
   FlushReason reason = did_print_in_current_task_
                            ? FlushReason::kCanvasPushFrameWhilePrinting
                            : FlushReason::kCanvasPushFrame;

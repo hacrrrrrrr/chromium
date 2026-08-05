@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/glic/host/glic_annotation_manager.h"
+
 #include <memory>
 
 #include "base/callback_list.h"
@@ -15,7 +17,6 @@
 #include "chrome/browser/glic/glic_metrics.h"
 #include "chrome/browser/glic/host/context/glic_page_context_fetcher.h"
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
-#include "chrome/browser/glic/host/glic_annotation_manager.h"
 #include "chrome/browser/glic/public/glic_instance_metrics_backwards_compatibility.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
@@ -1488,7 +1489,7 @@ class MAYBE_GlicAnnotationManagerTabContextPermissionUiTest
       // When GlicDefaultTabContextSetting is disabled, we rely on a pref to
       // determine if tab context permission is enabled.
       return Steps(Do([this, enabled]() {
-        browser()->profile()->GetPrefs()->SetBoolean(
+        browser()->GetProfile()->GetPrefs()->SetBoolean(
             glic::prefs::kGlicTabContextEnabled, enabled);
       }));
     }

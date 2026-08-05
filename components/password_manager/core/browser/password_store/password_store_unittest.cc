@@ -37,7 +37,6 @@
 #include "components/password_manager/core/browser/form_parsing/form_data_parser.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/password_manager/core/browser/password_store/fake_password_store_backend.h"
-#include "components/password_manager/core/browser/password_store/mock_password_store_backend.h"
 #include "components/password_manager/core/browser/password_store/mock_password_store_consumer.h"
 #include "components/password_manager/core/browser/password_store/password_form_converters.h"
 #include "components/password_manager/core/browser/password_store/password_store_backend.h"
@@ -135,12 +134,13 @@ StoredCredential MakeStoredCredential(const std::string& signon_realm) {
   return cred;
 }
 
-std::tuple<scoped_refptr<PasswordStore>, MockPasswordStoreBackend*>
-CreateUnownedStoreWithOwnedMockBackend() {
-  auto backend = std::make_unique<MockPasswordStoreBackend>();
-  MockPasswordStoreBackend* mock_backend = backend.get();
+std::tuple<scoped_refptr<PasswordStore>, FakePasswordStoreBackend*>
+CreateUnownedStoreWithOwnedFakeBackend() {
+  auto backend = std::make_unique<FakePasswordStoreBackend>(
+      password_manager::IsAccountStore(false));
+  FakePasswordStoreBackend* fake_backend = backend.get();
   return std::make_tuple(
-      base::MakeRefCounted<PasswordStore>(std::move(backend)), mock_backend);
+      base::MakeRefCounted<PasswordStore>(std::move(backend)), fake_backend);
 }
 
 PasswordFormData CreateTestPasswordFormDataByOrigin(const char* origin_url) {
@@ -158,12 +158,6 @@ PasswordFormData CreateTestPasswordFormDataByOrigin(const char* origin_url) {
   return data;
 }
 
-PasswordStoreChangeList CreateChangeList(PasswordStoreChange::Type type,
-                                         StoredCredential cred) {
-  PasswordStoreChangeList changes;
-  changes.emplace_back(type, std::move(cred));
-  return changes;
-}
 
 auto HasChangeType(PasswordStoreChange::Type type) {
   return testing::Property(&PasswordStoreChange::type, Eq(type));
@@ -193,8 +187,6 @@ auto EqUpdate(const StoredCredential& cred) {
 
 }  // namespace
 
-// TODO(crbug.com/535284793): Refactor tests to use the fake backend instead of
-// mocks.
 class PasswordStoreTest : public testing::Test {
  public:
   PasswordStoreTest(const PasswordStoreTest&) = delete;
@@ -387,18 +379,10 @@ TEST_F(PasswordStoreTest, RemoveLoginsCreatedBetweenCallbackIsCalled) {
 
 TEST_F(PasswordStoreTest,
        RemoveLoginsCreatedBetweenCompletedSuccessfullyWithEmtpyListOfChanges) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
 
   base::test::TestFuture<bool> completion_future;
-  EXPECT_CALL(*mock_backend, RemoveLoginsCreatedBetweenAsync)
-      .WillOnce(WithArg<3>([](PasswordChangesOrErrorReply reply) {
-        std::move(reply).Run(PasswordStoreChangeList());
-      }));
   store->RemoveLoginsCreatedBetween(FROM_HERE,
                                     base::Time::FromSecondsSinceUnixEpoch(0),
                                     base::Time::FromSecondsSinceUnixEpoch(2),
@@ -410,20 +394,13 @@ TEST_F(PasswordStoreTest,
 
 TEST_F(PasswordStoreTest,
        RemoveLoginsCreatedBetweenCompletionFailedWithBackendError) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->ReturnErrorOnRequest(kBackendError);
   store->Init();
 
   base::test::TestFuture<bool> completion_future;
   MockPasswordStoreObserver mock_observer;
   store->AddObserver(&mock_observer);
-  EXPECT_CALL(*mock_backend, RemoveLoginsCreatedBetweenAsync)
-      .WillOnce(WithArg<3>([](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
   EXPECT_CALL(mock_observer,
               OnErrorStateChanged(store.get(), ActionableError::kInactionable));
   store->RemoveLoginsCreatedBetween(FROM_HERE,
@@ -539,30 +516,22 @@ TEST_F(PasswordStoreTest, PasswordManagerTimeSinceInitMetric) {
 }
 
 TEST_F(PasswordStoreTest, DelegatesGetAllLoginsToBackend) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
 
   MockPasswordStoreConsumer mock_consumer;
-  EXPECT_CALL(*mock_backend, GetAllLoginsAsync(_));
+  EXPECT_CALL(mock_consumer, OnGetPasswordStoreResultsOrErrorFrom);
   store->GetAllLogins(mock_consumer.GetWeakPtr());
   WaitForPasswordStore();
   store->ShutdownOnUIThread();
 }
 
 TEST_F(PasswordStoreTest, DelegatesGetAutofillableLoginsToBackend) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
 
   MockPasswordStoreConsumer mock_consumer;
-  EXPECT_CALL(*mock_backend, GetAutofillableLoginsAsync(_));
+  EXPECT_CALL(mock_consumer, OnGetPasswordStoreResultsOrErrorFrom);
   store->GetAutofillableLogins(mock_consumer.GetWeakPtr());
   WaitForPasswordStore();
   store->ShutdownOnUIThread();
@@ -571,25 +540,16 @@ TEST_F(PasswordStoreTest, DelegatesGetAutofillableLoginsToBackend) {
 TEST_F(PasswordStoreTest, CallOnLoginsChangedIfRemovalProvidesChanges) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
+
+  store->AddLogin(CloneStoredCredential(kTestForm));
+  WaitForPasswordStore();
+
   store->AddObserver(&mock_observer);
 
   // Expect that observers receive the removal when the backend invokes the
   // reply with a `PasswordStoreChangeList`.
-  EXPECT_CALL(*mock_backend,
-              RemoveLoginAsync(_,
-                               MatchesCredential(CopyableStoredCredential(
-                                   CloneStoredCredential(kTestForm))),
-                               _))
-      .WillOnce(WithArg<2>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(CreateChangeList(
-            PasswordStoreChange::REMOVE, CloneStoredCredential(kTestForm)));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer,
               OnLoginsChanged(store.get(), ElementsAre(EqRemoval(kTestForm))));
@@ -603,23 +563,12 @@ TEST_F(PasswordStoreTest, CallOnLoginsChangedIfRemovalProvidesChanges) {
 TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfRemovalReturnsError) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->ReturnErrorOnRequest(kBackendError);
   store->Init();
   store->AddObserver(&mock_observer);
 
   // Expect that observers does not receive the removal when backend fails.
-  EXPECT_CALL(*mock_backend,
-              RemoveLoginAsync(_,
-                               MatchesCredential(CopyableStoredCredential(
-                                   CloneStoredCredential(kTestForm))),
-                               _))
-      .WillOnce(WithArg<2>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer, OnLoginsChanged).Times(0);
   EXPECT_CALL(mock_observer,
@@ -634,24 +583,12 @@ TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfRemovalReturnsError) {
 TEST_F(PasswordStoreTest, CallOnLoginsChangedIfAdditionProvidesChanges) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
   store->AddObserver(&mock_observer);
 
   // Expect that observers receive the addition when the backend invokes the
   // reply with a `PasswordStoreChangeList`.
-  EXPECT_CALL(*mock_backend,
-              AddLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                CloneStoredCredential(kTestForm))),
-                            _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(CreateChangeList(
-            PasswordStoreChange::ADD, CloneStoredCredential(kTestForm)));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer,
               OnLoginsChanged(store.get(), ElementsAre(EqAddition(kTestForm))));
@@ -664,25 +601,16 @@ TEST_F(PasswordStoreTest, CallOnLoginsChangedIfAdditionProvidesChanges) {
 
 TEST_F(PasswordStoreTest, CallOnLoginsChangedIfUpdateProvidesChanges) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
-  MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
+  store->AddLogin(CloneStoredCredential(kTestForm));
+  WaitForPasswordStore();
+
+  MockPasswordStoreObserver mock_observer;
   store->AddObserver(&mock_observer);
 
   // Expect that observers receive the update when the backend invokes the
   // reply with a `PasswordStoreChangeList`.
-  EXPECT_CALL(*mock_backend,
-              UpdateLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                   CloneStoredCredential(kTestForm))),
-                               _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(CreateChangeList(
-            PasswordStoreChange::UPDATE, CloneStoredCredential(kTestForm)));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer,
               OnLoginsChanged(store.get(), ElementsAre(EqUpdate(kTestForm))));
@@ -696,22 +624,12 @@ TEST_F(PasswordStoreTest, CallOnLoginsChangedIfUpdateProvidesChanges) {
 TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfAdditionReturnsError) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->ReturnErrorOnRequest(kBackendError);
   store->Init();
   store->AddObserver(&mock_observer);
 
   // Expect that observers does not receive the change when backend fails.
-  EXPECT_CALL(*mock_backend,
-              AddLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                CloneStoredCredential(kTestForm))),
-                            _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer, OnLoginsChanged).Times(0);
   EXPECT_CALL(mock_observer,
@@ -723,61 +641,13 @@ TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfAdditionReturnsError) {
   store->ShutdownOnUIThread();
 }
 
-TEST_F(PasswordStoreTest,
-       DoNotCallOnErrorStateChangedIfAdditionReturnsErrorAndFeatureDisabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(
-      features::kPasswordStorePropagatesActionableErrors);
-
-  const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
-  MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
-  store->Init();
-  store->AddObserver(&mock_observer);
-
-  // Expect that observers does not receive the change when backend fails.
-  EXPECT_CALL(*mock_backend,
-              AddLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                CloneStoredCredential(kTestForm))),
-                            _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
-  EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
-  EXPECT_CALL(mock_observer, OnLoginsChanged).Times(0);
-  EXPECT_CALL(mock_observer, OnErrorStateChanged).Times(0);
-  store->AddLogin(CloneStoredCredential(kTestForm));
-  WaitForPasswordStore();
-
-  store->RemoveObserver(&mock_observer);
-  store->ShutdownOnUIThread();
-}
-
 TEST_F(PasswordStoreTest, DoNotCallOnErrorStateChangedIfErrorStateIsIdentical) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->ReturnErrorOnRequest(kBackendError);
   store->Init();
   store->AddObserver(&mock_observer);
-
-  EXPECT_CALL(*mock_backend,
-              AddLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                CloneStoredCredential(kTestForm))),
-                            _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
 
   EXPECT_CALL(mock_observer,
               OnErrorStateChanged(store.get(), ActionableError::kInactionable))
@@ -793,22 +663,12 @@ TEST_F(PasswordStoreTest, DoNotCallOnErrorStateChangedIfErrorStateIsIdentical) {
 TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfUpdateReturnsError) {
   const StoredCredential kTestForm = MakeStoredCredential(kTestWebRealm1);
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->ReturnErrorOnRequest(kBackendError);
   store->Init();
   store->AddObserver(&mock_observer);
 
   // Expect that observers does not receive the update when backend fails.
-  EXPECT_CALL(*mock_backend,
-              UpdateLoginAsync(MatchesCredential(CopyableStoredCredential(
-                                   CloneStoredCredential(kTestForm))),
-                               _))
-      .WillOnce(WithArg<1>([&](PasswordChangesOrErrorReply reply) -> void {
-        std::move(reply).Run(PasswordChangesOrError(kBackendError));
-      }));
   EXPECT_CALL(mock_observer, OnLoginsRetained).Times(0);
   EXPECT_CALL(mock_observer, OnLoginsChanged).Times(0);
   EXPECT_CALL(mock_observer,
@@ -821,28 +681,17 @@ TEST_F(PasswordStoreTest, DoNotCallOnLoginsChangedIfUpdateReturnsError) {
 }
 
 TEST_F(PasswordStoreTest, AbleToSavePasswords) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  scoped_refptr<PasswordStore> store = CreatePasswordStore();
   store->Init();
-  EXPECT_CALL(*mock_backend, GetError)
-      .WillOnce(testing::Return(ActionableError::kNoError));
 
   EXPECT_EQ(store->GetError(), ActionableError::kNoError);
   store->ShutdownOnUIThread();
 }
 
 TEST_F(PasswordStoreTest, NotAbleToSavePasswords) {
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(WithArg<2>([](base::OnceCallback<void(bool)> completion) {
-        std::move(completion).Run(true);
-      }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
+  fake_backend->SetError(ActionableError::kInactionable);
   store->Init();
-  EXPECT_CALL(*mock_backend, GetError)
-      .WillOnce(testing::Return(ActionableError::kInactionable));
 
   EXPECT_EQ(store->GetError(), ActionableError::kInactionable);
   store->ShutdownOnUIThread();
@@ -945,7 +794,7 @@ TEST_F(PasswordStoreTest, Unblocklisting) {
   non_blocklisted_form.signon_realm = kTestWebRealm1;
   non_blocklisted_form.url = GURL(kTestWebOrigin1);
   non_blocklisted_form.username_value = u"username";
-  non_blocklisted_form.password_value = u"password";
+  non_blocklisted_form.password_value = PasswordString(u"password");
 
   store->AddLogin(CloneStoredCredential(blocklisted_form));
   store->AddLogin(CloneStoredCredential(non_blocklisted_form));
@@ -975,13 +824,13 @@ TEST_F(PasswordStoreTest, UpdateLoginWithPrimaryKey_PasswordChanges) {
   old_cred.signon_realm = kTestWebRealm1;
   old_cred.url = GURL(kTestWebOrigin1);
   old_cred.username_value = u"username";
-  old_cred.password_value = u"password";
+  old_cred.password_value = PasswordString(u"password");
   old_cred.password_issues = {{InsecureType::kLeaked, InsecurityMetadata()},
                               {InsecureType::kPhished, InsecurityMetadata()},
                               {InsecureType::kWeak, InsecurityMetadata()}};
 
   StoredCredential new_cred = CloneStoredCredential(old_cred);
-  new_cred.password_value = u"new_password";
+  new_cred.password_value = PasswordString(u"new_password");
 
   StoredCredential expected_new_cred = CloneStoredCredential(new_cred);
   expected_new_cred.password_issues.clear();
@@ -1014,7 +863,7 @@ TEST_F(PasswordStoreTest, UpdateLoginWithPrimaryKey_UsernameChanges) {
   old_cred.signon_realm = kTestWebRealm1;
   old_cred.url = GURL(kTestWebOrigin1);
   old_cred.username_value = u"username";
-  old_cred.password_value = u"password";
+  old_cred.password_value = PasswordString(u"password");
   old_cred.password_issues = {{InsecureType::kLeaked, InsecurityMetadata()},
                               {InsecureType::kPhished, InsecurityMetadata()},
                               {InsecureType::kWeak, InsecurityMetadata()}};
@@ -1056,28 +905,13 @@ TEST_F(PasswordStoreTest, UpdateLoginWithPrimaryKey_UsernameChanges) {
 // ActionableError::kInactionable) to observers.
 TEST_F(PasswordStoreTest,
        OnErrorStateChangedFlowOnAndroidForegroundRefreshFailure) {
-  base::test::ScopedFeatureList feature_list(
-      features::kPasswordStorePropagatesActionableErrors);
-
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-
-  PasswordStoreBackend::RemoteChangesReceived remote_form_changes_received;
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(testing::WithArgs<0, 2>(
-          [&](PasswordStoreBackend::RemoteChangesReceived remote_changes,
-              base::OnceCallback<void(bool)> completion) {
-            remote_form_changes_received = std::move(remote_changes);
-            std::move(completion).Run(true);
-          }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
 
   store->Init();
   store->AddObserver(&mock_observer);
 
-  EXPECT_CALL(*mock_backend, GetAllLoginsAsync)
-      .WillOnce(testing::WithArg<0>([&](BackendLoginsOrErrorReply callback) {
-        std::move(callback).Run(kBackendError);
-      }));
+  fake_backend->ReturnErrorOnRequest(kBackendError);
 
   EXPECT_CALL(mock_observer,
               OnErrorStateChanged(store.get(), ActionableError::kNoError))
@@ -1085,7 +919,7 @@ TEST_F(PasswordStoreTest,
   EXPECT_CALL(mock_observer,
               OnErrorStateChanged(store.get(), ActionableError::kInactionable));
 
-  remote_form_changes_received.Run(std::nullopt);
+  fake_backend->NotifyAboutError();
 
   WaitForPasswordStore();
 
@@ -1098,20 +932,8 @@ TEST_F(PasswordStoreTest,
 // ActionableError::kNoError to observers via OnErrorStateChanged.
 TEST_F(PasswordStoreTest,
        OnErrorStateChangedFlowOnNonAndroidRemoteChangesNullopt) {
-  base::test::ScopedFeatureList feature_list(
-      features::kPasswordStorePropagatesActionableErrors);
-
   MockPasswordStoreObserver mock_observer;
-  auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-
-  PasswordStoreBackend::RemoteChangesReceived remote_form_changes_received;
-  EXPECT_CALL(*mock_backend, InitBackend)
-      .WillOnce(testing::WithArgs<0, 2>(
-          [&](PasswordStoreBackend::RemoteChangesReceived remote_changes,
-              base::OnceCallback<void(bool)> completion) {
-            remote_form_changes_received = std::move(remote_changes);
-            std::move(completion).Run(true);
-          }));
+  auto [store, fake_backend] = CreateUnownedStoreWithOwnedFakeBackend();
 
   store->Init();
   store->AddObserver(&mock_observer);
@@ -1119,7 +941,7 @@ TEST_F(PasswordStoreTest,
   EXPECT_CALL(mock_observer,
               OnErrorStateChanged(store.get(), ActionableError::kNoError));
 
-  remote_form_changes_received.Run(std::nullopt);
+  fake_backend->NotifyAboutError();
 
   WaitForPasswordStore();
 
@@ -1150,16 +972,45 @@ class PasswordStoreOriginTest : public PasswordStoreTest {
   scoped_refptr<PasswordStore> store_;
 };
 
+// Helper subclass of `FakePasswordStoreBackend` that holds back initialization
+// completion until `CompleteInit()` is explicitly called by the test. Used
+// to test operations queued on `PasswordStore` before init completes.
+class DelayedInitFakePasswordStoreBackend : public FakePasswordStoreBackend {
+ public:
+  using FakePasswordStoreBackend::FakePasswordStoreBackend;
+
+  void InitBackend(RemoteChangesReceived remote_form_changes_received,
+                   base::RepeatingClosure sync_enabled_or_disabled_cb,
+                   base::OnceCallback<void(bool)> completion) override {
+    FakePasswordStoreBackend::InitBackend(
+        std::move(remote_form_changes_received),
+        std::move(sync_enabled_or_disabled_cb), base::DoNothing());
+    init_completion_ = std::move(completion);
+  }
+
+  // Completes initialization by invoking the callback passed to `InitBackend`.
+  void CompleteInit(bool success = true) {
+    if (init_completion_) {
+      GetTaskRunner()->PostTask(
+          FROM_HERE, base::BindOnce(std::move(init_completion_), success));
+    }
+  }
+
+ private:
+  base::OnceCallback<void(bool)> init_completion_;
+};
+
 class PasswordStoreDelayedInitTest : public testing::Test {
  public:
   void SetUp() override {
-    auto [store, mock_backend] = CreateUnownedStoreWithOwnedMockBackend();
-    store_ = std::move(store);
-    mock_backend_ = mock_backend;
+    auto backend = std::make_unique<DelayedInitFakePasswordStoreBackend>(
+        password_manager::IsAccountStore(false));
+    backend_ = backend.get();
+    store_ = base::MakeRefCounted<PasswordStore>(std::move(backend));
   }
 
   void TearDown() override {
-    mock_backend_ = nullptr;
+    backend_ = nullptr;
     store_->ShutdownOnUIThread();
   }
 
@@ -1169,13 +1020,13 @@ class PasswordStoreDelayedInitTest : public testing::Test {
   }
 
   PasswordStore* store() { return store_.get(); }
-  MockPasswordStoreBackend* backend() { return mock_backend_.get(); }
+  DelayedInitFakePasswordStoreBackend* backend() { return backend_; }
 
  private:
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   scoped_refptr<PasswordStore> store_;
-  raw_ptr<MockPasswordStoreBackend> mock_backend_;
+  raw_ptr<DelayedInitFakePasswordStoreBackend> backend_ = nullptr;
 };
 
 TEST_F(PasswordStoreDelayedInitTest, AddLogin) {
@@ -1183,8 +1034,6 @@ TEST_F(PasswordStoreDelayedInitTest, AddLogin) {
       CreateTestPasswordFormDataByOrigin("http://foo.example.com/"),
       /*is_account_store=*/false);
 
-  base::OnceCallback<void(bool)> init_callback;
-  EXPECT_CALL(*backend(), InitBackend).WillOnce(MoveArg<2>(&init_callback));
   store()->Init();
 
   base::MockOnceClosure mock_callback;
@@ -1193,10 +1042,9 @@ TEST_F(PasswordStoreDelayedInitTest, AddLogin) {
   EXPECT_CALL(mock_callback, Run).Times(0);
   RunUntilIdle();
 
-  EXPECT_CALL(*backend(), AddLoginAsync)
-      .WillOnce(base::test::RunOnceCallback<1>(PasswordChanges()));
   EXPECT_CALL(mock_callback, Run);
-  std::move(init_callback).Run(true);
+  backend()->CompleteInit(true);
+  RunUntilIdle();
 }
 
 TEST_F(PasswordStoreDelayedInitTest, UpdateLogin) {
@@ -1204,8 +1052,6 @@ TEST_F(PasswordStoreDelayedInitTest, UpdateLogin) {
       CreateTestPasswordFormDataByOrigin("http://foo.example.com/"),
       /*is_account_store=*/false);
 
-  base::OnceCallback<void(bool)> init_callback;
-  EXPECT_CALL(*backend(), InitBackend).WillOnce(MoveArg<2>(&init_callback));
   store()->Init();
 
   base::MockOnceClosure mock_callback;
@@ -1214,10 +1060,9 @@ TEST_F(PasswordStoreDelayedInitTest, UpdateLogin) {
   EXPECT_CALL(mock_callback, Run).Times(0);
   RunUntilIdle();
 
-  EXPECT_CALL(*backend(), UpdateLoginAsync)
-      .WillOnce(base::test::RunOnceCallback<1>(PasswordChanges()));
   EXPECT_CALL(mock_callback, Run);
-  std::move(init_callback).Run(true);
+  backend()->CompleteInit(true);
+  RunUntilIdle();
 }
 
 TEST_F(PasswordStoreDelayedInitTest, GetAutofillableLogins) {
@@ -1225,8 +1070,6 @@ TEST_F(PasswordStoreDelayedInitTest, GetAutofillableLogins) {
       CreateTestPasswordFormDataByOrigin("http://foo.example.com/"),
       /*is_account_store=*/false);
 
-  base::OnceCallback<void(bool)> init_callback;
-  EXPECT_CALL(*backend(), InitBackend).WillOnce(MoveArg<2>(&init_callback));
   store()->Init();
 
   MockPasswordStoreConsumer mock_consumer;
@@ -1235,10 +1078,9 @@ TEST_F(PasswordStoreDelayedInitTest, GetAutofillableLogins) {
   EXPECT_CALL(mock_consumer, OnGetPasswordStoreResultsOrErrorFrom).Times(0);
   RunUntilIdle();
 
-  EXPECT_CALL(*backend(), GetAutofillableLoginsAsync)
-      .WillOnce(base::test::RunOnceCallback<0>(BackendLoginsResult()));
   EXPECT_CALL(mock_consumer, OnGetPasswordStoreResultsOrErrorFrom);
-  std::move(init_callback).Run(true);
+  backend()->CompleteInit(true);
+  RunUntilIdle();
 }
 
 }  // namespace password_manager

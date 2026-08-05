@@ -48,24 +48,17 @@ WebEntities::WebEntities(bool xml_entities) {
     entities_map_.Set(0x0027, String("#39"));
 }
 
-String WebEntities::EntityNameByCode(int code) const {
-  // FIXME: We should use find so we only do one hash lookup.
-  if (entities_map_.Contains(code))
-    return entities_map_.at(code);
-  return "";
-}
-
 String WebEntities::ConvertEntitiesInString(const String& value) const {
   StringBuilder result;
   bool did_convert_entity = false;
   unsigned length = value.length();
   for (unsigned i = 0; i < length; ++i) {
     UChar c = value[i];
-    // FIXME: We should use find so we only do one hash lookup.
-    if (entities_map_.Contains(c)) {
+    const auto it = entities_map_.find(c);
+    if (it != entities_map_.end()) {
       did_convert_entity = true;
       result.Append('&');
-      result.Append(entities_map_.at(c));
+      result.Append(it->value);
       result.Append(';');
     } else {
       result.Append(c);

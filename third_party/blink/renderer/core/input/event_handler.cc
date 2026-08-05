@@ -929,6 +929,13 @@ WebInputEventResult EventHandler::HandleMousePressEvent(
   if (!mouse_event.FromTouch())
     frame_->Selection().SetCaretBlinkingSuspended(true);
 
+  if (mev.GetHitTestResult().InnerNode() &&
+      mouse_event.button == WebPointerProperties::Button::kLeft) {
+    HitTestResult result = mev.GetHitTestResult();
+    result.SetToShadowHostIfInUAShadowRoot();
+    frame_->GetChromeClient().WillDispatchPointerDown(*result.InnerNode());
+  }
+
   WebInputEventResult event_result = DispatchMousePointerEvent(
       WebInputEvent::Type::kPointerDown, mev.InnerPossiblyPseudoElement(),
       mev.Event(), Vector<WebMouseEvent>(), Vector<WebMouseEvent>());
@@ -995,7 +1002,7 @@ WebInputEventResult EventHandler::HandleMousePressEvent(
     DCHECK_EQ(WebInputEvent::Type::kMouseDown, mouse_event.GetType());
     HitTestResult result = mev.GetHitTestResult();
     result.SetToShadowHostIfInUAShadowRoot();
-    frame_->GetChromeClient().OnMouseDown(*result.InnerNode());
+    frame_->GetChromeClient().DidDispatchMouseDown(*result.InnerNode());
   }
 
   return event_result;

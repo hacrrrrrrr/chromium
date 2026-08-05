@@ -13,11 +13,14 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/process/process.h"
 #include "base/synchronization/atomic_flag.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
@@ -105,7 +108,7 @@ void QueueTask(std::unique_ptr<AfterStartupTask> queued_task) {
   GetAfterStartupTasks().push_back(queued_task.release());
 }
 
-void SetBrowserStartupIsComplete() {
+void SetBrowserStartupIsComplete(StartupIsCompleteReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (IsBrowserStartupComplete())
@@ -118,6 +121,7 @@ void SetBrowserStartupIsComplete() {
   TRACE_EVENT_INSTANT1("startup", "Startup.StartupComplete",
                        TRACE_EVENT_SCOPE_GLOBAL, "BrowserCount", browser_count);
   GetStartupCompleteFlag().Set();
+  base::UmaHistogramEnumeration("Startup.BrowserStartupCompleteReason", reason);
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS)
   // Process::Current().CreationTime() is not available on all platforms.
@@ -151,7 +155,7 @@ bool g_is_monitoring_started = false;
 // registered.
 int g_ref_count = 1;
 
-void MaybeSignalStartupComplete() {
+void MaybeSignalStartupComplete(StartupIsCompleteReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (g_ref_count > 0) {
     return;
@@ -160,14 +164,14 @@ void MaybeSignalStartupComplete() {
   // task is a convenient way to ensure this: if the UI thread is no longer
   // accepting tasks, this won't run.
   content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE, base::BindOnce(&SetBrowserStartupIsComplete));
+      FROM_HERE, base::BindOnce(&SetBrowserStartupIsComplete, reason));
 }
 
-void ReleaseRef() {
+void ReleaseRef(StartupIsCompleteReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CHECK_GT(g_ref_count, 0);
   g_ref_count--;
-  MaybeSignalStartupComplete();
+  MaybeSignalStartupComplete(reason);
 }
 
 // Observes the first visible page load and releases the page load reference.
@@ -190,24 +194,63 @@ class StartupObserver : public performance_manager::GraphOwned,
 
   ~StartupObserver() override = default;
 
-  static void Start();
+  static void Start(performance_manager::Graph* graph);
 
  private:
   using LoadingState = performance_manager::PageNode::LoadingState;
 
   StartupObserver() {
-    startup_ref_ = AfterStartupTaskUtils::RegisterStartupInProgressRef();
+    // If this is destroyed before a visible page is observed, log
+    // kNoVisiblePageFound.
+    startup_ref_ = AfterStartupTaskUtils::RegisterStartupInProgressRef(
+        StartupIsCompleteReason::kNoVisiblePageFound);
   }
 
-  void OnFirstVisiblePageLoadComplete() {
+  void StopObserving() {
     startup_ref_.reset();
     // This will result in delete getting called.
-    TakeFromGraph();
+    GetOwningGraph()->TakeFromGraph(this);
+  }
+
+  bool CheckIfPageIsInteresting(
+      const performance_manager::PageNode* page_node) {
+    // Only interested in visible tabs when feature is enabled, or any visible
+    // page node when disabled.
+    if (!page_node->IsVisible()) {
+      return false;
+    }
+    if (page_node->GetType() != performance_manager::PageType::kTab &&
+        base::FeatureList::IsEnabled(
+            features::kImprovedStartupBestEffortDelay)) {
+      return false;
+    }
+    // A visible page has been observed, so don't report kNoVisiblePageFound.
+    no_visible_tab_timer_.Stop();
+    startup_ref_->SetStartupIsCompleteReason(
+        StartupIsCompleteReason::kVisiblePageLoadingFinished);
+    return true;
   }
 
   // GraphOwned overrides
   void OnPassedToGraph(performance_manager::Graph* graph) override {
     graph->AddPageNodeObserver(this);
+    if (base::FeatureList::IsEnabled(
+            features::kImprovedStartupBestEffortDelay)) {
+      // The observer will only watch for pages of type kTab, so also add a
+      // timeout in case none appear (eg. first-run dialog or profile picker).
+      // First check if any were added before the observer was created.
+      for (const performance_manager::PageNode* page_node :
+           graph->GetAllPageNodes()) {
+        if (CheckIfPageIsInteresting(page_node)) {
+          return;
+        }
+      }
+      const base::TimeDelta timeout =
+          features::kStartupDelayVisibleTabTimeout.Get();
+      CHECK(timeout.is_positive());
+      no_visible_tab_timer_.Start(FROM_HERE, timeout, this,
+                                  &StartupObserver::StopObserving);
+    }
   }
 
   void OnTakenFromGraph(performance_manager::Graph* graph) override {
@@ -215,38 +258,60 @@ class StartupObserver : public performance_manager::GraphOwned,
   }
 
   // PageNodeObserver overrides
+  void OnPageNodeAdded(
+      const performance_manager::PageNode* page_node) override {
+    CheckIfPageIsInteresting(page_node);
+  }
+
+  void OnTypeChanged(const performance_manager::PageNode* page_node,
+                     performance_manager::PageType previous_type) override {
+    CheckIfPageIsInteresting(page_node);
+  }
+
+  void OnIsVisibleChanged(
+      const performance_manager::PageNode* page_node) override {
+    CheckIfPageIsInteresting(page_node);
+  }
+
   void OnLoadingStateChanged(const performance_manager::PageNode* page_node,
                              LoadingState previous_state) override {
-    // Only interested in visible tabs when feature is enabled, or any visible
-    // page node when disabled.
-    if (page_node->IsVisible() &&
-        (page_node->GetType() == performance_manager::PageType::kTab ||
-         !base::FeatureList::IsEnabled(
-             features::kImprovedStartupBestEffortDelay))) {
-      LoadingState state = page_node->GetLoadingState();
-      if (state == LoadingState::kLoadedIdle ||
-          state == LoadingState::kLoadingTimedOut) {
-        OnFirstVisiblePageLoadComplete();
-      }
+    if (!CheckIfPageIsInteresting(page_node)) {
+      return;
+    }
+
+    LoadingState state = page_node->GetLoadingState();
+    if (state == LoadingState::kLoadedIdle) {
+      StopObserving();
+    } else if (state == LoadingState::kLoadingTimedOut &&
+               (!base::FeatureList::IsEnabled(
+                    features::kImprovedStartupBestEffortDelay) ||
+                features::kStartupDelayStopOnLoadingTimedOut.Get())) {
+      startup_ref_->SetStartupIsCompleteReason(
+          StartupIsCompleteReason::kVisiblePageLoadingTimedOut);
+      StopObserving();
     }
   }
 
-  void TakeFromGraph() {
-    CHECK(performance_manager::PerformanceManager::IsAvailable());
-    performance_manager::PerformanceManager::GetGraph()->TakeFromGraph(this);
-  }
-
   std::unique_ptr<AfterStartupTaskUtils::StartupInProgressRef> startup_ref_;
+  base::OneShotTimer no_visible_tab_timer_;
 };
 
 // static
-void StartupObserver::Start() {
-  CHECK(performance_manager::PerformanceManager::IsAvailable());
+void StartupObserver::Start(performance_manager::Graph* graph) {
+  // Tests can pass a null `graph` to disable the StartupObserver.
+  if (!graph) {
+    return;
+  }
+
+  if (base::FeatureList::IsEnabled(features::kImprovedStartupBestEffortDelay) &&
+      features::kStartupDelayVisibleTabTimeout.Get().is_zero()) {
+    // Zero means don't observe visible tabs.
+    return;
+  }
 
   // Pass a new StartupObserver to the performance manager so we can get
   // notified when loading completes. The performance manager takes ownership.
-  performance_manager::PerformanceManager::GetGraph()->PassToGraph(
-      base::WrapUnique(new StartupObserver()));
+  graph->PassToGraph(base::WrapUnique(new StartupObserver()));
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -256,23 +321,28 @@ void StartupObserver::Start() {
 void AfterStartupTaskUtils::BeginMonitoringStartupCompletion() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CHECK(!g_is_monitoring_started);
-  AfterStartupTaskUtils::FinishStartupRegistration(
-      /*include_default_refs=*/true);
+  performance_manager::Graph* graph = nullptr;
+#if !BUILDFLAG(IS_ANDROID)
+  // StartupObserver isn't used on Android, so no need for PerformanceManager.
+  CHECK(performance_manager::PerformanceManager::IsAvailable());
+  graph = performance_manager::PerformanceManager::GetGraph();
+#endif  // !BUILDFLAG(IS_ANDROID)
+  AfterStartupTaskUtils::FinishStartupRegistration(graph);
 }
 
 // static
 void AfterStartupTaskUtils::BeginMonitoringStartupCompletionForTesting(
-    bool include_default_refs) {
+    performance_manager::Graph* graph) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (g_is_monitoring_started) {
     return;
   }
-  AfterStartupTaskUtils::FinishStartupRegistration(include_default_refs);
+  AfterStartupTaskUtils::FinishStartupRegistration(graph);
 }
 
 // static
 void AfterStartupTaskUtils::FinishStartupRegistration(
-    bool include_default_refs) {
+    performance_manager::Graph* graph) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_is_monitoring_started = true;
 #if BUILDFLAG(IS_CHROMEOS)
@@ -281,45 +351,49 @@ void AfterStartupTaskUtils::FinishStartupRegistration(
   if (ash::LoginDisplayHost::default_host() &&
       !ash::LoginDisplayHost::default_host()->IsWebUIStarted()) {
     content::GetUIThreadTaskRunner({})->PostTask(
-        FROM_HERE, base::BindOnce(&SetBrowserStartupIsComplete));
+        FROM_HERE,
+        base::BindOnce(&SetBrowserStartupIsComplete,
+                       StartupIsCompleteReason::kChromeOSLoginScreen));
     return;
   }
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
-  if (include_default_refs) {
-    StartupObserver::Start();
-  }
+  StartupObserver::Start(graph);
 
   // Release the implicit reference representing the startup sequence. This
   // enables considering startup complete once all other registered references
   // (e.g., paint, idle, restore) are released.
-  ReleaseRef();
+  ReleaseRef(StartupIsCompleteReason::kStartupRegistrationDone);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   // Add failsafe timeout
   content::GetUIThreadTaskRunner({})->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&SetBrowserStartupIsComplete),
-      base::Minutes(3));
+      FROM_HERE,
+      base::BindOnce(&SetBrowserStartupIsComplete,
+                     StartupIsCompleteReason::kFailsafeTimeout),
+      GetFailsafeTimeout());
 }
 
 #if !BUILDFLAG(IS_ANDROID)
 AfterStartupTaskUtils::StartupInProgressRef::StartupInProgressRef(
-    base::OnceClosure release_callback)
-    : release_runner_(std::move(release_callback)) {}
+    StartupIsCompleteReason reason)
+    : reason_(reason) {}
 
-AfterStartupTaskUtils::StartupInProgressRef::~StartupInProgressRef() = default;
+AfterStartupTaskUtils::StartupInProgressRef::~StartupInProgressRef() {
+  ReleaseRef(reason_);
+}
 
 // static
 std::unique_ptr<AfterStartupTaskUtils::StartupInProgressRef>
-AfterStartupTaskUtils::RegisterStartupInProgressRef() {
+AfterStartupTaskUtils::RegisterStartupInProgressRef(
+    StartupIsCompleteReason reason) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (IsBrowserStartupComplete()) {
     return nullptr;
   }
   g_ref_count++;
-  return std::make_unique<AfterStartupTaskUtils::StartupInProgressRef>(
-      base::BindOnce(&ReleaseRef));
+  return std::make_unique<AfterStartupTaskUtils::StartupInProgressRef>(reason);
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
@@ -337,12 +411,14 @@ void AfterStartupTaskUtils::PostTask(
   QueueTask(std::move(queued_task));
 }
 
-void AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting() {
-  ::SetBrowserStartupIsComplete();
+void AfterStartupTaskUtils::SetBrowserStartupIsCompleteForTesting(
+    StartupIsCompleteReason reason) {
+  ::SetBrowserStartupIsComplete(reason);
 }
 
-void AfterStartupTaskUtils::SetBrowserStartupIsComplete() {
-  ::SetBrowserStartupIsComplete();
+void AfterStartupTaskUtils::SetBrowserStartupIsComplete(
+    StartupIsCompleteReason reason) {
+  ::SetBrowserStartupIsComplete(reason);
 }
 
 bool AfterStartupTaskUtils::IsBrowserStartupComplete() {
@@ -360,4 +436,11 @@ void AfterStartupTaskUtils::UnsafeResetForTesting() {
 #endif
   g_is_monitoring_started = false;
   DCHECK(!IsBrowserStartupComplete());
+}
+
+// static
+base::TimeDelta AfterStartupTaskUtils::GetFailsafeTimeout() {
+  return base::FeatureList::IsEnabled(features::kImprovedStartupBestEffortDelay)
+             ? features::kStartupDelayFailsafeTimeout.Get()
+             : base::Minutes(3);
 }

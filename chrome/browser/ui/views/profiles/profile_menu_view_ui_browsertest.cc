@@ -356,6 +356,7 @@ const ProfileMenuViewPixelTestParam kPixelTestParams[] = {
         .pixel_test_param = {.test_suffix = "CrossDeviceSigninPromoNewBadge"},
         .signin_status = SigninStatusPixelTestParam::kSignedInNoSync,
         .with_cross_device_signin_promo = true,
+        .with_cross_device_signin_new_badge = true,
     },
 };
 
@@ -703,7 +704,7 @@ class ProfileMenuViewPixelTest
       if (GetParam().with_ai_avatar_ring) {
         ProfileAttributesStorage& storage =
             profile_manager->GetProfileAttributesStorage();
-        // Enable the AI ring for a subset of the profiles.
+        // Enable the AI subscription for a subset of the profiles.
         for (const auto& path : {default_profile.GetPath(), dark_profile_path,
                                  theme_profile_path}) {
           storage.GetProfileAttributesWithPath(path)->SetAiSubscriptionTier(1);
@@ -747,13 +748,13 @@ class ProfileMenuViewPixelTest
     }
 
     if (GetParam().with_local_data == WithLocalData::kWithBookmarksLocalData) {
-      browser()->profile()->GetPrefs()->SetString(
+      browser()->GetProfile()->GetPrefs()->SetString(
           prefs::kGoogleServicesLastSyncingGaiaId,
           account_info.gaia.ToString());
     }
 
     if (GetParam().with_ai_avatar_ring) {
-      browser()->profile()->GetPrefs()->SetInteger(
+      browser()->GetProfile()->GetPrefs()->SetInteger(
           subscription_eligibility::prefs::kAiSubscriptionTier, 1);
     }
 

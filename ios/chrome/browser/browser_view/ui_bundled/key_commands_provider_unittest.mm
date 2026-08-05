@@ -80,7 +80,7 @@ class KeyCommandsProviderTest : public PlatformTest {
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
     profile_ = std::move(builder).Build();
-    scene_state_ = [[SceneState alloc] initWithAppState:nil];
+    scene_state_ = [[SceneState alloc] init];
     LayoutGuideSceneAgent* layout_guide_scene_agent =
         [[LayoutGuideSceneAgent alloc] init];
     [scene_state_ addAgent:layout_guide_scene_agent];
@@ -1022,8 +1022,6 @@ TEST_F(KeyCommandsProviderTest, ClearingBrowserDoesntCrash) {
 
 // Checks that some commands are not available in ReadingMode.
 TEST_F(KeyCommandsProviderTest, TestReadingMode) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(kEnableReaderModeInUS);
   // Open a tab with a URL.
   GURL url = GURL("https://test/url");
   auto web_state_unique = CreateFakeWebStateWithURL(url);

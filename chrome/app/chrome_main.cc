@@ -14,11 +14,14 @@
 #include "base/environment.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/sampling_heap_profiler/poisson_allocation_sampler.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#if !defined(BUILDING_CHROME_RENDERER)
 #include "chrome/app/chrome_main_delegate.h"
+#endif
 #include "chrome/app/startup_timestamps.h"
 #include "chrome/browser/headless/headless_mode_init.h"
 #include "chrome/common/buildflags.h"
@@ -152,12 +155,12 @@ int ChromeMain(int argc, const char** argv) {
   if (install_static::InstallDetails::Get().VersionMismatch()) {
     base::debug::DumpWithoutCrashing();
   }
+  base::CommandLine::Init(0, nullptr);
 #else
   params.argc = argc;
   params.argv = argv;
   base::CommandLine::Init(params.argc, params.argv);
 #endif  // BUILDFLAG(IS_WIN)
-  base::CommandLine::Init(0, nullptr);
 
   base::CommandLine* command_line(base::CommandLine::ForCurrentProcess());
 

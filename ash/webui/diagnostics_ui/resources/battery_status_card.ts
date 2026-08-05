@@ -111,20 +111,21 @@ export class BatteryStatusCardElement extends BatteryStatusCardElementBase {
   }
 
 
-  testSuiteStatus: TestSuiteStatus;
-  batteryIcon: string;
-  iconClass: string;
-  isActive: boolean;
-  private batteryChargeStatus: BatteryChargeStatus;
-  private batteryHealth: BatteryHealth;
-  private batteryInfo: BatteryInfo;
-  private routines: RoutineType[];
-  private powerTimeString: string;
-  private systemDataProvider: SystemDataProviderInterface =
+  declare testSuiteStatus: TestSuiteStatus;
+  declare batteryIcon: string;
+  declare iconClass: string;
+  declare isActive: boolean;
+  declare private batteryChargeStatus: BatteryChargeStatus;
+  declare private batteryHealth: BatteryHealth;
+  declare private batteryInfo: BatteryInfo;
+  declare private routines: RoutineType[];
+  declare private powerTimeString: string;
+  private readonly systemDataProvider: SystemDataProviderInterface =
       getSystemDataProvider();
   private batteryChargeStatusObserverReceiver:
-      BatteryChargeStatusObserverReceiver|null;
-  private batteryHealthObserverReceiver: BatteryHealthObserverReceiver|null;
+      BatteryChargeStatusObserverReceiver|null = null;
+  private batteryHealthObserverReceiver: BatteryHealthObserverReceiver|null =
+      null;
 
   constructor() {
     super();

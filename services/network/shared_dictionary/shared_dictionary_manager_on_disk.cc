@@ -7,6 +7,8 @@
 #include "base/command_line.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory_coordinator/traits.h"
+#include "base/memory_coordinator/utils.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
@@ -18,6 +20,7 @@
 #include "components/url_pattern/simple_url_pattern_matcher.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
+#include "net/shared_dictionary/shared_dictionary_isolation_key.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "services/network/public/cpp/request_destination.h"
 #include "services/network/shared_dictionary/shared_dictionary_cache.h"
@@ -46,6 +49,13 @@ std::string ToCommaSeparatedString(
   }
   return base::JoinString(destinations, ",");
 }
+
+constexpr base::MemoryConsumerTraits kOnDiskTraits(
+    base::MemoryConsumerTraits::EstimatedMemoryUsage::kMedium,
+    base::MemoryConsumerTraits::ReleaseMemoryCost::kRequiresTraversal,
+    base::MemoryConsumerTraits::InformationRetention::kLossless,
+    base::MemoryConsumerTraits::ExecutionType::kAsynchronous,
+    base::MemoryConsumerTraits::IsStateful::kYes);
 
 }  // namespace
 
@@ -481,7 +491,8 @@ SharedDictionaryManagerOnDisk::SharedDictionaryManagerOnDisk(
 #endif  // BUILDFLAG(IS_ANDROID)
     scoped_refptr<disk_cache::BackendFileOperationsFactory>
         file_operations_factory)
-    : cache_max_size_(cache_max_size),
+    : SharedDictionaryManager("SharedDictionaryManagerOnDisk", kOnDiskTraits),
+      cache_max_size_(cache_max_size),
       cache_max_count_(cache_max_count),
       metadata_store_(database_path,
                       /*client_task_runner=*/
@@ -538,7 +549,16 @@ void SharedDictionaryManagerOnDisk::GetUsageInfo(
              const std::vector<net::SharedDictionaryUsageInfo>&)> callback,
          net::SQLitePersistentSharedDictionaryStore::UsageInfoOrError result) {
         if (result.has_value()) {
-          std::move(callback).Run(std::move(result.value()));
+          const net::SharedDictionaryIsolationKey& pervasive_key =
+              net::SharedDictionaryIsolationKey::GetPervasiveIsolationKey();
+          std::vector<net::SharedDictionaryUsageInfo> filtered;
+          for (auto& info : result.value()) {
+            // Skip reporting on the shared pervasive dictionary partition
+            if (info.isolation_key != pervasive_key) {
+              filtered.push_back(std::move(info));
+            }
+          }
+          std::move(callback).Run(std::move(filtered));
         } else {
           std::move(callback).Run({});
         }
@@ -583,17 +603,21 @@ void SharedDictionaryManagerOnDisk::GetOriginsBetween(
           [](base::OnceCallback<void(const std::vector<url::Origin>&)> callback,
              net::SQLitePersistentSharedDictionaryStore::OriginListOrError
                  result) {
-            std::move(callback).Run(
-                result.value_or(std::vector<url::Origin>()));
+            std::vector<url::Origin> origins;
+            if (result.has_value()) {
+              const url::Origin& pervasive_origin =
+                  net::SharedDictionaryIsolationKey::GetPervasiveIsolationKey()
+                      .frame_origin();
+              for (auto& origin : result.value()) {
+                // Skip reporting on the shared pervasive dictionary partition
+                if (origin != pervasive_origin) {
+                  origins.push_back(std::move(origin));
+                }
+              }
+            }
+            std::move(callback).Run(std::move(origins));
           },
           std::move(callback)));
-}
-
-void SharedDictionaryManagerOnDisk::HandleMemoryPressure(
-    base::MemoryPressureLevel level) {
-  if (level != base::MEMORY_PRESSURE_LEVEL_NONE) {
-    dictionary_cache_->Clear();
-  }
 }
 
 scoped_refptr<SharedDictionaryWriter>
@@ -787,6 +811,9 @@ void SharedDictionaryManagerOnDisk::MaybeStartSerializedTask() {
 void SharedDictionaryManagerOnDisk::OnDictionaryDeleted(
     const std::set<base::UnguessableToken>& disk_cache_key_tokens,
     bool need_to_doom_disk_cache_entries) {
+  if (disk_cache_key_tokens.empty()) {
+    return;
+  }
   if (need_to_doom_disk_cache_entries) {
     for (const base::UnguessableToken& token : disk_cache_key_tokens) {
       disk_cache().DoomEntry(token.ToString(), base::DoNothing());
@@ -794,6 +821,10 @@ void SharedDictionaryManagerOnDisk::OnDictionaryDeleted(
   }
   for (auto& it : storages()) {
     reinterpret_cast<SharedDictionaryStorageOnDisk*>(it.second.get())
+        ->OnDictionaryDeleted(disk_cache_key_tokens);
+  }
+  if (pervasive_storage()) {
+    reinterpret_cast<SharedDictionaryStorageOnDisk*>(pervasive_storage())
         ->OnDictionaryDeleted(disk_cache_key_tokens);
   }
 }
@@ -839,6 +870,13 @@ void SharedDictionaryManagerOnDisk::MaybePostExpiredDictionaryDeletionTask() {
             }
           },
           weak_factory_.GetWeakPtr())));
+}
+
+void SharedDictionaryManagerOnDisk::OnReleaseMemory() {
+  SharedDictionaryManager::OnReleaseMemory();
+  if (memory_limit() <= base::kModerateMemoryPressureThreshold) {
+    dictionary_cache_->Clear();
+  }
 }
 
 }  // namespace network

@@ -171,41 +171,134 @@ public class AtMemoryBottomSheetViewTest {
     }
 
     @Test
-    public void testNoticeVisibleProperty() {
-        AtMemoryHomeView homeView = mView.getHomeView();
-        View noticeContainer = homeView.findViewById(R.id.notice_container);
-        assertNotNull(noticeContainer);
+    public void testNoticeItemViewBinding() {
+        View noticeView =
+                android.view.LayoutInflater.from(mContext)
+                        .inflate(R.layout.at_memory_bottom_sheet_notice_item, null);
 
+        Runnable okClicked = mock(Runnable.class);
+        Runnable settingsClicked = mock(Runnable.class);
         PropertyModel model =
-                new PropertyModel.Builder(HomeProperties.ALL_KEYS)
-                        .with(HomeProperties.IS_NOTICE_VISIBLE, true)
+                new PropertyModel.Builder(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties.ALL_KEYS)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties.ON_OK_CLICKED,
+                                okClicked)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .ON_SETTINGS_CLICKED,
+                                settingsClicked)
                         .build();
+
         PropertyModelChangeProcessor.create(
-                model, homeView, AtMemoryBottomSheetViewBinder::bindAtMemoryHomeView);
+                model,
+                (AtMemoryBottomSheetNoticeView) noticeView,
+                AtMemoryBottomSheetViewBinder::bindNoticeItemView);
 
-        assertEquals(View.VISIBLE, noticeContainer.getVisibility());
-
-        model.set(HomeProperties.IS_NOTICE_VISIBLE, false);
-
-        assertEquals(View.GONE, noticeContainer.getVisibility());
+        View noticeOkButton = noticeView.findViewById(R.id.notice_ok_button);
+        assertNotNull(noticeOkButton);
+        noticeOkButton.performClick();
+        verify(okClicked).run();
     }
 
     @Test
-    public void testNoticeOkClickListenerProperty() {
-        AtMemoryHomeView homeView = mView.getHomeView();
-        View noticeOkButton = homeView.findViewById(R.id.notice_ok_button);
-        assertNotNull(noticeOkButton);
+    public void testTextWithClickableLinkViewBinding() {
+        View textWithClickableLinkView =
+                android.view.LayoutInflater.from(mContext)
+                        .inflate(
+                                R.layout.at_memory_bottom_sheet_text_with_clickable_link_item,
+                                null);
 
-        Runnable clicked = mock(Runnable.class);
+        Runnable linkClicked = mock(Runnable.class);
         PropertyModel model =
-                new PropertyModel.Builder(HomeProperties.ALL_KEYS)
-                        .with(HomeProperties.NOTICE_OK_CLICK_LISTENER, clicked)
+                new PropertyModel.Builder(
+                                AtMemoryBottomSheetProperties.TextWithClickableLinkProperties
+                                        .ALL_KEYS)
+                        .with(
+                                AtMemoryBottomSheetProperties.TextWithClickableLinkProperties.TEXT,
+                                "Test string with <link>link text</link>")
+                        .with(
+                                AtMemoryBottomSheetProperties.TextWithClickableLinkProperties
+                                        .ON_LINK_CLICKED,
+                                linkClicked)
                         .build();
-        PropertyModelChangeProcessor.create(
-                model, homeView, AtMemoryBottomSheetViewBinder::bindAtMemoryHomeView);
 
-        noticeOkButton.performClick();
-        verify(clicked).run();
+        PropertyModelChangeProcessor.create(
+                model,
+                (AtMemoryBottomSheetTextWithClickableLinkView) textWithClickableLinkView,
+                AtMemoryBottomSheetViewBinder::bindTextWithClickableLinkView);
+
+        TextView textView = textWithClickableLinkView.findViewById(R.id.text);
+        assertNotNull(textView);
+        assertEquals("Test string with link text", textView.getText().toString());
+    }
+
+    @Test
+    public void testNoticeItemViewBinding_isLoggingDisabled() {
+        View noticeView =
+                android.view.LayoutInflater.from(mContext)
+                        .inflate(R.layout.at_memory_bottom_sheet_notice_item, null);
+
+        Runnable settingsClicked = mock(Runnable.class);
+        PropertyModel model =
+                new PropertyModel.Builder(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties.ALL_KEYS)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .IS_LOGGING_ALLOWED,
+                                false)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .ON_SETTINGS_CLICKED,
+                                settingsClicked)
+                        .build();
+
+        PropertyModelChangeProcessor.create(
+                model,
+                (AtMemoryBottomSheetNoticeView) noticeView,
+                AtMemoryBottomSheetViewBinder::bindNoticeItemView);
+
+        TextView noticeTextView = noticeView.findViewById(R.id.notice_text);
+        assertNotNull(noticeTextView);
+        String expectedTextWithoutSpan =
+                mContext.getString(R.string.at_memory_notice_text_no_logging)
+                        .replace("<link>", "")
+                        .replace("</link>", "");
+        assertEquals(expectedTextWithoutSpan, noticeTextView.getText().toString());
+    }
+
+    @Test
+    public void testNoticeItemViewBinding_isLoggingEnabled() {
+        View noticeView =
+                android.view.LayoutInflater.from(mContext)
+                        .inflate(R.layout.at_memory_bottom_sheet_notice_item, null);
+
+        Runnable settingsClicked = mock(Runnable.class);
+        PropertyModel model =
+                new PropertyModel.Builder(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties.ALL_KEYS)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .IS_LOGGING_ALLOWED,
+                                true)
+                        .with(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .ON_SETTINGS_CLICKED,
+                                settingsClicked)
+                        .build();
+
+        PropertyModelChangeProcessor.create(
+                model,
+                (AtMemoryBottomSheetNoticeView) noticeView,
+                AtMemoryBottomSheetViewBinder::bindNoticeItemView);
+
+        TextView noticeTextView = noticeView.findViewById(R.id.notice_text);
+        assertNotNull(noticeTextView);
+        String expectedTextWithoutSpan =
+                mContext.getString(R.string.at_memory_notice_text)
+                        .replace("<link>", "")
+                        .replace("</link>", "");
+        assertEquals(expectedTextWithoutSpan, noticeTextView.getText().toString());
     }
 
     @Test
@@ -280,12 +373,13 @@ public class AtMemoryBottomSheetViewTest {
     @Test
     public void testHeightRatiosWhenSearchHasFocus() {
         when(mBottomSheetController.getContainerHeight()).thenReturn(1000);
+        when(mBottomSheetController.getMaxSheetWidth()).thenReturn(500);
 
         AtMemoryBottomSheetContent content =
                 new AtMemoryBottomSheetContent(mView, mBottomSheetController);
 
-        assertEquals(HeightMode.DISABLED, content.getHalfHeightRatio(), 0.01f);
-        assertTrue(content.getFullHeightRatio() <= 0.5f);
+        assertTrue(content.getHalfHeightRatio() > 0.0f && content.getHalfHeightRatio() <= 0.5f);
+        assertEquals(1.0f, content.getFullHeightRatio(), 0.01f);
 
         EditText searchView = mView.getContentView().findViewById(R.id.search_query_input);
         searchView.requestFocus();
@@ -298,14 +392,15 @@ public class AtMemoryBottomSheetViewTest {
     @Test
     public void testHeightRatiosOnFlyoutScreen() {
         when(mBottomSheetController.getContainerHeight()).thenReturn(1000);
+        when(mBottomSheetController.getMaxSheetWidth()).thenReturn(500);
 
         AtMemoryBottomSheetContent content =
                 new AtMemoryBottomSheetContent(mView, mBottomSheetController);
 
         mView.setCurrentScreen(ScreenId.FLYOUT_SCREEN);
 
-        assertEquals(HeightMode.DISABLED, content.getHalfHeightRatio(), 0.01f);
-        assertEquals(HeightMode.WRAP_CONTENT, content.getFullHeightRatio(), 0.01f);
+        assertTrue(content.getHalfHeightRatio() > 0.0f && content.getHalfHeightRatio() <= 0.5f);
+        assertEquals(1.0f, content.getFullHeightRatio(), 0.01f);
     }
 
     @Test

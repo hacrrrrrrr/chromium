@@ -132,11 +132,18 @@ void FragmentBuilder::PropagateStickyDescendants(
     const PhysicalFragment& child) {
   const PhysicalAxes scrollable_axes = GetOverflowScrollAxes();
 
+  bool single_axis_scroller_position_sticky = false;
+
   if (child.HasStickyConstrainedPosition()) {
     const PhysicalAxes axes =
         LayoutBoxModelObject::StickyConstrainedAxes(child.Style());
     const PhysicalAxes consumed = scrollable_axes & axes;
     const PhysicalAxes pending = axes ^ consumed;
+    // Sticky descendant continues propagation to ancestor through this
+    // single-axis scroll container.
+    if (scrollable_axes && pending) {
+      single_axis_scroller_position_sticky = true;
+    }
 
     EnsureStickyDescendants().emplace_back(
         To<LayoutBoxModelObject>(child.GetMutableLayoutObject()), consumed,
@@ -147,9 +154,18 @@ void FragmentBuilder::PropagateStickyDescendants(
     if (auto* pending_obj = item.GetIfPending()) {
       const PhysicalAxes consumed = scrollable_axes & item.PendingAxes();
       const PhysicalAxes pending = item.PendingAxes() ^ consumed;
+      // Sticky descendant continues propagation to ancestor through this
+      // single-axis scroll container.
+      if (scrollable_axes && pending) {
+        single_axis_scroller_position_sticky = true;
+      }
 
       EnsureStickyDescendants().emplace_back(pending_obj, consumed, pending);
     }
+  }
+
+  if (single_axis_scroller_position_sticky) {
+    child.GetDocument().CountUse(WebFeature::kSingleAxisScrollerPositionSticky);
   }
 }
 
@@ -711,25 +727,25 @@ void FragmentBuilder::TransferOutOfFlowCandidates(
 
 void FragmentBuilder::MoveOutOfFlowDescendantCandidatesToDescendants() {
   DCHECK(oof_positioned_descendants_.empty());
-  std::swap(oof_positioned_candidates_, oof_positioned_descendants_);
 
-  const auto* layout_inline = DynamicTo<LayoutInline>(layout_object_);
-  if (!layout_inline) {
-    return;
-  }
-
-  for (LogicalOofPositionedNode& candidate : oof_positioned_descendants_) {
-    // If we are inside the inline algorithm, (and creating a fragment for a
-    // <span> or similar), we may add a child (e.g. an atomic-inline) which has
-    // OOF descandants.
-    //
-    // This checks if the object creating this box will be the container for
-    // the given descendant.
-    if (!candidate.InlineContainer() &&
-        IsInlineContainerForNode(candidate.Node(), layout_inline)) {
-      candidate.SetInlineContainer(layout_inline);
+  // If we are inside the inline algorithm, (and creating a fragment for a
+  // <span> or similar), we may add a child (e.g. an atomic-inline) which has
+  // OOF descandants.
+  //
+  // This checks if the object creating this box will be the container for the
+  // given descendant.
+  if (const auto* layout_inline = DynamicTo<LayoutInline>(layout_object_)) {
+    if (layout_inline->CanContainAbsolutePositionObjects()) {
+      for (LogicalOofPositionedNode& candidate : oof_positioned_candidates_) {
+        if (!candidate.InlineContainer() &&
+            IsInlineContainerForNode(candidate.Node(), layout_inline)) {
+          candidate.SetInlineContainer(layout_inline);
+        }
+      }
     }
   }
+
+  std::swap(oof_positioned_candidates_, oof_positioned_descendants_);
 }
 
 LayoutUnit FragmentBuilder::BlockOffsetAdjustmentForFragmentainer(

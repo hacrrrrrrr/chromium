@@ -1,17 +1,5 @@
   <style include="cr-shared-style settings-shared passwords-shared
       your-saved-info-shared">
-    #autofillSyncToggleWrapper {
-      align-items: center;
-      cursor: pointer;
-      display: flex;
-      min-height: var(--cr-section-two-line-min-height);
-      padding: 0 var(--cr-section-padding);
-    }
-
-    #autofillSyncToggleWrapper:hover {
-      background-color: var(--cr-hover-background-color);
-    }
-
     #addressList .start {
       display: flex;
       overflow: hidden;
@@ -21,10 +9,6 @@
       display: flex;
       flex: 1;
       overflow: hidden;
-    }
-
-    #plusAddressSettingsButton {
-      margin-top: 16px;
     }
 
     #noEmailsLabel {
@@ -52,9 +36,9 @@
       margin-inline-end: 16px;
     }
   </style>
-  <settings-subpage page-title="[[getPageTitleLabel_(isYourSavedInfoSubpage_)]]"
+  <settings-subpage page-title="$i18n{contactInfoTitle}"
       learn-more-url="$i18n{addressesAndPaymentMethodsLearnMoreURL}"
-      class$="[[getMultiCardClass_(isYourSavedInfoSubpage_)]]">
+      class="multi-card">
     <div class="card">
       <settings-toggle-button id="autofillProfileToggle"
           no-extension-indicator label="$i18n{enableProfilesLabel}"
@@ -71,17 +55,6 @@
             pref="{{prefs.autofill.gmail_otp_filling.enabled}}">
         </settings-toggle-button>
       </template>
-      <div id="autofillSyncToggleWrapper"
-          hidden$="[[!isAutofillSyncToggleVisible_(accountInfo_)]]">
-        <div class="flex">
-          <div class="label">$i18n{autofillSyncToggleLabel}</div>
-          <div class="label cr-secondary-text">[[accountInfo_.email]]</div>
-        </div>
-        <cr-toggle id="autofillSyncToggle"
-            checked="[[accountInfo_.isAutofillSyncToggleEnabled]]"
-            on-change="onAutofillSyncEnabledChange_">
-        </cr-toggle>
-      </div>
       <template is="dom-if"
           if="[[prefs.autofill.profile_enabled.extensionId]]">
         <div class="cr-row continuation">
@@ -101,7 +74,7 @@
         <h2 class="flex">$i18n{addresses}</h2>
         <cr-button id="addAddress" class="header-aligned-button"
             on-click="onAddAddressClick_" aria-label="$i18n{addAddressTitle}"
-            hidden$="[[!prefs.autofill.profile_enabled.value]]">
+            disabled="[[!prefs.autofill.profile_enabled.value]]">
           $i18n{add}
         </cr-button>
       </div>
@@ -188,15 +161,6 @@
             confirm-text="$i18n{remove}"
             on-close="onEmailRemoveConfirmationDialogClose_">
         </settings-simple-confirmation-dialog>
-      </template>
-      <template is="dom-if" if="[[isPlusAddressEnabled_]]">
-        <cr-link-row class="cr-row" id="plusAddressSettingsButton"
-            label="$i18n{plusAddressSettings}"
-            sub-label="$i18n{plusAddressSettingsSublabel}"
-            on-click="onPlusAddressClick_"
-            role-description="$i18n{subpageArrowRoleDescription}"
-            external>
-        </cr-link-row>
       </template>
     </div>
     <div class="card">

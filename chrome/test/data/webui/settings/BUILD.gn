@@ -30,8 +30,6 @@ build_webui_tests("build") {
     "autofill_ai_entries_list_test.ts",
     "autofill_ai_section_test.ts",
     "autofill_fake_data.ts",
-    "autofill_page_index_test.ts",
-    "autofill_page_test.ts",
     "autofill_section_address_validation_test.ts",
     "autofill_section_focus_test.ts",
     "autofill_section_test.ts",
@@ -96,7 +94,6 @@ build_webui_tests("build") {
     "pref_service_test.ts",
     "pref_service_observer_mixin_test.ts",
     "pref_service_observer_mixin_lit_test.ts",
-    "privacy_guide_ad_topics_fragment_test.ts",
     "privacy_guide_completion_fragment_test.ts",
     "privacy_guide_cookies_fragment_test.ts",
     "privacy_guide_history_sync_fragment_test.ts",
@@ -109,7 +106,7 @@ build_webui_tests("build") {
     "privacy_guide_welcome_fragment_test.ts",
     "privacy_page_index_test.ts",
     "privacy_page_test.ts",
-    "privacy_sandbox_page_test.ts",
+    "protected_content_page_test.ts",
     "protocol_handlers_test.ts",
     "recent_site_permissions_test.ts",
     "reset_page_test.ts",
@@ -174,6 +171,7 @@ build_webui_tests("build") {
     "skills_page_test.ts",
     "sound_page_test.ts",
     "speed_page_test.ts",
+    "startup_urls_page_focus_test.ts",
     "startup_urls_page_test.ts",
     "storage_access_site_list_entry_test.ts",
     "storage_access_site_list_test.ts",
@@ -200,7 +198,6 @@ build_webui_tests("build") {
     "test_prefs_browser_proxy.ts",
     "test_privacy_guide_browser_proxy.ts",
     "test_privacy_page_browser_proxy.ts",
-    "test_privacy_sandbox_browser_proxy.ts",
     "test_profile_info_browser_proxy.ts",
     "test_reset_browser_proxy.ts",
     "test_safety_hub_browser_proxy.ts",
@@ -209,6 +206,7 @@ build_webui_tests("build") {
     "test_security_keys_browser_proxy.ts",
     "test_security_page_browser_proxy.ts",
     "test_site_settings_browser_proxy.ts",
+    "test_startup_urls_page_browser_proxy.ts",
     "test_sync_browser_proxy.ts",
     "test_util.ts",
     "shopping_page_test.ts",
@@ -249,9 +247,10 @@ build_webui_tests("build") {
       "translate_page_metrics_test_browser.ts",
       "translate_page_test.ts",
     ]
-    if (is_chrome_branded) {
-      files += [ "system_page_official_test.ts" ]
-    }
+  }
+
+  if (is_chrome_branded) {
+    files += [ "ai_page_official_test.ts" ]
   }
 
   if (is_mac) {

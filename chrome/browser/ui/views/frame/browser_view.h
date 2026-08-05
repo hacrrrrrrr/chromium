@@ -24,7 +24,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
-#include "chrome/browser/ui/tabs/projects/projects_panel_state_controller.h"
+#include "chrome/browser/ui/tabs/organizer/organizer_panel_state_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/translate/partial_translate_bubble_model.h"
@@ -44,7 +44,6 @@
 #include "components/infobars/core/infobar_container.h"
 #include "components/user_education/common/feature_promo/feature_promo_handle.h"
 #include "components/viz/common/frame_timing_details.h"
-#include "components/webapps/browser/banners/app_banner_manager.h"
 #include "content/public/browser/desktop_capture_pip_utils.h"
 #include "content/public/browser/page_user_data.h"
 #include "content/public/browser/permission_controller.h"
@@ -78,14 +77,13 @@ class BookmarkBarView;
 class Browser;
 class BrowserViewLayout;
 class ContentsContainerView;
-class ContentsLayoutManager;
 struct DropData;
 class ExclusiveAccessBubbleViews;
 class ExclusiveAccessBubbleViewsContext;
 class InfoBarContainerView;
 class LocationBarView;
 class MultiContentsView;
-class ProjectsPanelView;
+class OrganizerPanelView;
 class ScrimView;
 class SidePanel;
 class TabDragTarget;
@@ -120,11 +118,6 @@ namespace views {
 class WebView;
 }  // namespace views
 
-namespace webapps {
-enum class InstallableWebAppCheckResult;
-struct WebAppBannerData;
-}  // namespace webapps
-
 class CustomFloatingCorner;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -142,7 +135,6 @@ class BrowserView : public BrowserWindow,
                     public views::ClientView,
                     public infobars::InfoBarContainer::Delegate,
                     public ImmersiveModeController::Observer,
-                    public webapps::AppBannerManager::Observer,
                     public views::FocusChangeListener,
                     public BookmarkBarController::Delegate {
   METADATA_HEADER(BrowserView, views::ClientView)
@@ -220,7 +212,8 @@ class BrowserView : public BrowserWindow,
   views::View* GetSidePanelAnimationContent();
 
   // Returns all the ContentsContainerViews that belong to this browser.
-  std::vector<ContentsContainerView*> GetContentsContainerViews();
+  std::vector<raw_ptr<ContentsContainerView, DanglingUntriaged>>
+  GetContentsContainerViews();
 
   // Returns the ContentsContainerView for the active tab.
   ContentsContainerView* GetActiveContentsContainerView();
@@ -260,8 +253,8 @@ class BrowserView : public BrowserWindow,
   }
 #endif
 
-  // Container for the web contents.
-  views::View* contents_container() { return contents_container_; }
+  // Container for multiple contents container views.
+  views::View* contents_container();
 
   views::View* main_shadow_overlay() { return main_shadow_overlay_; }
 
@@ -282,8 +275,8 @@ class BrowserView : public BrowserWindow,
     return vertical_tab_strip_region_view_.get();
   }
 
-  ProjectsPanelView* projects_panel_container_for_testing() const {
-    return projects_panel_container_;
+  OrganizerPanelView* organizer_panel_container_for_testing() const {
+    return organizer_panel_container_;
   }
 
   // Accessor for the TabStrip.
@@ -520,7 +513,6 @@ class BrowserView : public BrowserWindow,
   std::vector<StatusBubble*> GetStatusBubbles() override;
   void UpdateTitleBar() override;
   void UpdateLoadingAnimations(bool is_visible) override;
-  void SetStarredState(bool is_starred) override;
   void OnActiveTabChanged(content::WebContents* old_contents,
                           content::WebContents* new_contents,
                           int index,
@@ -539,9 +531,7 @@ class BrowserView : public BrowserWindow,
   bool GetCanResize() override;
   ui::mojom::WindowShowState GetWindowShowState() const override;
   bool IsFullscreen() const override;
-  void UpdatePageActionIcon(PageActionIconType type) override;
   autofill::AutofillBubbleHandler* GetAutofillBubbleHandler() override;
-  void ExecutePageActionIconForTesting(PageActionIconType type) override;
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool is_user_initiated) override;
   void UpdateReloadStopState(bool is_loading, bool force) override;
@@ -635,7 +625,6 @@ class BrowserView : public BrowserWindow,
       const TabStripModelChange& change,
       const TabStripSelectionChange& selection) override;
   void OnTabChangedAt(tabs::TabInterface* tab,
-                      int index,
                       TabChangeType change_type) override;
   void OnSplitTabChanged(const SplitTabChange& change) override;
   void TabStripEmpty() override;
@@ -735,11 +724,6 @@ class BrowserView : public BrowserWindow,
   void OnImmersiveFullscreenEntered() override;
   void OnImmersiveFullscreenExited() override;
   void OnImmersiveModeControllerDestroyed() override;
-
-  // webapps::AppBannerManager::Observer:
-  void OnInstallableWebAppStatusUpdated(
-      webapps::InstallableWebAppCheckResult result,
-      const std::optional<webapps::WebAppBannerData>& data) override;
 
   // views::FocusChangeListener
   void OnWillChangeFocus(View* focused_before, View* focused_now) override;
@@ -884,7 +868,7 @@ class BrowserView : public BrowserWindow,
   void OnVerticalTabStripModeChanged(
       tabs::VerticalTabStripStateController* controller);
 
-  void OnProjectsPanelStateChanged(ProjectsPanelStateController* controller);
+  void OnOrganizerPanelStateChanged(OrganizerPanelStateController* controller);
 
   // Callback for the loading animation(s) associated with this view.
   void LoadingAnimationTimerCallback();
@@ -988,9 +972,6 @@ class BrowserView : public BrowserWindow,
   bool FindCommandIdForAccelerator(const ui::Accelerator& accelerator,
                                    int* command_id) const;
 
-  // Updates AppBannerManager::Observer to observe |new_manager| exclusively.
-  void ObserveAppBannerManager(webapps::AppBannerManager* new_manager);
-
   // Called by GetAccessibleWindowTitle, split out to make it testable.
   std::u16string GetAccessibleWindowTitleForChannelAndProfile(
       version_info::Channel,
@@ -1039,6 +1020,9 @@ class BrowserView : public BrowserWindow,
 
   void UpdateWindowControlsOverlayEnabled();
   void RefreshWindowControlsOverlayAfterFullscreenTransition();
+
+  // Called each time the browser window is shown.
+  void OnWindowDidShow();
 
   // Updates the Window Controls Overlay availability in this window.
   void UpdateWindowControlsOverlayAvailable();
@@ -1115,10 +1099,14 @@ class BrowserView : public BrowserWindow,
   // |------------------------------------------------------------------------|
   // | All infobars (infobar_container_)                                      |
   // |------------------------------------------------------------------------|
-  // | Contents container (contents_container_)                               |
-  // |  --------------------------------------------------------------------  |
-  // |  |  MultiContentsView (multi_contents_view_)                        |  |
-  // |  --------------------------------------------------------------------  |
+  // |------------------------------------------------------------------------|
+  // | MultiContentsView (multi_contents_view_)                               |
+  // |  |------------------------------------------------------------------|  |
+  // |  | ContentsContainerView (web contents, devtools, overlay, borders) |  |
+  // |  |------------------------------------------------------------------|  |
+  // |  | ContentsContainerView (web contents, devtools, overlay, borders) |  |
+  // |  -------------------------------------------------------------------|  |
+  // |------------------------------------------------------------------------|
   // |------------------------------------------------------------------------|
   // | SidePanel (side_panel_)                                                |
   // |------------------------------------------------------------------------|
@@ -1216,9 +1204,6 @@ class BrowserView : public BrowserWindow,
   // The view that contains all visible WebContents.
   raw_ptr<MultiContentsView> multi_contents_view_ = nullptr;
 
-  // Handled by ContentsLayoutManager.
-  raw_ptr<views::View> contents_container_ = nullptr;
-
   // The view responsible for housing the contents of the vertical tab strip.
   raw_ptr<VerticalTabStripRegionView> vertical_tab_strip_region_view_ = nullptr;
   raw_ptr<VerticalTabStripBackgroundBlurBackdrop>
@@ -1228,8 +1213,8 @@ class BrowserView : public BrowserWindow,
   raw_ptr<CustomFloatingCorner> vertical_tab_strip_top_corner_ = nullptr;
   raw_ptr<CustomFloatingCorner> vertical_tab_strip_bottom_corner_ = nullptr;
 
-  // The view responsible for housing the contents of the projects panel.
-  raw_ptr<ProjectsPanelView> projects_panel_container_ = nullptr;
+  // The view responsible for housing the contents of the organizer panel.
+  raw_ptr<OrganizerPanelView> organizer_panel_container_ = nullptr;
 
   // Side panel that extends to the height of the page content or toolbar,
   // aligned to the left or the right side of the browser window depending on
@@ -1311,10 +1296,6 @@ class BrowserView : public BrowserWindow,
   // exited to restore the original pre-fullscreen bounds of the window.
   base::OnceClosure restore_pre_fullscreen_bounds_callback_;
 
-  base::ScopedObservation<webapps::AppBannerManager,
-                          webapps::AppBannerManager::Observer>
-      app_banner_manager_observation_{this};
-
   base::ScopedObservation<views::FocusManager, views::FocusChangeListener>
       focus_manager_observation_{this};
 
@@ -1342,6 +1323,10 @@ class BrowserView : public BrowserWindow,
   bool is_window_controls_overlay_available_ = false;
   bool unframed_mode_enabled_ = false;
   bool window_management_permission_granted_ = false;
+
+  // True if the browser window has been shown at least once.
+  bool window_has_shown_ = false;
+
 #if BUILDFLAG(IS_WIN)
   class PipExclusionObserverImpl;
   std::unique_ptr<PipExclusionObserverImpl> pip_exclusion_observer_;
@@ -1360,9 +1345,11 @@ class BrowserView : public BrowserWindow,
   std::unique_ptr<tabs::VerticalTabStripStateController::ScopedEnableStateLock>
       vertical_tabs_enable_state_lock_;
 
-  base::CallbackListSubscription projects_panel_subscription_;
+  base::CallbackListSubscription organizer_panel_subscription_;
 
+#if BUILDFLAG(IS_CHROMEOS)
   base::CallbackListSubscription on_locked_task_subscription_;
+#endif
 
   base::CallbackListSubscription theme_changed_subscription_;
 

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "base/callback_list.h"
@@ -222,6 +223,9 @@ class ExecutionEngine : public ToolDelegate,
       AutofillSuggestionSelectedCallback callback) override;
   void RequestToShowGmailOtpOptInDialog(
       GmailOtpOptInCallback callback) override;
+  void RequestToShowGmailOtpConfirmationDialog(
+      const std::string& verification_code,
+      GmailOtpConfirmationCallback callback) override;
   void InterruptFromTool() override;
   void InterruptFromTool(bool retain_user_control) override;
   void UninterruptFromTool() override;
@@ -262,9 +266,6 @@ class ExecutionEngine : public ToolDelegate,
 
   static std::string StateToString(State state);
 
-  void OnMayActOnTabDecision(const url::Origin& evaluated_origin,
-                             MayActOnUrlBlockReason block_reason);
-
   void UserTakeover(mojom::ActionResultCode takeover_response_code,
                     base::OnceCallback<void(bool)> callback);
 
@@ -301,24 +302,17 @@ class ExecutionEngine : public ToolDelegate,
     return origin_gating_checker_.cache();
   }
 
+  const origin_gating::OriginGatingChecker& origin_gating_checker() const {
+    return origin_gating_checker_;
+  }
   origin_gating::OriginGatingChecker& origin_gating_checker() {
     return origin_gating_checker_;
   }
-
-  // Evaluates whether the actor may act on `tab`.
-  void MayActOnTab(const tabs::TabInterface& tab,
-                   AggregatedJournal& journal,
-                   TaskId task_id,
-                   DecisionCallbackWithReason callback);
 
   // Currently, navigations are generally forced to happen in the same tab (see
   // https://crbug.com/420669167 ). In some cases we need to drop this
   // restriction for certain tools to function.
   bool TabsCanOpenNewWebContents() const;
-
-  origin_gating::ActorContainerConfigSlot& actor_container_config_slot() {
-    return actor_container_config_slot_;
-  }
 
   // origin_gating::OriginGatingChecker::Delegate
   void DoesOriginRequireUserConfirmation(
@@ -404,26 +398,13 @@ class ExecutionEngine : public ToolDelegate,
                            const url::Origin& destination,
                            bool applied_gate) const;
 
-  // Returns the highest-priority navigation gating decision. Prioritizes
-  // blocking navigations over allowing (except on same origin navigations).
-  GatingDecision DetermineGatingDecision(const GURL& source_url,
-                                         const GURL& destination_url) const;
   void OnComputedGatingDecision(
       NavigationDecisionCallback callback,
       const url::Origin& source_origin,
       const url::Origin& destination_origin,
       State initial_state,
       std::optional<url::Origin> initiator,
-      std::unique_ptr<origin_gating::GatingDecisionContext> context,
-      origin_gating::GatingDecision decision);
-
-  void ShouldAllowNavigationDestination(
-      const GURL& url,
-      NoVerdictResultCallback result_callback);
-  void ShouldAllowPageAction(const GURL& url,
-                             NoVerdictResultCallback result_callback);
-  void OnShouldAllowUrlDecision(
-      NoVerdictResultCallback result_callback,
+      origin_gating::GateableEvent event,
       std::unique_ptr<origin_gating::GatingDecisionContext> context,
       origin_gating::GatingDecision decision);
 
@@ -507,9 +488,6 @@ class ExecutionEngine : public ToolDelegate,
   origin_gating::OriginGatingCache dark_launch_origin_gating_cache_;
 
   TabObservationStrategy observation_strategy_;
-
-  // Manages the container config settings that have been sent by the server.
-  origin_gating::ActorContainerConfigSlot actor_container_config_slot_;
 
   // For multi-step login, this is the credential that the user has chosen to
   // allow the actor to use. The key is the

@@ -91,14 +91,14 @@ std::unique_ptr<TestingPrefServiceSimple> SetPrefService() {
 
 // The image when the state is safe.
 UIImage* SafeImage() {
-  return DefaultSymbolTemplateWithPointSize(kCheckmarkCircleFillSymbol,
-                                            kTrailingSymbolImagePointSize);
+  return SymbolTemplateWithPointSize(SymbolCheckmarkCircleFill,
+                                     kTrailingSymbolImagePointSize);
 }
 
 // The image when the state is unsafe.
 UIImage* UnsafeImage() {
-  return DefaultSymbolTemplateWithPointSize(kErrorCircleFillSymbol,
-                                            kTrailingSymbolImagePointSize);
+  return SymbolTemplateWithPointSize(SymbolErrorCircleFill,
+                                     kTrailingSymbolImagePointSize);
 }
 
 // The color when the state is safe.
@@ -119,7 +119,7 @@ class SafetyCheckMediatorTest : public PlatformTest {
     TestProfileIOS::Builder builder;
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(
         SyncServiceFactory::GetInstance(),

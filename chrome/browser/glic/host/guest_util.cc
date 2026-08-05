@@ -4,10 +4,16 @@
 
 #include "chrome/browser/glic/host/guest_util.h"
 
+#include <algorithm>
+
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/supports_user_data.h"
 #include "base/version_info/version_info.h"
 #include "build/build_config.h"
@@ -16,12 +22,16 @@
 #include "chrome/browser/glic/glic_hotkey.h"
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/glic_features.mojom.h"
+#include "chrome/browser/glic/host/glic_guest_observer.h"
+#include "chrome/browser/glic/host/glic_page_handler.h"
+#include "chrome/browser/glic/host/glic_ui.h"
 #include "chrome/browser/glic/host/host.h"
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
+#include "chrome/browser/glic/service/glic_tab_contents_swapper.h"
 #include "chrome/browser/glic/suggestions/contextual_cueing_features.h"
 #include "chrome/browser/permissions/system/system_permission_settings.h"
 #include "chrome/browser/profiles/profile.h"
@@ -36,6 +46,8 @@
 #include "components/guest_view/buildflags/buildflags.h"
 #include "components/prefs/pref_service.h"
 #include "components/skills/features.h"
+#include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
@@ -50,6 +62,7 @@
 #include "pdf/buildflags.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/page/page_zoom.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/mojom/autoplay/autoplay.mojom.h"
 #include "third_party/blink/public/mojom/page/draggable_region.mojom.h"
@@ -68,9 +81,41 @@
 #include "components/guest_view/browser/slim_web_view/slim_web_view_guest.h"  // nogncheck
 #endif
 
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/tabs/page_context_eligibility_helper.h"
+#include "components/optimization_guide/content/browser/page_context_eligibility.h"
+#include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/clipboard_types.h"
+#include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/clipboard_format_type.h"
+#include "ui/base/clipboard/clipboard_metadata.h"
+#include "ui/base/clipboard/clipboard_monitor.h"
+#include "ui/base/clipboard/clipboard_observer.h"
+#endif
+
 namespace glic {
 
-BASE_FEATURE(kGlicGuestUrlMultiInstanceParam, base::FEATURE_ENABLED_BY_DEFAULT);
+#if !BUILDFLAG(IS_ANDROID)
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class GlicPasteFormat {
+  kPlainText = 0,
+  kHtml = 1,
+  kBitmap = 2,
+  kFilenames = 3,
+  kOther = 4,
+  kMaxValue = kOther,
+};
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class GlicPasteFailedEligibilityReason {
+  kPageContextIneligible = 0,
+  kPageContextInvalidated = 1,
+  kCrossProfile = 2,
+  kMaxValue = kCrossProfile,
+};
+#endif
 
 namespace {
 
@@ -220,13 +265,88 @@ GURL GetGuestURL() {
     return GURL();
   }
 
-  url = MaybeAddMultiInstanceParameter(url);
-
   return GetLocalizedGuestURL(url);
 }
 
 url::Origin GetGuestOrigin() {
   return url::Origin::Create(GetGuestURL());
+}
+
+std::string GetGlicAllowedOrigins(bool is_internal_google_account) {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  std::string allowed_origins =
+      command_line->GetSwitchValueASCII(::switches::kGlicAllowedOrigins);
+  if (allowed_origins.empty()) {
+    allowed_origins = features::kGlicAllowedOriginsOverride.Get();
+  }
+
+  // Allow corp origins for @google accounts.
+  if (is_internal_google_account) {
+    allowed_origins += " https://*.corp.google.com";
+  }
+  return allowed_origins;
+}
+
+bool IsOriginAllowedGlicApi(const url::Origin& origin) {
+  if (origin.opaque()) {
+    return false;
+  }
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kGlicDev)) {
+    return true;
+  }
+  if (GetGuestOrigin().IsSameOriginWith(origin)) {
+    return true;
+  }
+  std::string api_allowed_origins = features::kGlicApiAllowedOrigins.Get();
+  if (!api_allowed_origins.empty()) {
+    for (const std::string& allowed :
+         base::SplitString(api_allowed_origins, " ", base::TRIM_WHITESPACE,
+                           base::SPLIT_WANT_NONEMPTY)) {
+      url::Origin allowed_origin = url::Origin::Create(GURL(allowed));
+      if (!allowed_origin.opaque() && allowed_origin.IsSameOriginWith(origin)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool IsFrameAllowedGlicApi(content::RenderFrameHost& frame_host) {
+  if (!base::FeatureList::IsEnabled(features::kGlicEnableMojoJs)) {
+    return false;
+  }
+  content::WebContents* guest_contents =
+      content::WebContents::FromRenderFrameHost(&frame_host);
+  if (!guest_contents || !IsGlicGuest(guest_contents)) {
+    return false;
+  }
+  return IsOriginAllowedGlicApi(frame_host.GetLastCommittedOrigin());
+}
+
+void BindGlicWebClientHandler(
+    content::RenderFrameHost* rfh,
+    mojo::PendingReceiver<glic::mojom::WebClientHandler> receiver) {
+  if (!base::FeatureList::IsEnabled(features::kGlicEnableMojoJs)) {
+    return;
+  }
+  if (!IsFrameAllowedGlicApi(*rfh)) {
+    return;
+  }
+  content::WebContents* guest_contents =
+      content::WebContents::FromRenderFrameHost(rfh);
+  if (!guest_contents) {
+    return;
+  }
+  content::WebContents* top =
+      guest_view::GuestViewBase::GetTopLevelWebContents(guest_contents);
+  if (!top) {
+    return;
+  }
+  auto* glic_ui = GlicUI::From(top);
+  if (!glic_ui || !glic_ui->host()) {
+    return;
+  }
+  glic_ui->host()->CreateWebClient(std::move(receiver));
 }
 
 GURL MaybeApplyPresetGuestUrl(GURL guest_url) {
@@ -274,16 +394,17 @@ GURL GetLocalizedGuestURL(const GURL& guest_url) {
   return net::AppendQueryParameter(guest_url, "hl", google_locale);
 }
 
-GURL MaybeAddMultiInstanceParameter(const GURL& guest_url) {
-  if (base::FeatureList::IsEnabled(kGlicGuestUrlMultiInstanceParam)) {
-    return net::AppendOrReplaceQueryParameter(guest_url, "mode", "mi");
-  }
-  return guest_url;
-}
-
 bool IsGlicWebUI(const content::WebContents* web_contents) {
   return web_contents &&
          GlicWebUiData::FromWebContents(web_contents) != nullptr;
+}
+
+bool IsGlicOwnedTab(tabs::TabInterface* tab) {
+  if (!tab || !tab->GetContents()) {
+    return false;
+  }
+  return tab->GetContents()->GetUserData(GlicPlaceholderUserData::kKey) ||
+         IsGlicWebUI(tab->GetContents());
 }
 
 bool IsProcessHostForGlic(content::RenderProcessHost* process_host) {
@@ -310,6 +431,9 @@ bool OnGuestAdded(content::WebContents* guest_contents) {
     return false;
   }
 #endif
+  if (guest_contents->HasLiveOriginalOpenerChain()) {
+    return false;
+  }
 
   content::WebContents* top =
       guest_view::GuestViewBase::GetTopLevelWebContents(guest_contents);
@@ -342,13 +466,27 @@ bool OnGuestAdded(content::WebContents* guest_contents) {
         top->GetOrCreateWebPreferences().default_font_size;
     top->SetWebPreferences(prefs);
 #else
-    // TODO(b/470059315): What do we do for Android?
+    // Apply the persisted zoom level to the guest WebContents.
+    if (Profile* profile =
+            Profile::FromBrowserContext(top->GetBrowserContext())) {
+      // LINT.IfChange(GlicZoomFactors)
+      int zoom_percent = std::clamp(
+          profile->GetPrefs()->GetInteger(prefs::kGlicZoomLevel), 100, 200);
+      double zoom_factor = zoom_percent / 100.0;
+      // LINT.ThenChange(//chrome/browser/resources/glic/webview.ts:GlicZoomFactors,
+      // //chrome/browser/glic/host/glic_page_handler.cc:GlicZoomFactors)
+      double zoom_level = blink::ZoomFactorToZoomLevel(zoom_factor);
+      content::HostZoomMap::SetZoomLevel(guest_contents, zoom_level);
+    }
 #endif
   }
 
   guest_contents->SetUserData(
       "glic::WebviewWebContentsObserver",
       std::make_unique<WebviewWebContentsObserver>(guest_contents));
+  if (base::FeatureList::IsEnabled(features::kGlicEnableMojoJs)) {
+    glic::GlicGuestObserver::CreateForWebContents(guest_contents);
+  }
   VLOG(1) << "Registered glic::WebviewWebContentsObserver for guest "
              "WebContents with url=\""
           << guest_contents->GetVisibleURL() << "\"";
@@ -462,6 +600,15 @@ void PopulateGlobalClientInitialState(mojom::WebClientInitialState* state,
     state->host_capabilities.push_back(mojom::HostCapability::kNoWebUiLoader);
   }
 
+  if (base::FeatureList::IsEnabled(features::kGlicPasteEligibilityCheck)) {
+    state->host_capabilities.push_back(
+        mojom::HostCapability::kEnforcesPasteEligibility);
+  }
+
+  if (base::FeatureList::IsEnabled(features::kGlicWebDragAndDropFileUpload)) {
+    state->host_capabilities.push_back(mojom::HostCapability::kImgWebDragDrop);
+  }
+
   if (GlicEnabling::IsAutoOpenForPdfEnabled(profile)) {
     state->host_capabilities.push_back(mojom::HostCapability::kPdfZeroState);
   }
@@ -527,8 +674,184 @@ void PopulateGlobalClientInitialState(mojom::WebClientInitialState* state,
             gemini_enterprise_settings->location);
   }
 
-  state->enable_gmail_otp_opt_in = base::FeatureList::IsEnabled(
-      features::kGlicActorAutofillOneTimePassword);
+  state->enable_gmail_otp_opt_in =
+      base::FeatureList::IsEnabled(features::kGlicActorAutofillOneTimePassword);
+  state->enable_gmail_otp_confirmation =
+      base::FeatureList::IsEnabled(features::kGlicActorAutofillOneTimePassword);
+  state->file_upload_policy_state =
+      glic::prefs::GetFileUploadAllowedCapability(profile->GetPrefs());
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+
+void LogPasteAttempt(const content::ClipboardEndpoint& source,
+                     const ui::ClipboardMetadata& metadata) {
+  std::string_view source_suffix = source.web_contents() ? "Web" : "OS";
+
+  GlicPasteFormat format = GlicPasteFormat::kOther;
+  if (metadata.format_type == ui::ClipboardFormatType::PlainTextType()) {
+    format = GlicPasteFormat::kPlainText;
+  } else if (metadata.format_type == ui::ClipboardFormatType::HtmlType()) {
+    format = GlicPasteFormat::kHtml;
+  } else if (metadata.format_type == ui::ClipboardFormatType::BitmapType()) {
+    format = GlicPasteFormat::kBitmap;
+  } else if (metadata.format_type == ui::ClipboardFormatType::FilenamesType()) {
+    format = GlicPasteFormat::kFilenames;
+  }
+
+  base::UmaHistogramEnumeration(
+      base::StrCat({"Glic.Paste.AttemptedFormat.", source_suffix}), format);
+}
+
+// Tracks the copy eligibility of the last clipboard write. It listens to
+// clipboard changes to safely grab the newly generated sequence number after
+// a copy completes, and compares against this sequence number at paste time.
+class GlicClipboardEligibilityMonitor : public ui::ClipboardObserver {
+ public:
+  static GlicClipboardEligibilityMonitor* GetInstance() {
+    static base::NoDestructor<GlicClipboardEligibilityMonitor> instance;
+    return instance.get();
+  }
+
+  GlicClipboardEligibilityMonitor() {
+    ui::ClipboardMonitor::GetInstance()->AddObserver(this);
+  }
+
+  ~GlicClipboardEligibilityMonitor() override {
+    ui::ClipboardMonitor::GetInstance()->RemoveObserver(this);
+  }
+
+  void OnCopyAttempted(bool is_eligible) { pending_eligibility_ = is_eligible; }
+
+  void OnClipboardDataChanged() override {
+    if (pending_eligibility_.has_value()) {
+      last_seqno_ = ui::Clipboard::GetForCurrentThread()->GetSequenceNumber(
+          ui::ClipboardBuffer::kCopyPaste);
+      last_eligibility_ = *pending_eligibility_;
+      pending_eligibility_.reset();
+    }
+  }
+
+  std::optional<bool> GetEligibility(
+      const ui::ClipboardSequenceNumberToken& seqno) const {
+    if (last_seqno_ && *last_seqno_ == seqno) {
+      return last_eligibility_;
+    }
+    return std::nullopt;
+  }
+
+  void SetSeqnoForTesting(ui::ClipboardSequenceNumberToken seqno) {
+    if (pending_eligibility_.has_value()) {
+      last_seqno_ = seqno;
+      last_eligibility_ = *pending_eligibility_;
+      pending_eligibility_.reset();
+    }
+  }
+
+ private:
+  std::optional<bool> pending_eligibility_;
+  std::optional<ui::ClipboardSequenceNumberToken> last_seqno_;
+  std::optional<bool> last_eligibility_;
+};
+
+void OnBeforeClipboardCopy(const content::ClipboardEndpoint& source) {
+  if (!base::FeatureList::IsEnabled(features::kGlicPasteEligibilityCheck) ||
+      !base::FeatureList::IsEnabled(features::kGlicWebPasteEligibilityCheck)) {
+    return;
+  }
+
+  // We only track copy eligibility if it originated from a web page frame.
+  content::RenderFrameHost* rfh = source.render_frame_host();
+  if (!rfh) {
+    return;
+  }
+  content::WebContents* web_contents = source.web_contents();
+  if (!web_contents) {
+    return;
+  }
+
+  // Page context eligibility is tied to tabs. Copies from non-tab contexts
+  // (like side panels or webui) do not have this helper.
+  tabs::TabInterface* source_tab =
+      tabs::TabInterface::MaybeGetFromContents(web_contents);
+  if (!source_tab) {
+    return;
+  }
+  auto* helper = tabs::PageContextEligibilityHelper::From(source_tab);
+  if (!helper) {
+    return;
+  }
+
+  // Evaluate the page's eligibility at the moment of the copy.
+  optimization_guide::PageContextEligibilityStatus status =
+      helper->IsPageContextEligible();
+  bool is_eligible =
+      (status == optimization_guide::PageContextEligibilityStatus::kEligible);
+
+  // Stash the eligibility status in our global monitor. When the OS clipboard
+  // actually finishes updating, the monitor will tie this status to the new
+  // clipboard sequence number.
+  GlicClipboardEligibilityMonitor::GetInstance()->OnCopyAttempted(is_eligible);
+}
+
+void SetClipboardEligibilitySeqnoForTesting(
+    ui::ClipboardSequenceNumberToken seqno) {
+  GlicClipboardEligibilityMonitor::GetInstance()->SetSeqnoForTesting(seqno);
+}
+
+bool IsClipboardPasteAllowed(const content::ClipboardEndpoint& source,
+                             const content::ClipboardEndpoint& destination,
+                             const ui::ClipboardMetadata& metadata) {
+  if (!base::FeatureList::IsEnabled(features::kGlicPasteEligibilityCheck)) {
+    return false;
+  }
+
+  std::string_view source_suffix = source.web_contents() ? "Web" : "OS";
+
+  if (!source.web_contents()) {
+    // Allow pastes from external (OS) sources. We do not have sufficient
+    // provenance metadata to reliably block these without breaking the
+    // clipboard.
+    return true;
+  }
+
+  if (!base::FeatureList::IsEnabled(features::kGlicWebPasteEligibilityCheck)) {
+    return false;
+  }
+
+  // Pasting from Glic to Glic is always allowed.
+  if (IsGlicGuest(source.web_contents())) {
+    return true;
+  }
+
+  if (source.browser_context() != destination.browser_context()) {
+    base::UmaHistogramEnumeration(
+        base::StrCat({"Glic.Paste.FailedEligibilityReason.", source_suffix}),
+        GlicPasteFailedEligibilityReason::kCrossProfile);
+    return false;
+  }
+
+  std::optional<bool> was_eligible =
+      GlicClipboardEligibilityMonitor::GetInstance()->GetEligibility(
+          metadata.seqno);
+
+  if (was_eligible.has_value()) {
+    if (!*was_eligible) {
+      base::UmaHistogramEnumeration(
+          base::StrCat({"Glic.Paste.FailedEligibilityReason.", source_suffix}),
+          GlicPasteFailedEligibilityReason::kPageContextIneligible);
+      return false;
+    }
+    return true;
+  }
+
+  // If there's no matching sequence number, it means the copy was from
+  // an unknown source (or the monitor missed it), so we fail the paste.
+  base::UmaHistogramEnumeration(
+      base::StrCat({"Glic.Paste.FailedEligibilityReason.", source_suffix}),
+      GlicPasteFailedEligibilityReason::kPageContextInvalidated);
+  return false;
+}
+#endif
 
 }  // namespace glic

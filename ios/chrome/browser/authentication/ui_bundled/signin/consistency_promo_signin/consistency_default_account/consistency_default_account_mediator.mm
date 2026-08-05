@@ -183,8 +183,7 @@ NSString* GetPromoLabelString(
 
 }  // namespace
 
-@interface ConsistencyDefaultAccountMediator () <
-    IdentityManagerObserverBridgeDelegate> {
+@interface ConsistencyDefaultAccountMediator () <IdentityManagerObserving> {
   std::unique_ptr<signin::IdentityManagerObserverBridge>
       _identityManagerObserver;
   signin_metrics::AccessPoint _accessPoint;
@@ -322,7 +321,7 @@ NSString* GetPromoLabelString(
   UIImage* avatar =
       GetApplicationContext()->GetIdentityAvatarProvider()->GetIdentityAvatar(
           selectedIdentity, IdentityAvatarSize::TableViewIcon);
-  CHECK(self.selectedIdentity, base::NotFatalUntil::M147);
+  CHECK(self.selectedIdentity);
   BOOL isManaged = [self isIdentityKnownToBeManaged:selectedIdentity];
   [self.consumer showDefaultAccountWithFullName:selectedIdentity.userFullName
                                       givenName:selectedIdentity.userGivenName
@@ -344,7 +343,7 @@ NSString* GetPromoLabelString(
 // called asynchronously when the management status if retrieved and the
 // identity is managed.
 - (BOOL)isIdentityKnownToBeManaged:(id<SystemIdentity>)identity {
-  CHECK(identity, base::NotFatalUntil::M147);
+  CHECK(identity);
   if (std::optional<BOOL> managed = IsIdentityManaged(identity);
       managed.has_value()) {
     return managed.value();
@@ -361,7 +360,7 @@ NSString* GetPromoLabelString(
 
 #pragma mark -  IdentityManagerObserver
 
-- (void)onAccountsOnDeviceChanged {
+- (void)accountsOnDeviceDidChange {
   if (_accountManagerService &&
       !_accountManagerService->IsValidIdentity(self.selectedIdentity.gaiaId)) {
     // The currently selected identity is not valid anymore. Let’s select the
@@ -370,7 +369,7 @@ NSString* GetPromoLabelString(
   }
 }
 
-- (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
+- (void)extendedAccountInfoDidUpdate:(const AccountInfo&)info {
   id<SystemIdentity> identity =
       _accountManagerService->GetIdentityOnDeviceWithGaiaID(info.gaia);
   [self handleIdentityUpdated:identity];

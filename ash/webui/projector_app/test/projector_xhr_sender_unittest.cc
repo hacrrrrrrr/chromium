@@ -65,6 +65,7 @@ class ProjectorXhrSenderTest : public testing::Test {
   // testing::Test:
   void SetUp() override {
     sender_ = std::make_unique<ProjectorXhrSender>(
+        mock_app_client_.GetIdentityManager(),
         mock_app_client_.GetUrlLoaderFactory());
     mock_app_client_.AddSecondaryAccount(kTestUserSecondaryEmail);
   }
@@ -93,8 +94,8 @@ class ProjectorXhrSenderTest : public testing::Test {
 
  private:
   base::test::SingleThreadTaskEnvironment task_environment_;
-  std::unique_ptr<ProjectorXhrSender> sender_;
   MockAppClient mock_app_client_;
+  std::unique_ptr<ProjectorXhrSender> sender_;
 };
 
 TEST_F(ProjectorXhrSenderTest, Success) {
@@ -258,6 +259,17 @@ TEST_F(ProjectorXhrSenderTest, UnsupportedUrl) {
                           projector::mojom::XhrResponseCode::kUnsupportedURL);
 }
 
+TEST_F(ProjectorXhrSenderTest, MaliciousUnsupportedUrl) {
+  SendRequestFuture future;
+
+  sender()->Send(
+      GURL("https://www.googleapis.com/drive/v3/files/../../myMaliciousPath"),
+      /*method=*/projector::mojom::RequestType::kGet, /*request_body=*/"",
+      /*use_credentials=*/false, /*use_api_key=*/false, future.GetCallback());
+  VerifySendRequestFuture(future, "",
+                          projector::mojom::XhrResponseCode::kUnsupportedURL);
+}
+
 TEST_F(ProjectorXhrSenderTest, SuccessWithPrimaryEmail) {
   SendRequestFuture future;
 
@@ -366,6 +378,72 @@ TEST_F(ProjectorXhrSenderTest, SendRequestRejectsRedirects) {
   VerifySendRequestFutureWithNetworkErrorCode(
       future, "", projector::mojom::XhrResponseCode::kXhrFetchFailure,
       projector::mojom::JsNetErrorCode::kHttpError);
+}
+
+TEST_F(ProjectorXhrSenderTest, SendRequestOmitsCredentialsByDefault) {
+  mock_app_client().test_url_loader_factory().SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        EXPECT_EQ(request.credentials_mode,
+                  network::mojom::CredentialsMode::kOmit);
+      }));
+
+  SendRequestFuture future;
+  sender()->Send(
+      GURL(kTestDriveRequestUrl),
+      /*method=*/projector::mojom::RequestType::kGet, /*request_body=*/"",
+      /*use_credentials=*/false, /*use_api_key=*/false, future.GetCallback());
+
+  mock_app_client().test_url_loader_factory().AddResponse(kTestDriveRequestUrl,
+                                                          "{}");
+  mock_app_client().GrantOAuthTokenFor(
+      kTestUserEmail,
+      /* expiry_time = */ base::Time::Now() + kExpiryTimeFromNow);
+  VerifySendRequestFuture(future, "{}",
+                          projector::mojom::XhrResponseCode::kSuccess);
+}
+
+TEST_F(ProjectorXhrSenderTest, SendRequestIncludesCredentialsWhenRequested) {
+  mock_app_client().test_url_loader_factory().SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        EXPECT_EQ(request.credentials_mode,
+                  network::mojom::CredentialsMode::kInclude);
+      }));
+
+  SendRequestFuture future;
+  sender()->Send(
+      GURL(kTestDriveRequestUrl),
+      /*method=*/projector::mojom::RequestType::kGet, /*request_body=*/"",
+      /*use_credentials=*/true, /*use_api_key=*/false, future.GetCallback());
+
+  mock_app_client().test_url_loader_factory().AddResponse(kTestDriveRequestUrl,
+                                                          "{}");
+  mock_app_client().GrantOAuthTokenFor(
+      kTestUserEmail,
+      /* expiry_time = */ base::Time::Now() + kExpiryTimeFromNow);
+  VerifySendRequestFuture(future, "{}",
+                          projector::mojom::XhrResponseCode::kSuccess);
+}
+
+TEST_F(ProjectorXhrSenderTest, ApiKeyRequestOmitsCredentials) {
+  mock_app_client().test_url_loader_factory().SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        EXPECT_EQ(request.redirect_mode, network::mojom::RedirectMode::kError);
+        EXPECT_EQ(request.credentials_mode,
+                  network::mojom::CredentialsMode::kOmit);
+      }));
+
+  SendRequestFuture future;
+  auto url = GURL(kTestTranslationRequestUrl);
+  sender()->Send(url,
+                 /*method=*/projector::mojom::RequestType::kGet,
+                 /*request_body=*/"",
+                 /*use_credentials=*/false, /*use_api_key=*/true,
+                 future.GetCallback());
+
+  mock_app_client().test_url_loader_factory().AddResponse(
+      GetUrlWithApiKey(url).spec(), "{}");
+  VerifySendRequestFuture(future, "{}",
+                          projector::mojom::XhrResponseCode::kSuccess);
 }
 
 }  // namespace ash

@@ -367,6 +367,13 @@ class CONTENT_EXPORT WebContentsImpl
   // See docs/frame_trees.md for more details.
   FrameTree& GetPrimaryFrameTree() { return primary_frame_tree_; }
 
+  // The privileged-contents declaration this WebContents was created with,
+  // or nullopt for ordinary WebContents. Immutable for the lifetime of the
+  // WebContents. See WebContents::PrivilegedParams.
+  const std::optional<PrivilegedParams>& privileged_params() const {
+    return privileged_params_;
+  }
+
   // Whether the initial empty page of this view has been accessed by another
   // page, making it unsafe to show the pending URL. Always false after the
   // first commit.
@@ -959,7 +966,10 @@ class CONTENT_EXPORT WebContentsImpl
                             int error_code) override;
   void DraggableRegionsChanged(
       const std::vector<blink::mojom::DraggableRegionPtr>& regions) override;
-  void OnFirstContentfulPaintInPrimaryMainFrame() override;
+  void OnFirstContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) override;
+  void OnLargestContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) override;
   gfx::NativeWindow GetOwnerNativeWindow() override;
 
   media::PictureInPictureEventsInfo::AutoPipInfo GetAutoPipInfo()
@@ -1087,6 +1097,7 @@ class CONTENT_EXPORT WebContentsImpl
       NavigationHandle* navigation_handle) override;
   void NotifyChangedNavigationState(InvalidateTypes changed_flags) override;
   bool ShouldAllowRendererInitiatedCrossProcessNavigation(
+      RenderFrameHostImpl* render_frame_host,
       bool is_outermost_main_frame_navigation) override;
   const blink::UserAgentOverride& GetUserAgentOverride(
       FrameTree& frame_tree) override;
@@ -1210,6 +1221,7 @@ class CONTENT_EXPORT WebContentsImpl
   // The following function is already listed under WebContents overrides:
   // bool IsFullscreen() const override;
   blink::mojom::DisplayMode GetDisplayMode() const override;
+  blink::mojom::ApplicationContext GetApplicationContext() const override;
   ui::mojom::WindowShowState GetWindowShowState() override;
   DevicePostureProviderImpl* GetDevicePostureProvider() override;
   bool GetResizable() override;
@@ -1252,6 +1264,7 @@ class CONTENT_EXPORT WebContentsImpl
       bool proceed,
       bool* proceed_to_fire_unload) override;
   void CancelModalDialogsForRenderManager() override;
+  void NotifyPrimaryPageWillBeDeactivated(PageImpl& page) override;
   void NotifySwappedFromRenderManager(RenderFrameHostImpl* old_frame,
                                       RenderFrameHostImpl* new_frame) override;
   void NotifySwappedFromRenderManagerWithoutFallbackContent(
@@ -1301,6 +1314,8 @@ class CONTENT_EXPORT WebContentsImpl
   void SetFocusedFrame(FrameTreeNode* node, SiteInstanceGroup* source) override;
   FrameTree* GetOwnedDocumentPictureInPictureFrameTree() override;
   FrameTree* GetDocumentPictureInPictureOpenerFrameTree() override;
+  std::optional<int64_t> GetPrivilegedContentsFeatureId() override;
+  bool DoesWebContentsDisallowServiceWorkerControl() override;
 
   // NavigationControllerDelegate ----------------------------------------------
 
@@ -1673,6 +1688,7 @@ class CONTENT_EXPORT WebContentsImpl
   friend class TestWebContentsDestructionObserver;
   friend class BeforeUnloadBlockingDelegate;
   friend class TestWCDelegateForDialogsAndFullscreen;
+  friend class SurfaceEmbedConnectorImpl;
 
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplTest, CaptureHoldsWakeLock);
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplTest,
@@ -2271,6 +2287,18 @@ class CONTENT_EXPORT WebContentsImpl
       RenderWidgetHostImpl* render_widget_host,
       const blink::WebInputEvent& event);
 
+  // Returns the first WebContentsDelegate found in the embedding chain,
+  // traversing both SurfaceEmbedConnector and outer WebContents.
+  WebContentsDelegate* GetFirstWebContentsDelegate();
+
+  // Returns true if any WebContents in the parent chain (including this one)
+  // has a pointer lock widget.
+  bool HasPointerLockWidgetInParentChain();
+
+  // Sets the pointer lock widget for this WebContents and propagates it to all
+  // parents in the chain (both SurfaceEmbed and GuestView).
+  void SetPointerLockWidgetInParentChain(RenderWidgetHostImpl* widget);
+
 #if BUILDFLAG(IS_ANDROID)
   // Apply the cached primary subframe importance to the primary frame tree.
   void ApplyPrimaryPageSubframeImportance();
@@ -2348,6 +2376,9 @@ class CONTENT_EXPORT WebContentsImpl
   // Helps connect to embedder when embedded in a SurfaceEmbed plugin.
   // nullptr if not embedded.
   std::unique_ptr<SurfaceEmbedConnectorImpl> surface_embed_connector_;
+
+  // WebContents that are embedded in this WebContents via SurfaceEmbed.
+  std::vector<base::WeakPtr<WebContents>> surface_embed_children_;
 
   // Helper classes ------------------------------------------------------------
 
@@ -2572,6 +2603,11 @@ class CONTENT_EXPORT WebContentsImpl
   std::unique_ptr<WakeLockContextHost> wake_lock_context_host_;
   bool enable_wake_locks_ = true;
 
+  // Set at creation from CreateParams::privileged_params and never
+  // mutated afterwards; unset for ordinary WebContents. See
+  // WebContents::PrivilegedParams.
+  std::optional<PrivilegedParams> privileged_params_;
+
   // The last set/computed value of WebPreferences for this WebContents, either
   // set directly through SetWebPreferences, or set after recomputing values
   // from ComputeWebPreferences.
@@ -2757,7 +2793,6 @@ class CONTENT_EXPORT WebContentsImpl
   base::TimeTicks last_back_navigation_hint_time_ = base::TimeTicks::Min();
 
   viz::FrameSinkId xr_render_target_;
-
 
   // Background color of the page set by the embedder to be passed to all
   // renderers attached to this WebContents, for use in the main frame.

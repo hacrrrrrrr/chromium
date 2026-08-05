@@ -11,6 +11,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/ui/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
+#include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -60,6 +62,7 @@
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/accessibility/accessibility_features.h"
+#include "ui/actions/actions.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -70,7 +73,7 @@ class MockReadAnythingLifecycleObserver : public ReadAnythingLifecycleObserver {
   MOCK_METHOD(void,
               Activate,
               (bool active,
-               std::optional<ReadAnythingOpenTrigger>,
+               ReadAnythingOpenTrigger,
                std::optional<base::TimeDelta>),
               (override));
   MOCK_METHOD(void, OnDestroyed, (), (override));
@@ -90,23 +93,24 @@ class MockReadAnythingService : public ReadAnythingService {
 
 class ReadAnythingControllerBrowserTest : public InProcessBrowserTest {
  public:
-  ReadAnythingControllerBrowserTest() = default;
+  explicit ReadAnythingControllerBrowserTest(
+      std::vector<base::test::FeatureRef> enabled_features = {},
+      std::vector<base::test::FeatureRef> disabled_features = {}) {
+    enabled_features.push_back(features::kImmersiveReadAnything);
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+    enabled_features.push_back(features::kWasmTtsEngineAutoInstallDisabled);
+#endif
+    scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
+  }
 
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kImmersiveReadAnything,
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-         features::kWasmTtsEngineAutoInstallDisabled
-#endif
-        },
-        {});
     ReadAnythingController::SetFreezeDistillationOnCreationForTesting(true);
     InProcessBrowserTest::SetUp();
   }
 
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
-    browser()->profile()->GetPrefs()->ClearPref(
+    browser()->GetProfile()->GetPrefs()->ClearPref(
         prefs::kAccessibilityReadAnythingLastOpenedPresentationState);
     embedded_test_server()->ServeFilesFromSourceDirectory("chrome/test/data");
     ASSERT_TRUE(embedded_test_server()->Start());
@@ -316,7 +320,7 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
   base::RunLoop run_loop;
   EXPECT_CALL(observer, Activate(false, testing::_, testing::_))
       .WillOnce([&run_loop](
-                    bool active, std::optional<ReadAnythingOpenTrigger> trigger,
+                    bool active, ReadAnythingOpenTrigger trigger,
                     std::optional<base::TimeDelta> completed_session_duration) {
         EXPECT_TRUE(completed_session_duration.has_value());
         run_loop.Quit();
@@ -427,7 +431,14 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
 
   AssertOverlayVisibility(/*visible=*/false);
 
-  chrome::ExecuteCommand(browser(), IDC_SHOW_READING_MODE_SIDE_PANEL);
+  chrome::ExecuteCommandWithContext(
+      browser(), IDC_SHOW_READING_MODE_SIDE_PANEL,
+      actions::ActionInvocationContext::Builder()
+          .SetProperty(
+              kSidePanelOpenTriggerKey,
+              static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
+                  SidePanelOpenTrigger::kAppMenu))
+          .Build());
   AwaitAndAssertOverlayVisibility(/*visible=*/true);
 
   AssertOverlayVisibility(/*visible=*/true);
@@ -485,6 +496,65 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
   // Check presentation state.
   EXPECT_EQ(controller->GetPresentationState(),
             ReadAnythingController::PresentationState::kInImmersiveOverlay);
+}
+
+IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
+                       OverlayExists_IsHidden) {
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+  views::View* contents_container =
+      browser_view->GetActiveContentsContainerView();
+  ASSERT_NE(contents_container, nullptr);
+
+  views::View* overlay_view = nullptr;
+  int overlay_count = 0;
+
+  for (views::View* child : contents_container->children()) {
+    if (child->GetID() == VIEW_ID_READ_ANYTHING_OVERLAY) {
+      overlay_view = child;
+      overlay_count++;
+    }
+  }
+
+  ASSERT_NE(overlay_view, nullptr) << "Overlay should exist by default.";
+  EXPECT_EQ(1, overlay_count);
+  EXPECT_FALSE(overlay_view->GetVisible()) << "Overlay should be hidden.";
+}
+
+IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
+                       OverlayExistsOnSplitViews) {
+  chrome::NewTab(browser(), NewTabTypes::kNoUserAction);
+  browser()->tab_strip_model()->ActivateTabAt(0);
+  std::vector<int> other_tab_indices = {1};
+  split_tabs::SplitTabVisualData visual_data;
+  split_tabs::SplitTabCreatedSource source =
+      split_tabs::SplitTabCreatedSource::kToolbarButton;
+  browser()->tab_strip_model()->AddToNewSplit(other_tab_indices, visual_data,
+                                              source);
+
+  const auto ContainsReadAnythingOverlay = [](views::View* container) {
+    if (!container) {
+      return false;
+    }
+
+    for (views::View* child : container->children()) {
+      if (child->GetID() == VIEW_ID_READ_ANYTHING_OVERLAY) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+  views::View* container_0 = browser_view->GetActiveContentsContainerView();
+  ASSERT_NE(container_0, nullptr);
+  ASSERT_TRUE(ContainsReadAnythingOverlay(container_0));
+
+  browser()->tab_strip_model()->ActivateTabAt(1);
+  views::View* container_1 = browser_view->GetActiveContentsContainerView();
+  ASSERT_NE(container_1, nullptr);
+  ASSERT_NE(container_0, container_1);
+  ASSERT_TRUE(ContainsReadAnythingOverlay(container_1));
 }
 
 IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
@@ -868,10 +938,8 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
   // Create a context with a valid trigger for the action.
   actions::ActionInvocationContext context =
       actions::ActionInvocationContext::Builder()
-          .SetProperty(
-              kSidePanelOpenTriggerKey,
-              static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-                  SidePanelOpenTrigger::kPinnedEntryToolbarButton))
+          .SetProperty(kSidePanelOpenTriggerKey,
+                       SidePanelOpenTrigger::kPinnedEntryToolbarButton)
           .Build();
 
   read_anything_action->InvokeAction(std::move(context));
@@ -883,10 +951,8 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
   // Create a new context for the second invocation.
   actions::ActionInvocationContext context2 =
       actions::ActionInvocationContext::Builder()
-          .SetProperty(
-              kSidePanelOpenTriggerKey,
-              static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-                  SidePanelOpenTrigger::kPinnedEntryToolbarButton))
+          .SetProperty(kSidePanelOpenTriggerKey,
+                       SidePanelOpenTrigger::kPinnedEntryToolbarButton)
           .Build();
   read_anything_action->InvokeAction(std::move(context2));
 
@@ -2535,6 +2601,34 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest, Reopen_HasFocus) {
 }
 
 IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
+                       ShowImmersiveFromSidePanel_HasFocus) {
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+  ASSERT_TRUE(tab);
+  auto* controller = ReadAnythingController::From(tab);
+  ASSERT_TRUE(controller);
+  auto* side_panel_ui = browser()->GetFeatures().side_panel_ui();
+
+  // Open Side Panel
+  controller->ShowSidePanelUI(SidePanelOpenTrigger::kAppMenu);
+
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return side_panel_ui->IsSidePanelEntryShowing(
+        SidePanelEntryKey(SidePanelEntryId::kReadAnything));
+  }));
+
+  // Show Immersive Mode from Side Panel
+  controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kOmniboxChip);
+  AwaitAndAssertOverlayVisibility(/*visible=*/true);
+
+  views::View* overlay_view = GetActiveImmersiveOverlay();
+  ASSERT_TRUE(overlay_view);
+  auto* web_view = static_cast<views::WebView*>(overlay_view->children()[0]);
+
+  // It should be focused
+  EXPECT_TRUE(base::test::RunUntil([&]() { return web_view->HasFocus(); }));
+}
+
+IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
                        GlueAttachedAndDetachedCorrectly) {
   tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
   ASSERT_TRUE(tab);
@@ -2748,7 +2842,7 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
                        RemembersLastOpenedPresentation) {
   tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
   auto* controller = ReadAnythingController::From(tab);
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
   auto* side_panel_ui = browser()->GetFeatures().side_panel_ui();
 
   // 1. Initial state should be immersive (default).
@@ -2829,7 +2923,7 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
                        AutomaticToggleDoesNotUpdatePreference) {
   tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
   auto* controller = ReadAnythingController::From(tab);
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
   controller->UnlockDistillationStateForTesting();
 
   // 1. Initial state should be immersive.
@@ -2877,7 +2971,7 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
                        ToggleUI_RespectsPreference) {
   tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
   auto* controller = ReadAnythingController::From(tab);
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
   auto* side_panel_ui = browser()->GetFeatures().side_panel_ui();
 
   // Set preference to Side Panel.
@@ -3150,4 +3244,33 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingControllerBrowserTest,
 
   // Verify focus has return to the main page.
   EXPECT_TRUE(base::test::RunUntil([&]() { return IsFocusOnMainPage(); }));
+}
+
+class ReadAnythingControllerTranslateBrowserTest
+    : public ReadAnythingControllerBrowserTest {
+ public:
+  ReadAnythingControllerTranslateBrowserTest()
+      : ReadAnythingControllerBrowserTest(
+            {features::kReadAnythingTranslateEntryPoint}) {}
+};
+
+IN_PROC_BROWSER_TEST_F(
+    ReadAnythingControllerTranslateBrowserTest,
+    ImmersiveWebView_AttachesTranslateClientWhenFeatureEnabled) {
+  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+  tabs::TabInterface* tab = tab_strip_model->GetActiveTab();
+  ASSERT_TRUE(tab);
+  auto* controller = ReadAnythingController::From(tab);
+  ASSERT_TRUE(controller);
+
+  controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kOmniboxChip);
+  AwaitAndAssertOverlayVisibility(/*visible=*/true);
+  views::View* overlay_view = GetActiveImmersiveOverlay();
+  ASSERT_FALSE(overlay_view->children().empty());
+
+  ReadAnythingImmersiveWebView* web_view =
+      static_cast<ReadAnythingImmersiveWebView*>(overlay_view->children()[0]);
+  ASSERT_NE(web_view, nullptr);
+  EXPECT_NE(ChromeTranslateClient::FromWebContents(web_view->GetWebContents()),
+            nullptr);
 }

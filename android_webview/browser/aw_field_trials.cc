@@ -108,7 +108,6 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   aw_feature_overrides.DisableFeature(blink::features::kFencedFrames);
 
   // Disable FLEDGE on WebView.
-  aw_feature_overrides.DisableFeature(network::features::kInterestGroupStorage);
   aw_feature_overrides.DisableFeature(blink::features::kAdInterestGroupAPI);
   aw_feature_overrides.DisableFeature(blink::features::kFledge);
 
@@ -254,6 +253,8 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   aw_feature_overrides.DisableFeature(blink::features::kGeolocationElement);
   aw_feature_overrides.DisableFeature(blink::features::kUserMediaElement);
   aw_feature_overrides.DisableFeature(blink::features::kInstallElement);
+  aw_feature_overrides.DisableFeature(
+      blink::features::kCameraAndMicrophoneElements);
 
   // Delete Incidental Party State (DIPS) feature is not yet supported on
   // WebView.
@@ -364,6 +365,10 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   // Disable HappyEyeballsV2 for WebView for now.
   // DISABLED_TEMPORARY: crbug.com/529948671
   aw_feature_overrides.DisableFeature(net::features::kHappyEyeballsV2);
+
+  // DISABLED_TEMPORARY: crbug.com/515084572
+  aw_feature_overrides.DisableFeature(
+      net::features::kCloseQuicSessionsOnPreFreeze);
 }
 
 void AwFieldTrials::EnableRuntimeMutableFeatures(

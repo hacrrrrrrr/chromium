@@ -236,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
   {
     base::RunLoop run_loop;
     dialog = extensions::ExtensionUninstallDialog::Create(
-        app_browser->profile(), app_browser->GetWindow()->GetNativeWindow(),
+        app_browser->GetProfile(), app_browser->GetWindow()->GetNativeWindow(),
         &delegate);
     run_loop.RunUntilIdle();
   }
@@ -383,7 +383,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
   // Extensions container should be visible since there are enabled
   // extensions.
   ExtensionsToolbarDesktop* const container =
-      browser()->GetBrowserView().toolbar()->extensions_container();
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
+          ->extensions_container();
   ASSERT_TRUE(container->GetVisible());
   ASSERT_TRUE(container->GetViewForId(extensionA->id()));
 

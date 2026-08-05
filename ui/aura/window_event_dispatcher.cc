@@ -379,6 +379,9 @@ void WindowEventDispatcher::OnWindowHidden(Window* invisible,
   if (invisible->Contains(old_dispatch_target_))
     old_dispatch_target_ = nullptr;
 
+  // Block the deletion of the root window, its host thus this dispatcher.
+  aura::Window::ScopedDeleteBlocker blocker(host_->window());
+
   // Cleaning up gesture state may end up destroying the hidden window. We use a
   // weak pointer to detect this.
   base::WeakPtr<aura::Window> invisible_weak = invisible->GetWeakPtrAsWindow();
@@ -426,6 +429,12 @@ void WindowEventDispatcher::UpdateCapture(Window* old_capture,
   // Window.
   if (mouse_moved_handler_ && !window()->Contains(mouse_moved_handler_))
     mouse_moved_handler_ = nullptr;
+
+  std::unique_ptr<Window::ScopedDeleteBlocker> new_capture_blocker;
+  if (new_capture) {
+    new_capture_blocker =
+        std::make_unique<Window::ScopedDeleteBlocker>(new_capture);
+  }
 
   if (old_capture && old_capture->GetRootWindow() == window() &&
       old_capture->delegate()) {

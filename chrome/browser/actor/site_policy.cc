@@ -5,81 +5,25 @@
 #include "chrome/browser/actor/site_policy.h"
 
 #include <string>
-#include <string_view>
 
 #include "base/feature_list.h"
 #include "base/functional/callback.h"
 #include "base/notimplemented.h"
-#include "base/task/sequenced_task_runner.h"
 #include "base/types/expected.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_io_data.h"
 #include "components/actor/core/actor_features.h"
-#include "components/actor/core/actor_util.h"
-#include "components/actor/core/aggregated_journal.h"
-#include "components/actor/core/journal_details_builder.h"
 #include "components/actor/public/mojom/actor_types.mojom.h"
 #include "components/optimization_guide/core/filters/optimization_hints_component_update_listener.h"
 #include "components/optimization_guide/core/hints/optimization_guide_decision.h"
 #include "components/optimization_guide/core/optimization_guide_util.h"
 #include "components/optimization_guide/proto/hints.pb.h"
-#include "components/safe_browsing/buildflags.h"
-#include "components/tabs/public/tab_interface.h"
-#include "content/public/browser/web_contents.h"
-#include "net/base/url_util.h"
 #include "url/gurl.h"
-#include "url/url_constants.h"
-
-#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
-#include "chrome/browser/safe_browsing/user_interaction_observer.h"
-#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
-#endif
 
 namespace actor {
 
 namespace {
-
-class DecisionWrapper {
- public:
-  DecisionWrapper(AggregatedJournal& journal,
-                  const GURL& url,
-                  TaskId task_id,
-                  std::string_view event_name,
-                  DecisionCallbackWithReason callback)
-      : callback_(std::move(callback)),
-        journal_entry_(
-            journal.CreatePendingAsyncEntry(url,
-                                            task_id,
-                                            MakeBrowserTrackUUID(task_id),
-                                            event_name,
-                                            {})) {}
-
-  void Reject(std::string_view reason, MayActOnUrlBlockReason block_reason) {
-    journal_entry_->EndEntry(JournalDetailsBuilder().AddError(reason).Build());
-
-    // Some decisions are made asynchronously, so always invoke the callback
-    // asynchronously for consistency.
-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback_), block_reason));
-  }
-
-  void Accept() {
-    journal_entry_->EndEntry(
-        JournalDetailsBuilder().Add("result", "Allow").Build());
-
-    // Some decisions are made asynchronously, so always invoke the callback
-    // asynchronously for consistency.
-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-        FROM_HERE,
-        base::BindOnce(std::move(callback_), MayActOnUrlBlockReason::kAllowed));
-  }
-
- private:
-  DecisionCallbackWithReason callback_;
-  std::unique_ptr<AggregatedJournal::PendingAsyncEntry> journal_entry_;
-};
 
 // Whether to continue with the action or navigation based on the optimization
 // guide decision. Since we want to not block navigation in case the service has
@@ -88,66 +32,6 @@ class DecisionWrapper {
 bool ShouldContinueFromOptimizationGuideDecision(
     optimization_guide::OptimizationGuideDecision decision) {
   return decision != optimization_guide::OptimizationGuideDecision::kFalse;
-}
-
-void MayActOnUrlInternal(const GURL& url,
-                         bool allow_insecure_http,
-                         Profile* profile,
-                         NoVerdictContinuation resolve_no_verdict,
-                         std::unique_ptr<DecisionWrapper> decision_wrapper) {
-  CHECK(resolve_no_verdict);
-
-  if ((net::IsLocalhost(url) && url.SchemeIsHTTPOrHTTPS()) ||
-      url.IsAboutBlank()) {
-    decision_wrapper->Accept();
-    return;
-  }
-
-  if (!(url.SchemeIs(url::kHttpsScheme) ||
-        (allow_insecure_http && url.SchemeIs(url::kHttpScheme)))) {
-    decision_wrapper->Reject("Wrong scheme",
-                             ProfileIOData::IsHandledURL(url)
-                                 ? MayActOnUrlBlockReason::kWrongScheme
-                                 : MayActOnUrlBlockReason::kExternalProtocol);
-    return;
-  }
-
-  if (url.HostIsIPAddress()) {
-    decision_wrapper->Reject("IP address", MayActOnUrlBlockReason::kIpAddress);
-    return;
-  }
-
-  if (IsActorSafetyCheckDisabled()) {
-    decision_wrapper->Accept();
-    return;
-  }
-
-  bool is_safe_browsing_enabled = false;
-#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
-  is_safe_browsing_enabled =
-      safe_browsing::IsSafeBrowsingEnabled(*profile->GetPrefs());
-#endif
-  if (!is_safe_browsing_enabled) {
-    // We don't want to risk acting on dangerous sites, so we require
-    // SafeBrowsing.
-    decision_wrapper->Reject("Safebrowsing unavailable",
-                             MayActOnUrlBlockReason::kSafeBrowsing);
-    return;
-  }
-
-  std::move(resolve_no_verdict)
-      .Run(url,
-           base::BindOnce(
-               [](std::unique_ptr<DecisionWrapper> wrapper,
-                  base::expected<void, MayActOnUrlBlockResult> block_result) {
-                 if (block_result.has_value()) {
-                   wrapper->Accept();
-                 } else {
-                   wrapper->Reject(block_result.error().reason,
-                                   block_result.error().reason_code);
-                 }
-               },
-               std::move(decision_wrapper)));
 }
 
 }  // namespace
@@ -160,60 +44,6 @@ void InitActionBlocklist(Profile* profile) {
     optimization_guide_decider->RegisterOptimizationTypes(
         {optimization_guide::proto::GLIC_ACTION_PAGE_BLOCK});
   }
-}
-
-// TODO(mcnee): Add UMA for the outcomes.
-void MayActOnTab(const tabs::TabInterface& tab,
-                 AggregatedJournal& journal,
-                 TaskId task_id,
-                 NoVerdictContinuation resolve_no_verdict,
-                 DecisionCallbackWithReason callback) {
-  content::WebContents& web_contents = *tab.GetContents();
-
-  const GURL& url = web_contents.GetPrimaryMainFrame()->GetLastCommittedURL();
-  std::unique_ptr<DecisionWrapper> decision_wrapper =
-      std::make_unique<DecisionWrapper>(journal, url, task_id, "MayActOnTab",
-                                        std::move(callback));
-
-  if (web_contents.GetPrimaryMainFrame()->IsErrorDocument()) {
-    decision_wrapper->Reject("Tab is an error document",
-                             MayActOnUrlBlockReason::kTabIsErrorDocument);
-    return;
-  }
-
-#if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
-  // SafeBrowsing Delayed Warnings experiment can delay some SafeBrowsing
-  // warnings until user interaction. If the current page has a delayed warning,
-  // it'll have a user interaction observer attached.
-  // Do not act on such a page.
-  if (safe_browsing::SafeBrowsingUserInteractionObserver::FromWebContents(
-          &web_contents) &&
-      !IsActorSafetyCheckDisabled()) {
-    decision_wrapper->Reject("Blocked by safebrowsing",
-                             MayActOnUrlBlockReason::kSafeBrowsing);
-    return;
-  }
-#endif
-
-  MayActOnUrlInternal(
-      url, /*allow_insecure_http=*/false,
-      Profile::FromBrowserContext(web_contents.GetBrowserContext()),
-      std::move(resolve_no_verdict), std::move(decision_wrapper));
-}
-
-void MayActOnUrl(const GURL& url,
-                 bool allow_insecure_http,
-                 Profile* profile,
-                 AggregatedJournal& journal,
-                 TaskId task_id,
-                 NoVerdictContinuation resolve_no_verdict,
-                 DecisionCallbackWithReason callback) {
-  std::unique_ptr<DecisionWrapper> decision_wrapper =
-      std::make_unique<DecisionWrapper>(journal, url, task_id, "MayActOnUrl",
-                                        std::move(callback));
-  MayActOnUrlInternal(url, allow_insecure_http, profile,
-                      std::move(resolve_no_verdict),
-                      std::move(decision_wrapper));
 }
 
 base::expected<void, DecisionCallback>

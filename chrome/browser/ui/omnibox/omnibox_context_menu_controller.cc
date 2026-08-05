@@ -32,15 +32,16 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/contextual_search/searchbox_context_data.h"
+#include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_state_manager.h"
 #include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/omnibox_popup_file_selector.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_aim_presenter.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_delegate.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_base_content.h"
 #include "chrome/browser/ui/webui/cr_components/composebox/composebox_handler.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
@@ -172,72 +173,9 @@ bool IsValidTab(GURL url) {
          !url.IsAboutBlank();
 }
 
-
 bool IsThinkingModel(omnibox::ModelMode model) {
   return model == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO ||
          model == omnibox::ModelMode::MODEL_MODE_GEMINI_PRO_NO_GEN_UI;
-}
-
-void HandleDriveUploadResponse(
-    bool was_ai_mode_open,
-    base::WeakPtr<content::WebContents> web_contents,
-    searchbox::mojom::DriveUploadResponsePtr response) {
-  if (!response || !web_contents) {
-    return;
-  }
-
-  std::vector<searchbox::mojom::SearchContextAttachmentPtr> file_attachments;
-  for (const auto& file : response->files) {
-    auto file_attachment = searchbox::mojom::FileAttachment::New();
-    file_attachment->uuid = file->token;
-    file_attachment->name = file->file_name;
-    file_attachment->mime_type = file->mime_type;
-    file_attachment->image_data_url = file->thumbnail_url;
-    file_attachment->icon_url = file->icon_url;
-
-    file_attachments.push_back(
-        searchbox::mojom::SearchContextAttachment::NewFileAttachment(
-            std::move(file_attachment)));
-  }
-
-  if (response->error.has_value()) {
-    auto file_attachment = searchbox::mojom::FileAttachment::New();
-    file_attachment->uuid = base::UnguessableToken::Create();
-    file_attachment->name = "";
-    file_attachment->mime_type = "";
-
-    contextual_search::ContextUploadErrorType error_type =
-        contextual_search::ContextUploadErrorType::kUnknown;
-    switch (response->error.value()) {
-      case searchbox::mojom::DriveUploadError::kMaxFilesExceeded:
-        error_type = contextual_search::ContextUploadErrorType::
-            kBrowserProcessingMaxFilesExceededError;
-        break;
-      case searchbox::mojom::DriveUploadError::kSizeLimitExceeded:
-        error_type = contextual_search::ContextUploadErrorType::
-            kBrowserProcessingFileTooLargeError;
-        break;
-    }
-    file_attachment->error_type = error_type;
-    file_attachments.push_back(
-        searchbox::mojom::SearchContextAttachment::NewFileAttachment(
-            std::move(file_attachment)));
-  }
-
-  bool has_files_or_errors = !file_attachments.empty();
-
-  OmniboxContextMenuController::UpdateSearchboxContext(
-      web_contents.get(), /*tab_info=*/std::nullopt,
-      /*tool_mode=*/std::nullopt, std::move(file_attachments));
-
-  auto* omnibox_controller =
-      OmniboxContextMenuController::GetOmniboxController(web_contents.get());
-  if (omnibox_controller && omnibox_controller->edit_model()) {
-    if (was_ai_mode_open || has_files_or_errors) {
-      omnibox_controller->edit_model()->OpenAiMode(
-          OmniboxEditModel::AimActivation::kContextMenu);
-    }
-  }
 }
 
 }  // namespace
@@ -889,6 +827,74 @@ void OmniboxContextMenuController::UpdateSearchboxContext(
   }
 }
 
+void OmniboxContextMenuController::HandleDriveUploadResponse(
+    bool was_ai_mode_open,
+    base::WeakPtr<content::WebContents> web_contents,
+    searchbox::mojom::DriveUploadResponsePtr response) {
+  if (!response || !web_contents) {
+    return;
+  }
+
+  std::vector<searchbox::mojom::SearchContextAttachmentPtr> file_attachments;
+  for (const auto& file : response->files) {
+    auto file_attachment = searchbox::mojom::FileAttachment::New();
+    file_attachment->uuid = file->token;
+    file_attachment->name = file->file_name;
+    file_attachment->mime_type = file->mime_type;
+    file_attachment->image_data_url = std::nullopt;
+    file_attachment->icon_url = file->icon_url;
+    if (file->thumbnail_url.has_value()) {
+      file_attachment->thumbnail_url = GURL(file->thumbnail_url.value());
+    }
+
+    file_attachments.push_back(
+        searchbox::mojom::SearchContextAttachment::NewFileAttachment(
+            std::move(file_attachment)));
+  }
+
+  if (response->error.has_value()) {
+    auto file_attachment = searchbox::mojom::FileAttachment::New();
+    file_attachment->uuid = base::UnguessableToken::Create();
+    file_attachment->name = "";
+    file_attachment->mime_type = "";
+
+    contextual_search::ContextUploadErrorType error_type =
+        contextual_search::ContextUploadErrorType::kUnknown;
+    switch (response->error.value()) {
+      case searchbox::mojom::DriveUploadError::kMaxFilesExceeded:
+        error_type = contextual_search::ContextUploadErrorType::
+            kBrowserProcessingMaxFilesExceededError;
+        break;
+      case searchbox::mojom::DriveUploadError::kSizeLimitExceeded:
+        error_type = contextual_search::ContextUploadErrorType::
+            kBrowserProcessingFileTooLargeError;
+        break;
+    }
+    file_attachment->error_type = error_type;
+    file_attachments.push_back(
+        searchbox::mojom::SearchContextAttachment::NewFileAttachment(
+            std::move(file_attachment)));
+  }
+
+  // Only update the search context and open AI mode if files or errors were
+  // received. Ignore cancellations to preserve the current search/query state.
+  bool has_files_or_errors = !file_attachments.empty();
+  if (has_files_or_errors) {
+    OmniboxContextMenuController::UpdateSearchboxContext(
+        web_contents.get(), /*tab_info=*/std::nullopt,
+        /*tool_mode=*/std::nullopt, std::move(file_attachments));
+  }
+
+  auto* omnibox_controller =
+      OmniboxContextMenuController::GetOmniboxController(web_contents.get());
+  if (omnibox_controller && omnibox_controller->edit_model()) {
+    if (was_ai_mode_open || has_files_or_errors) {
+      omnibox_controller->edit_model()->OpenAiMode(
+          OmniboxEditModel::AimActivation::kContextMenu);
+    }
+  }
+}
+
 bool OmniboxContextMenuController::IsContentSharingEnabled() const {
   auto* browser_window_interface =
       webui::GetBrowserWindowInterface(web_contents_.get());
@@ -1267,7 +1273,7 @@ OmniboxPopupUI* OmniboxContextMenuController::GetOmniboxPopupUI(
   }
 
   // Fallback: If web_contents does not have WebUI (e.g. it is the active tab),
-  // try to find it through the active browser window's LocationBarView.
+  // try to find it through the active browser window's LocationBar.
   auto* browser_window_interface =
       webui::GetBrowserWindowInterface(web_contents);
   if (!browser_window_interface) {
@@ -1280,12 +1286,12 @@ OmniboxPopupUI* OmniboxContextMenuController::GetOmniboxPopupUI(
     return nullptr;
   }
 
-  auto* location_bar_view = static_cast<LocationBarView*>(location_bar);
-  if (!location_bar_view) {
+  auto* presenter_delegate = location_bar->GetPresenterDelegate();
+  if (!presenter_delegate) {
     return nullptr;
   }
 
-  auto* presenter = location_bar_view->GetOmniboxPopupAimPresenter();
+  auto* presenter = presenter_delegate->GetOmniboxPopupAimPresenter();
   if (!presenter) {
     return nullptr;
   }
@@ -1383,6 +1389,11 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
         base::UmaHistogramExactLinear(
             "ContextualSearch.ContextAdded.ContextAddedMethod.Omnibox",
             /*ContextMenu*/ 0, 4);
+        if (base::FeatureList::IsEnabled(
+                omnibox::kContextManagementInComposebox)) {
+          base::UmaHistogramBoolean(
+              "ContextualSearch.AddTabsFlyout.TabSelected.Omnibox", true);
+        }
         AddTabContext(tab_info);
       }
     }
@@ -1437,7 +1448,8 @@ void OmniboxContextMenuController::ExecuteCommand(int id, int event_flags) {
                                       : nullptr;
                   if (handler) {
                     handler->OnDriveUploadClicked(
-                        base::BindOnce(&HandleDriveUploadResponse,
+                        base::BindOnce(&OmniboxContextMenuController::
+                                           HandleDriveUploadResponse,
                                        is_aim_popup_open, web_contents));
                   }
                 },

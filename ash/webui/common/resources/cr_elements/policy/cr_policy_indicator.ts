@@ -40,15 +40,15 @@ export class CrPolicyIndicatorElement extends CrPolicyIndicatorElementBase {
     };
   }
 
-  iconAriaLabel: string;
-  private indicatorTooltip_: string;
+  declare iconAriaLabel: string;
+  declare private indicatorTooltip_: string;
 
   /**
    * @param indicatorSourceName The name associated with the indicator.
    *     See chrome.settingsPrivate.PrefObject.controlledByName
    * @return The tooltip text for |type|.
    */
-  private getIndicatorTooltip_(
+  protected getIndicatorTooltip_(
       indicatorType: CrPolicyIndicatorType,
       indicatorSourceName: string): string {
     return this.getIndicatorTooltip(indicatorType, indicatorSourceName);

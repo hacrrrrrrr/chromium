@@ -1,14 +1,10 @@
 import("//build/config/features.gni")
 
-assert(use_blink)  # Needed because of content/public/browser dependency.
-
 static_library("first_run") {
   sources = [
-    "personal_context_first_run_client.h",
     "personal_context_first_run_service.h",
     "personal_context_first_run_service_impl.cc",
     "personal_context_first_run_service_impl.h",
-    "personal_context_first_run_types.h",
   ]
 
   deps = [
@@ -16,7 +12,18 @@ static_library("first_run") {
     "//components/keyed_service/core",
     "//components/personal_context/core",
     "//components/signin/public/identity_manager",
-    "//content/public/browser",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "test_personal_context_first_run_service.cc",
+    "test_personal_context_first_run_service.h",
+  ]
+  deps = [
+    ":first_run",
+    "//base",
   ]
 }
 
@@ -31,7 +38,6 @@ source_set("unit_tests") {
     "//components/personal_context/core:prefs",
     "//components/prefs:test_support",
     "//components/signin/public/identity_manager:test_support",
-    "//content/test:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]

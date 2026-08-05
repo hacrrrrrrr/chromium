@@ -15,7 +15,7 @@ export function getHtml(this: AvatarButtonElement) {
     ?has-label="${!!this.state.text}"
     ?disabled="${!this.state.enabled}"
     ?has-border="${this.shouldPaintBorder()}"
-    ?has-ai-ring="${this.state.hasAiRing}"
+    ?has-linear-gradient-ring="${this.state.hasLinearGradientRing}"
     .tooltip="${this.getTooltip_() || ''}"
     .ariaLabel="${this.state.accessibilityName || ''}"
     .ariaHasPopup="menu"
@@ -29,7 +29,7 @@ export function getHtml(this: AvatarButtonElement) {
     <icon-from-table slot="prefix-icon" id="icon"
         .iconHandle="${this.state.icon}"></icon-from-table>
   ` : html`
-    <cr-icon slot="prefix-icon" id="icon" icon="cr:person"></cr-icon>
+    <cr-icon slot="prefix-icon" id="icon" icon="cr:person-filled"></cr-icon>
   `}
   <span id="text" ?visible="${!!this.state.text}">
     ${this.state.text || ''}

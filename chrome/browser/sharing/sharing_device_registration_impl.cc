@@ -18,9 +18,7 @@
 #include "components/gcm_driver/crypto/p256_key_util.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
-#include "components/prefs/pref_service.h"
 #include "components/sharing_message/features.h"
-#include "components/sharing_message/pref_names.h"
 #include "components/sharing_message/sharing_constants.h"
 #include "components/sharing_message/sharing_device_registration_result.h"
 #include "components/sharing_message/sharing_sync_preference.h"
@@ -34,12 +32,10 @@ using instance_id::InstanceID;
 using SharingFeature = syncer::DeviceInfo::SharingFeature;
 
 SharingDeviceRegistrationImpl::SharingDeviceRegistrationImpl(
-    PrefService* pref_service,
     SharingSyncPreference* sharing_sync_preference,
     instance_id::InstanceIDDriver* instance_id_driver,
     syncer::SyncService* sync_service)
-    : pref_service_(pref_service),
-      sharing_sync_preference_(sharing_sync_preference),
+    : sharing_sync_preference_(sharing_sync_preference),
       instance_id_driver_(instance_id_driver),
       sync_service_(sync_service) {}
 
@@ -200,12 +196,7 @@ std::set<SharingFeature> SharingDeviceRegistrationImpl::GetEnabledFeatures()
   }
 
   std::set<SharingFeature> enabled_features;
-  if (IsClickToCallSupported()) {
-    enabled_features.insert(SharingFeature::kClickToCallV2);
-  }
-  if (IsSharedClipboardSupported()) {
-    enabled_features.insert(SharingFeature::kSharedClipboardV2);
-  }
+
   if (IsSmsFetcherSupported()) {
     enabled_features.insert(SharingFeature::kSmsFetcher);
   }
@@ -223,19 +214,6 @@ std::set<SharingFeature> SharingDeviceRegistrationImpl::GetEnabledFeatures()
   }
 
   return enabled_features;
-}
-
-bool SharingDeviceRegistrationImpl::IsClickToCallSupported() const {
-  return false;
-}
-
-bool SharingDeviceRegistrationImpl::IsSharedClipboardSupported() const {
-  // Check the enterprise policy for Shared Clipboard.
-  if (pref_service_ &&
-      !pref_service_->GetBoolean(prefs::kSharedClipboardEnabled)) {
-    return false;
-  }
-  return true;
 }
 
 bool SharingDeviceRegistrationImpl::IsSmsFetcherSupported() const {

@@ -90,14 +90,16 @@ net::NetworkTrafficAnnotationTag GetTrafficAnnotationTag(bool is_app) {
             "If the OnFileAttachedEnterpriseConnector, "
             "OnFileDownloadedEnterpriseConnector, "
             "OnFileTransferEnterpriseConnector, "
-            "OnBulkDataEntryEnterpriseConnector or OnPrintEnterpriseConnector "
+            "OnBulkDataEntryEnterpriseConnector, OnDataCopiedEnterpriseConnector, "
+            "or OnPrintEnterpriseConnector "
             "policy is set, a request is made to scan a file attached to "
             "Chrome, a file downloaded by Chrome, a file transfered from a "
-            "ChromeOS file system, data pasted in "
-            "Chrome or data printed from Chrome respectively."
+            "ChromeOS file system, data pasted in Chrome, "
+            "data copied from Chrome, or data printed from Chrome respectively."
           data:
-            "The uploaded/downloaded/transfered file, pasted data or printed "
-            "data. Also includes an access token (enterprise only)."
+            "The uploaded/downloaded/transfered file, pasted data, copied "
+            "data or printed data. Also includes an access token (enterprise "
+            "only)."
           destination: GOOGLE_OWNED_SERVICE
           internal {
             contacts {
@@ -126,6 +128,9 @@ net::NetworkTrafficAnnotationTag GetTrafficAnnotationTag(bool is_app) {
             }
             OnBulkDataEntryEnterpriseConnector {
               OnBulkDataEntryEnterpriseConnector: "[]"
+            }
+            OnDataCopiedEnterpriseConnector {
+              OnDataCopiedEnterpriseConnector: "[]"
             }
             OnFileTransferEnterpriseConnector {
               OnFileTransferEnterpriseConnector: "[]"
@@ -267,15 +272,6 @@ void CloudBinaryUploadServiceBase::MaybeCancelRequests(
     FinishIfActive(id, ScanRequestUploadResult::kUserCancelled,
                    ContentAnalysisResponse());
   }
-}
-
-size_t CloudBinaryUploadServiceBase::GetParallelActiveRequestsMax() {
-  size_t experiment_max = kParallelContentAnalysisRequestCountMax.Get();
-  if (experiment_max > 0) {
-    return experiment_max;
-  }
-
-  return kDefaultMaxParallelActiveRequests;
 }
 
 base::WeakPtr<BinaryUploadService> CloudBinaryUploadServiceBase::AsWeakPtr() {
@@ -556,7 +552,7 @@ void CloudBinaryUploadServiceBase::RecordRequestMetrics(
 
 void CloudBinaryUploadServiceBase::PopRequestQueue() {
   AssertCalledOnUIThread();
-  while (active_requests_.size() < GetParallelActiveRequestsMax() &&
+  while (active_requests_.size() < kDefaultMaxParallelActiveRequests &&
          !request_queue_.empty()) {
     auto request = std::move(request_queue_.front());
     request_queue_.pop_front();
@@ -844,7 +840,7 @@ void CloudBinaryUploadServiceBase::QueueForDeepScanning(
         AccessPointFromRequest(request->analysis_connector(),
                                request->reason())};
   }
-  if (active_requests_.size() >= GetParallelActiveRequestsMax()) {
+  if (active_requests_.size() >= kDefaultMaxParallelActiveRequests) {
     request_queue_.push_back(std::move(request));
   } else {
     UploadForDeepScanning(std::move(request));

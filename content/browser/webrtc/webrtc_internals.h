@@ -146,6 +146,13 @@ class CONTENT_EXPORT WebRTCInternals : public PeerConnectionTrackerHostObserver,
 
   int num_connected_connections() const { return num_connected_connections_; }
 
+  // Returns whether the stats polling timer is currently running. Used by tests
+  // to verify that stats polling starts when an observer attaches to an
+  // already-active PeerConnection.
+  bool IsStatsTimerRunningForTesting() const {
+    return stats_timer_.IsRunning();
+  }
+
  protected:
   // Constructor/Destructor are protected to allow tests to derive from the
   // class and do per-instance testing without having to use the global
@@ -337,6 +344,11 @@ class CONTENT_EXPORT WebRTCInternals : public PeerConnectionTrackerHostObserver,
 
   // Weak factory for this object that we use for bulking up updates.
   base::WeakPtrFactory<WebRTCInternals> weak_factory_{this};
+
+  // Removes tracked getUserMedia/getDisplayMedia requests whose timestamp is
+  // older than kMaxMediaEntryAge so that long-lived sessions do not accumulate
+  // stale entries.
+  void PruneOldGetUserMediaRequests();
 
   // Helper functions for getUserMedia/getDisplayMedia.
   void OnGetMedia(std::string_view request_type,

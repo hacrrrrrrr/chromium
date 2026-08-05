@@ -24,6 +24,7 @@
 #include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_popup_selection.h"
 #include "components/omnibox/browser/searchbox.mojom.h"
+#include "components/omnibox/browser/searchbox_utils.h"
 #include "components/omnibox/common/input_state.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -121,23 +122,15 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                          const std::u16string& input,
                          bool prevent_inline_autocomplete,
                          uint32_t cursor_position,
-                         bool is_on_focus) override;
-  void QueryAutocompleteWithSuggestInventory(
-      int32_t query_id,
-      const std::u16string& input,
-      bool prevent_inline_autocomplete,
-      uint32_t cursor_position,
-      omnibox::SuggestInventory suggest_inventory,
-      bool is_on_focus) override;
+                         omnibox::SuggestInventory suggest_inventory,
+                         bool is_on_focus,
+                         const std::string& keyword) override;
   void StopAutocomplete(bool clear_result) override;
   void OpenAutocompleteMatch(uint8_t line,
                              const GURL& url,
                              bool are_matches_showing,
                              uint8_t mouse_button,
-                             bool alt_key,
-                             bool ctrl_key,
-                             bool meta_key,
-                             bool shift_key,
+                             searchbox::mojom::ActionModifiersPtr modifiers,
                              bool via_keyboard) override;
   void SetSmartComposeStats(
       searchbox::mojom::SmartComposeStatsPtr smart_compose_stats) override {}
@@ -165,7 +158,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                      bool ctrl_key,
                      bool meta_key,
                      bool shift_key) override;
-  void GetPlaceholderConfig(GetPlaceholderConfigCallback callback) override;
+  void GetCyclingPlaceholderConfig(
+      GetCyclingPlaceholderConfigCallback callback) override;
   void GetRecentTabs(GetRecentTabsCallback callback) override;
   void GetTabPreview(int32_t tab_id, GetTabPreviewCallback callback) override {}
   void WaitForTabFaviconLoad(int32_t tab_id,
@@ -200,6 +194,7 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
       GetDriveDisclaimerStatusCallback callback) override;
   void OnDriveDisclaimerAccepted() override;
   void OnDriveUploadClicked(OnDriveUploadClickedCallback callback) override;
+  void OpenProfilePicker() override {}
   void GetPageClassification(GetPageClassificationCallback callback) override;
 #if !BUILDFLAG(IS_ANDROID)
   void SetSmartTabSharingActive(bool active) override;
@@ -218,6 +213,7 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
                            Lens_AutocompleteController_Start);
   FRIEND_TEST_ALL_PREFIXES(WebuiOmniboxHandlerTest,
                            OpenAutocompleteMatch_KeyboardModifiers);
+  FRIEND_TEST_ALL_PREFIXES(WebuiOmniboxHandlerTest, OpenLensSearch);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchboxHandlerTest,
                            QueryAutocomplete_SetsLensInputs);
   FRIEND_TEST_ALL_PREFIXES(ContextualSearchboxHandlerTest,
@@ -247,9 +243,6 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   void SetAutocompleteControllerForTesting(
       std::unique_ptr<AutocompleteController> controller);
 
-  std::u16string GetSuggestionGroupHeaderText(
-      const std::optional<omnibox::GroupId>& suggestion_group_id) const;
-
   raw_ptr<Profile> profile_;
   raw_ptr<content::WebContents> web_contents_;
   // Tracks the ID of the latest query received from the page and sent to
@@ -264,6 +257,8 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
   std::unique_ptr<OmniboxController> owned_controller_;
   std::unique_ptr<OmniboxClient> client_;
   std::unique_ptr<AutocompleteController> autocomplete_controller_;
+
+  searchbox::InteractionMetricsTracker metrics_tracker_;
 
   base::ScopedObservation<AutocompleteController,
                           AutocompleteController::Observer>
@@ -297,26 +292,22 @@ class SearchboxHandler : public searchbox::mojom::PageHandler,
       int32_t query_id,
       const std::u16string& input,
       const AutocompleteResult& result,
-      const OmniboxEditModel* edit_model,
       bookmarks::BookmarkModel* bookmark_model,
       const PrefService* prefs,
       const TemplateURLService* turl_service) const;
   base::flat_map<int32_t, searchbox::mojom::SuggestionGroupPtr>
   CreateSuggestionGroupsMap(
       const AutocompleteResult& result,
-      const OmniboxEditModel* edit_model,
       const PrefService* prefs,
       const omnibox::GroupConfigMap& suggestion_groups_map) const;
   std::vector<searchbox::mojom::AutocompleteMatchPtr> CreateAutocompleteMatches(
       const AutocompleteResult& result,
-      const OmniboxEditModel* edit_model,
       bookmarks::BookmarkModel* bookmark_model,
       const omnibox::GroupConfigMap& suggestion_groups_map,
       const TemplateURLService* turl_service) const;
   virtual std::optional<searchbox::mojom::AutocompleteMatchPtr>
   CreateAutocompleteMatch(const AutocompleteMatch& match,
                           size_t line,
-                          const OmniboxEditModel* edit_model,
                           bookmarks::BookmarkModel* bookmark_model,
                           const omnibox::GroupConfigMap& suggestion_groups_map,
                           const TemplateURLService* turl_service) const;

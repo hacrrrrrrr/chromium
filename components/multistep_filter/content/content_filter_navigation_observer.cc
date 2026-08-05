@@ -17,6 +17,7 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "net/http/http_response_headers.h"
+#include "ui/base/page_transition_types.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -31,6 +32,10 @@ FilterNavigationMetadata CreateFilterNavigationMetadata(
     NavigationHandle* handle) {
   FilterNavigationMetadata metadata;
   metadata.navigation_id = handle->GetNavigationId();
+  metadata.ukm_source_id = handle->GetNextPageUkmSourceId();
+  metadata.navigation_start_time = handle->NavigationStart();
+  metadata.navigation_finish_time =
+      handle->GetNavigationHandleTiming().navigation_did_commit_time;
   metadata.url = handle->GetURL();
   metadata.prev_url = handle->GetPreviousPrimaryMainFrameURL();
   metadata.is_cryptographic_scheme = metadata.url.SchemeIsCryptographic();
@@ -48,15 +53,19 @@ FilterNavigationMetadata CreateFilterNavigationMetadata(
                                       (metadata.http_response_code >= 400 &&
                                        metadata.http_response_code <= 599);
   metadata.has_user_gesture = handle->HasUserGesture();
-  metadata.was_filter_initiated_navigation =
-      FilterInitiatedNavigationMarker::GetForNavigationHandle(*handle) !=
-      nullptr;
-  metadata.applied_suggestion =
-      metadata.was_filter_initiated_navigation
-          ? FilterInitiatedNavigationMarker::GetForNavigationHandle(*handle)
-                ->suggestion()
-          : std::nullopt;
+  const FilterInitiatedNavigationMarker* marker =
+      FilterInitiatedNavigationMarker::GetForNavigationHandle(*handle);
+  metadata.was_filter_initiated_navigation = (marker != nullptr);
+  metadata.applied_suggestion = marker ? marker->suggestion() : std::nullopt;
   metadata.is_same_document_navigation = handle->IsSameDocument();
+  metadata.is_back_navigation =
+      handle->IsHistory() && handle->GetNavigationEntryOffset() < 0;
+  ui::PageTransition transition = handle->GetPageTransition();
+  metadata.is_navigation_from_omnibox_or_bookmarks =
+      ((transition & ui::PAGE_TRANSITION_FROM_ADDRESS_BAR) != 0) ||
+      ui::PageTransitionCoreTypeIs(transition,
+                                   ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+
   return metadata;
 }
 

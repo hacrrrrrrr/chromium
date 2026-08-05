@@ -164,7 +164,7 @@ class ChromeComposeClientBrowserTest : public InProcessBrowserTest {
         std::make_unique<TestModelQualityLogsUploaderService>(
             g_browser_process->local_state()));
 
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         prefs::kPrefHasCompletedComposeFRE, true);
     SetPrefsForComposeMSBBState(true);
 
@@ -263,7 +263,7 @@ class ChromeComposeClientBrowserTest : public InProcessBrowserTest {
   }
 
   void SetPrefsForComposeMSBBState(bool msbb_state) {
-    PrefService* prefs = browser()->profile()->GetPrefs();
+    PrefService* prefs = browser()->GetProfile()->GetPrefs();
     prefs->SetBoolean(
         unified_consent::prefs::kUrlKeyedAnonymizedDataCollectionEnabled,
         msbb_state);
@@ -798,7 +798,7 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   base::UserActionTester user_action_tester;
   base::ScopedMockElapsedTimersForTest test_timer;
 
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPrefHasCompletedComposeFRE, false);
 
   compose::Config& config = compose::GetMutableConfigForTesting();
@@ -1190,7 +1190,7 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   base::ScopedMockElapsedTimersForTest test_timer;
 
   // Enable FRE and show the dialog.
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPrefHasCompletedComposeFRE, false);
   ShowDialogAndBindMojo();
   client().CloseUI(compose::mojom::CloseReason::kFirstRunCloseButton);
@@ -1267,7 +1267,7 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   base::UserActionTester user_action_tester;
 
   // Set both FRE and MSBB dialog states.
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPrefHasCompletedComposeFRE, false);
   SetPrefsForComposeMSBBState(false);
   // Dialog should show at FRE state.
@@ -1318,7 +1318,7 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   base::HistogramTester histograms;
 
   // Enable FRE and show the dialog.
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPrefHasCompletedComposeFRE, false);
   ShowDialogAndBindMojo();
   // Show the dialog a second time.
@@ -1373,7 +1373,7 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   base::HistogramTester histograms;
 
   // Enable FRE and show the dialog.
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kPrefHasCompletedComposeFRE, false);
   ShowDialogAndBindMojo();
   // Complete FRE then close by inserting.
@@ -2033,17 +2033,8 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
       1);
 }
 
-// TODO(crbug.com/503556973): Re-enable after fixing flakiness on Windows,
-// ChromeOS and Linux.
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
-#define MAYBE_TestShouldTriggerProactiveNudgeEnabled \
-  DISABLED_TestShouldTriggerProactiveNudgeEnabled
-#else
-#define MAYBE_TestShouldTriggerProactiveNudgeEnabled \
-  TestShouldTriggerProactiveNudgeEnabled
-#endif
 IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
-                       MAYBE_TestShouldTriggerProactiveNudgeEnabled) {
+                       TestShouldTriggerProactiveNudgeEnabled) {
   base::HistogramTester histograms;
 
   // Enable proactive nudge.
@@ -2051,9 +2042,6 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   config.proactive_nudge_enabled = true;
   config.proactive_nudge_focus_delay = base::Microseconds(4);
   config.proactive_nudge_segmentation = false;
-
-  // Focus the field in the DOM to make it the active element.
-  FocusField();
 
   autofill::FormFieldData field = field_data();
   field.set_origin(
@@ -2070,9 +2058,16 @@ IN_PROC_BROWSER_TEST_F(ChromeComposeClientBrowserTest,
   const autofill::AutofillSuggestionTriggerSource trigger_source =
       autofill::AutofillSuggestionTriggerSource::kTextFieldValueChanged;
 
-  // Should trigger after delay (using RunUntil to wait for timer/tasks).
+  // Initial call returns false because of focus delay.
+  EXPECT_FALSE(client().ShouldTriggerPopup(form_data, field, trigger_source));
+
+  // Wait for focus delay timer to complete and trigger popup with delayed
+  // source to log UKM metrics.
   EXPECT_TRUE(base::test::RunUntil([&]() {
-    return client().ShouldTriggerPopup(form_data, field, trigger_source);
+    return client().ShouldTriggerPopup(
+        form_data, field,
+        autofill::AutofillSuggestionTriggerSource::
+            kComposeDelayedProactiveNudge);
   }));
 
   // Commit metrics on page navigation.

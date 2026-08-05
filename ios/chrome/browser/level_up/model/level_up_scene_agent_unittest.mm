@@ -37,7 +37,7 @@ class LevelUpSceneAgentTest : public PlatformTest {
     profile_state_ = [[ProfileState alloc] initWithAppState:app_state_];
     profile_state_.profile = profile_.get();
 
-    scene_state_ = [[SceneState alloc] initWithAppState:app_state_];
+    scene_state_ = [[SceneState alloc] init];
     scene_state_.profileState = profile_state_;
 
     agent_ = [[LevelUpSceneAgent alloc] init];
@@ -86,6 +86,22 @@ TEST_F(LevelUpSceneAgentTest, TestActionTriggersCompletion) {
 
   // Verify that password checkup is completed as well.
   EXPECT_TRUE(service_->IsTaskCompleted(TaskType::kPasswordCheckup));
+}
+
+TEST_F(LevelUpSceneAgentTest, TestActionTriggersStatIncrement) {
+  EXPECT_EQ(
+      0, service_->GetStatValue(LevelUpTaskStatType::kPhotoSearchesPerformed));
+
+  // Simulate the scene becoming active to start listening.
+  scene_state_.activationLevel = SceneActivationLevelForegroundActive;
+
+  // Record action that should trigger photo search stat increment.
+  base::RecordAction(
+      base::UserMetricsAction("Mobile.LensOverlay.CameraSearch.Performed"));
+
+  // Verify that the photo search stat is incremented.
+  EXPECT_EQ(
+      1, service_->GetStatValue(LevelUpTaskStatType::kPhotoSearchesPerformed));
 }
 
 }  // namespace

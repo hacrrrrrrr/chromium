@@ -13,6 +13,7 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -2005,7 +2006,7 @@ IN_PROC_BROWSER_TEST_F(
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest,
                        WidevineHWSecureBlockedWhenPolicyBlocked) {
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       policy::policy_prefs::kProtectedContentIdentifiersAllowed, true);
   EXPECT_WV(IsVideoRobustnessSupported(kWidevine, nullptr));
   EXPECT_WV(IsVideoRobustnessSupported(kWidevine, ""));
@@ -2028,7 +2029,7 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest,
 
 IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesWidevineTest,
                        WidevineHWSecureAllowedWhenPolicyAllowed) {
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       policy::policy_prefs::kProtectedContentIdentifiersAllowed, true);
   EXPECT_WV(IsVideoRobustnessSupported(kWidevine, nullptr));
   EXPECT_WV(IsVideoRobustnessSupported(kWidevine, ""));
@@ -2060,7 +2061,7 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesPlayReadyTest,
                        PlayReadyBlockedWhenPolicyBlocked) {
   SKIP_IF_WINDOWS_PLAYREADY_INCOMPATIBLE();
 
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       policy::policy_prefs::kProtectedContentIdentifiersAllowed, false);
 
   // PlayReady hardware secure key systems should be blocked.
@@ -2075,7 +2076,7 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesPlayReadyTest,
                        PlayReadySuccessWhenPolicyAllowed) {
   SKIP_IF_WINDOWS_PLAYREADY_INCOMPATIBLE();
 
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       policy::policy_prefs::kProtectedContentIdentifiersAllowed, true);
 
   // PlayReady hardware secure key systems should succeed.
@@ -2084,5 +2085,29 @@ IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesPlayReadyTest,
   EXPECT_SUCCESS(
       IsVideoRobustnessSupported(kPlayReadyKeySystemRecommendationDefault,
                                  kPlayReadyHardwareSecureRobustness));
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaSupportedTypesPlayReadyTest,
+                       PlayReadyUMA) {
+  SKIP_IF_WINDOWS_PLAYREADY_INCOMPATIBLE();
+
+  base::HistogramTester histogram_tester;
+
+  // PlayReady hardware secure key system request should log UMA correctly.
+  EXPECT_SUCCESS(IsVideoRobustnessSupported(
+      kPlayReadyKeySystemRecommendationHWSecure, nullptr));
+
+  // PlayReady default key system with hardware secure robustness should also
+  // log UMA correctly under the same base key system name.
+  EXPECT_SUCCESS(
+      IsVideoRobustnessSupported(kPlayReadyKeySystemRecommendationDefault,
+                                 kPlayReadyHardwareSecureRobustness));
+
+  histogram_tester.ExpectBucketCount(
+      "Media.EME.RequestMediaKeySystemAccess.PlayReady",
+      /*KEY_SYSTEM_REQUESTED*/ 0, 2);
+  histogram_tester.ExpectBucketCount(
+      "Media.EME.RequestMediaKeySystemAccess.PlayReady",
+      /*KEY_SYSTEM_SUPPORTED*/ 1, 2);
 }
 #endif  // BUILDFLAG(ENABLE_PLAYREADY)

@@ -15,10 +15,13 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/bindings/remote.h"
+#include "net/http/http_request_headers.h"
+#include "services/network/public/mojom/web_transport.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink.h"
 #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
@@ -33,6 +36,8 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_web_transport_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_web_transport_send_stream_options.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/fetch/fetch_header_list.h"
+#include "third_party/blink/renderer/core/fetch/headers.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -63,6 +68,7 @@
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/loader/cors/cors.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -240,17 +246,17 @@ class WebTransport::DatagramUnderlyingSink final : public UnderlyingSinkBase {
     UnderlyingSinkBase::Trace(visitor);
   }
 
+  void RejectPendingResolvers(v8::Local<v8::Value> error) {
+    while (!pending_datagrams_resolvers_.empty()) {
+      pending_datagrams_resolvers_.TakeFirst()->Reject(error);
+    }
+    pending_datagrams_.clear();
+  }
+
  private:
   ScriptPromise<IDLUndefined> SendDatagram(base::span<const uint8_t> data) {
     auto* resolver = MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(
         web_transport_->script_state_);
-    // This resolver is for the return value of this function. When the
-    // WebTransport is closed, the stream (for datagrams) is errored and
-    // resolvers in `pending_datagrams_resolvers_` are released without
-    // neither resolved nor rejected. That's fine, because the WritableStream
-    // takes care of the case and reject all the pending promises when the
-    // stream is errored. So we call SuppressDetachCheck here.
-    resolver->SuppressDetachCheck();
     pending_datagrams_resolvers_.push_back(resolver);
 
     if (web_transport_->transport_remote_.is_bound()) {
@@ -872,6 +878,7 @@ WebTransport::WebTransport(ScriptState* script_state,
       ready_(MakeGarbageCollected<ReadyProperty>(context)),
       closed_(MakeGarbageCollected<
               ScriptPromiseProperty<WebTransportCloseInfo, IDLAny>>(context)),
+      draining_(MakeGarbageCollected<DrainingProperty>(context)),
       inspector_transport_id_(CreateUniqueIdentifier()) {}
 
 ScriptPromise<WritableStream> WebTransport::createUnidirectionalStream(
@@ -1063,6 +1070,10 @@ ScriptPromise<WebTransportCloseInfo> WebTransport::closed(
   return closed_->Promise(script_state->World());
 }
 
+ScriptPromise<IDLUndefined> WebTransport::draining(ScriptState* script_state) {
+  return draining_->Promise(script_state->World());
+}
+
 ScriptPromise<WebTransportConnectionStats> WebTransport::getStats(
     ScriptState* script_state) {
   auto* resolver =
@@ -1121,6 +1132,28 @@ void WebTransport::OnConnectionEstablished(
   if (!selected_application_protocol.IsNull()) {
     selected_application_protocol_ = selected_application_protocol;
   }
+
+  if (RuntimeEnabledFeatures::WebTransportHeadersEnabled()) {
+    auto* header_list = MakeGarbageCollected<FetchHeaderList>();
+    size_t iter = 0;
+    std::string name;
+    std::string value;
+    while (response_headers->EnumerateHeaderLines(&iter, &name, &value)) {
+      const String header_name = WebString::FromLatin1(name);
+      if (
+          // https://w3c.github.io/webtransport/#process-a-webtransport-fetch-response
+          EqualIgnoringAsciiCase(header_name, "wt-protocol") ||
+          // https://fetch.spec.whatwg.org/#forbidden-response-header-name
+          EqualIgnoringAsciiCase(header_name, "set-cookie") ||
+          EqualIgnoringAsciiCase(header_name, "set-cookie2")) {
+        continue;
+      }
+      header_list->Append(header_name, WebString::FromLatin1(value));
+    }
+    response_headers_ = MakeGarbageCollected<Headers>(header_list);
+    response_headers_->SetGuard(Headers::kImmutableGuard);
+  }
+
   latest_stats_ = ConvertStatsFromMojom(std::move(initial_stats));
 
   datagram_underlying_sink_->SendPendingDatagrams();
@@ -1264,6 +1297,13 @@ void WebTransport::OnClosed(
   Cleanup(idl_close_info, error, /*abruptly=*/false);
 }
 
+void WebTransport::OnDraining() {
+  DVLOG(1) << "WebTransport::OnDraining() this=" << this;
+  if (draining_->GetState() == DrainingProperty::State::kPending) {
+    draining_->ResolveWithUndefined();
+  }
+}
+
 void WebTransport::OnOutgoingStreamClosed(uint32_t stream_id) {
   DVLOG(1) << "WebTransport::OnOutgoingStreamClosed(" << stream_id
            << ") this=" << this;
@@ -1358,6 +1398,21 @@ void WebTransport::StopSending(uint32_t stream_id, uint32_t code) {
   transport_remote_->StopSending(stream_id, code);
 }
 
+void WebTransport::SetStreamPriority(
+    uint32_t stream_id,
+    network::mojom::blink::WebTransportStreamPriorityPtr priority) {
+  CHECK(priority);
+  DVLOG(1) << "WebTransport::SetStreamPriority() this=" << this
+           << ", stream_id=" << stream_id
+           << ", has_send_group_id=" << priority->send_group_id.has_value()
+           << ", send_group_id=" << priority->send_group_id.value_or(0)
+           << ", send_order=" << priority->send_order;
+  if (!transport_remote_.is_bound()) {
+    return;
+  }
+  transport_remote_->SetStreamPriority(stream_id, std::move(priority));
+}
+
 void WebTransport::ForgetIncomingStream(uint32_t stream_id,
                                         bool has_received_close) {
   DVLOG(1) << "WebTransport::ForgetIncomingStream() this=" << this
@@ -1393,6 +1448,7 @@ void WebTransport::Trace(Visitor* visitor) const {
   visitor->Trace(client_receiver_);
   visitor->Trace(ready_);
   visitor->Trace(closed_);
+  visitor->Trace(draining_);
   visitor->Trace(latest_stats_);
   visitor->Trace(pending_get_stats_resolvers_);
   visitor->Trace(incoming_stream_map_);
@@ -1402,6 +1458,7 @@ void WebTransport::Trace(Visitor* visitor) const {
   visitor->Trace(received_bidirectional_streams_);
   visitor->Trace(received_bidirectional_streams_underlying_source_);
   visitor->Trace(send_groups_);
+  visitor->Trace(response_headers_);
   ScriptWrappable::Trace(visitor);
   ExecutionContextLifecycleObserver::Trace(visitor);
 }
@@ -1530,6 +1587,31 @@ void WebTransport::Init(const String& url_for_diagnostics,
         options.anticipatedConcurrentIncomingBidirectionalStreams();
   }
 
+  net::HttpRequestHeaders::HeaderVector additional_headers;
+  if (RuntimeEnabledFeatures::WebTransportHeadersEnabled() &&
+      options.hasHeaders()) {
+    auto* parsed_headers =
+        Headers::Create(script_state_, options.headers(), exception_state);
+    if (exception_state.HadException()) {
+      return;
+    }
+
+    const auto& header_list = parsed_headers->HeaderList()->List();
+    additional_headers.reserve(header_list.size());
+    for (const auto& [name, value] : header_list) {
+      if (EqualIgnoringAsciiCase(name, "wt-available-protocols")) {
+        exception_state.ThrowTypeError(
+            "The 'wt-available-protocols' header cannot be set.");
+        return;
+      }
+      // Silently drop forbidden request headers per Fetch spec.
+      if (cors::IsForbiddenRequestHeader(name, value)) {
+        continue;
+      }
+      additional_headers.emplace_back(name.Latin1(), value.Latin1());
+    }
+  }
+
   if (auto* scheduler = execution_context->GetScheduler()) {
     // Two features are registered here:
     // - `kWebTransport`: a non-sticky feature that will disable aggressive
@@ -1570,6 +1652,7 @@ void WebTransport::Init(const String& url_for_diagnostics,
         BlinkCongestionControlToMojo(congestion_control_),
         anticipated_concurrent_incoming_unidirectional_streams_,
         anticipated_concurrent_incoming_bidirectional_streams_,
+        std::move(additional_headers),
         handshake_client_receiver_.BindNewPipeAndPassRemote(
             execution_context->GetTaskRunner(TaskType::kNetworking)));
 
@@ -1655,6 +1738,7 @@ void WebTransport::Cleanup(WebTransportCloseInfo* info,
   HandlePendingGetStatsResolvers(error);
   ScriptValue error_value(isolate, error);
   datagram_underlying_source_->Error(received_datagrams_controller_, error);
+  datagram_underlying_sink_->RejectPendingResolvers(error);
   outgoing_datagrams_->Controller()->error(script_state_, error_value);
 
   // We use local variables to avoid re-entrant problems.
@@ -1770,14 +1854,8 @@ void WebTransport::OnCreateSendStreamResponse(
     auto* send_stream = MakeGarbageCollected<WebTransportSendStream>(
         script_state_, this, stream_id, std::move(producer));
     send_stream->Init(PassThroughException(isolate));
-    // Apply options from createUnidirectionalStream(). setSendGroup() can
-    // throw (e.g. InvalidStateError if the group belongs to another
-    // transport), so this must be inside the try_catch scope.
     if (!try_catch.HasCaught()) {
-      send_stream->ApplySendStreamOptions(send_group, send_order,
-                                          PassThroughException(isolate));
-    }
-    if (!try_catch.HasCaught()) {
+      send_stream->ApplySendStreamOptions(send_group, send_order);
       outgoing_stream = send_stream->GetOutgoingStream();
       writable_stream = send_stream;
     }
@@ -1838,13 +1916,10 @@ void WebTransport::OnCreateBidirectionalStreamResponse(
   v8::TryCatch try_catch(isolate);
   bidirectional_stream->Init(PassThroughException(isolate));
 
-  // Apply options from createBidirectionalStream(). Must be inside the
-  // try_catch scope to properly catch any exception from setSendGroup().
   if (!try_catch.HasCaught()) {
     if (auto* send_stream = DynamicTo<WebTransportSendStream>(
             bidirectional_stream->writable())) {
-      send_stream->ApplySendStreamOptions(send_group, send_order,
-                                          PassThroughException(isolate));
+      send_stream->ApplySendStreamOptions(send_group, send_order);
     }
   }
 
@@ -1983,6 +2058,10 @@ WebTransport::ExtractSendStreamOptions(
   }
   result.send_order = options->sendOrder();
   return result;
+}
+
+Headers* WebTransport::responseHeaders() const {
+  return response_headers_.Get();
 }
 
 }  // namespace blink

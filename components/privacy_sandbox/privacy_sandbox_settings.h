@@ -8,7 +8,6 @@
 #include "base/time/time.h"
 #include "components/browsing_topics/common/common_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "content/public/browser/interest_group_api_operation.h"
 
 class GURL;
 
@@ -36,6 +35,17 @@ enum class PrivacySandboxAttestationsGatedAPI {
   kSharedStorage,
 
   kMaxValue = kSharedStorage,
+};
+
+// The possible operations performable by parties related to the Interest
+// Group API.
+enum class InterestGroupApiOperation {
+  kJoin,
+  kLeave,
+  kUpdate,
+  kSell,
+  kBuy,
+  kRead
 };
 
 // A service which acts as a intermediary between Privacy Sandbox APIs and
@@ -110,9 +120,6 @@ class PrivacySandboxSettings : public KeyedService {
   // site assigned topic.
   virtual bool IsTopicAllowed(const CanonicalTopic& topic) = 0;
 
-  // Returns whether |topic| is prioritized by Finch settings.
-  virtual bool IsTopicPrioritized(const CanonicalTopic& topic) = 0;
-
   // Sets |topic| to |allowed|. Whether a topic is allowed or not is made
   // available through IsTopicAllowed().
   virtual void SetTopicAllowed(const CanonicalTopic& topic, bool allowed) = 0;
@@ -151,7 +158,7 @@ class PrivacySandboxSettings : public KeyedService {
   virtual bool IsFledgeAllowed(
       const url::Origin& top_frame_origin,
       const url::Origin& auction_party,
-      content::InterestGroupApiOperation interest_group_api_operation,
+      InterestGroupApiOperation interest_group_api_operation,
       content::RenderFrameHost* console_frame = nullptr) const = 0;
 
   // Determine whether |destination_origin| is allowed to receive events

@@ -7,6 +7,7 @@
 
 #include <optional>
 
+#include "base/callback_list.h"
 #include "chrome/browser/ui/tabs/tab_menu_model_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
@@ -63,7 +64,7 @@ class TabStripCollectionController : public TabContextMenuController::Delegate {
   void MoveTabLast(const tabs::TabInterface* tab_interface);
   void SelectTab(const tabs::TabInterface* tab_interface,
                  const TabStripUserGestureDetails& event);
-  void CloseTab(const tabs::TabInterface* tab_interface);
+  void CloseTab(const tabs::TabInterface* tab_interface, CloseTabSource source);
   void ToggleSelected(const tabs::TabInterface* tab_interface);
   void AddSelectionFromAnchorTo(const tabs::TabInterface* tab_interface);
   void ExtendSelectionTo(const tabs::TabInterface* tab_interface);
@@ -87,6 +88,9 @@ class TabStripCollectionController : public TabContextMenuController::Delegate {
 
   BrowserView* GetBrowserView() const { return browser_view_; }
 
+  bool IsGlassFrame() const { return is_glass_; }
+  void OnGlassFrameEligibilityChanged(bool is_eligible);
+
   TabDragHandler& GetDragHandler() { return drag_handler_.get(); }
   const TabDragHandler& GetDragHandler() const { return drag_handler_.get(); }
 
@@ -100,9 +104,16 @@ class TabStripCollectionController : public TabContextMenuController::Delegate {
   // changed.
   void TabKeyboardFocusChangedTo(const tabs::TabInterface* tab);
 
+  std::optional<tab_groups::TabGroupId> GetFocusedGroup() const;
+
   void TabGroupFocusChanged(
       std::optional<tab_groups::TabGroupId> new_focused_group_id,
       std::optional<tab_groups::TabGroupId> old_focused_group_id);
+
+  // Updates the browser theme when focus mode is active for a tab group.
+  // Triggered when tab group focus changes or when the color of the currently
+  // focused tab group changes.
+  void UpdateFocusModeTheme(std::optional<tab_groups::TabGroupId> group_id);
 
  private:
   // TabContextMenuController::Delegate:
@@ -138,6 +149,9 @@ class TabStripCollectionController : public TabContextMenuController::Delegate {
   raw_ptr<BrowserView> browser_view_;
   const raw_ref<TabDragHandler> drag_handler_;
   raw_ptr<TabHoverCardController> hover_card_controller_;
+
+  bool is_glass_ = false;
+  base::CallbackListSubscription glass_frame_service_subscription_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_TABS_COMMON_TAB_STRIP_COLLECTION_CONTROLLER_H_

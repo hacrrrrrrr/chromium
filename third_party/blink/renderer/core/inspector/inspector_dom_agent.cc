@@ -466,13 +466,10 @@ PseudoId InspectorDOMAgent::ProtocolPseudoTypeToPseudoId(
   NOTREACHED();
 }
 
-InspectorDOMAgent::InspectorDOMAgent(
-    v8::Isolate* isolate,
-    InspectedFrames* inspected_frames,
-    v8_inspector::V8InspectorSession* v8_session)
+InspectorDOMAgent::InspectorDOMAgent(v8::Isolate* isolate,
+                                     InspectedFrames* inspected_frames)
     : isolate_(isolate),
       inspected_frames_(inspected_frames),
-      v8_session_(v8_session),
       document_node_to_id_map_(MakeGarbageCollected<NodeToIdMap>()),
       last_node_id_(1),
       suppress_attribute_modified_event_(false),
@@ -757,6 +754,7 @@ protocol::Response InspectorDOMAgent::disable() {
   if (!enabled_.Get())
     return protocol::Response::ServerError("DOM agent hasn't been enabled");
   ReleaseForcedPopovers();
+  ReleaseForcedInterestInvokers();
   include_whitespace_.Clear();
   enabled_.Clear();
   instrumenting_agents_->RemoveInspectorDOMAgent(this);
@@ -917,6 +915,7 @@ void InspectorDOMAgent::PushChildNodesToFrontend(int node_id,
 
 void InspectorDOMAgent::DiscardFrontendBindings() {
   ReleaseForcedPopovers();
+  ReleaseForcedInterestInvokers();
   if (history_)
     history_->Reset();
   search_results_.clear();
@@ -1650,10 +1649,10 @@ protocol::Response InspectorDOMAgent::NodeForRemoteObjectId(
   v8::Local<v8::Value> value;
   v8::Local<v8::Context> context;
   std::unique_ptr<v8_inspector::StringBuffer> error;
-  if (!v8_session_) {
+  if (!V8Session()) {
     return protocol::Response::ServerError("The agent has been detached");
   }
-  if (!v8_session_->unwrapObject(&error, ToV8InspectorStringView(object_id),
+  if (!V8Session()->unwrapObject(&error, ToV8InspectorStringView(object_id),
                                  &value, &context, nullptr)) {
     return protocol::Response::ServerError(
         ToCoreString(std::move(error)).Utf8());
@@ -1930,8 +1929,8 @@ protocol::Response InspectorDOMAgent::resolveNode(
   if (!node)
     return protocol::Response::ServerError("No node with given id found");
   // This should only be called via CDP, so agent should not be detached.
-  CHECK(v8_session_);
-  *result = ResolveNode(v8_session_, node, object_group_name,
+  CHECK(V8Session());
+  *result = ResolveNode(V8Session().get(), node, object_group_name,
                         std::move(execution_context_id));
   if (!*result) {
     return protocol::Response::ServerError(
@@ -2179,10 +2178,6 @@ protocol::Response InspectorDOMAgent::forceShowPopover(
     bool enable,
     std::optional<int> invoker_node_id,
     std::unique_ptr<protocol::Array<int>>* out_node_ids) {
-  if (!base::FeatureList::IsEnabled(features::kDevToolsAllowPopoverForcing)) {
-    return protocol::Response::ServerError("Feature is not enabled");
-  }
-
   Node* node = nullptr;
   protocol::Response response = AssertNode(node_id, node);
   if (!response.IsSuccess()) {
@@ -2218,9 +2213,64 @@ protocol::Response InspectorDOMAgent::forceShowPopover(
 
 void InspectorDOMAgent::WillHidePopover(HTMLElement* element,
                                         bool* force_open) {
-  if (base::FeatureList::IsEnabled(features::kDevToolsAllowPopoverForcing) &&
-      force_open && forced_popovers_.Contains(element)) {
+  if (force_open && forced_popovers_.Contains(element)) {
     *force_open = true;
+  }
+}
+
+void InspectorDOMAgent::ReleaseForcedInterestInvokers() {
+  HeapHashSet<WeakMember<Node>> forced_interest_invokers;
+  forced_interest_invokers_.swap(forced_interest_invokers);
+  for (auto& node : forced_interest_invokers) {
+    if (auto* element = DynamicTo<Element>(node.Get())) {
+      if (auto* target = element->InterestForElement()) {
+        element->InterestLost(target);
+      }
+    }
+  }
+}
+
+protocol::Response InspectorDOMAgent::forceShowInterest(int node_id,
+                                                        bool enable) {
+  if (!base::FeatureList::IsEnabled(features::kDevToolsAllowInterestForcing)) {
+    return protocol::Response::ServerError("Feature is not enabled");
+  }
+
+  Node* node = nullptr;
+  protocol::Response response = AssertNode(node_id, node);
+  if (!response.IsSuccess()) {
+    return response;
+  }
+
+  auto* element = DynamicTo<Element>(node);
+  if (!element) {
+    return protocol::Response::ServerError("node is not an Element");
+  }
+
+  if (enable) {
+    if (!element->InterestForElement()) {
+      return protocol::Response::ServerError("node is not an interest invoker");
+    }
+    bool is_new = forced_interest_invokers_.insert(element).is_new_entry;
+    if (is_new) {
+      element->ShowInterestNow();
+    }
+  } else {
+    if (forced_interest_invokers_.Contains(element)) {
+      forced_interest_invokers_.erase(element);
+      if (auto* target = element->InterestForElement()) {
+        element->InterestLost(target);
+      }
+    }
+  }
+  return protocol::Response::Success();
+}
+
+void InspectorDOMAgent::WillLoseInterest(Element* element,
+                                         bool* force_interest) {
+  if (base::FeatureList::IsEnabled(features::kDevToolsAllowInterestForcing) &&
+      force_interest && forced_interest_invokers_.Contains(element)) {
+    *force_interest = true;
   }
 }
 
@@ -3208,8 +3258,8 @@ protocol::Response InspectorDOMAgent::setInspectedNode(int node_id) {
   if (!response.IsSuccess())
     return response;
   // Method should only be called from CDP, so won't happen after detach.
-  CHECK(v8_session_);
-  v8_session_->addInspectedObject(std::make_unique<InspectableNode>(node));
+  CHECK(V8Session());
+  V8Session()->addInspectedObject(std::make_unique<InspectableNode>(node));
   return protocol::Response::Success();
 }
 
@@ -3263,7 +3313,7 @@ protocol::Response InspectorDOMAgent::scrollIntoViewIfNeeded(
       AssertNode(node_id, backend_node_id, object_id, node);
   if (!response.IsSuccess())
     return response;
-  node->GetDocument().EnsurePaintLocationDataValidForNode(
+  node->GetDocument().UpdateStyleAndLayoutForNode(
       node, DocumentUpdateReason::kInspector);
   if (!node->isConnected())
     return protocol::Response::ServerError("Node is detached from document");
@@ -3344,12 +3394,12 @@ protocol::Response InspectorDOMAgent::getFileInfo(const String& object_id,
                                                   String* path) {
   // Method is only called from CDP, so will not be called after Detach().
   CHECK(isolate_);
-  CHECK(v8_session_);
+  CHECK(V8Session());
   v8::HandleScope handles(isolate_);
   v8::Local<v8::Value> value;
   v8::Local<v8::Context> context;
   std::unique_ptr<v8_inspector::StringBuffer> error;
-  if (!v8_session_->unwrapObject(&error, ToV8InspectorStringView(object_id),
+  if (!V8Session()->unwrapObject(&error, ToV8InspectorStringView(object_id),
                                  &value, &context, nullptr)) {
     return protocol::Response::ServerError(
         ToCoreString(std::move(error)).Utf8());
@@ -3439,13 +3489,13 @@ void InspectorDOMAgent::Trace(Visitor* visitor) const {
   visitor->Trace(dom_editor_);
   visitor->Trace(node_to_creation_source_location_map_);
   visitor->Trace(forced_popovers_);
+  visitor->Trace(forced_interest_invokers_);
   InspectorBaseAgent::Trace(visitor);
 }
 
 void InspectorDOMAgent::Dispose() {
   InspectorBaseAgent<protocol::DOM::Metainfo>::Dispose();
   isolate_ = nullptr;
-  v8_session_ = nullptr;
 }
 
 }  // namespace blink

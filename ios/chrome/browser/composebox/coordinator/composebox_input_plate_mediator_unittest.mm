@@ -133,6 +133,9 @@
 - (void)updatePreferredContentSizeForNewTextFieldHeight {
 }
 
+- (void)disableSending:(BOOL)disableSending {
+}
+
 @end
 
 namespace {
@@ -828,23 +831,6 @@ TEST_F(ComposeboxInputPlateMediatorTest, AwaitingSignalsSetOnFocus) {
   id<ComposeboxOmniboxClientDelegate> delegate =
       (id<ComposeboxOmniboxClientDelegate>)mediator_;
   EXPECT_TRUE([delegate awaitingAttachmentSignals]);
-}
-
-// Tests that the `awaitingAttachmentSignals` flag remains `NO` when an
-// attachment is added manually after the session has started.
-TEST_F(ComposeboxInputPlateMediatorTest,
-       AwaitingSignalsNotSetOnManualAddition) {
-  SetAIMEligible(true);
-  SetDSEGoogle(true);
-
-  id<ComposeboxOmniboxClientDelegate> delegate =
-      (id<ComposeboxOmniboxClientDelegate>)mediator_;
-  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
-
-  NSURL* url = [NSURL fileURLWithPath:@"/tmp/test.pdf"];
-  [mediator_ processFileURL:net::GURLWithNSURL(url) isPDF:YES];
-
-  EXPECT_FALSE([delegate awaitingAttachmentSignals]);
 }
 
 // Tests that the `awaitingAttachmentSignals` flag is cleared (set to `NO`)

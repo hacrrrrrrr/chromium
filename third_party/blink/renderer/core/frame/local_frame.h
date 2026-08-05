@@ -120,6 +120,7 @@ class SharedURLLoaderFactory;
 namespace blink {
 
 class AdTracker;
+class ScriptInitiationMonitor;
 class AssociatedInterfaceProvider;
 class AuditsIssue;
 class BackgroundColorPaintImageGenerator;
@@ -540,6 +541,8 @@ class CORE_EXPORT LocalFrame final
   }
   IdlenessDetector* GetIdlenessDetector() { return idleness_detector_.Get(); }
   AdTracker* GetAdTracker() { return ad_tracker_.Get(); }
+  ScriptInitiationMonitor* GetScriptInitiationMonitor() const;
+  ScriptInitiationMonitor* GetOrCreateScriptInitiationMonitor();
   void SetAdTrackerForTesting(AdTracker* ad_tracker);
   LCPScriptObserver* GetScriptObserver() { return script_observer_.Get(); }
 
@@ -817,6 +820,13 @@ class CORE_EXPORT LocalFrame final
 
   LocalFrameToken GetLocalFrameToken() const;
 
+  // A helper that returns the initiator state token from the LocalFrame's
+  // LocalDomWindow.
+  const base::UnguessableToken& GetInitiatorStateToken() const;
+
+  // A helper that returns the document token from the LocalFrame's Document.
+  DocumentToken GetDocumentToken() const;
+
   LoaderFreezeMode GetLoaderFreezeMode();
 
   // Swaps `this` LocalFrame in to replace the current frame  (e.g. in the case
@@ -861,9 +871,15 @@ class CORE_EXPORT LocalFrame final
   // to FrameFirstPaint.
   void OnFirstPaint(bool text_painted, bool image_painted);
 
-  // Invoked on first contentful paint on this frame.
-  void OnFirstContentfulPaint(const base::TimeTicks& paint_time,
-                              const base::TimeTicks& navigation_time);
+  // Invoked on first contentful paint on this frame. `presentation_time` is the
+  // renderer-side presentation timestamp of the first contentful paint.
+  void OnFirstContentfulPaint(const base::TimeTicks& presentation_time);
+
+  // Invoked when the outermost main frame's largest contentful paint candidate
+  // changed. May be invoked multiple times as larger elements paint.
+  // `presentation_time` is the renderer-side presentation timestamp of the
+  // current largest contentful paint candidate.
+  void OnLargestContentfulPaint(const base::TimeTicks& presentation_time);
 
   void WriteIntoTrace(perfetto::TracedValue ctx) const;
 
@@ -1114,6 +1130,7 @@ class CORE_EXPORT LocalFrame final
   Member<PerformanceMonitor> performance_monitor_;
 
   Member<AdTracker> ad_tracker_;
+  Member<ScriptInitiationMonitor> script_initiation_monitor_;
   Member<IdlenessDetector> idleness_detector_;
   base::OnceClosureList network_idle_callbacks_;
   Member<InspectorIssueReporter> inspector_issue_reporter_;

@@ -174,12 +174,11 @@ class ReadAnythingOmniboxControllerTestBase
 
   void OnEntryShown(SidePanelEntry* entry) {
     if (IsImmersiveEnabled()) {
-      std::optional<ReadAnythingOpenTrigger> read_anything_trigger;
-      if (entry->last_open_trigger().has_value()) {
-        read_anything_trigger =
-            read_anything::SidePanelToReadAnythingOpenTrigger(
-                entry->last_open_trigger().value());
-      }
+      ReadAnythingOpenTrigger read_anything_trigger =
+          entry->last_open_trigger().has_value()
+              ? read_anything::SidePanelToReadAnythingOpenTrigger(
+                    entry->last_open_trigger().value())
+              : ReadAnythingOpenTrigger::kUnknown;
       ReadAnythingController::From(browser()->GetActiveTabInterface())
           ->OnEntryShown(read_anything_trigger);
     } else {
@@ -211,7 +210,7 @@ class ReadAnythingOmniboxControllerBrowserTest
       : InteractiveFeaturePromoTestMixin(UseDefaultTrackerAllowingPromos(
             {feature_engagement::kIPHReadingModePageActionLabelFeature})) {
     std::vector<base::test::FeatureRef> enabled_features = {
-        features::kReadAnythingOmniboxChip, features::kPageActionsMigration,
+        features::kReadAnythingOmniboxChip,
         feature_engagement::kIPHReadingModePageActionLabelFeature,
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
         features::kWasmTtsEngineAutoInstallDisabled

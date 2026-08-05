@@ -96,7 +96,6 @@ source_set("impl") {
     "//chrome/browser/preloading/prefetch/prefetch_service",
     "//chrome/browser/preloading/prefetch/search_prefetch",
     "//chrome/browser/preloading/search_preload",
-    "//chrome/browser/privacy_sandbox/notice:core",
     "//chrome/browser/profiles",
     "//chrome/browser/profiles:misc",
     "//chrome/browser/profiles:profile",
@@ -217,9 +216,12 @@ source_set("impl") {
   if (enable_extensions_core) {
     deps += [
       "//chrome/browser/ui/webui/extensions",
-      "//chrome/browser/ui/webui/management",
       "//extensions/common",
     ]
+  }
+
+  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
+    deps += [ "//chrome/browser/ui/webui/management" ]
   }
 
   if (enable_background_mode) {
@@ -340,6 +342,7 @@ source_set("impl") {
       "//chromeos/ui/wm",
       "//components/onc",
       "//components/quirks",
+      "//components/user_manager:multi_user",
     ]
   }
 
@@ -390,15 +393,17 @@ source_set("impl") {
       "//chrome/browser/sharing_hub",
       "//chrome/browser/ui/commerce",
       "//chrome/browser/ui/extensions",
+      "//chrome/browser/ui/omnibox/omnibox_everywhere:prefs",
       "//chrome/browser/ui/performance_controls",
       "//chrome/browser/ui/send_tab_to_self",
       "//chrome/browser/ui/side_panel",
       "//chrome/browser/ui/tabs",
       "//chrome/browser/ui/tabs:tab_strip",
-      "//chrome/browser/ui/tabs/projects:impl",
+      "//chrome/browser/ui/tabs/organizer:impl",
       "//chrome/browser/ui/tabs/saved_tab_groups",
       "//chrome/browser/ui/views/side_panel",
       "//chrome/browser/ui/webui/bookmarks",
+      "//chrome/browser/ui/webui/settings",
       "//chrome/browser/user_education",
       "//components/headless/policy",
       "//components/live_caption",
@@ -460,6 +465,7 @@ source_set("impl") {
     deps += [
       "//chrome/browser/indigo",
       "//chrome/browser/ui/read_anything:prefs",
+      "//chrome/browser/ui/views/frame:glass_frame_service",
       "//chrome/browser/ui/webui/cr_components/theme_color_picker:impl",
       "//chrome/browser/ui/webui/history",
       "//chrome/browser/ui/webui/tab_search",

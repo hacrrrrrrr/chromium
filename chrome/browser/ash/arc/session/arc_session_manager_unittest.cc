@@ -58,8 +58,6 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/ash/components/browser_context_helper/annotated_account_id.h"
-#include "chromeos/ash/components/dbus/arc/arcvm_data_migrator_client.h"
-#include "chromeos/ash/components/dbus/arc/fake_arcvm_data_migrator_client.h"
 #include "chromeos/ash/components/dbus/concierge/concierge_client.h"
 #include "chromeos/ash/components/dbus/dlcservice/dlcservice_client.h"
 #include "chromeos/ash/components/dbus/dlcservice/fake_dlcservice_client.h"
@@ -85,6 +83,7 @@
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/services/app_service/public/cpp/app_service_registry.h"
 #include "components/session_manager/core/fake_session_manager_delegate.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -321,7 +320,6 @@ class ArcSessionManagerTestBase : public testing::Test {
         TestingBrowserProcess::GetGlobal()->local_state()));
     session_manager_->OnUserManagerCreated(user_manager_.Get());
 
-    ash::ArcVmDataMigratorClient::InitializeFake();
     ash::ConciergeClient::InitializeFake(/*fake_cicerone_client=*/nullptr);
     ash::DlcserviceClient::InitializeFake();
     chromeos::PowerManagerClient::InitializeFake();
@@ -375,7 +373,6 @@ class ArcSessionManagerTestBase : public testing::Test {
     chromeos::PowerManagerClient::Shutdown();
     ash::DlcserviceClient::Shutdown();
     ash::ConciergeClient::Shutdown();
-    ash::ArcVmDataMigratorClient::Shutdown();
     // UserManager is created after SessionManager, but destroyed after it.
     session_manager_.reset();
     user_manager_.Reset();
@@ -434,6 +431,8 @@ class ArcSessionManagerTestBase : public testing::Test {
   }
 
   content::BrowserTaskEnvironment task_environment_;
+
+  apps::AppServiceRegistry app_service_registry_;
   TestingProfileManager profile_manager_;
   std::unique_ptr<session_manager::SessionManager> session_manager_;
   user_manager::ScopedUserManager user_manager_;

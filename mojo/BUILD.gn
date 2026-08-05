@@ -37,7 +37,7 @@ group("tests") {
     ":mojo_perftests",
     ":mojo_unittests",
     "//mojo/public/tools:mojo_python_unittests",
-    "//third_party/ipcz/src:ipcz_tests",
+    "//third_party/ipcz/src:tests_sources",
   ]
 
   if (!is_ios) {
@@ -63,9 +63,6 @@ test("mojo_unittests") {
 
 test("mojo_perftests") {
   sources = []
-  if (mojo_support_legacy_core) {
-    sources += [ "//mojo/core/handle_table_perftest.cc" ]
-  }
   deps = [
     "//mojo/core/test:run_all_perftests",
     "//mojo/core/test:test_support",

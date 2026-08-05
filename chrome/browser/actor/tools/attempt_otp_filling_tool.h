@@ -23,11 +23,9 @@
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/one_time_tokens/core/browser/one_time_token_retrieval_error.h"
 
-namespace affiliations {
-class DomainRelationChecker;
-}  // namespace affiliations
-
 namespace actor {
+
+class ActorLoginFlowVerifier;
 
 // A tool that attempts to retrieve a one-time password (OTP) and fill it into
 // the specified fields on the page. (One field or many smaller ones.)
@@ -40,8 +38,8 @@ class AttemptOtpFillingTool : public Tool {
       tabs::TabHandle tab_handle,
       std::vector<PageTarget> trigger_fields,
       bool for_signin,
-      AttemptOtpFillingToolRequest::OtpType predicted_otp_type =
-          AttemptOtpFillingToolRequest::OtpType::kUnknown);
+      AttemptOtpFillingToolRequest::OtpType predicted_otp_type,
+      std::unique_ptr<ActorLoginFlowVerifier> actor_login_flow_verifier);
   ~AttemptOtpFillingTool() override;
 
   // Tool:
@@ -64,6 +62,10 @@ class AttemptOtpFillingTool : public Tool {
  private:
   void OnGmailOtpOptInResponse(ToolCallback callback,
                                webui::mojom::GmailOtpOptInResultPtr response);
+  void OnGmailOtpConfirmationResponse(
+      ToolCallback callback,
+      std::string otp,
+      webui::mojom::GmailOtpConfirmationResultPtr response);
   void OnOtpRetrieved(
       ToolCallback callback,
       base::expected<std::string, one_time_tokens::OneTimeTokenRetrievalError>
@@ -80,10 +82,8 @@ class AttemptOtpFillingTool : public Tool {
   bool for_signin_;
   AttemptOtpFillingToolRequest::OtpType predicted_otp_type_;
 
-  // `DomainRelationChecker` finds relationship between origins (exactly the
-  // same, affiliated, ePSL match, weak match, no match). used to determine if
-  // an OTP form is related to the last actor login flow.
-  std::unique_ptr<affiliations::DomainRelationChecker> domain_relation_checker_;
+  bool requires_confirmation_ = false;
+  std::unique_ptr<ActorLoginFlowVerifier> actor_login_flow_verifier_;
 
   base::WeakPtrFactory<AttemptOtpFillingTool> weak_factory_{this};
 };

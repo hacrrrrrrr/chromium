@@ -10,7 +10,6 @@
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/password_manager/password_change/annotated_page_content_capturer.h"
-#include "chrome/browser/password_manager/password_change/model_quality_logs_uploader.h"
 #include "chrome/browser/password_manager/password_change/password_change_logging_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
@@ -50,23 +49,40 @@ blink::mojom::AIPageContentOptionsPtr GetAIPageContentOptions() {
 
 }  // namespace
 
+LoginCheckResult::LoginCheckResult() = default;
+
+LoginCheckResult::LoginCheckResult(
+    LoginCheckResult::Status status,
+    int state_checks_count,
+    base::TimeDelta duration,
+    std::unique_ptr<
+        optimization_guide::proto::PasswordChangeSubmissionLoggingData>
+        logging_data)
+    : status(status),
+      state_checks_count(state_checks_count),
+      duration(duration),
+      logging_data(std::move(logging_data)) {}
+
+LoginCheckResult::~LoginCheckResult() = default;
+
+LoginCheckResult::LoginCheckResult(LoginCheckResult&&) = default;
+
+LoginCheckResult& LoginCheckResult::operator=(LoginCheckResult&&) = default;
+
 LoginStateChecker::LoginStateChecker(
     content::WebContents* web_contents,
-    ModelQualityLogsUploader* logs_uploader,
     password_manager::PasswordManagerClient* client,
+    optimization_guide::ModelExecutionServiceType service_type,
     LoginStateResultCallback callback)
     : content::WebContentsObserver(web_contents),
       creation_time_(base::Time::Now()),
-      logs_uploader_(CHECK_DEREF(logs_uploader)),
+      service_type_(service_type),
       client_(client),
       result_check_callback_(std::move(callback)) {
   CheckLoginState(/*ignore_attempts_limit=*/false);
 }
 
-LoginStateChecker::~LoginStateChecker() {
-  logs_uploader_->SetStepDuration(kLoginCheckStep,
-                                  base::Time::Now() - creation_time_);
-}
+LoginStateChecker::~LoginStateChecker() = default;
 
 bool LoginStateChecker::ReachedAttemptsLimit() const {
   return state_checks_count_ >= kMaxLoginChecks;
@@ -83,13 +99,18 @@ void LoginStateChecker::DidFinishNavigation(
   CheckLoginState(/*ignore_attempts_limit=*/false);
 }
 
-void LoginStateChecker::TerminateLoginChecks() {
+void LoginStateChecker::TerminateLoginChecks(
+    std::unique_ptr<
+        optimization_guide::proto::PasswordChangeSubmissionLoggingData>
+        logging_data) {
   // Reset content::WebContentsObserver.
   Observe(nullptr);
   capturer_.reset();
   cached_page_content_ = std::nullopt;
 
-  result_check_callback_.Run(LoginCheckResult::kError);
+  result_check_callback_.Run(LoginCheckResult(
+      LoginCheckResult::Status::kError, state_checks_count_,
+      base::Time::Now() - creation_time_, std::move(logging_data)));
 }
 
 void LoginStateChecker::CheckLoginState(bool ignore_attempts_limit) {
@@ -144,7 +165,8 @@ void LoginStateChecker::OnPageContentReceived(
       optimization_guide::ModelBasedCapabilityKey::kPasswordChangeSubmission,
       request, /*execution_timeout=*/std::nullopt,
       base::BindOnce(&LoginStateChecker::OnExecutionResponseCallback,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      service_type_);
 }
 
 void LoginStateChecker::OnExecutionResponseCallback(
@@ -155,8 +177,6 @@ void LoginStateChecker::OnExecutionResponseCallback(
   is_request_in_flight_ = false;
   // Increase the count of login checks.
   state_checks_count_++;
-  logs_uploader_->SetLoggedInCheckQuality(state_checks_count_,
-                                          std::move(logging_data));
 
   LogMessage(
       client_,
@@ -166,7 +186,7 @@ void LoginStateChecker::OnExecutionResponseCallback(
     LogNumber(client_,
               SavePasswordProgressLogger::STRING_LOGIN_STATE_CHECK_SERVER_ERROR,
               static_cast<int>(execution_result.response.error().error()));
-    TerminateLoginChecks();
+    TerminateLoginChecks(std::move(logging_data));
     return;
   }
 
@@ -181,21 +201,17 @@ void LoginStateChecker::OnExecutionResponseCallback(
   } else {
     LogMessage(client_,
                SavePasswordProgressLogger::STRING_LOGIN_STATE_CHECK_FAILURE);
-    TerminateLoginChecks();
+    TerminateLoginChecks(std::move(logging_data));
     return;
   }
 
   // Terminate the flow immediately in case of an error.
   if (response->is_logged_in_data().error_case() != kNoError) {
-    TerminateLoginChecks();
+    TerminateLoginChecks(std::move(logging_data));
     return;
   }
 
   bool is_logged_in = response->is_logged_in_data().is_logged_in();
-  // If the login state is false, a subsequent retry will override the
-  // quality state with either an unexpected or failure status.
-  logs_uploader_->SetLoggedInCheckQuality(state_checks_count_,
-                                          std::move(logging_data));
 
   LogBoolean(client_,
              SavePasswordProgressLogger::STRING_LOGIN_STATE_CHECK_RESULT,
@@ -212,6 +228,9 @@ void LoginStateChecker::OnExecutionResponseCallback(
     cached_page_content_ = std::nullopt;
   }
 
-  result_check_callback_.Run(is_logged_in ? LoginCheckResult::kLoggedIn
-                                          : LoginCheckResult::kLoggedOut);
+  result_check_callback_.Run(
+      LoginCheckResult(is_logged_in ? LoginCheckResult::Status::kLoggedIn
+                                    : LoginCheckResult::Status::kLoggedOut,
+                       state_checks_count_, base::Time::Now() - creation_time_,
+                       std::move(logging_data)));
 }

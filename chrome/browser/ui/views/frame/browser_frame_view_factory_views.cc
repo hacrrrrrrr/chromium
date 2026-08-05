@@ -35,7 +35,7 @@ namespace {
 std::unique_ptr<OpaqueBrowserFrameView> CreateOpaqueBrowserFrameViewLinux(
     BrowserWidget* widget,
     BrowserView* browser_view) {
-  auto* profile = browser_view->browser()->profile();
+  auto* profile = browser_view->browser()->GetProfile();
   auto* linux_ui_theme = ui::LinuxUiTheme::GetForProfile(profile);
   auto* theme_service_factory = ThemeServiceFactory::GetForProfile(profile);
   auto* app_controller =
@@ -79,7 +79,8 @@ std::unique_ptr<OpaqueBrowserFrameView> CreateOpaqueBrowserFrameViewLinux(
 std::unique_ptr<BrowserFrameView> CreateBrowserFrameViewLinux(
     BrowserWidget* widget,
     BrowserView* browser_view) {
-  if (browser_view->browser()->is_type_picture_in_picture()) {
+  if (browser_view->browser()->GetType() ==
+      BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE) {
     return std::make_unique<PictureInPictureBrowserFrameViewLinux>(
         widget, browser_view);
   }
@@ -96,7 +97,8 @@ std::unique_ptr<BrowserFrameView> CreateBrowserFrameViewLinux(
 std::unique_ptr<BrowserFrameView> CreateBrowserFrameViewWin(
     BrowserWidget* widget,
     BrowserView* browser_view) {
-  if (browser_view->browser()->is_type_picture_in_picture()) {
+  if (browser_view->browser()->GetType() ==
+      BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE) {
     return std::make_unique<PictureInPictureBrowserFrameView>(widget,
                                                               browser_view);
   }

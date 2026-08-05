@@ -82,22 +82,34 @@ std::vector<ListIdentifier> VerifyChecksums(
   return stores_to_reset;
 }
 
+void RecordCheckStoresTimeTaken(const std::string& metric_name,
+                                base::TimeDelta delta) {
+  base::UmaHistogramTimes(
+      GetMetricName(
+          "SafeBrowsing.",
+          base::StrCat({"CheckUrl.TimeTaken.LocalLookup.", metric_name}),
+          /*allow_v5_logging=*/true),
+      delta);
+  base::UmaHistogramTimes(
+      base::StrCat(
+          {"SafeBrowsing.SBCheckUrl.TimeTaken.LocalLookup.", metric_name}),
+      delta);
+}
+
 // Returns hash prefixes matching the collection of stores.
 DbLookupResult CheckStores(
     const std::vector<FullHashStr>& full_hashes,
     std::vector<std::pair<ListIdentifier, SBStore*>> stores,
     base::TimeTicks db_thread_post_time) {
   base::TimeTicks db_thread_start_time = base::TimeTicks::Now();
-  base::UmaHistogramTimes(
-      "SafeBrowsing.V4CheckUrl.TimeTaken.LocalLookup.DbThreadQueueDelay",
-      db_thread_start_time - db_thread_post_time);
+  RecordCheckStoresTimeTaken("DbThreadQueueDelay",
+                             db_thread_start_time - db_thread_post_time);
 
   DbLookupResult lookup_result;
   lookup_result.db_thread_post_time = db_thread_post_time;
   lookup_result.db_thread_start_time = db_thread_start_time;
 
   for (const auto& store : stores) {
-    base::TimeTicks start = base::TimeTicks::Now();
     for (const auto& full_hash : full_hashes) {
       HashPrefixStr hash_prefix =
           store.second->GetMatchingHashPrefix(full_hash);
@@ -105,21 +117,11 @@ DbLookupResult CheckStores(
         lookup_result.results[full_hash].emplace_back(store.first, hash_prefix);
       }
     }
-    if (store.first.threat_type() == ThreatType::HIGH_CONFIDENCE_ALLOWLIST) {
-      // Logs
-      // SafeBrowsing.V4Store.DbThread.CheckHighConfidenceAllowlistStoreDuration
-      base::UmaHistogramTimes(
-          GetMetricName(
-              "SafeBrowsing.",
-              "Store.DbThread.CheckHighConfidenceAllowlistStoreDuration"),
-          base::TimeTicks::Now() - start);
-    }
   }
 
   base::TimeTicks db_thread_end_time = base::TimeTicks::Now();
-  base::UmaHistogramTimes(
-      "SafeBrowsing.V4CheckUrl.TimeTaken.LocalLookup.StoreLookupDuration",
-      db_thread_end_time - db_thread_start_time);
+  RecordCheckStoresTimeTaken("StoreLookupDuration",
+                             db_thread_end_time - db_thread_start_time);
 
   lookup_result.db_thread_end_time = db_thread_end_time;
   return lookup_result;

@@ -24,13 +24,14 @@
 #include "base/memory/raw_ptr.h"
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
-#include "components/accessibility_annotator/core/annotation_reducer/memory_search_result.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #include "components/autofill/core/browser/data_model/payments/iban.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/integrators/at_memory/memory_data_type.h"
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/webdata/autocomplete/autocomplete_entry.h"
+#include "components/autofill/core/browser/webdata/autocomplete/autocomplete_table_label_sensitive.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
@@ -211,8 +212,7 @@ struct Suggestion {
 
     AtMemoryPayload();
     // `value` is the value to be shown in the suggestion UI and the preview.
-    AtMemoryPayload(std::u16string value,
-                    accessibility_annotator::MemoryDataType memory_data_type);
+    AtMemoryPayload(std::u16string value, MemoryDataType memory_data_type);
     AtMemoryPayload(const AtMemoryPayload&);
     AtMemoryPayload(AtMemoryPayload&&);
     AtMemoryPayload& operator=(const AtMemoryPayload&);
@@ -225,19 +225,20 @@ struct Suggestion {
     // Text to fill in the trigger field upon accepting the suggestion.
     std::u16string value;
 
+    // Human-readable type name of the entry.
+    std::u16string type_name;
+
     // The identifier for the entry (e.g. IBAN Guid or InstrumentId).
     Identifier identifier;
 
-    // The type of the entry from accessibility annotator.
-    accessibility_annotator::MemoryDataType memory_data_type =
-        accessibility_annotator::MemoryDataType::kUnknown;
+    // The memory data type of the entry.
+    MemoryDataType memory_data_type = MemoryDataType::kUnknown;
 
     // Whether the entry is sourced from `PersonalContextService`.
     bool is_personal_context_sourced = false;
 
     // The data sources that provided the entry.
-    std::underlying_type_t<accessibility_annotator::MemoryEntrySourceType>
-        sources_bitmask = 0;
+    std::underlying_type_t<MemoryEntrySourceType> sources_bitmask = 0;
   };
 
   struct OpenGeminiPayload final {
@@ -271,7 +272,8 @@ struct Suggestion {
                                AutocompleteEntry,
                                BnplIssuer,
                                AtMemoryPayload,
-                               OpenGeminiPayload>;
+                               OpenGeminiPayload,
+                               AutocompleteSearchResultLabelSensitive>;
 
   // This struct is used to provide password suggestions with custom icons,
   // using the favicon of the website associated with the credentials. While
@@ -474,17 +476,16 @@ struct Suggestion {
     kStatic,
   };
 
-  // Describes whether a suggestion can be accepted and how it should be styled
-  // when it cannot be.
+  // Describes the behavioral interaction contract of a suggestion: whether it
+  // can be selected/focused and whether it can be accepted (clicked/filled).
   enum class Acceptability {
-    // The suggestion can be accepted.
-    kAcceptable,
-    // The suggestion cannot be accepted (i.e. trying to accept it is ignored by
-    // the UI controller).
-    kUnacceptable,
-    // The suggestion cannot be accepted and is displayed in a
-    // disabled/grayed-out form.
-    kUnacceptableWithDeactivatedStyle,
+    // The suggestion can be selected and accepted.
+    kSelectableAndAcceptable,
+    // The suggestion can be selected, but cannot be accepted (i.e. trying to
+    // accept it is ignored by the UI controller).
+    kSelectableButUnacceptable,
+    // The suggestion cannot be selected/focused and cannot be accepted.
+    kUnselectableAndUnacceptable,
   };
 
   explicit Suggestion(SuggestionType type);
@@ -680,15 +681,19 @@ struct Suggestion {
   FiltrationPolicy filtration_policy = FiltrationPolicy::kFilterable;
 
   // The acceptability of the suggestion, see the enum values doc for details.
-  Acceptability acceptability = Acceptability::kAcceptable;
+  // Note that even if `acceptability` is `kSelectableAndAcceptable`, some
+  // `SuggestionType` are still not acceptable. See `IsAcceptable()` for
+  // details.
+  Acceptability acceptability = Acceptability::kSelectableAndAcceptable;
 
   // Returns whether the user is able to preview the suggestion by hovering on
-  // it or accept it by clicking on it.
+  // it or accept it by clicking on it. Checks both whether the suggestion type
+  // is acceptable (i.e. not a separator, title, etc.) and whether
+  // `acceptability == Acceptability::kSelectableAndAcceptable`.
   bool IsAcceptable() const;
 
-  // Returns whether the user will see the suggestion in
-  // a "disabled and grayed-out" form.
-  bool HasDeactivatedStyle() const;
+  // Returns whether the user is able to focus or select the suggestion.
+  bool IsSelectable() const;
 };
 
 void PrintTo(const Suggestion& suggestion, std::ostream* os);

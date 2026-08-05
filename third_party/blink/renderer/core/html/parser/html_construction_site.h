@@ -189,6 +189,7 @@ class HTMLConstructionSite final {
 
   bool ShouldFosterParent() const;
   void FosterParent(Node*);
+  void FosterParentAlreadyParsedChild(Node*);
 
   bool IndexOfFirstUnopenFormattingElement(
       unsigned& first_unopen_element_index) const;
@@ -289,6 +290,7 @@ class HTMLConstructionSite final {
   void FindFosterSite(HTMLConstructionSiteTask&);
 
   CreateElementFlags GetCreateElementFlags() const;
+  bool ShouldMarkScriptAlreadyStarted() const;
   Element* CreateElement(AtomicHTMLToken*, const AtomicString& namespace_uri);
 
   void MergeAttributesFromTokenIntoElement(AtomicHTMLToken*, Element*);

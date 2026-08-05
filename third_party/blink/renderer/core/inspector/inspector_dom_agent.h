@@ -88,9 +88,7 @@ class CORE_EXPORT InspectorDOMAgent final
       Document*);
   static ShadowRoot* UserAgentShadowRoot(Node*);
 
-  InspectorDOMAgent(v8::Isolate*,
-                    InspectedFrames*,
-                    v8_inspector::V8InspectorSession*);
+  InspectorDOMAgent(v8::Isolate*, InspectedFrames*);
   InspectorDOMAgent(const InspectorDOMAgent&) = delete;
   InspectorDOMAgent& operator=(const InspectorDOMAgent&) = delete;
   ~InspectorDOMAgent() override;
@@ -282,6 +280,10 @@ class CORE_EXPORT InspectorDOMAgent final
       std::unique_ptr<protocol::Array<int>>* out_nodeIds) override;
   void WillHidePopover(HTMLElement* element, bool* force_open);
 
+  protocol::Response forceShowInterest(int node_id, bool enable) override;
+  void WillLoseInterest(Element* element, bool* force_interest);
+  void ReleaseForcedInterestInvokers();
+
   bool Enabled() const;
   IncludeWhitespaceEnum IncludeWhitespace() const;
   void ReleaseDanglingNodes();
@@ -425,7 +427,6 @@ class CORE_EXPORT InspectorDOMAgent final
 
   v8::Isolate* isolate_;  // null after Dispose().
   Member<InspectedFrames> inspected_frames_;
-  v8_inspector::V8InspectorSession* v8_session_;  // null after Dispose().
   HeapHashSet<Member<DOMListener>> dom_listeners_;
   Member<NodeToIdMap> document_node_to_id_map_;
   // Owns node mappings for dangling nodes.
@@ -438,6 +439,7 @@ class CORE_EXPORT InspectorDOMAgent final
   HashSet<int> distributed_nodes_requested_;
   HashMap<int, int> cached_child_count_;
   HeapHashSet<WeakMember<Node>> forced_popovers_;
+  HeapHashSet<WeakMember<Node>> forced_interest_invokers_;
   int last_node_id_;
   Member<Document> document_;
   using SearchResults =

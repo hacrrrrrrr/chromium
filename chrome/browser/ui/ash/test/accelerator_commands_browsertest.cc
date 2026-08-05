@@ -82,7 +82,7 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   // 1) Browser windows.
   aura::Window* window = browser()->GetWindow()->GetNativeWindow();
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
-  ASSERT_TRUE(browser()->is_type_normal());
+  ASSERT_EQ(browser()->GetType(), BrowserWindowInterface::Type::TYPE_NORMAL);
   ASSERT_TRUE(widget->IsActive());
   SetToInitialShowState(widget);
   EXPECT_TRUE(IsInitialShowState(widget));
@@ -104,12 +104,14 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   // 3) Hosted apps.
   Browser::CreateParams browser_create_params(
       Browser::CreateParams::CreateForApp("Test", true /* trusted_source */,
-                                          gfx::Rect(), browser()->profile(),
+                                          gfx::Rect(), browser()->GetProfile(),
                                           true));
 
   Browser* app_host_browser = Browser::Create(browser_create_params);
-  ASSERT_FALSE(app_host_browser->is_type_popup());
-  ASSERT_TRUE(app_host_browser->is_type_app());
+  ASSERT_NE(app_host_browser->GetType(),
+            BrowserWindowInterface::Type::TYPE_POPUP);
+  ASSERT_EQ(app_host_browser->GetType(),
+            BrowserWindowInterface::Type::TYPE_APP);
   AddBlankTabAndShow(app_host_browser);
   window = app_host_browser->GetWindow()->GetNativeWindow();
   widget = views::Widget::GetWidgetForNativeWindow(window);
@@ -128,8 +130,8 @@ IN_PROC_BROWSER_TEST_P(AcceleratorCommandsFullscreenBrowserTest,
   browser_create_params =
       Browser::CreateParams(Browser::TYPE_POPUP, browser()->GetProfile(), true);
   Browser* popup_browser = Browser::Create(browser_create_params);
-  ASSERT_TRUE(popup_browser->is_type_popup());
-  ASSERT_FALSE(popup_browser->is_type_app());
+  ASSERT_EQ(popup_browser->GetType(), BrowserWindowInterface::Type::TYPE_POPUP);
+  ASSERT_NE(popup_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   AddBlankTabAndShow(popup_browser);
   window = popup_browser->GetWindow()->GetNativeWindow();
   widget = views::Widget::GetWidgetForNativeWindow(window);

@@ -71,7 +71,7 @@ class TaskUpdaterSceneAgentTest : public PlatformTest {
     TestProfileIOS::Builder builder;
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
@@ -87,10 +87,9 @@ class TaskUpdaterSceneAgentTest : public PlatformTest {
     profile_state_ = [[ProfileState alloc] initWithAppState:app_state_];
     profile_state_.profile = profile_.get();
 
-    scene_state_ = [[FakeSceneState alloc] initWithAppState:app_state_
-                                                    profile:profile_.get()
-                                             sceneSessionID:"scene-1"];
+    scene_state_ = [[FakeSceneState alloc] initWithProfile:profile_.get()];
     scene_state_.profileState = profile_state_;
+    scene_state_.sceneSessionID = "scene-1";
 
     agent_ = [[TaskUpdaterSceneAgent alloc] init];
     [scene_state_ addAgent:agent_];
@@ -159,9 +158,9 @@ TEST_F(TaskUpdaterSceneAgentTest, TestUIBlocker) {
 
   // Set a UI blocker before becoming active.
   FakeSceneState* blocker_target =
-      [[FakeSceneState alloc] initWithAppState:app_state_
-                                       profile:profile_.get()
-                                sceneSessionID:"scene-2"];
+      [[FakeSceneState alloc] initWithProfile:profile_.get()];
+  scene_state_.profileState = profile_state_;
+  scene_state_.sceneSessionID = "scene-2";
   [profile_state_ incrementBlockingUICounterForTarget:blocker_target];
 
   scene_state_.activationLevel = SceneActivationLevelForegroundActive;

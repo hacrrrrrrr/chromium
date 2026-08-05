@@ -499,6 +499,8 @@ class CloudPolicyClientTest : public testing::Test {
 #if BUILDFLAG(IS_CHROMEOS)
     fake_statistics_provider_.SetMachineStatistic(ash::system::kSerialNumberKey,
                                                   "fake_serial_number");
+    fake_statistics_provider_.SetLoadingState(
+        ash::system::StatisticsProvider::LoadingState::kFinished);
 #endif
 
     CreateClient();
@@ -2759,9 +2761,8 @@ TEST_F(CloudPolicyClientTest, UploadSecurityEventNotRegistered) {
                                result_future.GetCallback());
 
   const CloudPolicyClient::Result result = result_future.Get();
-  EXPECT_EQ(result,
-            CloudPolicyClient::Result(CloudPolicyClient::NotRegistered()));
-  }
+  EXPECT_TRUE(result.IsClientNotRegisteredError());
+}
 
 class CloudPolicyClientUploadSecurityEventTest
     : public CloudPolicyClientTest,
@@ -2829,10 +2830,42 @@ TEST_P(CloudPolicyClientUploadSecurityEventTest, TestWithProtoFormat) {
   }
 
   EXPECT_EQ(1, request.events_size());
+  EXPECT_EQ(result.upload_events_request().SerializeAsString(),
+            request.SerializeAsString());
+}
+
+TEST_P(CloudPolicyClientUploadSecurityEventTest,
+       TestCallbackReceivesEnrichedProtoFields) {
+  RegisterClient();
+
+  ExpectAndCaptureJSONJob(/*response=*/"{}");
+
+  base::test::TestFuture<CloudPolicyClient::Result> result_future;
+
+  // Pass an initial request with only an event, no device or chrome_version
+  // metadata.
+  ::chrome::cros::reporting::proto::UploadEventsRequest initial_request =
+      MakeDefaultUploadEventsRequest();
+  EXPECT_FALSE(initial_request.has_device());
+  EXPECT_TRUE(initial_request.browser().chrome_version().empty());
+
+  client_->UploadSecurityEvent(include_device_info(),
+                               std::move(initial_request),
+                               result_future.GetCallback());
+
+  const auto& returned_request = result_future.Get().upload_events_request();
+  EXPECT_TRUE(returned_request.has_browser());
+  EXPECT_FALSE(returned_request.browser().chrome_version().empty());
+  EXPECT_EQ(version_info::GetVersionNumber(),
+            returned_request.browser().chrome_version());
+  if (include_device_info()) {
+    EXPECT_TRUE(returned_request.has_device());
+    EXPECT_EQ(kDMToken, returned_request.device().dm_token());
+    EXPECT_EQ(client_id_, returned_request.device().client_id());
+  }
 }
 
 TEST_F(CloudPolicyClientTest, RealtimeReportMerge) {
-
   auto config = std::make_unique<RealtimeReportingJobConfiguration>(
       client_.get(), service_.configuration()->GetRealtimeReportingServerUrl(),
       /*include_device_info*/ true,
@@ -3665,9 +3698,7 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::Values(std::string(), kDeviceDMToken));
 
 #if BUILDFLAG(IS_ANDROID)
-// Constantly failing on android-automotive-12l-x64-rel-tests.
-// crbug.com/528019503
-TEST_F(CloudPolicyClientTest, DISABLED_PolicyFetchDesktopAndroid) {
+TEST_F(CloudPolicyClientTest, PolicyFetchDesktopAndroid) {
   base::android::device_info::set_is_desktop_for_testing(true);
   policy_type_ = dm_protocol::GetChromeUserPolicyType();
   CreateClient();
@@ -3697,9 +3728,7 @@ TEST_F(CloudPolicyClientTest, DISABLED_PolicyFetchDesktopAndroid) {
   base::android::device_info::reset_is_desktop_for_testing();
 }
 
-// Constantly failing on android-automotive-12l-x64-rel-tests.
-// crbug.com/528019503
-TEST_F(CloudPolicyClientTest, DISABLED_RegistrationDesktopAndroid) {
+TEST_F(CloudPolicyClientTest, RegistrationDesktopAndroid) {
   base::android::device_info::set_is_desktop_for_testing(true);
   policy_type_ = dm_protocol::GetChromeUserPolicyType();
   CreateClient();

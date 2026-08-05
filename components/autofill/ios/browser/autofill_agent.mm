@@ -10,6 +10,7 @@
 #import <cstdint>
 #import <memory>
 #import <optional>
+#include <ranges>
 #import <string>
 #import <tuple>
 #import <utility>
@@ -32,7 +33,6 @@
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
 #import "base/time/time.h"
-#import "base/types/zip.h"
 #import "base/uuid.h"
 #import "base/values.h"
 #import "build/branding_buildflags.h"
@@ -105,6 +105,7 @@ using autofill::Section;
 using autofill::Suggestion;
 using autofill::SuggestionType;
 using autofill::FieldPropertiesFlags::kAutofilledOnUserTrigger;
+using ActivityType = autofill::FormActivityParams::ActivityType;
 using base::NumberToString;
 using base::SysNSStringToUTF16;
 using base::SysNSStringToUTF8;
@@ -388,8 +389,7 @@ bool HasGuid(const Suggestion::Payload& payload) {
   }
 
   if (suggestion.type == SuggestionType::kAutocompleteAtMemoryButton) {
-    // TODO(crbug.com/527936416) - Clicking this chip should open the
-    // AtMemoryViewController.
+    [self.delegate showAtMemory];
     if (SuggestionHandledCompletion c =
             std::exchange(_suggestionHandledCompletion, nil)) {
       c();
@@ -580,7 +580,7 @@ bool HasGuid(const Suggestion::Payload& payload) {
   for (const auto& form : forms) {
     base::DictValue fieldData;
     for (const auto [field, field_prediction] :
-         base::zip(form.data.fields(), form.fields)) {
+         std::views::zip(form.data.fields(), form.fields)) {
       fieldData.Set(NumberToString(field.renderer_id().value()),
                     base::Value(field_prediction.overall_type));
     }
@@ -681,11 +681,13 @@ bool HasGuid(const Suggestion::Payload& payload) {
       case SuggestionType::kAllLoyaltyCardsEntry:
       case SuggestionType::kAllSavedPasswordsEntry:
       case SuggestionType::kAtMemoryAiDisclosure:
+      case SuggestionType::kAtMemoryFetching:
       case SuggestionType::kAtMemoryGenericError:
       case SuggestionType::kAtMemoryInactivityNudge:
       case SuggestionType::kAtMemoryNoConnection:
       case SuggestionType::kAtMemorySearchAffordance:
       case SuggestionType::kAtMemorySearchResult:
+      case SuggestionType::kAtMemorySourceAttribution:
       case SuggestionType::kAutofillAiOtherOrders:
       case SuggestionType::kAutofillAiOtherShipments:
       case SuggestionType::kAutofillAiPrivateInferenceNotice:
@@ -924,15 +926,17 @@ bool HasGuid(const Suggestion::Payload& payload) {
   // If the event is a form_changed, then the event concerns the whole page and
   // not a particular form. The whole document's forms need to be extracted to
   // find the new forms.
-  if (params.type == "form_changed") {
+  if (params.type == ActivityType::kFormChanged) {
     driver->ScanForms();
     return;
   }
 
   // We are only interested in 'input' events in order to notify the autofill
   // manager for metrics purposes.
-  if (params.type != "input" ||
-      (params.field_type != "text" && params.field_type != "password")) {
+  if (params.type != ActivityType::kInput ||
+      (params.field_type != autofill::FormActivityParams::FieldType::kText &&
+       params.field_type !=
+           autofill::FormActivityParams::FieldType::kObfuscated)) {
     return;
   }
 
@@ -1394,7 +1398,7 @@ bool HasGuid(const Suggestion::Payload& payload) {
 // specified form and field.
 - (void)queryAutofillForForm:(const FormData&)form
              fieldIdentifier:(FieldRendererId)fieldIdentifier
-                        type:(NSString*)type
+                        type:(ActivityType)type
                   typedValue:(NSString*)typedValue
                        frame:(base::WeakPtr<web::WebFrame>)frame
                     webState:(base::WeakPtr<web::WebState>)webState

@@ -8,7 +8,9 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ComponentCallbacks;
 import android.content.Context;
+import android.content.res.Configuration;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnAttachStateChangeListener;
@@ -144,6 +146,8 @@ public class BookmarkManagerCoordinator
     private final ModalDialogManager mModalDialogManager;
     private final ModelList mModelList;
     private final @Nullable BackPressManager mBackPressManager;
+    private final ComponentCallbacks mComponentCallbacks;
+    private @Nullable BookmarkDesktopNavigationCoordinator mDesktopNavigationCoordinator;
 
     // TODO(https://crbug.com/475144764): Investigate whether activity can be replaced by a Context.
     /**
@@ -187,7 +191,10 @@ public class BookmarkManagerCoordinator
                         GlobalDiscardableReferencePool.getReferencePool());
         mSnackbarManager = snackbarManager;
 
-        mMainView = (ViewGroup) LayoutInflater.from(activity).inflate(R.layout.bookmark_main, null);
+        final boolean isDesktopLayoutEnabled = BookmarkUtils.isDesktopBookmarksLayoutEnabled();
+        int layoutId =
+                isDesktopLayoutEnabled ? R.layout.bookmark_main_desktop : R.layout.bookmark_main;
+        mMainView = (ViewGroup) LayoutInflater.from(activity).inflate(layoutId, null);
         mBookmarkModel = BookmarkModel.getForProfile(profile);
         mBookmarkOpener = bookmarkOpener;
         ShoppingService service = ShoppingServiceFactory.getForProfile(profile);
@@ -215,6 +222,17 @@ public class BookmarkManagerCoordinator
                         dragReorderableRecyclerViewAdapter,
                         /* recyclerView= */ null,
                         edgeToEdgePadAdjusterGenerator);
+        if (isDesktopLayoutEnabled) {
+            int padding =
+                    activity.getResources()
+                            .getDimensionPixelSize(R.dimen.bookmark_desktop_content_padding);
+            mRecyclerView.setPaddingRelative(
+                    padding,
+                    mRecyclerView.getPaddingTop(),
+                    padding,
+                    mRecyclerView.getPaddingBottom());
+            mRecyclerView.setClipToPadding(false);
+        }
 
         // Disable everything except move animations. Switching between folders should be as
         // seamless as possible without flickering caused by these animations. While dragging
@@ -230,6 +248,14 @@ public class BookmarkManagerCoordinator
         // Using OneshotSupplier as an alternative to a 2-step initialization process.
         OneshotSupplierImpl<BookmarkDelegate> bookmarkDelegateSupplier =
                 new OneshotSupplierImpl<>();
+        if (isDesktopLayoutEnabled) {
+            View navigationPane = assumeNonNull(mMainView.findViewById(R.id.navigation_pane));
+            mDesktopNavigationCoordinator =
+                    new BookmarkDesktopNavigationCoordinator(
+                            activity, navigationPane, mBookmarkModel, bookmarkDelegateSupplier);
+        }
+        BookmarkUndoController bookmarkUndoController =
+                new BookmarkUndoController(activity, mBookmarkModel, snackbarManager);
         mBookmarkToolbarCoordinator =
                 new BookmarkToolbarCoordinator(
                         activity,
@@ -248,8 +274,11 @@ public class BookmarkManagerCoordinator
                         () -> IncognitoUtils.isIncognitoModeEnabled(profile),
                         bookmarkManagerOpener,
                         mSnackbarManager,
-                        /* nextFocusableView= */ mMainView.findViewById(R.id.list_content));
-        mSelectableListLayout.configureWideDisplayStyle();
+                        /* nextFocusableView= */ mMainView.findViewById(R.id.list_content),
+                        bookmarkUndoController);
+        if (!isDesktopLayoutEnabled) {
+            mSelectableListLayout.configureWideDisplayStyle();
+        }
 
         final @BookmarkRowDisplayPref int displayPref =
                 mBookmarkUiPrefs.getBookmarkRowDisplayPref();
@@ -260,9 +289,6 @@ public class BookmarkManagerCoordinator
                         mBookmarkModel,
                         mImageFetcher,
                         BookmarkViewUtils.getRoundedIconGenerator(activity, displayPref));
-
-        BookmarkUndoController bookmarkUndoController =
-                new BookmarkUndoController(activity, mBookmarkModel, snackbarManager);
         Consumer<OnScrollListener> onScrollListenerConsumer =
                 onScrollListener -> mRecyclerView.addOnScrollListener(onScrollListener);
         mMediator =
@@ -365,17 +391,44 @@ public class BookmarkManagerCoordinator
         } else {
             mBackPressManager = null;
         }
+
+        mComponentCallbacks =
+                new ComponentCallbacks() {
+                    @Override
+                    public void onConfigurationChanged(Configuration newConfig) {
+                        if (BookmarkUtils.isDesktopBookmarksLayoutEnabled()) {
+                            int padding =
+                                    mContext.getResources()
+                                            .getDimensionPixelSize(
+                                                    R.dimen.bookmark_desktop_content_padding);
+                            mRecyclerView.setPaddingRelative(
+                                    padding,
+                                    mRecyclerView.getPaddingTop(),
+                                    padding,
+                                    mRecyclerView.getPaddingBottom());
+                            mBookmarkToolbarCoordinator.onConfigurationChanged(newConfig);
+                        }
+                    }
+
+                    @Override
+                    public void onLowMemory() {}
+                };
+        mContext.registerComponentCallbacks(mComponentCallbacks);
     }
 
     // Public API implementation.
 
     /** Destroys and cleans up itself. This must be called after done using this class. */
     public void onDestroyed() {
+        mContext.unregisterComponentCallbacks(mComponentCallbacks);
         RecordUserAction.record("MobileBookmarkManagerClose");
         mMainView.removeOnAttachStateChangeListener(this);
         mSelectableListLayout.onDestroyed();
         mMediator.onDestroy();
         mSigninPromoCoordinator.destroy();
+        if (mDesktopNavigationCoordinator != null) {
+            mDesktopNavigationCoordinator.destroy();
+        }
     }
 
     /** Returns the view that shows the main bookmarks UI. */
@@ -645,6 +698,10 @@ public class BookmarkManagerCoordinator
 
     @Nullable BackPressManager getBackPressManagerForTesting() {
         return mBackPressManager;
+    }
+
+    ComponentCallbacks getComponentCallbacksForTesting() {
+        return mComponentCallbacks;
     }
 
     @SuppressLint("ClickableViewAccessibility")

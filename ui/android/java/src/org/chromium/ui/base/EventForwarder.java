@@ -6,6 +6,7 @@ package org.chromium.ui.base;
 
 import android.content.ClipData;
 import android.content.ClipDescription;
+import android.content.ContentResolver;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PersistableBundle;
@@ -223,13 +224,20 @@ public class EventForwarder {
      * @see View#onTouchEvent(MotionEvent)
      */
     public boolean onTouchEvent(MotionEvent event) {
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
+        boolean requiresSpecialHandling = touchEventRequiresSpecialHandling(event);
+
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             mLastToolType = event.getToolType(0);
             logActionDown(event);
-            cancelPendingHoverExit();
+            if (!requiresSpecialHandling) {
+                sendPendingHoverExit();
+            }
         }
 
-        if (touchEventRequiresSpecialHandling(event)) {
+        if (requiresSpecialHandling) {
             return true;
         }
 
@@ -243,6 +251,9 @@ public class EventForwarder {
      * @param event the MotionEvent targeting the handle.
      */
     public boolean onTouchHandleEvent(MotionEvent event) {
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
         final boolean isTouchHandleEvent = true;
         return sendTouchEvent(event, isTouchHandleEvent);
     }
@@ -417,8 +428,9 @@ public class EventForwarder {
     }
 
     /**
-     * Creates a new motion event differed from the given event by current touch offset
-     * if the offset is not zero.
+     * Creates a new motion event differed from the given event by current touch offset if the
+     * offset is not zero.
+     *
      * @param src Source motion event.
      * @return A new motion event if we have non-zero touch offset. Otherwise return the same event.
      */
@@ -446,6 +458,9 @@ public class EventForwarder {
      */
     public boolean onHoverEvent(MotionEvent event) {
         TraceEvent.begin("onHoverEvent");
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
 
         if (mStylusWritingDelegate != null) {
             mStylusWritingDelegate.handleHoverEvent(event);
@@ -478,12 +493,13 @@ public class EventForwarder {
 
                 if (mPendingHoverExitEvent != null) {
                     cancelPendingHoverExit();
-                    return false;
+                    return true;
                 } else if (!mIsHovering) {
                     mIsHovering = true;
-                    return sendNativeMouseEventInternal(event, /* forceSend= */ true);
+                    sendNativeMouseEventInternal(event, /* forceSend= */ true);
+                    return true;
                 }
-                return false;
+                return true;
             }
 
             if (eventAction == MotionEvent.ACTION_HOVER_EXIT) {
@@ -493,7 +509,7 @@ public class EventForwarder {
                     PostTask.postDelayedTask(
                             TaskTraits.UI_DEFAULT, mPendingHoverExitRunnable, HOVER_EXIT_DELAY_MS);
                 }
-                return false;
+                return true;
             }
 
             if (eventAction == MotionEvent.ACTION_HOVER_MOVE) {
@@ -518,6 +534,9 @@ public class EventForwarder {
      */
     public boolean onMouseEvent(MotionEvent event) {
         TraceEvent.begin("sendMouseEvent");
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
         boolean didOffsetEvent = false;
         try {
             if (hasTouchEventOffset()) {
@@ -604,6 +623,7 @@ public class EventForwarder {
             mLastTrackpadScrollStartY = event.getY() + mCurrentTouchOffsetY;
             mLastTrackpadScrollStartRawX = event.getRawX() + mCurrentTouchOffsetX;
             mLastTrackpadScrollStartRawY = event.getRawY() + mCurrentTouchOffsetY;
+            cancelPendingHoverExit();
         } else {
             deltaX = event.getX() + mCurrentTouchOffsetX - mLastTrackpadScrollX;
             deltaY = event.getY() + mCurrentTouchOffsetY - mLastTrackpadScrollY;
@@ -621,11 +641,18 @@ public class EventForwarder {
             float velocityY = mVelocityTracker.getYVelocity();
             if (Math.abs(velocityX) > MIN_FLING_VELOCITY
                     || Math.abs(velocityY) > MIN_FLING_VELOCITY) {
-                // Trackpad scroll events are handled by manually calculating deltas from raw
-                // coordinates. These calculations produce Cartesian deltas (Swipe Right = +X).
-                // Chrome expects touchpad events to follow "natural" scrolling conventions
-                // (where Swipe Right = Scroll Left = +X).
-                startFling(event.getEventTime(), velocityX, velocityY, false, false, true);
+                startFling(
+                        event.getEventTime(),
+                        mLastTrackpadScrollStartX,
+                        mLastTrackpadScrollStartY,
+                        mLastTrackpadScrollStartRawX,
+                        mLastTrackpadScrollStartRawY,
+                        velocityX,
+                        velocityY,
+                        /* syntheticScroll= */ false,
+                        /* preventBoosting= */ false,
+                        /* isTouchpadEvent= */ true,
+                        /* targetViewport= */ false);
                 return;
             }
         }
@@ -757,14 +784,17 @@ public class EventForwarder {
                 for (int i = 0; i < itemCount; i++) {
                     // If there are any Uris, set them as files.
                     Uri uri = clipData.getItemAt(i).getUri();
-                    // Reject URIs originating from this app to prevent the browser from opening
-                    // private files on behalf of an untrusted paste request.
-                    if (UiAndroidFeatureMap.isEnabled(
-                                    UiAndroidFeatures.CLIPBOARD_CONFUSED_DEPUTY_DEFENSE_FILES)
-                            && ContentUriUtils.isUriFromThisApp(uri)) {
-                        continue;
-                    }
                     if (uri != null) {
+                        // Reject non-URIs or URIs originating from this app to prevent the browser
+                        // from opening private files on behalf of an untrusted paste request.
+                        if (UiAndroidFeatureMap.isEnabled(
+                                UiAndroidFeatures.CLIPBOARD_CONFUSED_DEPUTY_DEFENSE_FILES)) {
+                            if (!ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())
+                                    || ContentUriUtils.isUriFromThisApp(uri)) {
+                                continue;
+                            }
+                        }
+
                         String uriString = uri.toString();
                         String displayName = ContentUriUtils.maybeGetDisplayName(uriString);
                         if (displayName == null) {
@@ -848,6 +878,9 @@ public class EventForwarder {
      */
     public boolean onGenericMotionEvent(MotionEvent event) {
         if (mNativeEventForwarder == 0) return false;
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
         boolean isMouseEvent =
                 (event.getSource() & InputDevice.SOURCE_CLASS_POINTER) != 0
                         && event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE;
@@ -880,6 +913,9 @@ public class EventForwarder {
      */
     @VisibleForTesting
     public boolean onCapturedPointerEvent(MotionEvent event, int deviceRotation) {
+        if (!validateMotionEvent(event)) {
+            return false;
+        }
         boolean shouldConvertToMouseEvent =
                 isTrackpadToMouseEventConversionEnabled()
                         && event.isFromSource(InputDevice.SOURCE_TOUCHPAD);
@@ -977,35 +1013,49 @@ public class EventForwarder {
     }
 
     /**
-     * Flings the viewport with velocity vector (velocityX, velocityY).
+     * Start a fling gesture.
      *
-     * @param timeMs the current time.
-     * @param velocityX fling speed in x-axis.
-     * @param velocityY fling speed in y-axis.
-     * @param syntheticScroll true if generated by gamepad (which will make this fixed-velocity
-     *     fling)
+     * @param timeMs Current time (in milliseconds).
+     * @param x The x coordinate of the fling start in view space.
+     * @param y The y coordinate of the fling start in view space.
+     * @param rawX The raw x coordinate of the fling start in screen space.
+     * @param rawY The raw y coordinate of the fling start in screen space.
+     * @param velocityX Velocity in X.
+     * @param velocityY Velocity in Y.
+     * @param syntheticScroll if true, this fling is synthetic scroll.
      * @param preventBoosting if false, this fling may boost an existing fling. Otherwise, ends the
      *     current fling and starts a new one.
      * @param isTouchpadEvent if true, the gesture event created will have source touchpad,
      *     touchscreen otherwise.
+     * @param targetViewport if true, the fling will target the viewport directly.
      */
     public void startFling(
             long timeMs,
+            float x,
+            float y,
+            float rawX,
+            float rawY,
             float velocityX,
             float velocityY,
             boolean syntheticScroll,
             boolean preventBoosting,
-            boolean isTouchpadEvent) {
+            boolean isTouchpadEvent,
+            boolean targetViewport) {
         if (mNativeEventForwarder == 0) return;
         EventForwarderJni.get()
                 .startFling(
                         mNativeEventForwarder,
                         timeMs,
+                        x,
+                        y,
+                        rawX,
+                        rawY,
                         velocityX,
                         velocityY,
                         syntheticScroll,
                         preventBoosting,
-                        isTouchpadEvent);
+                        isTouchpadEvent,
+                        targetViewport);
     }
 
     /**
@@ -1028,6 +1078,18 @@ public class EventForwarder {
     @CalledByNative
     public static @Nullable EventForwarder getJavaObject(long nativeEventForwarder) {
         return sEventForwarders.get(nativeEventForwarder);
+    }
+
+    private static boolean validateMotionEvent(MotionEvent event) {
+        for (int i = 0; i < event.getPointerCount(); ++i) {
+            if (!Float.isFinite(event.getX(i))
+                    || !Float.isFinite(event.getY(i))
+                    || !Float.isFinite(event.getRawX(i))
+                    || !Float.isFinite(event.getRawY(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.PACKAGE_PRIVATE)
@@ -1103,11 +1165,16 @@ public class EventForwarder {
         void startFling(
                 long nativeEventForwarder,
                 long timeMs,
+                float x,
+                float y,
+                float rawX,
+                float rawY,
                 float velocityX,
                 float velocityY,
                 boolean syntheticScroll,
                 boolean preventBoosting,
-                boolean isTouchpadEvent);
+                boolean isTouchpadEvent,
+                boolean targetViewport);
 
         void cancelFling(
                 long nativeEventForwarder,

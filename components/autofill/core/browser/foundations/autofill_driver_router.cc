@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,7 +29,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
-#include "base/types/zip.h"
 #include "build/buildflag.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/foundations/autofill_driver.h"
@@ -504,11 +504,11 @@ void AutofillDriverRouter::FormWithEmailVerificationTokenSubmitted(
 void AutofillDriverRouter::DidDetectJavaScriptAutofill(
     RoutedCallback<const FormData&,
                    const FieldGlobalId&,
-                   const std::vector<FieldGlobalId>&> callback,
+                   const std::vector<JavaScriptFieldModification>&> callback,
     AutofillDriver& source,
     FormData form,
     FieldGlobalId trigger_field_id,
-    const std::vector<FieldGlobalId>& field_ids) {
+    std::vector<JavaScriptFieldModification> field_modifications) {
   FormGlobalId form_id = form.global_id();
   form_forest_.UpdateTreeOfRendererForm(std::move(form), source);
 
@@ -522,7 +522,8 @@ void AutofillDriverRouter::DidDetectJavaScriptAutofill(
     return;
   }
   auto* target = DriverOfFrame(browser_form.host_frame());
-  callback(CHECK_DEREF(target), browser_form, trigger_field_id, field_ids);
+  callback(CHECK_DEREF(target), browser_form, trigger_field_id,
+           field_modifications);
 }
 
 void AutofillDriverRouter::SelectFieldOptionsDidChange(
@@ -677,6 +678,17 @@ void AutofillDriverRouter::ExtractFormWithField(
   }
 }
 
+void AutofillDriverRouter::ObserveFieldVisibility(
+    RoutedCallback<FieldRendererId,
+                   mojo::PendingRemote<mojom::AutofillVisibilityObserver>>
+        callback,
+    const FieldGlobalId& field_id,
+    mojo::PendingRemote<mojom::AutofillVisibilityObserver> observer) {
+  if (auto* target = DriverOfFrame(field_id.frame_token)) {
+    callback(*target, field_id.renderer_id, std::move(observer));
+  }
+}
+
 void AutofillDriverRouter::SendTypePredictionsToRenderer(
     RoutedCallback<const std::vector<FormDataPredictions>&> callback,
     const FormDataPredictions& browser_fdp) {
@@ -689,7 +701,7 @@ void AutofillDriverRouter::SendTypePredictionsToRenderer(
   std::map<FieldGlobalId, FormFieldDataPredictions> field_predictions;
   DCHECK_EQ(browser_fdp.data.fields().size(), browser_fdp.fields.size());
   for (auto [field, field_prediction] :
-       base::zip(browser_fdp.data.fields(), browser_fdp.fields)) {
+       std::views::zip(browser_fdp.data.fields(), browser_fdp.fields)) {
     field_predictions.emplace(field.global_id(), field_prediction);
   }
 

@@ -158,6 +158,7 @@ void ViewAccessibility::AddVirtualChildViewAt(
 
   AXVirtualView* added_view = virtual_children_[index].get();
   added_view->OnViewHasNewAncestor(view_);
+  added_view->OnOwnerViewChanged();
 
   AXUpdateNotifier::Get()->NotifyChildAdded(added_view, this);
   FireLiveRegionChangedIfNeeded(LiveRegionEventTrigger::kAdditions);
@@ -179,6 +180,7 @@ std::unique_ptr<AXVirtualView> ViewAccessibility::RemoveVirtualChildView(
   FireLiveRegionChangedIfNeeded(LiveRegionEventTrigger::kRemovals);
 
   child->set_parent_view(nullptr);
+  child->OnOwnerViewChanged();
 
   // If the removed child (or any of its descendants) was the active descendant,
   // clear it.
@@ -1716,6 +1718,32 @@ void ViewAccessibility::OnViewHasNewAncestor(const View* new_ancestor) {
   for (auto& child : virtual_children()) {
     child->OnViewHasNewAncestor(ancestor_focusable);
   }
+}
+
+void ViewAccessibility::OnViewParentChanged() {
+  CHECK(view_);
+  if (view_->parent()) {
+    OnViewHasNewAncestor(view_->parent());
+  }
+
+  UpdateOffsetContainerId();
+}
+
+ui::AXNodeID ViewAccessibility::GetOffsetContainerId() const {
+  CHECK(view_);
+  const ViewAccessibility* parent = GetViewAccessibilityParent();
+  return parent ? static_cast<ui::AXNodeID>(parent->GetUniqueId())
+                : ui::kInvalidAXNodeID;
+}
+
+void ViewAccessibility::UpdateOffsetContainerId() {
+  const ui::AXNodeID offset_container_id = GetOffsetContainerId();
+  if (data_.relative_bounds.offset_container_id == offset_container_id) {
+    return;
+  }
+
+  data_.relative_bounds.offset_container_id = offset_container_id;
+  NotifyDataChanged();
 }
 
 void ViewAccessibility::SetRootViewURL(const std::string& url) {

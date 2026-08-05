@@ -14,24 +14,46 @@ source_set("language_tag") {
     "language_tag.h",
     "language_tag_matcher.cc",
     "language_tag_matcher.h",
+    "locale_holder.cc",
+    "locale_holder.h",
     "tag_converters.cc",
     "tag_converters.h",
   ]
 
   defines = [ "BASE_I18N_IMPLEMENTATION" ]
 
+  include_dirs = [
+    "//third_party/rust/chromium_crates_io/vendor/icu_capi-v2/bindings/cpp",
+  ]
+
   public_deps = [
     ":base_i18n_export",
     "//base/i18n/internal",
+    "//third_party/icu",
   ]
   deps = [
     "//base",
     "//base/i18n/internal:canonical_language_tags",
-    "//base/i18n/internal:i18n_icu_bridge_ffi",
+    "//third_party/rust/icu_capi/v2:lib",
   ]
   visibility = [
     ":*",
     "//base:*",
+  ]
+}
+
+source_set("language_tag_value_converters") {
+  sources = [
+    "language_tag_value_converters.cc",
+    "language_tag_value_converters.h",
+  ]
+
+  defines = [ "BASE_I18N_IMPLEMENTATION" ]
+
+  public_deps = [
+    ":base_i18n_export",
+    ":language_tag",
+    "//base",
   ]
 }
 
@@ -64,14 +86,26 @@ source_set("time_formatting_types") {
   sources = [ "time_formatting_types.h" ]
 }
 
+source_set("test_support") {
+  testonly = true
+  sources = [ "test/test_locale_holder.h" ]
+  public_deps = [
+    "//base",
+    "//base:i18n",
+  ]
+}
+
 source_set("unittests") {
   testonly = true
   sources = [
     "bcp47_extensions_unittest.cc",
     "language_tag_matcher_unittest.cc",
     "language_tag_unittest.cc",
+    "locale_holder_unittest.cc",
+    "test/test_locale_holder_unittest.cc",
   ]
   deps = [
+    ":test_support",
     "//base",
     "//base:i18n",
     "//base/i18n/internal:unittests",

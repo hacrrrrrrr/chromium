@@ -95,19 +95,30 @@ FieldType GetStorableTypeCollapsingGroups(FieldType type) {
 // example, if the profile is going to fill ADDRESS_HOME_ZIP, it should
 // prioritize showing that over ADDRESS_HOME_STATE in the suggestion sublabel.
 int SpecificityForType(FieldType type) {
-  static constexpr auto kOrder =
+  static constexpr auto kOrderOld =
       std::to_array({ADDRESS_HOME_LINE1, ADDRESS_HOME_LINE2, EMAIL_ADDRESS,
                      PHONE_HOME_WHOLE_NUMBER, NAME_FULL, ADDRESS_HOME_ZIP,
                      ADDRESS_HOME_SORTING_CODE, COMPANY_NAME, ADDRESS_HOME_CITY,
                      ADDRESS_HOME_STATE, ADDRESS_HOME_COUNTRY});
+  // Prioritizes ADDRESS_HOME_STREET_ADDRESS over postal code in inferred
+  // labels. See crbug.com/540151895.
+  static constexpr auto kOrderNew = std::to_array(
+      {ADDRESS_HOME_LINE1, ADDRESS_HOME_LINE2, ADDRESS_HOME_STREET_ADDRESS,
+       EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER, NAME_FULL, ADDRESS_HOME_ZIP,
+       ADDRESS_HOME_SORTING_CODE, COMPANY_NAME, ADDRESS_HOME_CITY,
+       ADDRESS_HOME_STATE, ADDRESS_HOME_COUNTRY});
   CHECK_NE(type, EMPTY_TYPE);
-  if (auto it = std::ranges::find(kOrder, type); it != kOrder.end()) {
-    return it - kOrder.begin();
+  base::span<const FieldType> order =
+      base::FeatureList::IsEnabled(
+          features::kAutofillFixLabelGenerationForStreetAddress)
+          ? base::span<const FieldType>(kOrderNew)
+          : base::span<const FieldType>(kOrderOld);
+  if (auto it = std::ranges::find(order, type); it != order.end()) {
+    return it - order.begin();
   }
   // The priority of other types is arbitrary, but deterministic.
   return 100 + type;
 }
-
 // Fills `distinguishing_fields` with a list of fields to use when creating
 // labels that can help to distinguish between two profiles. Draws fields from
 // `suggested_fields` if it is non-NULL; otherwise returns a default list.
@@ -122,7 +133,7 @@ void GetFieldsForDistinguishingProfiles(
   std::vector<FieldType> default_fields;
   if (!suggested_fields) {
     default_fields.append_range(
-        AutofillProfile::kDefaultDistinguishingFieldsForLabels);
+        AutofillProfile::DefaultDistinguishingFieldsForLabels());
     if (excluded_fields.empty()) {
       distinguishing_fields->swap(default_fields);
       return;
@@ -443,34 +454,6 @@ bool AutofillProfile::IsEmpty(std::string_view app_locale) const {
   return types.empty();
 }
 
-bool AutofillProfile::IsPresentButInvalid(FieldType type) const {
-  std::string country = base::UTF16ToUTF8(GetRawInfo(ADDRESS_HOME_COUNTRY));
-  std::u16string data = GetRawInfo(type);
-  if (data.empty()) {
-    return false;
-  }
-
-  switch (type) {
-    case ADDRESS_HOME_STATE:
-      return country == "US" && !IsValidState(data);
-
-    case ADDRESS_HOME_ZIP:
-      return !IsValidZip(data, AddressCountryCode(country),
-                         base::FeatureList::IsEnabled(
-                             features::kAutofillExtendZipCodeValidation));
-
-    case PHONE_HOME_WHOLE_NUMBER:
-      return !i18n::PhoneObject(data, country, /*infer_country_code=*/false)
-                  .IsValidNumber();
-
-    case EMAIL_ADDRESS:
-      return !IsValidEmailAddress(data);
-
-    default:
-      NOTREACHED();
-  }
-}
-
 int AutofillProfile::Compare(const AutofillProfile& profile) const {
   static constexpr auto kTypes =
       std::to_array<FieldType>({NAME_FULL,
@@ -640,7 +623,14 @@ bool AutofillProfile::IsSubsetOfForFieldSet(
               app_locale)) {
         return false;
       }
-    } else if (!AutofillProfileComparator::Compare(value, other_value)) {
+    } else if (type == EMAIL_ADDRESS) {
+      if (!AutofillProfileComparator::Compare(
+              value, other_value, normalization::WhitespaceSpec::kRetain)) {
+        return false;
+      }
+    } else if (!AutofillProfileComparator::Compare(
+                   value, other_value,
+                   normalization::WhitespaceSpec::kDiscard)) {
       return false;
     }
   }
@@ -843,6 +833,31 @@ void AutofillProfile::OnProfileCountryUpdate(
 }
 
 // static
+base::span<const FieldType>
+AutofillProfile::DefaultDistinguishingFieldsForLabels() {
+  static constexpr auto kDefaultDistinguishingFieldsForLabelsOld =
+      std::to_array<FieldType>(
+          {NAME_FULL, ADDRESS_HOME_LINE1, ADDRESS_HOME_LINE2,
+           ADDRESS_HOME_DEPENDENT_LOCALITY, ADDRESS_HOME_CITY,
+           ADDRESS_HOME_STATE, ADDRESS_HOME_ZIP, ADDRESS_HOME_SORTING_CODE,
+           ADDRESS_HOME_COUNTRY, EMAIL_ADDRESS, PHONE_HOME_WHOLE_NUMBER,
+           COMPANY_NAME});
+  static constexpr auto kDefaultDistinguishingFieldsForLabelsNew =
+      std::to_array<FieldType>({NAME_FULL, ADDRESS_HOME_STREET_ADDRESS,
+                                ADDRESS_HOME_DEPENDENT_LOCALITY,
+                                ADDRESS_HOME_CITY, ADDRESS_HOME_STATE,
+                                ADDRESS_HOME_ZIP, ADDRESS_HOME_SORTING_CODE,
+                                ADDRESS_HOME_COUNTRY, EMAIL_ADDRESS,
+                                PHONE_HOME_WHOLE_NUMBER, COMPANY_NAME});
+  return base::FeatureList::IsEnabled(
+             features::kAutofillFixLabelGenerationForStreetAddress)
+             ? base::span<const FieldType>(
+                   kDefaultDistinguishingFieldsForLabelsNew)
+             : base::span<const FieldType>(
+                   kDefaultDistinguishingFieldsForLabelsOld);
+}
+
+// static
 std::vector<std::u16string> AutofillProfile::CreateDifferentiatingLabels(
     base::span<const AutofillProfile* const> profiles,
     std::string_view app_locale) {
@@ -890,9 +905,8 @@ std::vector<std::u16string> AutofillProfile::CreateInferredLabels(
     } else {
       // We have more than one profile with the same label, so add
       // differentiating fields.
-      CreateInferredLabelsHelper(
-          profiles, it.second, fields_to_use, minimal_fields_shown, app_locale,
-          labels);
+      CreateInferredLabelsHelper(profiles, it.second, fields_to_use,
+                                 minimal_fields_shown, app_locale, labels);
     }
   }
   return labels;

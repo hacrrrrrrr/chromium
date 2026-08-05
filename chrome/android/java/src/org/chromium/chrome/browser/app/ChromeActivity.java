@@ -81,6 +81,7 @@ import org.chromium.chrome.browser.ChromeWindow;
 import org.chromium.chrome.browser.DeferredStartupHandler;
 import org.chromium.chrome.browser.GracefulShutdownService;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.KeyboardShortcuts;
 import org.chromium.chrome.browser.PlayServicesVersionInfo;
 import org.chromium.chrome.browser.TabStateThemeResourceProvider;
 import org.chromium.chrome.browser.WarmupManager;
@@ -109,6 +110,7 @@ import org.chromium.chrome.browser.bookmarks.TabBookmarker;
 import org.chromium.chrome.browser.bookmarks.bar.BookmarkBarUtils;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
+import org.chromium.chrome.browser.compositor.CompositorViewHolderSupplier;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
 import org.chromium.chrome.browser.compositor.layouts.SceneChangeObserver;
@@ -181,6 +183,7 @@ import org.chromium.chrome.browser.provider.PageContentProviderMetrics;
 import org.chromium.chrome.browser.readaloud.ReadAloudController;
 import org.chromium.chrome.browser.screenshot_protection.ScreenshotProtectionController;
 import org.chromium.chrome.browser.selection.SelectionPopupBackPressHandler;
+import org.chromium.chrome.browser.settings.SettingsInTab;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.share.ShareDelegateImpl;
@@ -275,6 +278,7 @@ import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.base.WindowAndroid.KeyboardShortcutsDelegate;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayAndroid.DisplayAndroidObserver;
 import org.chromium.ui.display.DisplayUtil;
@@ -301,6 +305,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                 AppMenuBlocker,
                 MenuOrKeyboardActionController,
                 CompositorViewHolder.Initializer,
+                KeyboardShortcutsDelegate,
                 TabModelInitializer,
                 ThemeResourceWrapperProvider,
                 UmaActivityObserver.UmaSessionAwareActivity {
@@ -518,13 +523,16 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     @Override
     protected ActivityWindowAndroid createWindowAndroid() {
-        return new ChromeWindow(
-                /* activity= */ this,
-                mCompositorViewHolderSupplier,
-                getModalDialogManagerSupplier(),
-                mManualFillingComponentSupplier,
-                getIntentRequestTracker(),
-                getInsetObserver());
+        ActivityWindowAndroid window =
+                new ChromeWindow(
+                        /* activity= */ this,
+                        mCompositorViewHolderSupplier,
+                        getModalDialogManagerSupplier(),
+                        mManualFillingComponentSupplier,
+                        getIntentRequestTracker(),
+                        getInsetObserver());
+        window.setKeyboardShortcutsDelegate(this);
+        return window;
     }
 
     @Override
@@ -653,6 +661,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         ShareDelegateSupplier.attach(host, mShareDelegateSupplier);
         TabModelSelectorSupplier.attach(host, mTabModelSelectorSupplier);
         EphemeralTabCoordinatorSupplier.attach(host, mEphemeralTabCoordinatorSupplier);
+        CompositorViewHolderSupplier.attach(host, mCompositorViewHolderSupplier);
         ManualFillingComponentSupplier.attach(host, mManualFillingComponentSupplier);
         BrowserControlsManagerSupplier.attach(host, mBrowserControlsManagerSupplier);
         // BrowserControlsManager is ready immediately.
@@ -1458,7 +1467,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if (getProfileProviderSupplier().get() == null
                 || !GlicEnabling.isProfileEligible(
                         getProfileProviderSupplier().get().getOriginalProfile())
-                || DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)) {
+                || DeviceFormFactor.isNonMultiDisplayContextOnTablet(this)
+                || ChromeFeatureList.sGlicBackgroundActuation.isEnabled()) {
             return null;
         }
 
@@ -1627,6 +1637,9 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void onStopWithNative() {
         super.onStopWithNative();
+        if (mFullscreenVideoPictureInPictureController != null) {
+            mFullscreenVideoPictureInPictureController.onStop();
+        }
         endUmaSession();
     }
 
@@ -1982,6 +1995,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             }
             compositorViewHolder.shutDown();
         }
+        CompositorViewHolderSupplier.destroy(mCompositorViewHolderSupplier);
         mCompositorViewHolderSupplier.destroy();
 
         // crbug.com/352365937: Let the pip controller clear up to prevent a leak.
@@ -2114,12 +2128,86 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
     }
 
+    /**
+     * Helper method to explicitly process hardware accelerators (e.g. Alt+G) bypassing the standard
+     * dispatchKeyEvent flow. This is necessary when focus is in an input field and the IME has
+     * bypassed normal View dispatch, allowing the accelerator manager to still intercept shortcuts.
+     *
+     * @param event The KeyEvent to process.
+     * @return true if the event was handled and consumed as an accelerator.
+     */
+    protected boolean processAccelerator(KeyEvent event) {
+        return mAcceleratorManager != null && mAcceleratorManager.processKeyEvent(event);
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (mAcceleratorManager != null && mAcceleratorManager.processKeyEvent(event)) {
             return true;
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean preHandleKeyboardEvent(KeyEvent event) {
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.UNIVERSAL_KEYBOARD_HANDLING)) {
+            return false;
+        }
+
+        if (!didFinishNativeInitialization()) {
+            return false;
+        }
+
+        // First evaluate hardware accelerators (e.g. Alt+G, user-customizable shortcuts,
+        // or extensions shortcuts) that may have bypassed dispatchKeyEvent because the soft
+        // keyboard (IME) is active and intercepting hardware keys.
+        if (processAccelerator(event)) {
+            return true;
+        }
+
+        // If the soft keyboard (IME) is active, Android may bypass Activity.dispatchKeyEvent()
+        // and send hardware key events directly to the InputConnection. In that case, those
+        // events will eventually enter Chrome's PreHandleKeyboardEvent pipeline. We must
+        // explicitly call this method here in order to allow the browser to handle the
+        // shortcut before the page in some cases (e.g. F6 or F7).
+        Boolean dispatchResult =
+                KeyboardShortcuts.dispatchKeyEvent(
+                        event,
+                        didFinishNativeInitialization(),
+                        getFullscreenManager(),
+                        /* menuOrKeyboardActionController= */ this,
+                        /* context= */ this);
+        if (Boolean.TRUE.equals(dispatchResult)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    @Override
+    public boolean handleKeyboardEvent(KeyEvent event) {
+        if (!ChromeFeatureList.isEnabled(ChromeFeatureList.UNIVERSAL_KEYBOARD_HANDLING)) {
+            return false;
+        }
+
+        // As a fallback, give dispatch-level shortcuts another chance.
+        Boolean dispatchResult =
+                KeyboardShortcuts.dispatchKeyEvent(
+                        event,
+                        didFinishNativeInitialization(),
+                        getFullscreenManager(),
+                        /* menuOrKeyboardActionController= */ this,
+                        /* context= */ this);
+        if (Boolean.TRUE.equals(dispatchResult)) {
+            return true;
+        }
+
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            return onKeyDown(event.getKeyCode(), event);
+        } else if (event.getAction() == KeyEvent.ACTION_UP) {
+            return onKeyUp(event.getKeyCode(), event);
+        }
+        return false;
     }
 
     /** Returns snackbar manager for all snackbar related operations. */
@@ -2221,7 +2309,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             mScreenshotProtectionControllerSupplier.set(
                     new ScreenshotProtectionController(
                             this,
-                            getLifecycleDispatcher(),
+                            mActivityTabProvider.asObservable(),
                             getTabModelSelector(),
                             isCustomTab(),
                             SupplierUtils.upcast(
@@ -2661,6 +2749,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                 }
             }
 
+            if (newConfig.fontScale != mConfig.fontScale) {
+                doRecreateActivity();
+                return;
+            }
+
             // Maintain tab state by re-parenting tabs when a Chrome window is moved between
             // displays.
             if (newConfig.touchscreen != mConfig.touchscreen
@@ -2858,7 +2951,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         int type = Profile.getBrowserProfileTypeFromProfile(getCurrentTabModel().getProfile());
 
         if (id == R.id.preferences_id) {
-            if (ChromeFeatureList.isEnabled(ChromeFeatureList.SETTINGS_IN_TAB)) {
+            if (SettingsInTab.isEnabled()) {
                 LoadUrlParams params =
                         new LoadUrlParams(UrlConstants.SETTINGS_URL, PageTransition.LINK);
                 // Settings are associated with the on-the-record profile, never incognito.
@@ -2919,6 +3012,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if (id == R.id.about_chrome_menu_id) {
             SettingsNavigationFactory.createSettingsNavigation()
                     .startSettings(this, AboutChromeSettings.class);
+            RecordUserAction.record("MobileMenuAboutChrome");
             return true;
         }
 
@@ -2995,6 +3089,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             BookmarkOpener opener =
                     new BookmarkOpenerImpl(mBookmarkModelSupplier, this, getComponentName());
             opener.openBookmarkInCurrentTab(bookmarkId, currentTab.isIncognito());
+            RecordUserAction.record("MobileMenuOpenBookmark");
             return true;
         }
 
@@ -3005,6 +3100,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                     getTabModelSelector(),
                     menuItemData.getInt(AppMenuPropertiesDelegateImpl.TAB_ID_BUNDLE_KEY),
                     TabSelectionType.FROM_USER);
+            RecordUserAction.record("MobileMenuSelectTabFromGroup");
             return true;
         }
 
@@ -3030,15 +3126,21 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
 
         if (id == R.id.offline_page_id) {
-            DownloadUtils.downloadOfflinePage(this, currentTab, /* fromAppMenu= */ true);
             RecordUserAction.record("MobileMenuDownloadPage");
-            return true;
+            if (DownloadUtils.isAllowedToDownloadPage(currentTab)) {
+                DownloadUtils.downloadOfflinePage(this, currentTab, /* fromAppMenu= */ true);
+                return true;
+            }
+            return false;
         }
 
         if (id == R.id.download_page_id) {
-            DownloadUtils.downloadOfflinePage(this, currentTab, /* fromAppMenu= */ true);
             RecordUserAction.record("MobileMenuItemDownloadPage");
-            return true;
+            if (DownloadUtils.isAllowedToDownloadPage(currentTab)) {
+                DownloadUtils.downloadOfflinePage(this, currentTab, /* fromAppMenu= */ true);
+                return true;
+            }
+            return false;
         }
 
         if (id == R.id.reload_menu_id) {
@@ -3189,18 +3291,14 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     /**
      * Shows Help and Feedback and records the user action as well.
+     *
      * @param url The URL of the tab the user is currently on.
      * @param recordAction The user action to record.
      * @param profile The current {@link Profile}.
      */
     public void startHelpAndFeedback(String url, String recordAction, Profile profile) {
-        // Since reading back the compositor is asynchronous, we need to do the readback
-        // before starting the GoogleHelp.
-        String helpContextId =
-                HelpAndFeedbackLauncherImpl.getHelpContextIdFromUrl(
-                        this, url, getCurrentTabModel().isIncognito());
-        HelpAndFeedbackLauncherImpl.getForProfile(profile).show(this, helpContextId, url);
-        RecordUserAction.record(recordAction);
+        HelpAndFeedbackLauncherImpl.getForProfile(profile)
+                .showHelpAndFeedbackForUrl(this, url, recordAction);
     }
 
     protected void startUmaSession() {

@@ -82,8 +82,7 @@ bool IsTriggeredByOmnibox(const actions::ActionInvocationContext& context) {
   std::underlying_type_t<page_actions::PageActionTrigger> page_action_trigger =
       context.GetProperty(page_actions::kPageActionTriggerKey);
   return (page_action_trigger != page_actions::kInvalidPageActionTrigger) &&
-         features::IsReadAnythingOmniboxChipEnabled() &&
-         base::FeatureList::IsEnabled(features::kPageActionsMigration);
+         features::IsReadAnythingOmniboxChipEnabled();
 }
 
 void LogDecision(ReadAnythingOmniboxChipDecision decision) {
@@ -237,12 +236,7 @@ void ReadAnythingEntryPointController::InvokePageAction(
       context.GetProperty(kSidePanelOpenTriggerKey);
 
   ReadAnythingOpenTrigger open_trigger;
-  if (side_panel_trigger ==
-          static_cast<int>(SidePanelOpenTrigger::kPinnedEntryToolbarButton) ||
-      side_panel_trigger ==
-          static_cast<int>(SidePanelOpenTrigger::kOverflowMenu)) {
-    open_trigger = ReadAnythingOpenTrigger::kPinnedSidePanelEntryToolbarButton;
-  } else if (IsTriggeredByOmnibox(context)) {
+  if (IsTriggeredByOmnibox(context)) {
     open_trigger = ReadAnythingOpenTrigger::kOmniboxChip;
     // Reset the ignored count for the omnibox entrypoint because it was used.
     bwi->GetProfile()->GetPrefs()->SetInteger(
@@ -252,7 +246,11 @@ void ReadAnythingEntryPointController::InvokePageAction(
         feature_engagement::kIPHReadingModePageActionLabelFeature,
         FeaturePromoFeatureUsedAction::kClosePromoIfPresent);
   } else {
-    return;
+    open_trigger = SidePanelToReadAnythingOpenTrigger(
+        static_cast<SidePanelOpenTrigger>(side_panel_trigger));
+    if (open_trigger == ReadAnythingOpenTrigger::kUnknown) {
+      return;
+    }
   }
 
   ToggleUI(bwi, open_trigger);
@@ -340,8 +338,7 @@ void ReadAnythingEntryPointController::UpdatePageActionVisibility(
     tabs::TabInterface* tab,
     base::OnceCallback<void(user_education::FeaturePromoResult promo_result)>
         show_promo_callback) {
-  if (!base::FeatureList::IsEnabled(features::kPageActionsMigration) ||
-      !features::IsReadAnythingOmniboxChipEnabled() || !tab) {
+  if (!features::IsReadAnythingOmniboxChipEnabled() || !tab) {
     return;
   }
 
@@ -402,7 +399,9 @@ bool ReadAnythingEntryPointController::CheckIfShouldSuggestReadingModeNaive(
   // Disable the omnibox on app windows, as these windows don't usually have
   // omnibox support.
   Browser* browser = bwi->GetBrowserForMigrationOnly();
-  if (browser && (browser->is_type_app() || browser->is_type_app_popup())) {
+  if (browser &&
+      (browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+       browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP)) {
     LogDecision(ReadAnythingOmniboxChipDecision::kHideAppWindow);
     return false;
   }
@@ -480,8 +479,7 @@ void ReadAnythingEntryPointController::CheckIfShouldSuggestReadingMode(
 // static
 void ReadAnythingEntryPointController::OnPageActionIgnored(
     BrowserWindowInterface* bwi) {
-  if (!base::FeatureList::IsEnabled(features::kPageActionsMigration) ||
-      !features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
+  if (!features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
     return;
   }
 

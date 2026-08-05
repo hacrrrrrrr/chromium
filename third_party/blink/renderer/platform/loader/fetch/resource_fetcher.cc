@@ -533,10 +533,13 @@ network::mojom::RequestDestination ResourceFetcher::DetermineRequestDestination(
       return network::mojom::RequestDestination::kVideo;
     case ResourceType::kManifest:
       return network::mojom::RequestDestination::kManifest;
+    case ResourceType::kDictionary:
+      return RuntimeEnabledFeatures::CDTNewDestinationEnabled()
+                 ? network::mojom::RequestDestination::kCompressionDictionary
+                 : network::mojom::RequestDestination::kEmpty;
     case ResourceType::kRaw:
     case ResourceType::kLinkPrefetch:
     case ResourceType::kMock:
-    case ResourceType::kDictionary:
       return network::mojom::RequestDestination::kEmpty;
   }
   NOTREACHED();
@@ -1694,16 +1697,27 @@ void ResourceFetcher::InitializeRevalidation(
               revalidating_request.GetCacheMode());
     if (revalidating_request.GetCacheMode() ==
         mojom::blink::FetchCacheMode::kValidateCache) {
-      revalidating_request.SetHttpHeaderField(http_names::kCacheControl,
-                                              AtomicString("max-age=0"));
+      if (!base::FeatureList::IsEnabled(network::features::kSafeRevalidation)) {
+        revalidating_request.SetHttpHeaderField(http_names::kCacheControl,
+                                                AtomicString("max-age=0"));
+      }
     }
   }
-  if (!last_modified.empty()) {
-    revalidating_request.SetHttpHeaderField(http_names::kIfModifiedSince,
-                                            last_modified);
-  }
-  if (!e_tag.empty()) {
-    revalidating_request.SetHttpHeaderField(http_names::kIfNoneMatch, e_tag);
+  if (base::FeatureList::IsEnabled(network::features::kSafeRevalidation)) {
+    if (!last_modified.empty()) {
+      revalidating_request.SetRevalidationLastModified(last_modified);
+    }
+    if (!e_tag.empty()) {
+      revalidating_request.SetRevalidationEtag(e_tag);
+    }
+  } else {
+    if (!last_modified.empty()) {
+      revalidating_request.SetHttpHeaderField(http_names::kIfModifiedSince,
+                                              last_modified);
+    }
+    if (!e_tag.empty()) {
+      revalidating_request.SetHttpHeaderField(http_names::kIfNoneMatch, e_tag);
+    }
   }
 
   resource->SetRevalidatingRequest(revalidating_request);
@@ -2456,7 +2470,7 @@ void ResourceFetcher::RecordPreconnect(const KURL& url,
   // Preconnects with distinct crossorigin values to the same origin are
   // reported separately.
   const String key =
-      origin + "|" + String::Number(static_cast<int>(crossorigin));
+      StrCat({origin, "|", String::Number(static_cast<int>(crossorigin))});
   auto it = preconnect_records_.find(key);
   if (it == preconnect_records_.end()) {
     PreconnectInfo info;

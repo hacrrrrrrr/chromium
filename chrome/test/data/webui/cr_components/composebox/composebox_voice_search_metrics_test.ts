@@ -5,13 +5,13 @@
 import 'chrome://contextual-tasks/strings.m.js';
 import 'chrome://resources/cr_components/composebox/composebox_voice_search.js';
 
-import {PageCallbackRouter, PageHandlerRemote} from 'chrome://resources/cr_components/composebox/composebox.mojom-webui.js';
+import {PageHandlerRemote} from 'chrome://resources/cr_components/composebox/composebox.mojom-webui.js';
 import {ComposeboxProxyImpl} from 'chrome://resources/cr_components/composebox/composebox_proxy.js';
 import type {ComposeboxVoiceSearchElement} from 'chrome://resources/cr_components/composebox/composebox_voice_search.js';
 import {VoiceSearchAction, VoiceSearchError, VoiceSearchMetricType, VoiceSearchQuerySource} from 'chrome://resources/cr_components/composebox/composebox_voice_search.js';
 import {WindowProxy} from 'chrome://resources/cr_components/composebox/window_proxy.js';
 import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
-import {assertEquals} from 'chrome://webui-test/chai_assert.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import type {MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
 import {fakeMetricsPrivate} from 'chrome://webui-test/metrics_test_support.js';
 import {TestMock} from 'chrome://webui-test/test_mock.js';
@@ -41,7 +41,7 @@ suite('ComposeboxVoiceSearchMetrics', () => {
         Promise.resolve({metricSource: 'NTP_REALBOX'}));
 
     ComposeboxProxyImpl.setInstance(new ComposeboxProxyImpl(
-        handler as unknown as PageHandlerRemote, new PageCallbackRouter(),
+        handler as unknown as PageHandlerRemote,
         searchboxHandler as unknown as SearchboxPageHandlerRemote,
         new SearchboxPageCallbackRouter()));
 
@@ -414,6 +414,60 @@ suite('ComposeboxVoiceSearchMetrics', () => {
     mockVoiceSearch.voiceRecognition_.abort();
     await microtasksFinished();
   });
+
+  test(
+      'Does not record any CANCELED_BY_USER metrics on close click when error scrim shows up',
+      async () => {
+        mockVoiceSearch.metricSource = 'NTP_REALBOX';
+        voiceSearchElement.submitStopButtonsEnabled = true;
+        mockVoiceSearch.errorMessage_ = 'Some error';
+
+        // Wait for Lit to render the close button
+        await microtasksFinished();
+
+        let cancelEventFired = false;
+        let canceledByUser = true;
+        voiceSearchElement.addEventListener(
+            'voice-search-cancel', (e: Event) => {
+              cancelEventFired = true;
+              canceledByUser = (e as CustomEvent<boolean>).detail;
+            });
+
+        // Get the close button and click it
+        const closeButton =
+            voiceSearchElement.shadowRoot.querySelector<HTMLElement>(
+                '#closeButton');
+        assertTrue(!!closeButton, 'Close button should be rendered');
+        closeButton.click();
+
+        await microtasksFinished();
+
+        assertTrue(cancelEventFired, 'voice-search-cancel should be fired');
+        assertFalse(canceledByUser, 'canceled-by-user should be false');
+
+        // New unified metrics SHOULD NOT be recorded:
+        assertEquals(
+            0,
+            metrics.count(
+                'VoiceSearch.Action.NTP_REALBOX',
+                VoiceSearchAction.CANCELED_BY_USER));
+        assertEquals(
+            0,
+            metrics.count(
+                'VoiceSearch.Action', VoiceSearchAction.CANCELED_BY_USER));
+
+        // Legacy metric SHOULD NOT be recorded:
+        const LEGACY_ACTION_CLOSE_OVERLAY = 2;
+        assertEquals(
+            0,
+            metrics.count(
+                'NewTabPage.VoiceActions', LEGACY_ACTION_CLOSE_OVERLAY));
+
+        // Clean up internal state to prevent leaking into the next test.
+        mockVoiceSearch.state_ = -1;
+        mockVoiceSearch.voiceRecognition_.abort();
+        await microtasksFinished();
+      });
 
   test('Records ABORTED error but skips action metric recording', async () => {
     // Simulate an aborted error from the underlying speech recognition API.

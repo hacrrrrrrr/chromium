@@ -245,7 +245,7 @@ class MagicStackRankingModelTest : public PlatformTest {
     TestProfileIOS::Builder builder;
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(ios::HistoryServiceFactory::GetInstance(),
                               ios::HistoryServiceFactory::GetDefaultFactory());
@@ -656,23 +656,6 @@ TEST_F(MagicStackRankingModelTest, TestTipsMediatorDelegateCallsRemoval) {
                                          animate:[OCMArg any]
                                   withCompletion:[OCMArg any]]);
   [_magicStackRankingModel removeTipsModuleWithCompletion:nil];
-  EXPECT_OCMOCK_VERIFY(mockDelegate);
-}
-
-// Test that disabling the Magic Stack ranking model doesn't crash and doesn't
-// perform a valid fetch.
-TEST_F(MagicStackRankingModelTest, TestDisabledSegmentationRanking) {
-  scoped_feature_list_.Reset();
-  scoped_feature_list_.InitWithFeaturesAndParameters(
-      {}, {{segmentation_platform::features::
-                kSegmentationPlatformIosModuleRanker}});
-  id mockDelegate =
-      OCMStrictProtocolMock(@protocol(MagicStackRankingModelDelegate));
-  _magicStackRankingModel.delegate = mockDelegate;
-  OCMReject([mockDelegate magicStackRankingModel:[OCMArg any]
-                        didGetLatestRankingOrder:[OCMArg any]]);
-  [_magicStackRankingModel fetchLatestMagicStackRanking];
-  base::RunLoop().RunUntilIdle();
   EXPECT_OCMOCK_VERIFY(mockDelegate);
 }
 

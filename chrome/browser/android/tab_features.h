@@ -39,6 +39,7 @@ class DataProtectionNavigationController;
 }  // namespace enterprise_data_protection
 
 namespace glic {
+class ContextualCueingHelper;
 class GlicInstanceHelper;
 class GlicSidePanelCoordinator;
 }  // namespace glic
@@ -50,6 +51,8 @@ class SyncSessionsRouterTabHelper;
 namespace lens {
 class TabContextualizationController;
 }  // namespace lens
+
+class HttpAuthCacheStatus;
 
 namespace tabs {
 
@@ -86,6 +89,7 @@ class TabFeatures {
 
   std::unique_ptr<sync_sessions::SyncSessionsRouterTabHelper>
       sync_sessions_router_;
+  std::unique_ptr<HttpAuthCacheStatus> http_auth_cache_status_;
   std::unique_ptr<QwacWebContentsObserver> qwac_web_contents_observer_;
   std::unique_ptr<NewTabPagePreloadPipelineManager>
       new_tab_page_preload_pipeline_manager_;
@@ -98,6 +102,7 @@ class TabFeatures {
       enterprise_data_protection::DataProtectionNavigationController>
       data_protection_tab_controller_;
 
+  std::unique_ptr<glic::ContextualCueingHelper> contextual_cueing_helper_;
   std::unique_ptr<glic::GlicInstanceHelper> glic_instance_helper_;
   std::unique_ptr<glic::GlicSidePanelCoordinator> glic_side_panel_coordinator_;
   std::unique_ptr<actor::ui::ActorUiTabControllerInterface>

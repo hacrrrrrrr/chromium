@@ -51,6 +51,15 @@ class TestOAuthConsumerRegistry : public signin::OAuthConsumerRegistry {
   signin::OAuthConsumer GetOAuthConsumerForSkillsService() const override {
     return signin::OAuthConsumer("skills_service", {"test_scope"});
   }
+
+  signin::OAuthConsumer GetOAuthConsumerForDrivePickerHost() const override {
+    return signin::OAuthConsumer(
+        signin::oauth_consumer_name::kDrivePickerHostName, {});
+  }
+
+  signin::OAuthConsumer GetOAuthConsumerForBrowserActuator() const override {
+    NOTREACHED();
+  }
 };
 
 }  // namespace

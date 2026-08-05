@@ -40,8 +40,8 @@ import org.chromium.chrome.browser.ntp_customization.theme.theme_collections.Ntp
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.BackgroundImageInfo;
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.UploadImagePreviewCoordinator;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase;
-import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase.PlatformType;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataUploadImage;
+import org.chromium.chrome.browser.ntp_customization.theme_sync.data.PlatformType;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -163,7 +163,7 @@ public class NtpThemeCoordinator {
                     NtpCustomizationUtils.getDefaultBackgroundImageInfo(mContext, bitmap);
             NtpBackgroundDataUploadImage uploadImageData =
                     new NtpBackgroundDataUploadImage(
-                            PlatformType.ANDROID_LOCAL,
+                            PlatformType.ANDROID,
                             info,
                             bitmap,
                             /* primaryColor= */ null,

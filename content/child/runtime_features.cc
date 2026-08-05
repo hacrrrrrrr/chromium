@@ -133,10 +133,6 @@ void SetRuntimeFeaturesFromChromiumFeatures() {
       blinkFeatureToBaseFeatureMapping[] = {
           {wf::EnableAccessibilityUseAXPositionForDocumentMarkers,
            raw_ref(features::kUseAXPositionForDocumentMarkers)},
-#if BUILDFLAG(IS_ANDROID)
-          {wf::EnableAudioOutputDevices,
-           raw_ref(features::kAAudioPerStreamDeviceSelection)},
-#endif
           {wf::EnableBackgroundFetch, raw_ref(features::kBackgroundFetch)},
           {wf::EnableBoundaryEventDispatchTracksNodeRemoval,
            raw_ref(blink::features::kBoundaryEventDispatchTracksNodeRemoval)},
@@ -315,13 +311,7 @@ void SetRuntimeFeaturesFromChromiumFeatures() {
            kSetOnlyIfOverridden},
           {"FencedFramesLocalUnpartitionedDataAccess",
            raw_ref(blink::features::kFencedFramesLocalUnpartitionedDataAccess)},
-          {"Fledge", raw_ref(blink::features::kFledge)},
-          {"Fledge", raw_ref(features::kPrivacySandboxAdsAPIsOverride),
-           kSetOnlyIfOverridden},
-          {"Fledge", raw_ref(features::kPrivacySandboxAdsAPIsM1Override),
-           kSetOnlyIfOverridden},
-          {"FledgeBiddingAndAuctionServerAPI",
-           raw_ref(blink::features::kFledgeBiddingAndAuctionServer), kDefault},
+
 #if BUILDFLAG(IS_WIN)
           {"FontDataServiceForCSSLocalFonts",
            raw_ref(features::kFontDataServiceForCSSLocalFonts)},
@@ -341,18 +331,7 @@ void SetRuntimeFeaturesFromChromiumFeatures() {
           {"SerialPortConnected", raw_ref(features::kSerialPortConnected)},
           {"WebSerialWorldIsolatedCache",
            raw_ref(features::kWebSerialWorldIsolatedCache)},
-          {"SplitViewLinkOpen", raw_ref(features::kSplitViewLinkOpen)},
-          {"TopicsAPI", raw_ref(features::kPrivacySandboxAdsAPIsOverride),
-           kSetOnlyIfOverridden},
-          {"TopicsAPI", raw_ref(features::kPrivacySandboxAdsAPIsM1Override)},
-          {"TopicsDocumentAPI",
-           raw_ref(features::kPrivacySandboxAdsAPIsOverride),
-           kSetOnlyIfOverridden},
-          {"TopicsDocumentAPI",
-           raw_ref(features::kPrivacySandboxAdsAPIsM1Override)},
-          {"TopicsImgAPI", raw_ref(features::kPrivacySandboxAdsAPIsOverride),
-           kSetOnlyIfOverridden},
-          {"TopicsImgAPI", raw_ref(features::kPrivacySandboxAdsAPIsM1Override)},
+          {"TopicsAPI", raw_ref(network::features::kBrowsingTopics)},
           {"TouchTextEditingRedesign",
            raw_ref(features::kTouchTextEditingRedesign)},
           {"TrustedTypesFromLiteral",
@@ -363,6 +342,9 @@ void SetRuntimeFeaturesFromChromiumFeatures() {
            raw_ref(webnn::mojom::features::
                        kExperimentalWebMachineLearningNeuralNetwork),
            kSetOnlyIfOverridden},
+          {"RequestStorageAccessFor",
+           raw_ref(content_settings::features::
+                       kStorageAccessAPIRelatedWebsiteSets)},
           {"LocalNetworkAccessPermissionPolicy",
            raw_ref(network::features::kLocalNetworkAccessChecks)}};
   for (const auto& mapping : runtimeFeatureNameToChromiumFeatureMapping) {
@@ -486,6 +468,9 @@ void SetCustomizedRuntimeFeaturesFromCombinedArgs(
       ui::NativeTheme::GetInstanceForWeb()->use_overlay_scrollbar());
   WebRuntimeFeatures::EnableFluentScrollbars(ui::IsFluentScrollbarEnabled());
 #if BUILDFLAG(IS_ANDROID)
+  WebRuntimeFeatures::EnableAudioOutputDevices(
+      base::FeatureList::IsEnabled(features::kAAudioPerStreamDeviceSelection) &&
+      base::android::device_info::is_desktop());
   WebRuntimeFeatures::EnableDesktopAndroidScrollbars(
       command_line.HasSwitch(
           blink::switches::kEnableDesktopAndroidScrollbars) &&
@@ -542,30 +527,6 @@ void ResolveInvalidConfigurations() {
         "FencedFramesLocalUnpartitionedDataAccess", false);
   }
 
-  // Topics API cannot be enabled without the support of the browser process.
-  // The Document API should be additionally gated by the
-  // `kBrowsingTopicsDocumentAPI` feature.
-  if (!base::FeatureList::IsEnabled(network::features::kBrowsingTopics)) {
-    LOG_IF(WARNING, WebRuntimeFeatures::IsTopicsAPIEnabled())
-        << "Topics cannot be enabled in this configuration. Use --"
-        << switches::kEnableFeatures << "="
-        << network::features::kBrowsingTopics.name << " in addition.";
-    WebRuntimeFeatures::EnableTopicsAPI(false);
-    WebRuntimeFeatures::EnableTopicsDocumentAPI(false);
-    WebRuntimeFeatures::EnableTopicsImgAPI(false);
-  } else {
-    if (!base::FeatureList::IsEnabled(
-            blink::features::kBrowsingTopicsDocumentAPI)) {
-      LOG_IF(WARNING, WebRuntimeFeatures::IsTopicsDocumentAPIEnabled())
-          << "Topics Document API cannot be enabled in this configuration. Use "
-             "--"
-          << switches::kEnableFeatures << "="
-          << blink::features::kBrowsingTopicsDocumentAPI.name
-          << " in addition.";
-      WebRuntimeFeatures::EnableTopicsDocumentAPI(false);
-    }
-  }
-
   if (!base::FeatureList::IsEnabled(network::features::kSharedStorageAPI)) {
     LOG_IF(WARNING, WebRuntimeFeatures::IsSharedStorageAPIEnabled())
         << "SharedStorage cannot be enabled in this "
@@ -586,16 +547,6 @@ void ResolveInvalidConfigurations() {
     WebRuntimeFeatures::EnableAttributionReporting(false);
   }
 
-  if (!base::FeatureList::IsEnabled(network::features::kInterestGroupStorage)) {
-    LOG_IF(WARNING,
-           WebRuntimeFeatures::IsAdInterestGroupAPIEnabledByRuntimeFlag())
-        << "AdInterestGroupAPI cannot be enabled in this "
-           "configuration. Use --"
-        << switches::kEnableFeatures << "="
-        << network::features::kInterestGroupStorage.name << " in addition.";
-    WebRuntimeFeatures::EnableAdInterestGroupAPI(false);
-    WebRuntimeFeatures::EnableFledge(false);
-  }
 
   // UserMediaElement cannot be enabled without the support of the
   // browser process.
@@ -635,6 +586,14 @@ void ResolveInvalidConfigurations() {
           network::features::kCSPScriptSrcHashesInV1)) {
     WebRuntimeFeatures::EnableCSPHashesV1(false);
   }
+
+  // LegacyAbstractRange (containers on AbstractRange.prototype) is the
+  // strict inverse of the global OpaqueRange runtime flag. Resolve this after
+  // command-line overrides so the two prototype shapes never coexist. Remove
+  // once OpaqueRange ships to stable.
+  // crbug.com/421421332
+  WebRuntimeFeatures::EnableFeatureFromString(
+      "LegacyAbstractRange", !WebRuntimeFeatures::IsOpaqueRangeEnabled());
 }
 
 }  // namespace

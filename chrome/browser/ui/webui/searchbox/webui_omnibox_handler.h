@@ -25,6 +25,8 @@
 class MetricsReporter;
 class OmniboxController;
 
+struct AiModeButtonUiConfig;
+
 namespace content {
 class WebUI;
 }  // namespace content
@@ -60,7 +62,7 @@ class WebuiOmniboxHandler : public ContextualSearchboxHandler,
   void StepSelection(OmniboxPopupSelection::Direction direction,
                      OmniboxPopupSelection::Step step);
   void OpenCurrentSelection(WindowOpenDisposition disposition);
-  void SetAimButtonVisible(bool visible);
+  void SetAimButtonVisible(bool visible) override;
 
   // SearchboxHandler:
   WindowOpenDisposition ComputeWindowOpenDisposition(
@@ -73,7 +75,6 @@ class WebuiOmniboxHandler : public ContextualSearchboxHandler,
   std::optional<searchbox::mojom::AutocompleteMatchPtr> CreateAutocompleteMatch(
       const AutocompleteMatch& match,
       size_t line,
-      const OmniboxEditModel* edit_model,
       bookmarks::BookmarkModel* bookmark_model,
       const omnibox::GroupConfigMap& suggestion_groups_map,
       const TemplateURLService* turl_service) const override;
@@ -125,6 +126,7 @@ class WebuiOmniboxHandler : public ContextualSearchboxHandler,
 
   void OnContentSharingPolicyChanged();
   void OnAimPopupEligibilityChanged();
+  void OnAiModeButtonConfigChanged(const AiModeButtonUiConfig* config);
   void OnNavigationFinished(content::NavigationHandle* navigation_handle);
 
   WebContentsObserver web_contents_observer_;
@@ -135,6 +137,7 @@ class WebuiOmniboxHandler : public ContextualSearchboxHandler,
 
   PrefChangeRegistrar pref_change_registrar_;
   base::CallbackListSubscription aim_eligibility_subscription_;
+  base::CallbackListSubscription ai_mode_config_subscription_;
   base::CallbackListSubscription tab_will_detach_subscription_;
   base::CallbackListSubscription tab_did_insert_subscription_;
 

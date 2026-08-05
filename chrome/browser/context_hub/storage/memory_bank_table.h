@@ -63,8 +63,14 @@ class MemoryBankTable {
   // Retrieves a single entry by ID. Returns std::nullopt if not found.
   std::optional<MemoryBankEntry> GetEntry(int64_t id);
 
+  // Retrieves entries matching the given IDs.
+  std::vector<MemoryBankEntry> GetEntriesByIds(base::span<const int64_t> ids);
+
   // Retrieves all entries from memory_bank_entries ordered by timestamp DESC.
   std::vector<MemoryBankEntry> GetAllEntries();
+
+  // Returns the total number of entries in memory_bank_entries.
+  size_t GetEntryCount();
 
   // Deletes records by IDs. Returns true on success.
   bool DeleteEntries(base::span<const int64_t> ids);

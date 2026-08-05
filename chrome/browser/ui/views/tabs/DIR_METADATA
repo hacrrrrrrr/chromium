@@ -1,7 +1,1 @@
-monorail: {
-  component: "UI>Browser>TopChrome>TabStrip"
-}
-team_email: "chrome-desktop-ui-sea@google.com"
-buganizer_public: {
-  component_id: 1456118
-}
+mixins: "//chrome/browser/ui/views/tabs/COMMON_METADATA"

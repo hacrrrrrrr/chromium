@@ -207,24 +207,26 @@ suite('AppReceivesToolbarChanges', () => {
     const lineFocus = app.$.lineFocus;
     assertTrue(!!lineFocus);
 
-    let expectedData = LineFocusStyle.UNDERLINE;
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+    await microtasksFinished();
+
+    const expectedData = LineFocusStyle.UNDERLINE;
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_STYLE, {detail: {data: expectedData}});
     await microtasksFinished();
     assertEquals('block', window.getComputedStyle(lineFocus).display);
     assertEquals(expectedData, lineFocusController.getCurrentLineFocusStyle());
 
-    expectedData = LineFocusStyle.OFF;
-    emitEvent(
-        app, ToolbarEvent.LINE_FOCUS_STYLE, {detail: {data: expectedData}});
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: false}});
     await microtasksFinished();
     assertEquals('none', window.getComputedStyle(lineFocus).display);
-    assertEquals(expectedData, lineFocusController.getCurrentLineFocusStyle());
+    assertFalse(lineFocusController.isEnabled());
   });
 
   test('line focus style change updates padding', async () => {
     chrome.readingMode.isLineFocusEnabled = true;
     app.connectedCallback();
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_MOVEMENT,
         {detail: {data: LineFocusMovement.STATIC}});
@@ -241,9 +243,7 @@ suite('AppReceivesToolbarChanges', () => {
         +window.getComputedStyle(app.$.container).paddingTop.replace('px', '');
     assertLT(0, padding);
 
-    emitEvent(
-        app, ToolbarEvent.LINE_FOCUS_STYLE,
-        {detail: {data: LineFocusStyle.OFF}});
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: false}});
     await microtasksFinished();
     assertEquals('0px', window.getComputedStyle(app.$.container).paddingTop);
   });
@@ -269,6 +269,7 @@ suite('AppReceivesToolbarChanges', () => {
   test('line focus movement change updates padding', async () => {
     chrome.readingMode.isLineFocusEnabled = true;
     app.connectedCallback();
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_STYLE,
         {detail: {data: LineFocusStyle.UNDERLINE}});
@@ -297,6 +298,9 @@ suite('AppReceivesToolbarChanges', () => {
     const lineFocus = app.$.lineFocus;
     assertTrue(!!lineFocus);
 
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+    await microtasksFinished();
+
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_STYLE,
         {detail: {data: LineFocusStyle.UNDERLINE}});
@@ -324,6 +328,9 @@ suite('AppReceivesToolbarChanges', () => {
     const lineFocus = app.$.lineFocus;
     assertTrue(!!lineFocus);
 
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+    await microtasksFinished();
+
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_STYLE,
         {detail: {data: LineFocusStyle.UNDERLINE}});
@@ -345,9 +352,7 @@ suite('AppReceivesToolbarChanges', () => {
       'line focus movement change does nothing with line focus off',
       async () => {
         chrome.readingMode.isLineFocusEnabled = true;
-        emitEvent(
-            app, ToolbarEvent.LINE_FOCUS_STYLE,
-            {detail: {data: LineFocusStyle.OFF}});
+        emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: false}});
         // The app needs content so it has a non-zero height.
         app.updateContent();
 
@@ -383,6 +388,8 @@ suite('AppReceivesToolbarChanges', () => {
 
   test('font size change updates line focus line height', async () => {
     chrome.readingMode.isLineFocusEnabled = true;
+    app.updateContent();
+    emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
     emitEvent(
         app, ToolbarEvent.LINE_FOCUS_STYLE,
         {detail: {data: LineFocusStyle.UNDERLINE}});
@@ -401,6 +408,7 @@ suite('AppReceivesToolbarChanges', () => {
   test(
       'font size change does not change line focus window height', async () => {
         chrome.readingMode.isLineFocusEnabled = true;
+        emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
         emitEvent(
             app, ToolbarEvent.LINE_FOCUS_STYLE,
             {detail: {data: LineFocusStyle.SMALL_WINDOW}});
@@ -415,6 +423,70 @@ suite('AppReceivesToolbarChanges', () => {
         const newHeight = app.style.getPropertyValue('--line-focus-height');
         assertEquals(startingHeight, newHeight);
       });
+
+  suite('line focus on empty page', () => {
+    setup(() => {
+      chrome.readingMode.isLineFocusEnabled = true;
+      chrome.readingMode.isImmersiveEnabled = true;
+    });
+
+    test('line focus is not shown on empty page', async () => {
+      // Enable line focus and set style on an empty page.
+      emitEvent(app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+      emitEvent(
+          app, ToolbarEvent.LINE_FOCUS_STYLE,
+          {detail: {data: LineFocusStyle.UNDERLINE}});
+      await microtasksFinished();
+
+      // Verify line focus element is hidden and line focus display style is
+      // none.
+      assertTrue(app.$.lineFocus.hasAttribute('hidden'));
+      assertEquals('none', app.style.getPropertyValue('--line-focus-display'));
+    });
+
+    test(
+        'toggling line focus on empty page does not set dark toolbar icon color',
+        async () => {
+          // Set line focus style to window mode while line focus is disabled.
+          emitEvent(
+              app, ToolbarEvent.LINE_FOCUS_STYLE,
+              {detail: {data: LineFocusStyle.SMALL_WINDOW}});
+          await microtasksFinished();
+
+          // Enable line focus while page is empty.
+          emitEvent(
+              app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+          await microtasksFinished();
+
+          assertNotEquals(
+              'var(--color-read-anything-toolbar-icon-dark)',
+              app.style.getPropertyValue('--toolbar-icon-color'));
+        });
+
+    test(
+        'line focus style applied to toolbar icon color when content becomes available',
+        async () => {
+          // Enable line focus and set to window mode while page is empty.
+          emitEvent(
+              app, ToolbarEvent.LINE_FOCUS_TOGGLE, {detail: {data: true}});
+          emitEvent(
+              app, ToolbarEvent.LINE_FOCUS_STYLE,
+              {detail: {data: LineFocusStyle.SMALL_WINDOW}});
+          await microtasksFinished();
+
+          assertNotEquals(
+              'var(--color-read-anything-toolbar-icon-dark)',
+              app.style.getPropertyValue('--toolbar-icon-color'));
+
+          // Draw content on the page so content state becomes HAS_CONTENT.
+          app.updateContent();
+          await microtasksFinished();
+
+          assertEquals(
+              'var(--color-read-anything-toolbar-icon-dark)',
+              app.style.getPropertyValue('--toolbar-icon-color'));
+        });
+  });
 
   suite('on language toggle', () => {
     function emitLanguageToggle(lang: string) {

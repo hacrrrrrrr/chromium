@@ -70,6 +70,8 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/navigation_simulator.h"
+#include "content/public/test/test_renderer_host.h"
+#include "content/public/test/test_utils.h"
 #include "content/public/test/web_contents_tester.h"
 #include "mojo/public/cpp/bindings/associated_receiver_set.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -144,6 +146,11 @@ class MockPersonalContextEligibilityService
               GetEligibilityState,
               (),
               (override));
+  MOCK_METHOD(
+      std::optional<personal_context::PersonalContextNonEligibilityReason>,
+      GetNonEligibilityReason,
+      (),
+      (const, override));
 };
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -453,10 +460,9 @@ TEST_F(ChromeAutofillClientTest,
       base::flat_set<EntityTypeName>({EntityTypeName::kVehicle}), {NAME_FULL});
 }
 
-// Test that some entities (such as passports) does not trigger AutofillAi
-// filling surveys.
+// Test that all entities trigger generalized Autofill AI filling surveys.
 TEST_F(ChromeAutofillClientTest,
-       TriggerUserAutofillAiFillingJourneySurvey_Passport_SurveyNotTriggered) {
+       TriggerUserAutofillAiFillingJourneySurvey_SuggestionAccepted) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(features::kAutofillAiFillingSurvey);
 
@@ -466,7 +472,15 @@ TEST_F(ChromeAutofillClientTest,
   EXPECT_CALL(*mock_hats_service, CanShowAnySurvey)
       .WillRepeatedly(Return(true));
 
-  EXPECT_CALL(*mock_hats_service, LaunchDelayedSurveyForWebContents).Times(0);
+  EXPECT_CALL(
+      *mock_hats_service,
+      LaunchDelayedSurveyForWebContents(
+          kHatsSurveyTriggerAutofillAiFilling, _, _,
+          Eq(SurveyBitsData({{"User accepted suggestion", true}})),
+          Eq(SurveyStringData({{"Entity type", "Passport"},
+                               {"Saved entities", "Passport"},
+                               {"Triggering field types", "PASSPORT_NUMBER"}})),
+          _, _, _, _, _));
 
   client()->TriggerAutofillAiFillingJourneySurvey(
       /*suggestion_accepted=*/true, EntityType(EntityTypeName::kPassport),
@@ -507,62 +521,6 @@ TEST_F(
       FieldTypeSet({FLIGHT_RESERVATION_FLIGHT_NUMBER}));
 }
 
-// Test that the Autofill AI save prompt survey calls the hats service with
-// the expected params.
-TEST_F(ChromeAutofillClientTest,
-       TriggerUserAutofillAiSavePromptSurvey_Accepted) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeaturesAndParameters(
-      /*enabled_features=*/{{features::kAutofillAiSavePromptSurvey,
-                             {{"autofill_ai_walletable_entity_save_prompt_"
-                               "survey_accepted_trigger_id",
-                               "12345"}}}},
-      /*disabled_features=*/{});
-  MockHatsService* mock_hats_service = static_cast<MockHatsService*>(
-      HatsServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), base::BindRepeating(&BuildMockHatsService)));
-  EXPECT_CALL(*mock_hats_service, CanShowAnySurvey)
-      .WillRepeatedly(Return(true));
-
-  EXPECT_CALL(*mock_hats_service,
-              LaunchDelayedSurveyForWebContents(
-                  kHatsSurveyTriggerAutofillAiSavePrompt, _, _, _,
-                  Eq(SurveyStringData({{"Entity type", "Vehicle"},
-                                       {"Saved entities", "Vehicle"}})),
-                  _, _, _, Eq("12345"), _));
-
-  client()->TriggerAutofillAiSavePromptSurvey(
-      /*prompt_accepted=*/true, EntityType(EntityTypeName::kVehicle),
-      base::flat_set<EntityTypeName>({EntityTypeName::kVehicle}));
-}
-
-TEST_F(ChromeAutofillClientTest,
-       TriggerUserAutofillAiSavePromptSurvey_Declined) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeaturesAndParameters(
-      /*enabled_features=*/{{features::kAutofillAiSavePromptSurvey,
-                             {{"autofill_ai_walletable_entity_save_prompt_"
-                               "survey_declined_trigger_id",
-                               "12345"}}}},
-      /*disabled_features=*/{});
-
-  MockHatsService* mock_hats_service = static_cast<MockHatsService*>(
-      HatsServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), base::BindRepeating(&BuildMockHatsService)));
-  EXPECT_CALL(*mock_hats_service, CanShowAnySurvey)
-      .WillRepeatedly(Return(true));
-
-  EXPECT_CALL(*mock_hats_service,
-              LaunchDelayedSurveyForWebContents(
-                  kHatsSurveyTriggerAutofillAiSavePrompt, _, _, _,
-                  Eq(SurveyStringData({{"Entity type", "Vehicle"},
-                                       {"Saved entities", "Vehicle"}})),
-                  _, _, _, Eq("12345"), _));
-
-  client()->TriggerAutofillAiSavePromptSurvey(
-      /*prompt_accepted=*/false, EntityType(EntityTypeName::kVehicle),
-      base::flat_set<EntityTypeName>({EntityTypeName::kVehicle}));
-}
 
 TEST_F(ChromeAutofillClientTest,
        TriggerUserPerceptionOfAutofillCreditCardSurvey) {
@@ -1083,6 +1041,122 @@ TEST_F(ChromeAutofillClientTestWithMockWindow,
   client()->at_memory_copy_paste_observer().OnTextCopiedToClipboard(
       web_contents()->GetPrimaryMainFrame(), u"some text");
   secondary_client->at_memory_copy_paste_observer().OnPaste();
+}
+
+// Tests that `AtMemoryCopyPasteObserver` detects hotkey paste events via
+// `DidGetUserInteraction` and triggers the promo when an editable element is
+// focused.
+TEST_F(ChromeAutofillClientTestWithMockWindow,
+       AtMemoryCopyPasteObserver_HotkeyPasteDidGetUserInteraction) {
+  base::test::ScopedFeatureList feature_list(features::kAutofillAtMemory);
+  InitializePersonalContextEligibilityService();
+  EXPECT_CALL(*personal_context_eligibility_service(), GetEligibilityState())
+      .WillRepeatedly(
+          Return(personal_context::PersonalContextEligibilityState::kEligible));
+
+  std::unique_ptr<content::WebContents> secondary_web_contents =
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+  TestChromeAutofillClient* secondary_client =
+      client(secondary_web_contents.get());
+  ASSERT_TRUE(secondary_client);
+
+  TabAndWindowMocks secondary_mocks;
+  SetUpMockTabAndWindow(secondary_web_contents.get(), profile(),
+                        secondary_mocks);
+
+  MockBrowserUserEducationInterface secondary_mock_user_education(
+      &secondary_mocks.mock_window);
+
+  EXPECT_CALL(secondary_mock_user_education,
+              MaybeShowFeaturePromo(testing::Truly(
+                  [](const user_education::FeaturePromoParams& params) {
+                    return &*params.feature ==
+                           &feature_engagement::kIPHAutofillAtMemoryFeature;
+                  })))
+      .WillOnce(Return(true));
+
+  sessions::SessionTabHelper::CreateForWebContents(
+      web_contents(), sessions::SessionTabHelper::DelegateLookup());
+  sessions::SessionTabHelper::CreateForWebContents(
+      secondary_web_contents.get(),
+      sessions::SessionTabHelper::DelegateLookup());
+
+  // Copy on the first tab.
+  client()->at_memory_copy_paste_observer().OnTextCopiedToClipboard(
+      web_contents()->GetPrimaryMainFrame(), u"some text");
+
+  // Simulate Ctrl+V / Cmd+V via `DidGetUserInteraction` on the second tab.
+#if BUILDFLAG(IS_MAC)
+  constexpr int modifiers = blink::WebInputEvent::kMetaKey;
+#else
+  constexpr int modifiers = blink::WebInputEvent::kControlKey;
+#endif
+  blink::WebKeyboardEvent paste_event(blink::WebInputEvent::Type::kRawKeyDown,
+                                      modifiers, base::TimeTicks::Now());
+  paste_event.windows_key_code = ui::VKEY_V;
+
+  // Focus an editable element in the second tab.
+  content::FocusWebContentsOnFrame(
+      secondary_web_contents.get(),
+      secondary_web_contents->GetPrimaryMainFrame());
+  content::RenderFrameHostTester::For(
+      secondary_web_contents->GetPrimaryMainFrame())
+      ->SimulateFocusedElementChanged(/*is_editable_element=*/true,
+                                      /*is_richly_editable_element=*/false);
+
+  secondary_client->at_memory_copy_paste_observer().DidGetUserInteraction(
+      paste_event);
+}
+
+// Tests that `AtMemoryCopyPasteObserver` does not trigger the promo when a
+// hotkey paste occurs and no editable element is focused.
+TEST_F(ChromeAutofillClientTestWithMockWindow,
+       AtMemoryCopyPasteObserver_HotkeyPasteDidGetUserInteraction_NotEditable) {
+  base::test::ScopedFeatureList feature_list(features::kAutofillAtMemory);
+  InitializePersonalContextEligibilityService();
+  EXPECT_CALL(*personal_context_eligibility_service(), GetEligibilityState())
+      .WillRepeatedly(
+          Return(personal_context::PersonalContextEligibilityState::kEligible));
+
+  std::unique_ptr<content::WebContents> secondary_web_contents =
+      content::WebContentsTester::CreateTestWebContents(profile(), nullptr);
+  TestChromeAutofillClient* secondary_client =
+      client(secondary_web_contents.get());
+  ASSERT_TRUE(secondary_client);
+
+  TabAndWindowMocks secondary_mocks;
+  SetUpMockTabAndWindow(secondary_web_contents.get(), profile(),
+                        secondary_mocks);
+
+  MockBrowserUserEducationInterface secondary_mock_user_education(
+      &secondary_mocks.mock_window);
+
+  EXPECT_CALL(secondary_mock_user_education, MaybeShowFeaturePromo).Times(0);
+
+  sessions::SessionTabHelper::CreateForWebContents(
+      web_contents(), sessions::SessionTabHelper::DelegateLookup());
+  sessions::SessionTabHelper::CreateForWebContents(
+      secondary_web_contents.get(),
+      sessions::SessionTabHelper::DelegateLookup());
+
+  // Copy on the first tab.
+  client()->at_memory_copy_paste_observer().OnTextCopiedToClipboard(
+      web_contents()->GetPrimaryMainFrame(), u"some text");
+
+  // Simulate Ctrl+V / Cmd+V via `DidGetUserInteraction` on the second tab.
+#if BUILDFLAG(IS_MAC)
+  constexpr int modifiers = blink::WebInputEvent::kMetaKey;
+#else
+  constexpr int modifiers = blink::WebInputEvent::kControlKey;
+#endif
+  blink::WebKeyboardEvent paste_event(blink::WebInputEvent::Type::kRawKeyDown,
+                                      modifiers, base::TimeTicks::Now());
+  paste_event.windows_key_code = ui::VKEY_V;
+
+  // No content editable is focused by default.
+
+  secondary_client->at_memory_copy_paste_observer().DidGetUserInteraction(
+      paste_event);
 }
 
 #endif  // (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||

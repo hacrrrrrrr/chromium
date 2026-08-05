@@ -5,14 +5,15 @@
 #include "chrome/browser/glic/browser_ui/glic_actor_nudge_controller.h"
 
 #include "base/functional/bind.h"
+#include "base/notimplemented.h"
 #include "base/notreached.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/ui/actor_ui_metrics.h"
 #include "chrome/browser/actor/ui/actor_ui_state_manager_interface.h"
-#include "chrome/browser/actor/ui/task_list_bubble/actor_task_list_bubble_controller.h"
 #include "chrome/browser/glic/browser_ui/glic_actor_task_icon_manager.h"
 #include "chrome/browser/glic/browser_ui/glic_actor_task_icon_manager_factory.h"
+#include "chrome/browser/glic/browser_ui/glic_split_button_controller.h"
 #include "chrome/browser/glic/browser_ui/glic_split_button_delegate.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -21,6 +22,10 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/actor/ui/task_list_bubble/actor_task_list_bubble_controller.h"
+#endif
 
 namespace glic {
 
@@ -33,17 +38,17 @@ DEFINE_USER_DATA(GlicActorNudgeController);
 
 GlicActorNudgeController::GlicActorNudgeController(
     BrowserWindowInterface* browser,
-    GlicSplitButtonDelegate* horizontal_tabs_delegate,
-    GlicSplitButtonDelegate* vertical_tabs_delegate)
+    GlicSplitButtonController* split_button_controller)
     : profile_(browser->GetProfile()),
       browser_(browser),
-      horizontal_tabs_delegate_(horizontal_tabs_delegate),
-      vertical_tabs_delegate_(vertical_tabs_delegate),
+      split_button_controller_(split_button_controller),
       scoped_data_holder_(browser->GetUnownedUserDataHost(), *this) {
+  CHECK(split_button_controller_);
   if (base::FeatureList::IsEnabled(features::kGlicActorUi)) {
     RegisterActorNudgeStateCallback();
   }
 
+#if !BUILDFLAG(IS_ANDROID)
   ActorTaskListBubbleController* bubble_controller =
       ActorTaskListBubbleController::From(browser_);
   bubble_visibility_change_subscription_.push_back(
@@ -54,6 +59,7 @@ GlicActorNudgeController::GlicActorNudgeController(
       bubble_controller->RegisterBubbleDestroyedCallback(base::BindRepeating(
           &GlicActorNudgeController::OnBubbleVisibilityChange,
           weak_ptr_factory_.GetWeakPtr(), /*is_bubble_open=*/false)));
+#endif
 }
 
 GlicActorNudgeController::~GlicActorNudgeController() = default;
@@ -62,6 +68,20 @@ GlicActorNudgeController::~GlicActorNudgeController() = default;
 GlicActorNudgeController* GlicActorNudgeController::From(
     BrowserWindowInterface* browser) {
   return Get(browser->GetUnownedUserDataHost());
+}
+
+void GlicActorNudgeController::SetHorizontalTabsDelegate(
+    GlicSplitButtonDelegate* delegate) {
+  split_button_controller_->SetHorizontalTabsDelegate(delegate);
+}
+
+void GlicActorNudgeController::SetVerticalTabsDelegate(
+    GlicSplitButtonDelegate* delegate) {
+  split_button_controller_->SetVerticalTabsDelegate(delegate);
+}
+
+base::WeakPtr<GlicActorNudgeController> GlicActorNudgeController::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
 }
 
 void GlicActorNudgeController::OnStateUpdate(
@@ -179,24 +199,24 @@ void GlicActorNudgeController::TriggerGlicActorNudge(
 }
 
 void GlicActorNudgeController::ShowBubble() {
-  if (auto* delegate = GetActiveDelegate()) {
+  if (auto* delegate = split_button_controller_->GetActiveDelegate()) {
     delegate->ShowActorTaskListBubble();
   }
 }
 
 void GlicActorNudgeController::CloseBubble() {
+#if !BUILDFLAG(IS_ANDROID)
   ActorTaskListBubbleController* bubble_controller =
       ActorTaskListBubbleController::From(browser_);
-  if (bubble_controller->GetBubbleWidget()) {
-    bubble_controller->GetBubbleWidget()->Close();
-  }
+  bubble_controller->CloseBubble();
+#endif
 }
 
 bool GlicActorNudgeController::IsShowingNudge() {
-  return (IsDelegateActive(horizontal_tabs_delegate_) &&
-          horizontal_tabs_delegate_->GetIsShowingGlicActorTaskIconNudge()) ||
-         (IsDelegateActive(vertical_tabs_delegate_) &&
-          vertical_tabs_delegate_->GetIsShowingGlicActorTaskIconNudge());
+  if (auto* delegate = split_button_controller_->GetActiveDelegate()) {
+    return delegate->GetIsShowingGlicActorTaskIconNudge();
+  }
+  return false;
 }
 
 void GlicActorNudgeController::OnBubbleVisibilityChange(bool is_bubble_open) {
@@ -209,31 +229,7 @@ void GlicActorNudgeController::OnBubbleVisibilityChange(bool is_bubble_open) {
 
 void GlicActorNudgeController::CallOnBoth(
     base::RepeatingCallback<void(GlicSplitButtonDelegate&)> fn) {
-  // One or both or neither delegate may need updated.
-  if (IsDelegateActive(horizontal_tabs_delegate_)) {
-    fn.Run(*horizontal_tabs_delegate_);
-  }
-  if (IsDelegateActive(vertical_tabs_delegate_)) {
-    fn.Run(*vertical_tabs_delegate_);
-  }
-}
-
-bool GlicActorNudgeController::IsDelegateActive(
-    GlicSplitButtonDelegate* delegate) const {
-  return delegate && delegate->IsGlicAdded();
-}
-
-GlicSplitButtonDelegate* GlicActorNudgeController::GetActiveDelegate() const {
-  auto* vertical_tab_strip_state_controller =
-      tabs::VerticalTabStripStateController::From(browser_);
-  if (vertical_tab_strip_state_controller->ShouldDisplayVerticalTabs() &&
-      IsDelegateActive(vertical_tabs_delegate_)) {
-    return vertical_tabs_delegate_;
-  }
-  if (IsDelegateActive(horizontal_tabs_delegate_)) {
-    return horizontal_tabs_delegate_;
-  }
-  return nullptr;
+  split_button_controller_->CallOnBoth(fn);
 }
 
 }  // namespace glic

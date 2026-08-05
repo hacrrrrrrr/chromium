@@ -7,6 +7,7 @@
 
 #import <memory>
 
+#import "base/memory/raw_ptr.h"
 #import "base/memory/weak_ptr.h"
 #import "base/types/expected.h"
 #import "ios/chrome/browser/intelligence/actor/tools/model/actor_tool.h"
@@ -15,7 +16,7 @@ class WebStateList;
 
 namespace optimization_guide {
 namespace proto {
-class CloseTabAction;
+class CreateTabAction;
 }  // namespace proto
 }  // namespace optimization_guide
 
@@ -25,19 +26,25 @@ class WebState;
 
 namespace actor {
 
-class ProfileContextResolver;
+class ToolDelegate;
 
 // A tool to perform tab management operations.
 class TabManagementTool : public ActorTool {
  public:
   // Creates a TabManagementTool for the CloseTab action.
-  static base::expected<std::unique_ptr<TabManagementTool>, ToolExecutionResult>
-  CreateCloseTabTool(const optimization_guide::proto::CloseTabAction& action,
-                     const ProfileContextResolver& profile_context_resolver);
+  static std::unique_ptr<TabManagementTool> CreateCloseTabTool(
+      base::WeakPtr<web::WebState> web_state,
+      base::WeakPtr<WebStateList> web_state_list);
+
+  // Creates a TabManagementTool for the CreateTab action.
+  static std::unique_ptr<TabManagementTool> CreateTabTool(
+      const optimization_guide::proto::CreateTabAction& action,
+      ToolDelegate* tool_delegate);
 
   ~TabManagementTool() override;
 
   // ActorTool:
+  void Validate(ToolExecutionCallback callback) override;
   void Execute(ToolExecutionCallback callback) override;
   void Cancel() override;
   base::WeakPtr<web::WebState> GetTargetWebState() const override;
@@ -46,17 +53,33 @@ class TabManagementTool : public ActorTool {
  private:
   enum class ActionType {
     kClose,
+    kCreate,
   };
 
-  TabManagementTool(ActionType action_type,
-                    base::WeakPtr<web::WebState> web_state,
+  TabManagementTool(base::WeakPtr<web::WebState> web_state,
+                    ActionType action_type,
                     base::WeakPtr<WebStateList> web_state_list);
+  TabManagementTool(int32_t window_id,
+                    bool foreground,
+                    ToolDelegate* tool_delegate);
+
+  void ValidateCloseTab(ToolExecutionCallback callback);
+  void ValidateCreateTab(ToolExecutionCallback callback);
+
+  void ExecuteCloseTab();
+  void ExecuteCreateTab();
 
   const ActionType action_type_;
   const base::WeakPtr<web::WebState> web_state_;
   const base::WeakPtr<WebStateList> web_state_list_;
+  const raw_ptr<ToolDelegate> tool_delegate_ = nullptr;
+  const int32_t window_id_ = -1;
+  const bool foreground_;
 
   ToolExecutionCallback callback_;
+
+  base::WeakPtr<web::WebState> created_web_state_;
+  base::WeakPtrFactory<TabManagementTool> weak_ptr_factory_{this};
 };
 
 }  // namespace actor

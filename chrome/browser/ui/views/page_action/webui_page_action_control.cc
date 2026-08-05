@@ -12,6 +12,7 @@
 #include "base/notreached.h"
 #include "base/types/expected.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/page_action/action_ids.h"
 #include "chrome/browser/ui/page_action/page_action_controller.h"
 #include "chrome/browser/ui/page_action/page_action_model.h"
@@ -20,10 +21,14 @@
 #include "chrome/browser/ui/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/views/page_action/page_action_view_util.h"
+#include "chrome/browser/ui/views/page_action/webui_page_action_view.h"
 #include "chrome/browser/ui/views/toolbar/webui_toolbar_web_view.h"
+#include "chrome/browser/ui/webui/webui_toolbar/utils/toolbar_button_utils.h"
 #include "components/tabs/public/tab_interface.h"
 #include "mojo/public/mojom/base/error.mojom.h"
 #include "ui/actions/actions.h"
+#include "ui/color/color_id.h"
+#include "ui/gfx/color_utils.h"
 
 namespace page_actions {
 
@@ -33,159 +38,6 @@ namespace {
 
 using Code = mojo_base::mojom::Code;
 using Error = mojo_base::mojom::Error;
-
-actions::ActionId MojomPageActionIdToActionId(
-    MojomPageActionId page_action_id) {
-  switch (page_action_id) {
-    case MojomPageActionId::kActionAiMode:
-      return kActionAiMode;
-    case MojomPageActionId::kActionIndigo:
-      return kActionIndigo;
-    case MojomPageActionId::kActionMultistepFilter:
-      return kActionMultistepFilter;
-    case MojomPageActionId::kActionSidePanelShowLensOverlayResults:
-      return kActionSidePanelShowLensOverlayResults;
-    case MojomPageActionId::kActionLensOverlayHomework:
-      return kActionLensOverlayHomework;
-    case MojomPageActionId::kActionShowTranslate:
-      return kActionShowTranslate;
-    case MojomPageActionId::kActionShowMemorySaverChip:
-      return kActionShowMemorySaverChip;
-    case MojomPageActionId::kActionShowJsOptimizationsIcon:
-      return kActionShowJsOptimizationsIcon;
-    case MojomPageActionId::kActionRecordReplay:
-      return kActionRecordReplay;
-    case MojomPageActionId::kActionShowIntentPicker:
-      return kActionShowIntentPicker;
-    case MojomPageActionId::kActionZoomNormal:
-      return kActionZoomNormal;
-    case MojomPageActionId::kActionSidePanelShowReadAnything:
-      return kActionSidePanelShowReadAnything;
-    case MojomPageActionId::kActionOffersAndRewardsForPage:
-      return kActionOffersAndRewardsForPage;
-    case MojomPageActionId::kActionShowFileSystemAccess:
-      return kActionShowFileSystemAccess;
-    case MojomPageActionId::kActionInstallPwa:
-      return kActionInstallPwa;
-    case MojomPageActionId::kActionCommercePriceInsights:
-      return kActionCommercePriceInsights;
-    case MojomPageActionId::kActionCommerceDiscounts:
-      return kActionCommerceDiscounts;
-    case MojomPageActionId::kActionShowPasswordsBubbleOrPage:
-      return kActionShowPasswordsBubbleOrPage;
-    case MojomPageActionId::kActionShowCollaborationRecentActivity:
-      return kActionShowCollaborationRecentActivity;
-    case MojomPageActionId::kActionAutofillMandatoryReauth:
-      return kActionAutofillMandatoryReauth;
-    case MojomPageActionId::kActionFind:
-      return kActionFind;
-    case MojomPageActionId::kActionShowCookieControls:
-      return kActionShowCookieControls;
-    case MojomPageActionId::kActionShowAddressesBubbleOrPage:
-      return kActionShowAddressesBubbleOrPage;
-    case MojomPageActionId::kActionVirtualCardEnroll:
-      return kActionVirtualCardEnroll;
-    case MojomPageActionId::kActionFilledCardInformation:
-      return kActionFilledCardInformation;
-    case MojomPageActionId::kActionShowPaymentsBubbleOrPage:
-      return kActionShowPaymentsBubbleOrPage;
-    case MojomPageActionId::kActionSidePanelShowContextualTasks:
-      return kActionSidePanelShowContextualTasks;
-    case MojomPageActionId::kActionBookmarkThisTab:
-      return kActionBookmarkThisTab;
-    case MojomPageActionId::kActionFederation:
-      return kActionFederation;
-    case MojomPageActionId::kActionGlicContextualCueing:
-      return kActionGlicContextualCueing;
-    case MojomPageActionId::kActionAnchoredContextualCue:
-      return kActionAnchoredContextualCue;
-    case MojomPageActionId::kActionWebAuthnAmbientSignin:
-      return kActionWebAuthnAmbientSignin;
-    case MojomPageActionId::kActionAutofillPayment:
-      return kActionAutofillPayment;
-    case MojomPageActionId::kActionShowPaymentsChurnedUsersBubble:
-      return kActionShowPaymentsChurnedUsersBubble;
-    case MojomPageActionId::kActionFakePageActionForDebug:
-      return kActionFakePageActionForDebug;
-  }
-  NOTREACHED();
-}
-
-MojomPageActionId ActionIdToMojomPageActionId(actions::ActionId action_id) {
-  switch (action_id) {
-    case kActionAiMode:
-      return MojomPageActionId::kActionAiMode;
-    case kActionIndigo:
-      return MojomPageActionId::kActionIndigo;
-    case kActionMultistepFilter:
-      return MojomPageActionId::kActionMultistepFilter;
-    case kActionSidePanelShowLensOverlayResults:
-      return MojomPageActionId::kActionSidePanelShowLensOverlayResults;
-    case kActionLensOverlayHomework:
-      return MojomPageActionId::kActionLensOverlayHomework;
-    case kActionShowTranslate:
-      return MojomPageActionId::kActionShowTranslate;
-    case kActionShowMemorySaverChip:
-      return MojomPageActionId::kActionShowMemorySaverChip;
-    case kActionShowJsOptimizationsIcon:
-      return MojomPageActionId::kActionShowJsOptimizationsIcon;
-    case kActionRecordReplay:
-      return MojomPageActionId::kActionRecordReplay;
-    case kActionShowIntentPicker:
-      return MojomPageActionId::kActionShowIntentPicker;
-    case kActionZoomNormal:
-      return MojomPageActionId::kActionZoomNormal;
-    case kActionSidePanelShowReadAnything:
-      return MojomPageActionId::kActionSidePanelShowReadAnything;
-    case kActionOffersAndRewardsForPage:
-      return MojomPageActionId::kActionOffersAndRewardsForPage;
-    case kActionShowFileSystemAccess:
-      return MojomPageActionId::kActionShowFileSystemAccess;
-    case kActionInstallPwa:
-      return MojomPageActionId::kActionInstallPwa;
-    case kActionCommercePriceInsights:
-      return MojomPageActionId::kActionCommercePriceInsights;
-    case kActionCommerceDiscounts:
-      return MojomPageActionId::kActionCommerceDiscounts;
-    case kActionShowPasswordsBubbleOrPage:
-      return MojomPageActionId::kActionShowPasswordsBubbleOrPage;
-    case kActionShowCollaborationRecentActivity:
-      return MojomPageActionId::kActionShowCollaborationRecentActivity;
-    case kActionAutofillMandatoryReauth:
-      return MojomPageActionId::kActionAutofillMandatoryReauth;
-    case kActionFind:
-      return MojomPageActionId::kActionFind;
-    case kActionShowCookieControls:
-      return MojomPageActionId::kActionShowCookieControls;
-    case kActionShowAddressesBubbleOrPage:
-      return MojomPageActionId::kActionShowAddressesBubbleOrPage;
-    case kActionVirtualCardEnroll:
-      return MojomPageActionId::kActionVirtualCardEnroll;
-    case kActionFilledCardInformation:
-      return MojomPageActionId::kActionFilledCardInformation;
-    case kActionShowPaymentsBubbleOrPage:
-      return MojomPageActionId::kActionShowPaymentsBubbleOrPage;
-    case kActionSidePanelShowContextualTasks:
-      return MojomPageActionId::kActionSidePanelShowContextualTasks;
-    case kActionBookmarkThisTab:
-      return MojomPageActionId::kActionBookmarkThisTab;
-    case kActionFederation:
-      return MojomPageActionId::kActionFederation;
-    case kActionGlicContextualCueing:
-      return MojomPageActionId::kActionGlicContextualCueing;
-    case kActionAnchoredContextualCue:
-      return MojomPageActionId::kActionAnchoredContextualCue;
-    case kActionWebAuthnAmbientSignin:
-      return MojomPageActionId::kActionWebAuthnAmbientSignin;
-    case kActionAutofillPayment:
-      return MojomPageActionId::kActionAutofillPayment;
-    case kActionShowPaymentsChurnedUsersBubble:
-      return MojomPageActionId::kActionShowPaymentsChurnedUsersBubble;
-    case kActionFakePageActionForDebug:
-      return MojomPageActionId::kActionFakePageActionForDebug;
-  }
-  NOTREACHED();
-}
 
 }  // namespace
 
@@ -236,9 +88,16 @@ class WebUIPageActionControl::WebUIPageActionDelegate
   void OnPageActionModelWillBeDeleted(
       const page_actions::PageActionModelInterface& model) override;
 
-  toolbar_ui_api::mojom::PageActionStatePtr GetState() const;
+  toolbar_ui_api::mojom::PageActionStatePtr GetState();
   void NotifyClick(PageActionTrigger trigger);
   void NotifyChipShowingChanged();
+
+  const page_actions::PageActionModelInterface* GetObservedModel() const {
+    return observation_.IsObserving() ? observation_.GetSource() : nullptr;
+  }
+  page_actions::PageActionController* GetController() const {
+    return controller_;
+  }
 
  private:
   const actions::ActionId action_id_;
@@ -279,6 +138,9 @@ class WebUIPageActionControl::WebUIPageActionDelegate
 
   // The last state sent to the WebUI. Null if the action was not visible.
   toolbar_ui_api::mojom::PageActionStatePtr old_state_;
+  bool was_chip_visible_ = false;
+
+  toolbar_ui_api::IconHandle cached_icon_;
 };
 
 void WebUIPageActionControl::WebUIPageActionDelegate::SetController(
@@ -286,6 +148,7 @@ void WebUIPageActionControl::WebUIPageActionDelegate::SetController(
   observation_.Reset();
   action_item_subscription_ = {};
   controller_ = controller;
+  was_chip_visible_ = false;
 
   if (controller_) {
     controller_->RegisterCallbacks(page_actions::PageActionPassKey(),
@@ -304,6 +167,14 @@ void WebUIPageActionControl::WebUIPageActionDelegate::SetController(
 
 void WebUIPageActionControl::WebUIPageActionDelegate::OnPageActionModelChanged(
     const page_actions::PageActionModelInterface& model) {
+  const bool is_chip_visible =
+      model.GetVisible() && model.ShouldShowSuggestionChip();
+
+  if (model.GetShouldAnnounceChip() && !was_chip_visible_ && is_chip_visible) {
+    owner_->AnnounceAlert(model.GetText());
+  }
+  was_chip_visible_ = is_chip_visible;
+
   toolbar_ui_api::mojom::PageActionStatePtr new_state = GetState();
 
   if (!old_state_.Equals(new_state)) {
@@ -318,6 +189,7 @@ void WebUIPageActionControl::WebUIPageActionDelegate::
   observation_.Reset();
   action_item_subscription_ = {};
   controller_ = nullptr;
+  was_chip_visible_ = false;
   if (old_state_) {
     old_state_ = nullptr;
     owner_->NotifyPageActionStateChanged();
@@ -325,7 +197,7 @@ void WebUIPageActionControl::WebUIPageActionDelegate::
 }
 
 toolbar_ui_api::mojom::PageActionStatePtr
-WebUIPageActionControl::WebUIPageActionDelegate::GetState() const {
+WebUIPageActionControl::WebUIPageActionDelegate::GetState() {
   if (!observation_.IsObserving()) {
     return nullptr;
   }
@@ -335,9 +207,36 @@ WebUIPageActionControl::WebUIPageActionDelegate::GetState() const {
   }
 
   auto state = toolbar_ui_api::mojom::PageActionState::New();
-  state->page_action_id = ActionIdToMojomPageActionId(action_id_);
+  state->page_action_id =
+      webui_toolbar::ActionIdToMojomPageActionId(action_id_);
   state->accessible_name = model->GetAccessibleName();
   state->tooltip_text = model->GetTooltipText();
+  ui::ImageModel image_model = model->GetImage();
+  if (model->GetColorSource() ==
+          page_actions::PageActionColorSource::kCascadingAccent &&
+      image_model.IsVectorIcon()) {
+    const auto& vector_icon_model = image_model.GetVectorIcon();
+    const ui::ColorProvider* color_provider =
+        owner_->webui_delegate_->GetView()->GetColorProvider();
+    const SkColor default_color =
+        color_provider->GetColor(ui::kColorFocusableBorderFocused);
+    // Page actions are displayed on the toolbar, so `kColorToolbar` is used as
+    // the background color for contrast calculations (matching what
+    // `views::GetCascadingBackgroundColor()` resolves in native Views via
+    // `ToolbarView`).
+    const SkColor background_color = color_provider->GetColor(kColorToolbar);
+    const SkColor blended_color =
+        color_utils::BlendForMinContrast(
+            default_color, background_color, std::nullopt,
+            color_utils::kMinimumVisibleContrastRatio)
+            .color;
+    image_model = ui::ImageModel::FromVectorIcon(
+        *vector_icon_model.vector_icon(), blended_color,
+        vector_icon_model.icon_size(), vector_icon_model.badge_icon());
+  }
+  state->icon = cached_icon_ =
+      owner_->webui_delegate_->GetIconTable().RegisterImageModelTryReuse(
+          image_model, cached_icon_);
   return state;
 }
 
@@ -347,22 +246,13 @@ void WebUIPageActionControl::WebUIPageActionDelegate::NotifyClick(
 
   auto builder =
       actions::ActionInvocationContext::Builder()
-          .SetProperty(
-              page_actions::kPageActionTriggerKey,
-              static_cast<
-                  std::underlying_type_t<page_actions::PageActionTrigger>>(
-                  trigger))
-          .SetProperty(
-              page_actions::kPageActionEntryPointKey,
-              static_cast<
-                  std::underlying_type_t<page_actions::PageActionEntryPoint>>(
-                  page_actions::PageActionEntryPoint::kSuggestionChip));
+          .SetProperty(page_actions::kPageActionTriggerKey, trigger)
+          .SetProperty(page_actions::kPageActionEntryPointKey,
+                       page_actions::PageActionEntryPoint::kSuggestionChip);
   if (auto side_panel_trigger =
           GetSidePanelOpenTriggerForPageAction(action_item_->GetActionId())) {
-    builder = std::move(builder).SetProperty(
-        kSidePanelOpenTriggerKey,
-        static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-            *side_panel_trigger));
+    builder = std::move(builder).SetProperty(kSidePanelOpenTriggerKey,
+                                             *side_panel_trigger);
   }
   action_item_->InvokeAction(std::move(builder).Build());
 }
@@ -387,6 +277,8 @@ WebUIPageActionControl::WebUIPageActionControl(
     if (action_item) {
       delegates_[action_id] = std::make_unique<WebUIPageActionDelegate>(
           action_id, *action_item, *this);
+      views_[action_id] =
+          std::make_unique<WebUIPageActionView>(action_id, *this);
     }
   }
 }
@@ -395,6 +287,37 @@ WebUIPageActionControl::~WebUIPageActionControl() = default;
 
 void WebUIPageActionControl::Init(WebUIToolbarControlDelegate* webui_delegate) {
   webui_delegate_ = webui_delegate;
+}
+
+PageActionViewInterface* WebUIPageActionControl::GetPageActionViewInterface(
+    actions::ActionId action_id) {
+  auto it = views_.find(action_id);
+  if (it != views_.end()) {
+    return it->second.get();
+  }
+  return nullptr;
+}
+
+BrowserWindowInterface* WebUIPageActionControl::GetBrowser() {
+  return webui_delegate_ ? webui_delegate_->GetBrowser() : nullptr;
+}
+
+const page_actions::PageActionModelInterface*
+WebUIPageActionControl::GetObservedModel(actions::ActionId action_id) const {
+  auto it = delegates_.find(action_id);
+  if (it != delegates_.end()) {
+    return it->second->GetObservedModel();
+  }
+  return nullptr;
+}
+
+page_actions::PageActionController* WebUIPageActionControl::GetController(
+    actions::ActionId action_id) {
+  auto it = delegates_.find(action_id);
+  if (it != delegates_.end()) {
+    return it->second->GetController();
+  }
+  return nullptr;
 }
 
 void WebUIPageActionControl::UpdateController(
@@ -427,6 +350,13 @@ void WebUIPageActionControl::UpdateController(
   }
 }
 
+void WebUIPageActionControl::SetShouldHidePageActions(
+    bool should_hide_page_actions) {
+  if (active_controller_) {
+    active_controller_->SetShouldHidePageActions(should_hide_page_actions);
+  }
+}
+
 std::vector<toolbar_ui_api::mojom::PageActionStatePtr>
 WebUIPageActionControl::GetPageActionStates() {
   std::vector<toolbar_ui_api::mojom::PageActionStatePtr> states;
@@ -447,7 +377,8 @@ void WebUIPageActionControl::OnPageActionClick(
     PageActionTrigger trigger,
     toolbar_ui_api::mojom::ToolbarUIService::OnPageActionClickCallback
         callback) {
-  auto it = delegates_.find(MojomPageActionIdToActionId(action_id));
+  auto it =
+      delegates_.find(webui_toolbar::MojomPageActionIdToActionId(action_id));
   if (it == delegates_.end()) {
     std::move(callback).Run(base::unexpected(
         Error::New(Code::kInvalidArgument, "Invalid PageActionId")));
@@ -462,7 +393,8 @@ void WebUIPageActionControl::OnPageActionChipShowingChanged(
     toolbar_ui_api::mojom::PageActionId action_id,
     toolbar_ui_api::mojom::ToolbarUIService::
         OnPageActionChipShowingChangedCallback callback) {
-  auto it = delegates_.find(MojomPageActionIdToActionId(action_id));
+  auto it =
+      delegates_.find(webui_toolbar::MojomPageActionIdToActionId(action_id));
   if (it == delegates_.end()) {
     std::move(callback).Run(base::unexpected(
         Error::New(Code::kInvalidArgument, "Invalid PageActionId")));
@@ -476,6 +408,12 @@ void WebUIPageActionControl::OnPageActionChipShowingChanged(
 void WebUIPageActionControl::NotifyPageActionStateChanged() {
   if (webui_delegate_) {
     webui_delegate_->OnPageActionChanged(GetPageActionStates());
+  }
+}
+
+void WebUIPageActionControl::AnnounceAlert(const std::u16string& announcement) {
+  if (webui_delegate_) {
+    webui_delegate_->AnnounceAlert(announcement);
   }
 }
 

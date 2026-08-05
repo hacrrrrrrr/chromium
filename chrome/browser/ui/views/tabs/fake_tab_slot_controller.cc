@@ -79,6 +79,10 @@ bool FakeTabSlotController::CanPaintThrobberToLayer() const {
   return paint_throbber_to_layer_;
 }
 
+bool FakeTabSlotController::IsGlassFrame() const {
+  return is_glass_;
+}
+
 SkColor FakeTabSlotController::GetTabSeparatorColor() const {
   return SK_ColorBLACK;
 }
@@ -115,6 +119,11 @@ tab_groups::TabGroupColorId FakeTabSlotController::GetGroupColorId(
 bool FakeTabSlotController::IsGroupCollapsed(
     const tab_groups::TabGroupId& group) const {
   return tab_strip_controller_->IsGroupCollapsed(group);
+}
+
+std::optional<tab_groups::TabGroupId> FakeTabSlotController::GetFocusedGroup()
+    const {
+  return tab_strip_controller_->GetFocusedGroup();
 }
 
 SkColor FakeTabSlotController::GetPaintedGroupColor(

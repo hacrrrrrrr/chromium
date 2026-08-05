@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "chrome/browser/mac/auth_session_request.h"
 
 #import <AuthenticationServices/AuthenticationServices.h>
@@ -23,6 +18,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -203,7 +199,7 @@ void AuthSessionRequest::CancelAuthSession(
 
 // static
 std::optional<std::string> AuthSessionRequest::CanonicalizeScheme(
-    std::string scheme) {
+    std::string_view scheme) {
   url::RawCanonOutputT<char> canon_output;
   url::Component component;
   bool result = url::CanonicalizeScheme(scheme, &canon_output, &component);
@@ -211,7 +207,7 @@ std::optional<std::string> AuthSessionRequest::CanonicalizeScheme(
     return std::nullopt;
   }
 
-  return std::string(canon_output.data() + component.begin, component.len);
+  return std::string(component.AsViewOn(canon_output.view()));
 }
 
 void AuthSessionRequest::CreateAndAddNavigationThrottle(
@@ -284,7 +280,7 @@ Browser* AuthSessionRequest::CreateBrowser(
 
   // Check if browser creation is possible before attempting to create it.
   // This prevents crashes when the profile is in an unsuitable state.
-  if (Browser::GetCreationStatusForProfile(profile) !=
+  if (GetBrowserWindowCreationStatusForProfile(*profile) !=
       Browser::CreationStatus::kOk) {
     return nullptr;
   }
@@ -377,8 +373,6 @@ void AuthSessionRequest::WebContentsDestroyed() {
   //   triggered above in `CancelAuthSession()`.
   //
   // In both cancellation cases, the OS must receive a cancellation callback.
-  // (This is an undocumented requirement in the case that the OS asked for the
-  // cancellation; see https://crbug.com/40250389.)
 
   if (perform_cancellation_callback_) {
     NSError* error = [NSError

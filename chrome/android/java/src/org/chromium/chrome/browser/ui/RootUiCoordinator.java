@@ -31,6 +31,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.WindowInsetsCompat;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Callback;
 import org.chromium.base.CallbackController;
 import org.chromium.base.DeviceInfo;
@@ -424,7 +425,7 @@ public class RootUiCoordinator
     protected final @ActivityType int mActivityType;
     protected final Supplier<Boolean> mIsInOverviewModeSupplier;
     private final AppMenuDelegate mAppMenuDelegate;
-    private final Supplier<TabContentManager> mTabContentManagerSupplier;
+    protected final Supplier<TabContentManager> mTabContentManagerSupplier;
     private final IntentRequestTracker mIntentRequestTracker;
     private final boolean mInitializeUiWithIncognitoColors;
     protected final SettableMonotonicObservableSupplier<EphemeralTabCoordinator>
@@ -765,6 +766,12 @@ public class RootUiCoordinator
                             @Override
                             public boolean isCurrentTabNull() {
                                 return mActivityTabProvider.get() == null;
+                            }
+
+                            @Override
+                            public boolean isActivityFocused() {
+                                return ApplicationStatus.getLastTrackedFocusedActivity()
+                                        == mActivity;
                             }
                         });
 
@@ -1432,6 +1439,10 @@ public class RootUiCoordinator
     }
 
     protected boolean isContextualSearchEnabled() {
+        // Caution: this cannot return anything else. A lot of code implicitly assumes the
+        // mContextualSearchManager is always available.
+        // Only special cases can currently override this value - ones where no logic ever
+        // calls `assumeNonNull` on `mContextualSearchManagerSupplier`.
         return true;
     }
 
@@ -1835,6 +1846,7 @@ public class RootUiCoordinator
             return true;
         } else if (id == R.id.paint_preview_show_id) {
             DemoPaintPreview.showForTab(mActivityTabProvider.get());
+            RecordUserAction.record("MobileMenuPaintPreview");
             return true;
         } else if (id == R.id.get_image_descriptions_id) {
             Tab tab = mActivityTabProvider.get();

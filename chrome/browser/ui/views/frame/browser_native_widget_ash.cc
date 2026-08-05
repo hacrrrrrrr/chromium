@@ -106,8 +106,9 @@ void BrowserNativeWidgetAsh::OnWidgetInitDone() {
   // For legacy reasons v1 apps (like Secure Shell) are allowed to consume keys
   // like brightness, volume, etc. Otherwise these keys are handled by the
   // Ash window manager.
-  window_state->SetCanConsumeSystemKeys(browser->is_type_app() ||
-                                        browser->is_type_app_popup());
+  window_state->SetCanConsumeSystemKeys(
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP);
 
   app_restore::AppRestoreInfo::GetInstance()->OnWidgetInitialized(GetWidget());
 }
@@ -193,20 +194,24 @@ views::Widget::InitParams BrowserNativeWidgetAsh::GetWidgetParams(
   const int32_t restore_id =
       BrowserInitState::From(browser)->create_params().restore_id;
   params.init_properties_container.SetProperty(app_restore::kWindowIdKey,
-                                               browser->session_id().id());
+                                               browser->GetSessionID().id());
   params.init_properties_container.SetProperty(app_restore::kRestoreWindowIdKey,
                                                restore_id);
 
   params.init_properties_container.SetProperty(
       app_restore::kAppTypeBrowser,
-      (browser->is_type_app() || browser->is_type_app_popup()));
+      (browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+       browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP));
 
-  params.init_properties_container.SetProperty(app_restore::kBrowserAppNameKey,
-                                               browser->app_name());
+  params.init_properties_container.SetProperty(
+      app_restore::kBrowserAppNameKey,
+      BrowserInitState::From(browser)->create_params().app_name);
   params.init_properties_container.SetProperty(
       chromeos::kShouldHaveHighlightBorderOverlay, true);
 
-  bool is_app = browser->is_type_app() || browser->is_type_app_popup();
+  bool is_app =
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+      browser->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP;
   web_app::AppBrowserController* controller =
       web_app::AppBrowserController::From(browser);
   if (controller && controller->system_app()) {
@@ -285,7 +290,8 @@ void BrowserNativeWidgetAsh::SetWindowAutoManaged() {
   }
   // For browser window in Chrome OS, we should only enable the auto window
   // management logic for tabbed browser.
-  if (browser_view_->browser()->is_type_normal()) {
+  if (browser_view_->browser()->GetType() ==
+      BrowserWindowInterface::Type::TYPE_NORMAL) {
     GetNativeWindow()->SetProperty(ash::kWindowPositionManagedTypeKey, true);
   }
 }

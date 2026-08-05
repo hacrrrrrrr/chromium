@@ -20,6 +20,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -53,6 +54,7 @@
 #include "components/autofill/core/common/credit_card_number_validation.h"
 #include "components/autofill/core/common/dense_set.h"
 #include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "third_party/jni_zero/default_conversions.h"
 #include "third_party/re2/src/re2/re2.h"
 #include "url/android/gurl_android.h"
@@ -129,7 +131,7 @@ PersonalDataManagerAndroid::CreateJavaCreditCardFromNative(
   const data_util::PaymentRequestData& payment_request_data =
       data_util::GetPaymentRequestData(card.network());
   return Java_CreditCard_create(
-      env, card.guid(), card.origin(),
+      env, card.guid(), card.is_user_confirmed(),
       card.record_type() == CreditCard::RecordType::kLocalCard,
       card.record_type() == CreditCard::RecordType::kVirtualCard,
       card.GetRawInfo(CREDIT_CARD_NAME_FULL),
@@ -154,7 +156,7 @@ void PersonalDataManagerAndroid::PopulateNativeCreditCardFromJava(
     const JavaRef<jobject>& jcard,
     JNIEnv* env,
     CreditCard* card) {
-  card->set_origin(Java_CreditCard_getOrigin(env, jcard));
+  card->set_is_user_confirmed(Java_CreditCard_getIsUserConfirmed(env, jcard));
   card->SetRawInfo(CREDIT_CARD_NAME_FULL, Java_CreditCard_getName(env, jcard));
   card->SetRawInfo(CREDIT_CARD_NUMBER, Java_CreditCard_getNumber(env, jcard));
   card->SetRawInfo(CREDIT_CARD_EXP_MONTH, Java_CreditCard_getMonth(env, jcard));
@@ -362,7 +364,7 @@ ScopedJavaLocalRef<jobject> PersonalDataManagerAndroid::GetCreditCardForNumber(
     JNIEnv* env,
     const std::u16string& card_number) {
   // A local card with empty GUID.
-  CreditCard card("", "");
+  CreditCard card("");
   card.SetNumber(card_number);
   return PersonalDataManagerAndroid::CreateJavaCreditCardFromNative(env, card);
 }
@@ -779,6 +781,41 @@ bool PersonalDataManagerAndroid::
     IsAutofillAmountExtractionAiTermsSeenPrefEnabled(JNIEnv* env) {
   return payments_data_manager()
       .IsAutofillAmountExtractionAiTermsSeenPrefEnabled();
+}
+
+std::vector<std::string>
+PersonalDataManagerAndroid::GetEmailVerificationAddresses(JNIEnv* env) {
+  const base::DictValue& state =
+      prefs_->GetDict(prefs::kAutofillEmailVerificationState);
+  std::vector<std::string> emails;
+  emails.reserve(state.size());
+  for (auto it : state) {
+    emails.push_back(it.first);
+  }
+  return emails;
+}
+
+std::string PersonalDataManagerAndroid::GetEmailVerificationIssuer(
+    JNIEnv* env,
+    const std::string& email) {
+  const base::DictValue& state =
+      prefs_->GetDict(prefs::kAutofillEmailVerificationState);
+  const base::DictValue* email_data = state.FindDict(email);
+  if (!email_data) {
+    return "";
+  }
+  const std::string* issuer = email_data->FindString("issuer_site");
+  if (!issuer) {
+    return "";
+  }
+  return *issuer;
+}
+
+void PersonalDataManagerAndroid::RemoveEmailVerificationAddress(
+    JNIEnv* env,
+    const std::string& email) {
+  ScopedDictPrefUpdate update(prefs_, prefs::kAutofillEmailVerificationState);
+  update->Remove(email);
 }
 
 }  // namespace autofill

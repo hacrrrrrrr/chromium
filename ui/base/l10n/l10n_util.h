@@ -55,12 +55,15 @@ std::optional<std::string> CheckAndResolveLocale(
 // nearly all cases you shouldn't call this, rather use GetApplicationLocale
 // defined on browser_process.
 //
-// Returns the locale used by the Application.  First we use the value from the
-// command line (--lang), second we try the value in the prefs file (passed in
-// as `pref_locale`), finally, we fall back on the system locale. We only return
-// a value if there's a corresponding resource DLL for the locale.  Otherwise,
-// we fall back to en-us. `set_icu_locale` determines whether the resulting
-// locale is set as the default ICU locale before returning it.
+// Returns the locale used by the Application.  The algorithm follows this list
+// of preferences to find a suitable locale:
+// - First the value from the command line (--lang);
+// - Second the value in the prefs file (passed in as `pref_locale`);
+// - Finally, fallback on the system locale.
+//
+// A value is returned if it has a corresponding resource on-disk. Otherwise,
+// "en-US" is used as the last fallback. `set_icu_locale` determines whether
+// the resulting locale is set as the default ICU locale before returning it.
 COMPONENT_EXPORT(UI_BASE)
 std::string GetApplicationLocale(std::string_view pref_locale,
                                  bool set_icu_locale = true);
@@ -106,25 +109,11 @@ COMPONENT_EXPORT(UI_BASE)
 std::u16string GetDisplayNameForCountry(std::string_view country_code,
                                         std::string_view display_locale);
 
-// Converts all - into _, to be consistent with ICU and file system names.
-COMPONENT_EXPORT(UI_BASE)
-std::string NormalizeLocale(std::string_view locale);
-
 // Produce a vector of parent locales for given locale.
 // It includes the current locale in the result.
 // sr_Cyrl_RS generates sr_Cyrl_RS, sr_Cyrl and sr.
 COMPONENT_EXPORT(UI_BASE)
 std::vector<std::string> GetParentLocales(std::string_view current_locale);
-
-// Checks if a string is plausibly a syntactically-valid locale string,
-// for cases where we want the valid input to be a locale string such as
-// 'en', 'pt-BR', 'fil', 'es-419', 'zh-Hans-CN', 'i-klingon' or
-// 'de_DE@collation=phonebook', but we don't want to limit it to
-// locales that Chrome actually knows about, so 'xx-YY' should be
-// accepted, but 'z', 'German', 'en-$1', or 'abcd-1234' should not.
-// Case-insensitive. Based on BCP 47, see:
-//   http://unicode.org/reports/tr35/#Unicode_Language_and_Locale_Identifiers
-COMPONENT_EXPORT(UI_BASE) bool IsValidLocaleSyntax(std::string_view locale);
 
 //
 // Mac Note: See l10n_util_mac.h for some NSString versions and other support.
@@ -254,18 +243,13 @@ COMPONENT_EXPORT(UI_BASE)
 void SortStrings16(const std::string& locale,
                    std::vector<std::u16string>* strings);
 
-// Returns a vector of available locale codes from ICU. E.g., a vector
-// containing en-US, es, fr, fi, pt-PT, pt-BR, etc.
-COMPONENT_EXPORT(UI_BASE)
-const std::vector<std::string>& GetAvailableICULocales();
-
-// Returns whether we should show a locale to the user as a supported UI locale.
-// This is similar to CheckAndResolveLocale, except that it excludes some
-// languages from being shown.
+// Returns whether a locale shouled be shown to the user as a supported UI
+// locale. This is similar to CheckAndResolveLocale, except that it excludes
+// some languages from being shown.
 COMPONENT_EXPORT(UI_BASE)
 bool IsUserFacingUILocale(std::string_view locale);
 
-// Returns the subset of locales from GetAcceptLanguages which we should show
+// Returns the subset of locales from GetAcceptLanguages which should be shown
 // to the user as a supported UI locale.
 // E.g., a vector containing en-US, en-CA, en-GB, es, fr, pt-PT, pt-BR, etc.
 COMPONENT_EXPORT(UI_BASE)

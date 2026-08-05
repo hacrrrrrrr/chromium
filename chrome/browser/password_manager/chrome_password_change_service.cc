@@ -31,6 +31,7 @@
 #include "url/gurl.h"
 
 #if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/password_manager/password_change/change_password_form_waiter.h"
 #include "chrome/browser/password_manager/password_change/features.h"
 #include "chrome/browser/password_manager/password_change/model_quality_logs_uploader.h"
 #include "chrome/browser/password_manager/password_change_delegate_impl.h"
@@ -69,6 +70,22 @@ CreateLoggerPair(autofill::LogRouter* log_router) {
   }
   return {std::move(log_manager), std::move(logger)};
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+bool IsPasswordFieldVisible(const password_manager::PasswordForm& form) {
+  for (autofill::FieldRendererId renderer_id :
+       {form.password_element_renderer_id,
+        form.new_password_element_renderer_id}) {
+    if (!renderer_id) {
+      continue;
+    }
+    if (!FieldFocusable(renderer_id, form.form_data)) {
+      return false;
+    }
+  }
+  return true;
+}
+#endif
 
 }  // namespace
 
@@ -220,6 +237,14 @@ void ChromePasswordChangeService::StartPasswordChangeFromCheckup(
   password_change_from_checkup_delegate_->StartPasswordChangeFlow(
       credential, web_contents->GetWeakPtr(), std::move(callback));
 }
+
+void ChromePasswordChangeService::StopPasswordChangeFromCheckup() {
+  if (password_change_from_checkup_delegate_) {
+    password_change_from_checkup_delegate_->Stop(
+        actor::ActorTask::StoppedReason::kStoppedByUser);
+    password_change_from_checkup_delegate_.reset();
+  }
+}
 #endif  // BUILDFLAG(IS_ANDROID)
 
 PasswordChangeDelegate* ChromePasswordChangeService::GetPasswordChangeDelegate(
@@ -251,6 +276,13 @@ void ChromePasswordChangeService::Shutdown() {
     delegate->RemoveObserver(this);
   }
   password_change_delegates_.clear();
+#if !BUILDFLAG(IS_ANDROID)
+  if (password_change_from_checkup_delegate_) {
+    password_change_from_checkup_delegate_->Stop(
+        actor::ActorTask::StoppedReason::kShutdown);
+    password_change_from_checkup_delegate_.reset();
+  }
+#endif
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -374,6 +406,13 @@ PasswordChangeAvailability ChromePasswordChangeService::GetPerSiteAvailability(
                          true);
     }
     return PasswordChangeAvailability::kNonPasswordLogin;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          password_change::features::
+              kCheckPasswordFieldFocusableBeforeOffering) &&
+      !IsPasswordFieldVisible(form)) {
+    return PasswordChangeAvailability::kInvisiblePasswordField;
   }
 
   return PasswordChangeAvailability::kAvailable;

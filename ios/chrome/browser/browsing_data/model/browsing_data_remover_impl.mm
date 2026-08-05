@@ -744,15 +744,14 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
 
   UMA_HISTOGRAM_ENUMERATION(
       "History.ClearBrowsingData.UserDeletedCookieOrCache", choice);
+  base::RecordAction(
+      base::UserMetricsAction("ClearBrowsingData_UserDeletedCookieOrCache"));
 }
 
 void BrowsingDataRemoverImpl::RemoveDataFromWKWebsiteDataStore(
     base::Time delete_begin,
     BrowsingDataRemoveMask mask) {
   web::ClearBrowsingDataMask types = web::ClearBrowsingDataMask::kRemoveNothing;
-  if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_APPCACHE)) {
-    types |= web::ClearBrowsingDataMask::kRemoveAppCache;
-  }
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_COOKIES)) {
     types |= web::ClearBrowsingDataMask::kRemoveCookies;
   }

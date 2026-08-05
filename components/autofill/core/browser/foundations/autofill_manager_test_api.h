@@ -19,6 +19,8 @@ class AutofillManagerTestApi {
   explicit AutofillManagerTestApi(AutofillManager* manager)
       : manager_(*manager) {}
 
+  static AutofillManager::RendererEventPassKey pass_key() { return {}; }
+
   // Returns the cached FormStructures.
   const std::vector<const FormStructure*> form_structures() const {
     return base::ToVector(
@@ -47,8 +49,10 @@ class AutofillManagerTestApi {
   void OnLoadedServerPredictions(
       AutofillCrowdsourcingManager::QueryResponse response,
       const std::vector<FormData>& forms) {
+    std::vector<FormGlobalId> form_ids =
+        base::ToVector(forms, &FormData::global_id);
     manager_->NotifyObservers(
-        &AutofillManager::Observer::OnBeforeLoadedServerPredictions);
+        &AutofillManager::Observer::OnBeforeLoadedServerPredictions, form_ids);
     manager_->OnLoadedServerPredictions(forms, base::TimeTicks(),
                                         std::move(response));
   }
@@ -69,6 +73,8 @@ class AutofillManagerTestApi {
   }
 
   void ClearFormStructures() { manager_->form_structures_.clear(); }
+
+  void Reset() { manager_->Reset(); }
 
  private:
   raw_ref<AutofillManager> manager_;

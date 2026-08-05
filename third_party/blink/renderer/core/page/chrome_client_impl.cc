@@ -1297,7 +1297,7 @@ void ChromeClientImpl::ShowVirtualKeyboardOnElementFocus(LocalFrame& frame) {
       ->ShowVirtualKeyboardOnElementFocus();
 }
 
-void ChromeClientImpl::OnMouseDown(Node& mouse_down_node) {
+void ChromeClientImpl::DidDispatchMouseDown(Node& mouse_down_node) {
   LocalFrame* frame = mouse_down_node.GetDocument().GetFrame();
   if (auto* fill_client = AutofillClientFromFrame(frame)) {
     fill_client->DidReceiveLeftMouseDownOrGestureTapInNode(
@@ -1306,6 +1306,13 @@ void ChromeClientImpl::OnMouseDown(Node& mouse_down_node) {
   if (auto* record_replay_client = RecordReplayClientFromFrame(frame)) {
     record_replay_client->DidReceiveLeftMouseDownOrGestureTapInNode(
         WebNode(&mouse_down_node));
+  }
+}
+
+void ChromeClientImpl::WillDispatchPointerDown(Node& node) {
+  if (auto* fill_client =
+          AutofillClientFromFrame(node.GetDocument().GetFrame())) {
+    fill_client->DidReceiveLeftPointerDownBeforeDispatch(WebNode(&node));
   }
 }
 
@@ -1482,7 +1489,7 @@ WebAutofillClient* ChromeClientImpl::AutofillClientFromFrame(
     LocalFrame* frame) {
   if (!frame) {
     // It is possible to pass nullptr to this method. For instance the call from
-    // OnMouseDown might be nullptr. See https://crbug.com/739199.
+    // DidDispatchMouseDown might be nullptr. See https://crbug.com/739199.
     return nullptr;
   }
 
@@ -1580,8 +1587,14 @@ gfx::Rect ChromeClientImpl::AdjustWindowRectForDisplay(
   return window;
 }
 
-void ChromeClientImpl::OnFirstContentfulPaint(const base::TimeDelta& duration) {
-  web_view_->OnFirstContentfulPaint(duration);
+void ChromeClientImpl::OnFirstContentfulPaint(
+    const base::TimeTicks& presentation_time) {
+  web_view_->OnFirstContentfulPaint(presentation_time);
+}
+
+void ChromeClientImpl::OnLargestContentfulPaint(
+    const base::TimeTicks& presentation_time) {
+  web_view_->OnLargestContentfulPaint(presentation_time);
 }
 
 }  // namespace blink

@@ -4,6 +4,7 @@
 
 #include "components/autofill/core/browser/metrics/form_interactions_ukm_logger.h"
 
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -494,8 +495,8 @@ TEST_F(FieldLogUkmMetricTest, AutofillFieldInfoMetricsFieldType) {
   // Verify FieldInfo UKM event for every field.
   for (const auto [field, heuristic_type, html_field_type, server_type,
                    overall_type, autocomplete_state] :
-       base::zip(form.fields(), heuristic_types, html_field_types, server_types,
-                 overall_types, autocomplete_states)) {
+       std::views::zip(form.fields(), heuristic_types, html_field_types,
+                       server_types, overall_types, autocomplete_states)) {
     FieldPrediction::Source prediction_source =
         server_type != NO_SERVER_DATA ? FieldPrediction::SOURCE_AUTOFILL_DEFAULT
                                       : FieldPrediction::SOURCE_UNSPECIFIED;
@@ -574,7 +575,7 @@ TEST_F(FieldLogUkmMetricTest, AutofillFieldInfoMetricsFieldType) {
        FormGlobalIdToHash64Bit(form.global_id())},
       {UFST::kFormSignatureName,
        Collapse(CalculateFormSignature(form)).value()},
-      {UFST::kAutofillFormEventsName, 0},
+      {UFST::kAutofillFormEventsName, 1LL << FORM_EVENT_DID_PARSE_FORM},
       {UFST::kAutofillFormEvents2Name, 0},
       {UFST::kSampleRateName, 1},
       {UFST::kWasSubmittedName, true},
@@ -1503,7 +1504,8 @@ TEST_P(LogFocusedComplexFormAtFormRemoveTest, TestEmittedUKM) {
 
   if (GetParam().step_0_focus) {
     task_environment_.FastForwardBy(base::Milliseconds(1000));
-    autofill_manager().OnFocusOnFormFieldImpl(form, first_field.global_id());
+    autofill_manager().OnFocusOnFormField(form, first_field.global_id(),
+                                          AutofillManagerTestApi::pass_key());
   }
   if (GetParam().step_1_click) {
     task_environment_.FastForwardBy(base::Milliseconds(1000));

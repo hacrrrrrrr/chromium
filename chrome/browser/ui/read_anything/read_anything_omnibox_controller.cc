@@ -16,6 +16,8 @@
 #include "content/public/browser/page.h"
 #include "content/public/browser/web_contents.h"
 #include "read_anything_entry_point_controller.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_recorder.h"
 #include "ui/accessibility/accessibility_features.h"
 
 ReadAnythingOmniboxController::ReadAnythingOmniboxController(
@@ -25,8 +27,7 @@ ReadAnythingOmniboxController::ReadAnythingOmniboxController(
       tab_(tab) {
   // This class should only be instantiated if the omnibox entrypoint is
   // enabled.
-  CHECK(features::IsReadAnythingOmniboxChipEnabled() &&
-        base::FeatureList::IsEnabled(features::kPageActionsMigration));
+  CHECK(features::IsReadAnythingOmniboxChipEnabled());
 
   read_anything::ReadAnythingEntryPointController::
       RegisterForSuggestReadingMode(
@@ -75,7 +76,7 @@ void ReadAnythingOmniboxController::OnTabBackgrounded(tabs::TabInterface* tab) {
 
 void ReadAnythingOmniboxController::Activate(
     bool active,
-    std::optional<ReadAnythingOpenTrigger> open_trigger,
+    ReadAnythingOpenTrigger open_trigger,
     std::optional<base::TimeDelta> completed_session_duration) {
   if (active) {
     if (iph_response_timer_ && iph_response_timer_->IsRunning()) {
@@ -84,20 +85,21 @@ void ReadAnythingOmniboxController::Activate(
     }
 
     if (features::IsReadAnythingOmniboxChipEnabled() &&
-        base::FeatureList::IsEnabled(features::kPageActionsMigration) &&
-        open_trigger.has_value() &&
-        open_trigger.value() !=
+        open_trigger !=
             ReadAnythingOpenTrigger::kReadAnythingTogglePresentationButton &&
         GetCurrentPageActionState().showing) {
       // Ignore the toggle presentation button for this metric, since that can
       // only be used after RM is already open.
       base::UmaHistogramEnumeration(
-          "Accessibility.ReadAnything.EntryPointAfterOmnibox",
-          open_trigger.value());
+          "Accessibility.ReadAnything.EntryPointAfterOmnibox", open_trigger);
     }
     // Hide the omnibox entrypoint now that RM is already showing.
     read_anything::ReadAnythingEntryPointController::UpdatePageActionVisibility(
         /*should_show_page_action=*/false, tab_);
+
+    if (open_trigger == ReadAnythingOpenTrigger::kOmniboxChip) {
+      was_triggered_ = true;
+    }
   } else if (!features::IsImmersiveReadAnythingEnabled() &&
              tab_->IsActivated()) {
     // Show the entrypoint again once RM is closed. In immersive mode, do this
@@ -126,6 +128,7 @@ void ReadAnythingOmniboxController::OnReadingModePresenterChanged() {
 }
 
 void ReadAnythingOmniboxController::OnDestroyed() {
+  LogUkm();
   StopTimers();
   if (features::IsImmersiveReadAnythingEnabled()) {
     auto* read_anything_controller = ReadAnythingController::From(tab_);
@@ -146,6 +149,7 @@ void ReadAnythingOmniboxController::OnDiscardContents(
     content::WebContents* new_contents) {
   tabs::ContentsObservingTabFeature::OnDiscardContents(tab, old_contents,
                                                        new_contents);
+  LogUkm();
   read_anything::ReadAnythingEntryPointController::UpdatePageActionVisibility(
       /*should_show_page_action=*/false, tab_);
   StopTimers();
@@ -155,6 +159,7 @@ void ReadAnythingOmniboxController::OnDiscardContents(
 }
 
 void ReadAnythingOmniboxController::PrimaryPageChanged(content::Page& page) {
+  LogUkm();
   // Reset the distillable indicator when the page changes.
   was_last_checked_page_distillable_ = false;
   was_page_checked_ = false;
@@ -209,6 +214,11 @@ void ReadAnythingOmniboxController::OnShouldSuggestReadingModeResult(
   // count as "ignored".
   was_last_checked_page_distillable_ = should_show;
   was_page_checked_ = true;
+  if (tab_ && tab_->GetContents() &&
+      tab_->GetContents()->GetPrimaryMainFrame()) {
+    ukm_source_id_ =
+        tab_->GetContents()->GetPrimaryMainFrame()->GetPageUkmSourceId();
+  }
   if (IsIrrelevant()) {
     return;
   }
@@ -226,6 +236,11 @@ void ReadAnythingOmniboxController::UpdateVisibility(bool should_show) {
       should_show, tab_,
       base::BindOnce(&ReadAnythingOmniboxController::OnShowPromoResult,
                      weak_factory_.GetWeakPtr()));
+}
+
+void ReadAnythingOmniboxController::OnPageActionIconShown(
+    const page_actions::PageActionState& page_action) {
+  was_shown_ = true;
 }
 
 void ReadAnythingOmniboxController::UpdateIgnored(bool is_showing) {
@@ -283,4 +298,16 @@ bool ReadAnythingOmniboxController::IsIrrelevant() {
   return !tab_->IsActivated() ||
          read_anything::ReadAnythingEntryPointController::IsUIShowing(
              tab_->GetBrowserWindowInterface());
+}
+
+void ReadAnythingOmniboxController::LogUkm() {
+  if (ukm_source_id_ != ukm::kInvalidSourceId && was_page_checked_) {
+    ukm::builders::Accessibility_ReadAnything_OmniboxEntryPoint(ukm_source_id_)
+        .SetShown(was_shown_)
+        .SetTriggered(was_triggered_)
+        .Record(ukm::UkmRecorder::Get());
+  }
+  ukm_source_id_ = ukm::kInvalidSourceId;
+  was_triggered_ = false;
+  was_shown_ = false;
 }

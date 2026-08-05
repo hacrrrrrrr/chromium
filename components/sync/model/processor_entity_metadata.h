@@ -53,13 +53,6 @@ class ProcessorEntityMetadata {
   // Returns the underlying proto metadata.
   const sync_pb::EntityMetadata& proto() const { return metadata_; }
 
-  // Returns a mutable pointer to the underlying proto metadata.
-  // Prefer using the high-level mutation APIs below instead of modifying the
-  // proto directly.
-  // TODO(crbug.com/40823197): Remove this API once bookmarks are fully
-  // refactored.
-  sync_pb::EntityMetadata* mutable_proto() { return &metadata_; }
-
   // Returns true if the entity is deleted.
   bool IsDeleted() const;
 
@@ -88,6 +81,9 @@ class ProcessorEntityMetadata {
   // Increments the sequence number of the entity, indicating a local change.
   // This will also update the base_specifics_hash if the entity was not already
   // unsynced.
+  // TODO(crbug.com/40823197): Consider replacing IncrementSequenceNumber() with
+  // a higher-level domain API (e.g. MarkForRecommit()) to avoid exposing
+  // low-level sequence number counter semantics to callers.
   void IncrementSequenceNumber();
 
   // Returns true if the entity's specifics hash (sync-ed or unsynced) matches
@@ -108,8 +104,9 @@ class ProcessorEntityMetadata {
   // `specifics`. The entity must not be deleted.
   bool MatchesSpecificsHash(const sync_pb::EntitySpecifics& specifics) const;
 
-  // Updates the specifics hash in the metadata based on `specifics`.
-  void UpdateSpecificsHash(const sync_pb::EntitySpecifics& specifics);
+  // Returns true if `favicon_png_bytes` matches the tracked favicon hash.
+  // The entity must not be deleted.
+  bool MatchesFaviconHash(const std::string& favicon_png_bytes) const;
 
   // Records that a remote update was ignored. Updates server_id and
   // server_version.
@@ -131,12 +128,6 @@ class ProcessorEntityMetadata {
   // Records a commit response.
   void RecordCommitResponse(const CommitResponseData& data);
 
-  // Updates the metadata fields (sequence_number, specifics_hash,
-  // modification_time, is_deleted) for a local update.
-  // Used by bookmarks to perform custom local updates.
-  void UpdateMetadataForLocalUpdate(const sync_pb::EntitySpecifics& specifics,
-                                    base::Time modification_time);
-
   // Performs a local update based on the provided `data`, updating metadata
   // fields.
   void RecordLocalUpdate(
@@ -147,20 +138,11 @@ class ProcessorEntityMetadata {
   // Performs a local deletion, updating metadata fields.
   void RecordLocalDeletion(const DeletionOrigin& origin);
 
-  // Sets the possibly trimmed base specifics.
-  void SetPossiblyTrimmedBaseSpecifics(sync_pb::EntitySpecifics specifics);
-
-  // Sets the creation time.
-  void SetCreationTime(base::Time time);
-
-  // Sets the unique position.
-  void SetUniquePosition(const sync_pb::UniquePosition& unique_position);
-
-  // Clears the unique position.
-  void ClearUniquePosition();
-
  private:
   explicit ProcessorEntityMetadata(sync_pb::EntityMetadata metadata);
+
+  // Updates the specifics hash in the metadata based on `specifics`.
+  void UpdateSpecificsHash(const sync_pb::EntitySpecifics& specifics);
 
   sync_pb::EntityMetadata metadata_;
 };

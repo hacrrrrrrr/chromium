@@ -79,6 +79,7 @@
 #include "third_party/blink/renderer/core/sanitizer/sanitizer.h"
 #include "third_party/blink/renderer/core/script/ignore_destructive_write_count_incrementer.h"
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
+#include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -94,8 +95,9 @@ namespace blink {
 
 void HTMLConstructionSite::SetAttributes(Element* element,
                                          AtomicHTMLToken* token) {
-  if (!is_scripting_content_allowed_)
+  if (!is_scripting_content_allowed_) {
     element->StripScriptingAttributes(token->Attributes());
+  }
   element->ParserSetAttributes(token->Attributes());
   if (token->HasDuplicateAttribute()) {
     // UseCounter is not free, and only the first call matters. Only call to it
@@ -221,15 +223,17 @@ static inline void Insert(HTMLConstructionSiteTask& task) {
   // instead be inside the template element's template contents, after its last
   // child (if any).
   if (auto* template_element = DynamicTo<HTMLTemplateElement>(*task.parent)) {
-    if (auto* patch = template_element->GetPatch()) {
+    auto* patch = template_element->GetPatch();
+    if (patch && !patch->is_buffered()) {
       patch->Apply(task);
     } else {
       task.parent = template_element->InsertionTarget();
     }
     // If the Document was detached in the middle of parsing, The template
     // element won't be able to initialize its contents, so bail out.
-    if (!task.parent)
+    if (!task.parent) {
       return;
+    }
   }
 
   // https://html.spec.whatwg.org/C/#insert-a-foreign-element
@@ -248,8 +252,9 @@ static inline void ExecuteInsertTask(HTMLConstructionSiteTask& task) {
   Insert(task);
   if (auto* child = DynamicTo<Element>(task.child.Get())) {
     child->BeginParsingChildren();
-    if (task.self_closing)
+    if (task.self_closing) {
       child->FinishParsingChildren();
+    }
   }
 }
 
@@ -292,6 +297,21 @@ static inline void ExecuteInsertAlreadyParsedChildTask(
     HTMLConstructionSiteTask& task) {
   DCHECK_EQ(task.operation,
             HTMLConstructionSiteTask::kInsertAlreadyParsedChild);
+
+  // See https://github.com/whatwg/html/pull/12709
+  if (Document* parentDoc = DynamicTo<Document>(task.parent.Get())) {
+    if (parentDoc->documentElement()) {
+      if (task.child->parentNode()) {
+        task.child->parentNode()->ParserRemoveChild(*task.child);
+      }
+      return;
+    }
+  } else if (task.child->ContainsIncludingHostElements(*task.parent)) {
+    if (task.child->parentNode()) {
+      task.child->parentNode()->ParserRemoveChild(*task.child);
+    }
+    return;
+  }
 
   Insert(task);
 }
@@ -340,13 +360,15 @@ static unsigned FindBreakIndexBetween(const StringBuilder& string,
   DCHECK_LT(current_position, proposed_break_index);
   DCHECK_LE(proposed_break_index, string.length());
   // The end of the string is always a valid break.
-  if (proposed_break_index == string.length())
+  if (proposed_break_index == string.length()) {
     return proposed_break_index;
+  }
 
   // Latin-1 does not have breakable boundaries. If we ever moved to a different
   // 8-bit encoding this could be wrong.
-  if (string.Is8Bit())
+  if (string.Is8Bit()) {
     return proposed_break_index;
+  }
 
   // We need at least two characters look-ahead to account for UTF-16
   // surrogates, but can't search off the end of the buffer!
@@ -356,20 +378,23 @@ static unsigned FindBreakIndexBetween(const StringBuilder& string,
   CharacterBreakIterator it(
       string.Span16().subspan(current_position, break_search_length));
 
-  if (it.IsBreak(proposed_break_index - current_position))
+  if (it.IsBreak(proposed_break_index - current_position)) {
     return proposed_break_index;
+  }
 
   int adjusted_break_index_in_substring =
       it.Preceding(proposed_break_index - current_position);
-  if (adjusted_break_index_in_substring > 0)
+  if (adjusted_break_index_in_substring > 0) {
     return current_position + adjusted_break_index_in_substring;
+  }
   // We failed to find a breakable point, let the caller figure out what to do.
   return 0;
 }
 
 void HTMLConstructionSite::FlushPendingText() {
-  if (pending_text_.IsEmpty())
+  if (pending_text_.IsEmpty()) {
     return;
+  }
 
   const StringBuilder& string = pending_text_.string_builder;
 
@@ -434,8 +459,9 @@ void HTMLConstructionSite::FlushPendingText() {
 
 void HTMLConstructionSite::QueueTask(HTMLConstructionSiteTask& task,
                                      bool flush_pending_text) {
-  if (flush_pending_text)
+  if (flush_pending_text) {
     FlushPendingText();
+  }
 
   if (sanitizer_ && task.child && task.parent &&
       !task.parent->IsDocumentNode() &&
@@ -487,8 +513,9 @@ void HTMLConstructionSite::ExecuteQueuedTasks() {
   // This has no affect on pendingText, and we may have pendingText remaining
   // after executing all other queued tasks.
   const size_t size = task_queue_.size();
-  if (!size)
+  if (!size) {
     return;
+  }
 
   // Fast path for when |size| is 1, which is the common case
   if (size == 1) {
@@ -503,8 +530,9 @@ void HTMLConstructionSite::ExecuteQueuedTasks() {
   TaskQueue queue;
   queue.swap(task_queue_);
 
-  for (auto& task : queue)
+  for (auto& task : queue) {
     ExecuteTask(task);
+  }
 
   // We might be detached now.
 }
@@ -606,13 +634,15 @@ void HTMLConstructionSite::InsertHTMLHtmlStartTagBeforeHTML(
 void HTMLConstructionSite::MergeAttributesFromTokenIntoElement(
     AtomicHTMLToken* token,
     Element* element) {
-  if (token->Attributes().empty())
+  if (token->Attributes().empty()) {
     return;
+  }
 
   for (const auto& token_attribute : token->Attributes()) {
     if (element->AttributesWithoutUpdate().FindIndex(
-            token_attribute.GetName()) == kNotFound)
+            token_attribute.GetName()) == kNotFound) {
       element->setAttribute(token_attribute.GetName(), token_attribute.Value());
+    }
   }
 
   if (sanitizer_) {
@@ -626,8 +656,9 @@ void HTMLConstructionSite::InsertHTMLHtmlStartTagInBody(
     AtomicHTMLToken* token) {
   // Fragments do not have a root HTML element, so any additional HTML elements
   // encountered during fragment parsing should be ignored.
-  if (is_parsing_fragment_)
+  if (is_parsing_fragment_) {
     return;
+  }
 
   MergeAttributesFromTokenIntoElement(token, open_elements_.HtmlElement());
 }
@@ -653,8 +684,9 @@ void HTMLConstructionSite::InsertHTMLBodyStartTagInBody(
 }
 
 void HTMLConstructionSite::SetDefaultCompatibilityMode() {
-  if (is_parsing_fragment_)
+  if (is_parsing_fragment_) {
     return;
+  }
   SetCompatibilityMode(Document::kQuirksMode);
 }
 
@@ -838,12 +870,13 @@ void HTMLConstructionSite::InsertDoctype(AtomicHTMLToken* token) {
   // fragment, as changing the owning document's compatibility mode would be
   // wrong.
   DCHECK(!is_parsing_fragment_);
-  if (is_parsing_fragment_)
+  if (is_parsing_fragment_) {
     return;
+  }
 
-  if (token->ForceQuirks())
+  if (token->ForceQuirks()) {
     SetCompatibilityMode(Document::kQuirksMode);
-  else {
+  } else {
     SetCompatibilityModeFromDoctype(token->GetHTMLTag(), public_id, system_id);
   }
 }
@@ -964,8 +997,9 @@ void HTMLConstructionSite::InsertHTMLBodyElement(AtomicHTMLToken* token) {
   Element* body = CreateElement(token, html_names::xhtmlNamespaceURI);
   AttachLater(CurrentInsertionLocation(), body);
   open_elements_.PushHTMLBodyElement(HTMLStackItem::Create(body, token));
-  if (document_)
+  if (document_) {
     document_->WillInsertBody();
+  }
 }
 
 void HTMLConstructionSite::InsertHTMLFormElement(
@@ -1074,15 +1108,17 @@ void HTMLConstructionSite::InsertHTMLTemplateElement(
     return;
   }
 
-  if (!patch_target.IsNull()) {
-    if (auto* patch =
-            Patch::Prepare(current_insertion_location.parent, patch_target)) {
-      CHECK(RuntimeEnabledFeatures::DocumentPatchingEnabled());
-      UseCounter::Count(OwnerDocumentForCurrentNode(),
-                        WebFeature::kHTMLPatching);
-      template_element->SetPatch(patch);
+  if (Patch* patch = Patch::Prepare(current_insertion_location.parent,
+                                    patch_target, template_element)) {
+    CHECK(RuntimeEnabledFeatures::DocumentPatchingEnabled());
+    UseCounter::Count(OwnerDocumentForCurrentNode(), WebFeature::kHTMLPatching);
+    template_element->SetPatch(patch);
+    if (!patch_target.empty() && !patch->is_buffered()) {
       return;
     }
+
+    // empty patch_target attaches the template while streaming content.
+    CHECK(RuntimeEnabledFeatures::DeclarativeFragmentEnabled());
   }
 
   AttachLater(current_insertion_location, template_element);
@@ -1138,9 +1174,7 @@ void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
       // elements since scripts can never see those flags or effects thereof.
       .SetCreatedByParser(should_be_parser_inserted,
                           should_be_parser_inserted ? document_ : nullptr)
-      .SetAlreadyStarted(is_parsing_fragment_ && flags.IsCreatedByParser() &&
-                         parser_content_policy_ !=
-                             kAllowScriptingContentAndMarkAsParserInserted);
+      .SetAlreadyStarted(ShouldMarkScriptAlreadyStarted());
   HTMLScriptElement* element = nullptr;
   const auto* is_attribute = token->GetAttributeItem(html_names::kIsAttr);
   bool sanitizer_allows_is_attribute =
@@ -1154,8 +1188,9 @@ void HTMLConstructionSite::InsertScriptElement(AtomicHTMLToken* token) {
         OwnerDocumentForCurrentNode(), flags);
   }
   SetAttributes(element, token);
-  if (is_scripting_content_allowed_)
+  if (is_scripting_content_allowed_) {
     AttachLater(CurrentInsertionLocation(), element);
+  }
   open_elements_.Push(HTMLStackItem::Create(element, token));
 }
 
@@ -1180,15 +1215,17 @@ void HTMLConstructionSite::InsertTextNode(const StringView& string,
   HTMLConstructionSiteTask dummy_task(HTMLConstructionSiteTask::kInsert);
   dummy_task.parent = CurrentNode();
 
-  if (ShouldFosterParent())
+  if (ShouldFosterParent()) {
     FindFosterSite(dummy_task);
+  }
 
   AdjustInsertionLocation(dummy_task);
   if (auto* template_element =
           DynamicTo<HTMLTemplateElement>(*dummy_task.parent)) {
     // If the Document was detached in the middle of parsing, the template
     // element won't be able to initialize its contents.
-    if (auto* patch = template_element->GetPatch()) {
+    auto* patch = template_element->GetPatch();
+    if (patch && !patch->is_buffered()) {
       patch->Apply(dummy_task);
     } else {
       dummy_task.parent = template_element->InsertionTarget();
@@ -1207,8 +1244,9 @@ void HTMLConstructionSite::InsertTextNode(const StringView& string,
   // pending text into the task queue before making more.
   if (!pending_text_.IsEmpty() &&
       (pending_text_.parent != dummy_task.parent ||
-       pending_text_.next_child != dummy_task.next_child))
+       pending_text_.next_child != dummy_task.next_child)) {
     FlushPendingText();
+  }
   pending_text_.Append(dummy_task.parent, dummy_task.next_child, string,
                        whitespace_mode);
 }
@@ -1224,7 +1262,7 @@ void HTMLConstructionSite::Reparent(HTMLStackItem* new_parent,
 void HTMLConstructionSite::InsertAlreadyParsedChild(HTMLStackItem* new_parent,
                                                     HTMLStackItem* child) {
   if (new_parent->CausesFosterParenting()) {
-    FosterParent(child->GetNode());
+    FosterParentAlreadyParsedChild(child->GetNode());
     return;
   }
 
@@ -1246,6 +1284,14 @@ void HTMLConstructionSite::TakeAllChildren(HTMLStackItem* new_parent,
 CreateElementFlags HTMLConstructionSite::GetCreateElementFlags() const {
   return is_parsing_fragment_ ? CreateElementFlags::ByFragmentParser(document_)
                               : CreateElementFlags::ByParser(document_);
+}
+
+bool HTMLConstructionSite::ShouldMarkScriptAlreadyStarted() const {
+  return is_parsing_fragment_ &&
+         parser_content_policy_ !=
+             kAllowScriptingContentAndDoNotMarkAlreadyStarted &&
+         parser_content_policy_ !=
+             kAllowScriptingContentAndMarkAsParserInserted;
 }
 
 Document& HTMLConstructionSite::OwnerDocumentForCurrentNode() {
@@ -1273,8 +1319,9 @@ CustomElementDefinition* HTMLConstructionSite::LookUpCustomElementDefinition(
     const AtomicString& is,
     CustomElementRegistry* registry) {
   // "2. If namespace is not the HTML namespace, return null."
-  if (tag_name.NamespaceURI() != html_names::xhtmlNamespaceURI)
+  if (tag_name.NamespaceURI() != html_names::xhtmlNamespaceURI) {
     return nullptr;
+  }
 
   if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()) {
     if (!registry) {
@@ -1319,6 +1366,13 @@ Element* HTMLConstructionSite::CreateElement(
            ? static_cast<const QualifiedName&>(
                  html_names::TagToQualifiedName(token->GetHTMLTag()))
            : QualifiedName(g_null_atom, token->GetName(), namespace_uri));
+
+  // TODO(nrosenthal): make this explicit in the HTML standard.
+  Document& creation_document = (sanitizer_ && document.IsActive() &&
+                                 !sanitizer_->IsElementAllowed(tag_name))
+                                    ? document.EnsureTemplateDocument()
+                                    : document;
+
   // "5. Let is be the value of the "is" attribute in the given token ..." etc.
   const Attribute* is_attribute = token->GetAttributeItem(html_names::kIsAttr);
   // If sanitizer_ is set and if santizer_ would not allow the "is" attribute,
@@ -1336,8 +1390,7 @@ Element* HTMLConstructionSite::CreateElement(
     // intended parent is a template element, which means it will create a
     // document fragment, the custom element registry should be null.
     if (open_elements_.StackDepth() > 1) {
-      if (auto* tmpl =
-              DynamicTo<HTMLTemplateElement>(CurrentNode())) {
+      if (auto* tmpl = DynamicTo<HTMLTemplateElement>(CurrentNode())) {
         if (tmpl->IsShadowRootModeTemplate()) {
           // For declarative shadow root templates, the insertion target is the
           // shadow root itself. Use the shadow root's registry so elements get
@@ -1375,8 +1428,11 @@ Element* HTMLConstructionSite::CreateElement(
   }
   // 8. Let definition be the result of looking up a custom element definition
   // given registry, given namespace, local name and is.
-  auto* definition =
-      LookUpCustomElementDefinition(document, tag_name, is, registry);
+  CustomElementDefinition* definition = nullptr;
+  if (!sanitizer_ || sanitizer_->IsElementAllowed(tag_name)) {
+    definition =
+        LookUpCustomElementDefinition(document, tag_name, is, registry);
+  }
   // "5. If definition is non-null and the parser was not originally created
   // for the HTML fragment parsing algorithm, then let will execute script
   // be true."
@@ -1397,8 +1453,9 @@ Element* HTMLConstructionSite::CreateElement(
     // TODO(dominicc): This is the way the Blink HTML parser performs
     // checkpoints, but note the spec is different--it talks about the
     // JavaScript stack, not the script nesting level.
-    if (0u == reentry_permit_->ScriptNestingLevel())
+    if (0u == reentry_permit_->ScriptNestingLevel()) {
       document.GetAgent().event_loop()->PerformMicrotaskCheckpoint();
+    }
 
     // "6.3 Push a new element queue onto the custom element
     // reactions stack."
@@ -1412,14 +1469,15 @@ Element* HTMLConstructionSite::CreateElement(
     // only partially construct themselves when created by the parser, but since
     // this is a custom element, we need a fully-constructed element here.
     element = definition->CreateElement(
-        document, tag_name,
+        creation_document, tag_name,
         GetCreateElementFlags().SetCreatedByParser(false, nullptr));
 
     // "8. Append each attribute in the given token to element." We don't use
     // setAttributes here because the custom element constructor may have
     // manipulated attributes.
-    for (const auto& attribute : token->Attributes())
+    for (const auto& attribute : token->Attributes()) {
       element->setAttribute(attribute.GetName(), attribute.Value());
+    }
 
     // "9. If will execute script is true, then ..." etc. The CEReactionsScope
     // and ThrowOnDynamicMarkupInsertionCountIncrementer destructors implement
@@ -1427,11 +1485,20 @@ Element* HTMLConstructionSite::CreateElement(
   } else {
     if (definition) {
       DCHECK(GetCreateElementFlags().IsAsyncCustomElements());
-      element = definition->CreateElement(document, tag_name,
+      element = definition->CreateElement(creation_document, tag_name,
                                           GetCreateElementFlags());
     } else {
+      CreateElementFlags flags = GetCreateElementFlags();
+      // SVG <script> in foreign content is created here, not in
+      // InsertScriptElement(). Mark fragment-parsed ones "already started" too,
+      // so an innerHTML-injected SVG script can't run when later cloned.
+      if (RuntimeEnabledFeatures::SvgScriptFragmentAlreadyStartedEnabled() &&
+          tag_name == svg_names::kScriptTag &&
+          ShouldMarkScriptAlreadyStarted()) {
+        flags.SetAlreadyStarted(true);
+      }
       element = CustomElement::CreateUncustomizedOrUndefinedElement(
-          document, tag_name, GetCreateElementFlags(), is,
+          creation_document, tag_name, flags, is,
           CustomElementRegistryAssignment::ResolveNullableRegistry(
               registry,
               CustomElementRegistryAssignment::NullRegistryFallback::kWait));
@@ -1511,8 +1578,9 @@ HTMLStackItem* HTMLConstructionSite::CreateElementFromSavedToken(
 
 bool HTMLConstructionSite::IndexOfFirstUnopenFormattingElement(
     unsigned& first_unopen_element_index) const {
-  if (active_formatting_elements_.IsEmpty())
+  if (active_formatting_elements_.IsEmpty()) {
     return false;
+  }
   unsigned index = active_formatting_elements_.size();
   do {
     --index;
@@ -1529,8 +1597,9 @@ bool HTMLConstructionSite::IndexOfFirstUnopenFormattingElement(
 
 void HTMLConstructionSite::ReconstructTheActiveFormattingElements() {
   unsigned first_unopen_element_index;
-  if (!IndexOfFirstUnopenFormattingElement(first_unopen_element_index))
+  if (!IndexOfFirstUnopenFormattingElement(first_unopen_element_index)) {
     return;
+  }
 
   unsigned unopen_entry_index = first_unopen_element_index;
   DCHECK_LT(unopen_entry_index, active_formatting_elements_.size());
@@ -1549,13 +1618,15 @@ void HTMLConstructionSite::ReconstructTheActiveFormattingElements() {
 void HTMLConstructionSite::GenerateImpliedEndTagsWithExclusion(
     const HTMLTokenName& name) {
   while (HasImpliedEndTag(CurrentStackItem()) &&
-         !CurrentStackItem()->MatchesHTMLTag(name))
+         !CurrentStackItem()->MatchesHTMLTag(name)) {
     open_elements_.Pop();
+  }
 }
 
 void HTMLConstructionSite::GenerateImpliedEndTags() {
-  while (HasImpliedEndTag(CurrentStackItem()))
+  while (HasImpliedEndTag(CurrentStackItem())) {
     open_elements_.Pop();
+  }
 }
 
 bool HTMLConstructionSite::InQuirksMode() {
@@ -1609,6 +1680,15 @@ void HTMLConstructionSite::FosterParent(Node* node) {
   HTMLConstructionSiteTask task(HTMLConstructionSiteTask::kInsert);
   FindFosterSite(task);
   task.child = node;
+  DCHECK(task.parent);
+  QueueTask(task, true);
+}
+
+void HTMLConstructionSite::FosterParentAlreadyParsedChild(Node* child) {
+  HTMLConstructionSiteTask task(
+      HTMLConstructionSiteTask::kInsertAlreadyParsedChild);
+  FindFosterSite(task);
+  task.child = child;
   DCHECK(task.parent);
   QueueTask(task, true);
 }

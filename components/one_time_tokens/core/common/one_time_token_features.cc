@@ -12,15 +12,8 @@ namespace one_time_tokens::features {
 // TODO(crbug.com/452607505): Clean up when launched.
 BASE_FEATURE(kGmailOtpRetrievalService, base::FEATURE_DISABLED_BY_DEFAULT);
 
-const base::FeatureParam<std::string> kFetchEmailOneTimeTokenEndpointUrl{
-    &kGmailOtpRetrievalService,
-    /*name=*/"fetch-email-one-time-token-endpoint-url",
-    /*default_value=*/
-    "https://onetimetoken.pa.googleapis.com/v1/onetimetokens:fetchEmail"};
-
-const base::FeatureParam<std::string> kMockGmailOtpValue{
-    &kGmailOtpRetrievalService,
-    /*name=*/"mock-gmail-otp-value",
-    /*default_value=*/""};
+const base::FeatureParam<base::TimeDelta> kGmailOtpSubscriptionPeriodParam{
+    &kGmailOtpRetrievalService, /*name=*/"subscription_period",
+    /*default_value=*/base::Minutes(1)};
 
 }  // namespace one_time_tokens::features

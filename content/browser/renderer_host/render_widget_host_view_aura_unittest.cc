@@ -1225,6 +1225,25 @@ TEST_F(RenderWidgetHostViewAuraTest, ParentMovementUpdatesScreenRect) {
             widget_host_->screen_rects().at(0).second);
 }
 
+TEST_F(RenderWidgetHostViewAuraTest, GetViewBoundsWithoutTransform) {
+  parent_view_->SetBounds(gfx::Rect(0, 0, 800, 600));
+  InitViewForPopup(parent_view_, gfx::Rect(50, 50, 100, 100));
+
+  gfx::Rect initial_bounds = view_->GetViewBounds();
+  EXPECT_EQ(gfx::Rect(50, 50, 100, 100), initial_bounds);
+  EXPECT_EQ(initial_bounds, view_->GetViewBoundsWithoutTransform());
+
+  gfx::Transform transform;
+  transform.Translate(100, 100);
+  view_->GetNativeView()->SetTransform(transform);
+
+  // The transformed bounds should be different after translation.
+  EXPECT_NE(initial_bounds, view_->GetViewBounds());
+
+  // The bounds without transform should not be changed.
+  EXPECT_EQ(initial_bounds, view_->GetViewBoundsWithoutTransform());
+}
+
 #if BUILDFLAG(IS_CHROMEOS)
 // Checks that a popup view is destroyed when a user clicks outside of the popup
 // view and focus does not change. This is the case when the user clicks on the
@@ -1391,9 +1410,9 @@ TEST_F(RenderWidgetHostViewAuraTest, SetCompositionText) {
   MockWidgetInputHandler::DispatchedIMEMessage* ime_message =
       events[0]->ToIME();
   EXPECT_TRUE(ime_message);
-  EXPECT_TRUE(ime_message->Matches(composition_text.text, ime_text_spans,
-                                   gfx::Range::InvalidRange(), 4, 4,
-                                   blink::mojom::ImeState::kNone));
+  EXPECT_TRUE(ime_message->Matches(
+      composition_text.text, ime_text_spans, gfx::Range::InvalidRange(), 4, 4,
+      blink::mojom::ImeState::kNone, blink::DOMNodeIdType()));
 
   view_->ImeCancelComposition();
   EXPECT_FALSE(view_->has_composition_text_);
@@ -3142,10 +3161,10 @@ TEST_F(RenderWidgetHostViewAuraTest, BackgroundColorMatchesCompositorFrame) {
   metadata.root_background_color = SkColors::kRed;
   view_->SetRenderFrameMetadata(metadata);
   view_->OnRenderFrameMetadataChangedAfterActivation(base::TimeTicks::Now());
-  auto* parent_layer = view_->GetNativeView()->layer()->AsSolidColor();
+  auto* parent_layer = view_->GetNativeView()->layer()->AsSurface();
 
   EXPECT_EQ(gfx::Rect(0, 0, 100, 100), parent_layer->bounds());
-  EXPECT_EQ(SK_ColorRED, parent_layer->background_color());
+  EXPECT_EQ(SkColors::kRed, parent_layer->GetBackgroundColor());
 }
 
 // Tests background setting priority.
@@ -3239,12 +3258,16 @@ TEST_F(RenderWidgetHostViewAuraTest, DeviceScaleFactorChanges) {
   view_->SetSize(gfx::Size(300, 300));
   ASSERT_TRUE(view_->HasPrimarySurface());
   EXPECT_EQ(gfx::Size(300, 300), view_->window_->layer()->size());
-  viz::SurfaceId initial_surface_id = *view_->window_->layer()->GetSurfaceId();
-  EXPECT_EQ(nullptr, view_->window_->layer()->GetOldestAcceptableFallback());
+  viz::SurfaceId initial_surface_id =
+      *view_->window_->layer()->AsSurface()->GetSurfaceId();
+  EXPECT_EQ(
+      nullptr,
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
 
   // Resizing should update the primary SurfaceId.
   aura_test_helper_->GetTestScreen()->SetDeviceScaleFactor(2.0f);
-  viz::SurfaceId new_surface_id = *view_->window_->layer()->GetSurfaceId();
+  viz::SurfaceId new_surface_id =
+      *view_->window_->layer()->AsSurface()->GetSurfaceId();
   EXPECT_NE(new_surface_id, initial_surface_id);
   EXPECT_EQ(gfx::Size(300, 300), view_->window_->layer()->bounds().size());
 }
@@ -3356,11 +3379,16 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   UNSAFE_TODO(views[1])->SetSize(size2);
   // Show it, it should block until we give it a frame.
   UNSAFE_TODO(views[1])->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(
-      UNSAFE_TODO(views[1])->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_TRUE(UNSAFE_TODO(views[1])
+                  ->window_->layer()
+                  ->AsSurface()
+                  ->GetOldestAcceptableFallback());
   EXPECT_EQ(
-      *UNSAFE_TODO(views[1])->window_->layer()->GetOldestAcceptableFallback(),
-      *UNSAFE_TODO(views[1])->window_->layer()->GetSurfaceId());
+      *UNSAFE_TODO(views[1])
+           ->window_->layer()
+           ->AsSurface()
+           ->GetOldestAcceptableFallback(),
+      *UNSAFE_TODO(views[1])->window_->layer()->AsSurface()->GetSurfaceId());
 
   for (size_t i = 0; i < renderer_count; ++i)
     UNSAFE_TODO(views[i])->Destroy();
@@ -3925,6 +3953,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
     base::TimeTicks progress_time =
         base::TimeTicks::Now() + base::Milliseconds(17);
     widget_host_->ProgressFlingIfNeeded(progress_time);
+    base::RunLoop().RunUntilIdle();
     EXPECT_EQ(OVERSCROLL_NONE, overscroll_delegate()->current_mode());
     ReleaseAndResetDispatchedMessages();
   }
@@ -5888,9 +5917,11 @@ TEST_F(RenderWidgetHostViewAuraTest, DropFallbackIfResizedWhileHidden) {
   view_->Hide();
   view_->SetSize(gfx::Size(54, 32));
   view_->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(*view_->window_->layer()->GetOldestAcceptableFallback(),
-            *view_->window_->layer()->GetSurfaceId());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      *view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback(),
+      *view_->window_->layer()->AsSurface()->GetSurfaceId());
 }
 
 // If a tab is hidden and shown without being resized in the meantime, the
@@ -5902,13 +5933,15 @@ TEST_F(RenderWidgetHostViewAuraTest, DontDropFallbackIfNotResizedWhileHidden) {
   // Force fallback being set.
   view_->DidNavigate();
   view_->ResetFallbackToFirstNavigationSurface();
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
   viz::SurfaceId fallback =
-      *view_->window_->layer()->GetOldestAcceptableFallback();
+      *view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback();
   view_->Hide();
   view_->ShowWithVisibility(PageVisibilityState::kVisible);
-  ASSERT_TRUE(view_->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(fallback, *view_->window_->layer()->GetSurfaceId());
+  ASSERT_TRUE(
+      view_->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
+  EXPECT_EQ(fallback, *view_->window_->layer()->AsSurface()->GetSurfaceId());
 }
 
 // Check that TakeFallbackContentFrom() copies the fallback SurfaceId and
@@ -5927,8 +5960,9 @@ TEST_F(RenderWidgetHostViewAuraTest, TakeFallbackContent) {
   // Call TakeFallbackContentFrom(). The second view should obtain a fallback
   // from the first view.
   view2->TakeFallbackContentFrom(view_);
-  EXPECT_EQ(view_->window_->layer()->GetSurfaceId()->ToSmallestId(),
-            *view2->window_->layer()->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      view_->window_->layer()->AsSurface()->GetSurfaceId()->ToSmallestId(),
+      *view2->window_->layer()->AsSurface()->GetOldestAcceptableFallback());
 
   DestroyView(view2);
 }
@@ -5955,12 +5989,19 @@ TEST_F(RenderWidgetHostViewAuraTest, TakeFallbackContentForPrerender) {
   ASSERT_FALSE(prerender_view->delegated_frame_host_client_
                    ->DelegatedFrameHostIsVisible());
   prerender_view->SetSize(gfx::Size(50, 50));
-  ASSERT_FALSE(prerender_view->window_->layer()->GetOldestAcceptableFallback());
+  ASSERT_FALSE(prerender_view->window_->layer()
+                   ->AsSurface()
+                   ->GetOldestAcceptableFallback());
 
   prerender_view->TakeFallbackContentFrom(old_view);
-  ASSERT_TRUE(prerender_view->window_->layer()->GetOldestAcceptableFallback());
-  EXPECT_EQ(old_view->window_->layer()->GetSurfaceId()->ToSmallestId(),
-            *(prerender_view->window_->layer()->GetOldestAcceptableFallback()));
+  ASSERT_TRUE(prerender_view->window_->layer()
+                  ->AsSurface()
+                  ->GetOldestAcceptableFallback());
+  EXPECT_EQ(
+      old_view->window_->layer()->AsSurface()->GetSurfaceId()->ToSmallestId(),
+      *(prerender_view->window_->layer()
+            ->AsSurface()
+            ->GetOldestAcceptableFallback()));
 
   DestroyView(prerender_view);
   DestroyView(old_view);
@@ -6412,7 +6453,8 @@ TEST_F(InputMethodResultAuraTest, CommitTextBeforeCursor) {
         events[0]->ToIME();
     EXPECT_TRUE(ime_message);
     EXPECT_TRUE(ime_message->Matches(u"hello", {}, gfx::Range::InvalidRange(),
-                                     -5, -5, blink::mojom::ImeState::kNone));
+                                     -5, -5, blink::mojom::ImeState::kNone,
+                                     blink::DOMNodeIdType()));
   }
 }
 
@@ -6668,6 +6710,44 @@ TEST_F(InputMethodStateAuraTest, GetTextFromRange) {
     EXPECT_EQ(text.substr(request_range.start(), request_range.length()),
               result);
   }
+}
+
+// This test verifies that the autocorrect range is taken from the active view
+// only and that stale spans from other registered views are ignored.
+TEST_F(InputMethodStateAuraTest, GetAutocorrectRangeFromActiveView) {
+  TextInputManager* manager = GetTextInputManager(tab_view());
+  ASSERT_TRUE(manager);
+
+  // Send an autocorrect span from a child view, making it the active view.
+  ui::mojom::TextInputState child_state;
+  child_state.type = ui::TEXT_INPUT_TYPE_TEXT;
+  child_state.ime_text_spans_info.push_back(ui::mojom::ImeTextSpanInfo::New(
+      ui::ImeTextSpan(ui::ImeTextSpan::Type::kAutocorrect, 0, 1000),
+      gfx::Rect()));
+  views_[1]->TextInputStateChanged(child_state);
+  ASSERT_EQ(views_[1], manager->active_view_for_testing());
+  EXPECT_EQ(gfx::Range(0, 1000), manager->GetAutocorrectRange());
+
+  // Activate the tab view with no autocorrect span. The child view's span is
+  // still stored in the manager, but it must not be returned for the now
+  // active tab view.
+  ui::mojom::TextInputState tab_state;
+  tab_state.type = ui::TEXT_INPUT_TYPE_TEXT;
+  views_[0]->TextInputStateChanged(tab_state);
+  ASSERT_EQ(views_[0], manager->active_view_for_testing());
+  EXPECT_EQ(gfx::Range(), manager->GetAutocorrectRange());
+
+  // Activate the tab view with its own autocorrect span and verify that the
+  // returned range comes from the tab view.
+  ui::mojom::TextInputState tab_state_with_span;
+  tab_state_with_span.type = ui::TEXT_INPUT_TYPE_TEXT;
+  tab_state_with_span.ime_text_spans_info.push_back(
+      ui::mojom::ImeTextSpanInfo::New(
+          ui::ImeTextSpan(ui::ImeTextSpan::Type::kAutocorrect, 3, 6),
+          gfx::Rect()));
+  views_[0]->TextInputStateChanged(tab_state_with_span);
+  ASSERT_EQ(views_[0], manager->active_view_for_testing());
+  EXPECT_EQ(gfx::Range(3, 6), manager->GetAutocorrectRange());
 }
 
 // This test will verify that after selection, the selected text is written to

@@ -5,12 +5,14 @@
 #include "chrome/browser/password_manager/password_change_delegate_impl.h"
 
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/types/pass_key.h"
 #include "chrome/browser/optimization_guide/mock_optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_change/change_password_form_finder.h"
 #include "chrome/browser/password_manager/password_change/detached_web_contents.h"
+#include "chrome/browser/password_manager/password_change/features.h"
 #include "chrome/browser/password_manager/password_change/login_state_checker.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/passwords/password_change_ui_controller.h"
@@ -23,6 +25,7 @@
 #include "components/autofill/core/common/form_data_test_api.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/core/optimization_guide_prefs.h"
+#include "components/optimization_guide/proto/features/password_change_submission.pb.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
@@ -89,10 +92,6 @@ class MockManagePasswordsUIController : public ManagePasswordsUIController {
 class MockPasswordChangeDelegateObserver
     : public PasswordChangeDelegate::Observer {
  public:
-  MOCK_METHOD(void,
-              OnStateChanged,
-              (PasswordChangeDelegate::State),
-              (override));
   MOCK_METHOD(void,
               OnPasswordChangeStopped,
               (PasswordChangeDelegate*),
@@ -237,7 +236,7 @@ TEST_F(PasswordChangeDelegateImplTest, PasswordChangeFormNotFound) {
   delegate()->StartPasswordChangeFlow();
   static_cast<PasswordChangeDelegateImpl*>(delegate())
       ->login_checker()
-      ->RespondWithLoginStatus(LoginCheckResult::kLoggedIn);
+      ->RespondWithLoginStatus(LoginCheckResult::Status::kLoggedIn);
 
   EXPECT_EQ(delegate()->GetCurrentState(),
             PasswordChangeDelegate::State::kWaitingForChangePasswordForm);
@@ -397,19 +396,109 @@ TEST_F(PasswordChangeDelegateImplTest, LoginPasswordFormIsLogged) {
   EXPECT_TRUE(quality.has_login_form_data());
 }
 
-TEST_F(PasswordChangeDelegateImplTest, DelegateNotifiesObserver) {
+TEST_F(PasswordChangeDelegateImplTest, QualityLogsLoggedInCheckAdded) {
   CreateDelegate();
+  delegate()->StartPasswordChangeFlow();
+
+  PasswordChangeDelegateImpl* delegate_impl =
+      static_cast<PasswordChangeDelegateImpl*>(delegate());
+  auto logging_data = std::make_unique<
+      optimization_guide::proto::PasswordChangeSubmissionLoggingData>();
+  logging_data->mutable_response()
+      ->mutable_is_logged_in_data()
+      ->set_is_logged_in(true);
+
+  delegate_impl->login_checker()->RespondWithLoginStatus(
+      LoginCheckResult::Status::kLoggedIn, std::move(logging_data));
+
+  optimization_guide::proto::PasswordChangeQuality quality =
+      delegate_impl->logs_uploader()
+          ->GetFinalLog()
+          .password_change_submission()
+          .quality();
+  EXPECT_TRUE(quality.has_logged_in_check());
+  EXPECT_TRUE(
+      quality.logged_in_check().response().is_logged_in_data().is_logged_in());
+  EXPECT_EQ(
+      quality.logged_in_check().status(),
+      optimization_guide::proto::
+          PasswordChangeQuality_StepQuality_SubmissionStatus_ACTION_SUCCESS);
+}
+
+TEST_F(PasswordChangeDelegateImplTest, PrivateInferenceLoginCheck_Success) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      password_change::features::kPasswordChangeWithPrivateInferenceLoginCheck);
+
+  CreateDelegate();
+
+  // With Private Inference, the LOGIN_CHECK is executed before showing the
+  // agreement dialog to avoid prompting the user if they are logged out.
+  // Thus, the delegate starts in kNoState and proceeds silently.
+  EXPECT_EQ(delegate()->GetCurrentState(),
+            PasswordChangeDelegate::State::kNoState);
+
+  PasswordChangeDelegateImpl* delegate_impl =
+      static_cast<PasswordChangeDelegateImpl*>(delegate());
+  ASSERT_TRUE(delegate_impl->login_checker());
+  EXPECT_FALSE(delegate_impl->logs_uploader());
+
+  // Now, respond that the user is logged in.
+  auto logging_data = std::make_unique<
+      optimization_guide::proto::PasswordChangeSubmissionLoggingData>();
+  logging_data->mutable_response()
+      ->mutable_is_logged_in_data()
+      ->set_is_logged_in(true);
+
+  delegate_impl->login_checker()->RespondWithLoginStatus(
+      LoginCheckResult::Status::kLoggedIn, std::move(logging_data));
+  // The delegate should have transitioned to the offering/agreement state.
+  EXPECT_EQ(delegate()->GetCurrentState(),
+            PasswordChangeDelegate::State::kWaitingForAgreement);
+  EXPECT_FALSE(delegate_impl->login_checker());
+
+  delegate()->OnPrivacyNoticeAccepted();
+  EXPECT_EQ(delegate()->GetCurrentState(),
+            PasswordChangeDelegate::State::kWaitingForChangePasswordForm);
+  EXPECT_FALSE(delegate_impl->login_checker());
+  EXPECT_TRUE(delegate_impl->logs_uploader());
+  optimization_guide::proto::PasswordChangeQuality quality =
+      delegate_impl->logs_uploader()
+          ->GetFinalLog()
+          .password_change_submission()
+          .quality();
+  EXPECT_TRUE(quality.has_logged_in_check());
+  EXPECT_TRUE(
+      quality.logged_in_check().response().is_logged_in_data().is_logged_in());
+  EXPECT_EQ(
+      quality.logged_in_check().status(),
+      optimization_guide::proto::
+          PasswordChangeQuality_StepQuality_SubmissionStatus_ACTION_SUCCESS);
+}
+
+TEST_F(PasswordChangeDelegateImplTest, PrivateInferenceLoginCheck_Failure) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      password_change::features::kPasswordChangeWithPrivateInferenceLoginCheck);
+
+  CreateDelegate();
+  EXPECT_EQ(delegate()->GetCurrentState(),
+            PasswordChangeDelegate::State::kNoState);
+
+  PasswordChangeDelegateImpl* delegate_impl =
+      static_cast<PasswordChangeDelegateImpl*>(delegate());
+  ASSERT_TRUE(delegate_impl->login_checker());
 
   MockPasswordChangeDelegateObserver observer;
   delegate()->AddObserver(&observer);
 
-  EXPECT_EQ(delegate()->GetCurrentState(),
-            PasswordChangeDelegate::State::kWaitingForAgreement);
+  // The delegate should call Stop() upon terminal failure during pre-offering
+  // login check.
+  EXPECT_CALL(observer, OnPasswordChangeStopped(delegate()));
 
-  EXPECT_CALL(
-      observer,
-      OnStateChanged(
-          PasswordChangeDelegate::State::kWaitingForChangePasswordForm));
-  delegate()->OnPrivacyNoticeAccepted();
+  // Respond with terminal failure.
+  delegate_impl->login_checker()->RespondWithLoginStatus(
+      LoginCheckResult::Status::kError);
+
   delegate()->RemoveObserver(&observer);
 }

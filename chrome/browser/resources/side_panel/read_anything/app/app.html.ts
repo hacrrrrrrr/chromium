@@ -34,7 +34,9 @@ export function getHtml(this: AppElement) {
         .pageLanguage="${this.pageLanguage_}"
         .isImmersiveMode="${this.isImmersiveMode()}"
         .lineFocusStyle="${this.lineFocusStyle_}"
+        .lineFocusEnabled="${this.lineFocusEnabled_}"
         .lineFocusMovement="${this.lineFocusMovement_}"
+        .isLineFocusShowing="${this.computeIsLineFocusShowing_()}"
         @select-voice="${this.onSelectVoice_}"
         @voice-language-toggle="${this.onVoiceLanguageToggle_}"
         @preview-voice="${this.onPreviewVoice_}"
@@ -58,10 +60,13 @@ export function getHtml(this: AppElement) {
         @language-menu-open="${this.onLanguageMenuOpen_}"
         @language-menu-close="${this.onLanguageMenuClose_}"
         @line-focus-style-change="${this.onLineFocusStyleChange_}"
+        @line-focus-toggle-change="${this.onLineFocusToggleChange_}"
         @line-focus-movement-change="${this.onLineFocusMovementChange_}"
         @close-all-menus="${this.onCloseAllMenus_}"
         @settings-opened="${this.onSettingsOpened_}"
         @settings-closed="${this.onSettingsClosed_}"
+        translate="no"
+        class="notranslate"
         id="toolbar">
     </read-anything-toolbar>
   </div>
@@ -79,13 +84,16 @@ export function getHtml(this: AppElement) {
     </div>
     <!-- TODO: crbug.com/324143642- Localize the "Load More" string. -->
     <cr-button id="docs-load-more-button" tabindex="0"
+        translate="no"
+        class="notranslate"
         @click="${this.onDocsLoadMoreButtonClick_}"
         ?hidden="${!this.isDocsLoadMoreButtonVisible_}">
       Load More
     </cr-button>
   </div>
   <div id="empty-state-container"
-      class="sp-scroller"
+      class="sp-scroller notranslate"
+      translate="no"
       @mousemove="${this.onScrollerMousemove_}"
       @mouseleave="${this.onScrollerMouseleave_}"
       ?hidden="${this.computeHasContent()}">

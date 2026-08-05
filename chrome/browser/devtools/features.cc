@@ -113,7 +113,7 @@ BASE_FEATURE(kDevToolsAiAssistanceAccessibilityAgent,
 
 // Whether the DevTools AI Assistance Storage Agent is enabled.
 BASE_FEATURE(kDevToolsAiAssistanceStorageAgent,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Whether the DevTools AI Code Completion is enabled.
 BASE_FEATURE(kDevToolsAiCodeCompletion, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -165,11 +165,6 @@ BASE_FEATURE(kDevToolsSharedProcessInfobar, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kDevToolsAnimationStylesInStylesTab,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-// Whether DevTools will attempt to load project settings from a well-known
-// URI. See https://goo.gle/devtools-json-design for additional details.
-// This is enabled by default starting with M-136.
-BASE_FEATURE(kDevToolsWellKnown, base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Whether the DevTools AI generated annotation labels in timeline are enabled.
 BASE_FEATURE(kDevToolsAiGeneratedTimelineLabels,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -179,9 +174,6 @@ BASE_FEATURE(kDevToolsNewPermissionDialog, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Whether DevTools drawer can be toggled to vertical orientation.
 BASE_FEATURE(kDevToolsVerticalDrawer, base::FEATURE_ENABLED_BY_DEFAULT);
-
-// Turns on the GreenDev experimental UI.
-BASE_FEATURE(kDevToolsGreenDevUi, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Whether the global AI entrypoint is enabled.
 BASE_FEATURE(kDevToolsGlobalAiButton, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -205,7 +197,7 @@ const base::FeatureParam<bool> kDevToolsGdpProfilesStarterBadgeEnabled{
     /*default_value=*/true};
 
 // Whether Network panel should use Durable Messages to preserve network bodies.
-BASE_FEATURE(kDevToolsEnableDurableMessages, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kDevToolsEnableDurableMessages, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, allows starting remote debugging in a running Chrome instance.
 BASE_FEATURE(kDevToolsAcceptDebuggingConnections,
@@ -228,8 +220,6 @@ const base::FeatureParam<bool> kDevToolsConsoleInsightsTeasersAllowWithoutGpu{
     &kDevToolsConsoleInsightsTeasers, "allow_without_gpu",
     /*default_value=*/false};
 
-BASE_FEATURE(kDevToolsAiAssistanceV2, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kDevToolsAiV2Architecture, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Whether the Protocol Monitor panel is enabled.
@@ -245,4 +235,14 @@ BASE_FEATURE(kDevToolsUseGcaApi, base::FEATURE_DISABLED_BY_DEFAULT);
 // Whether the Plus Button is shown in main DevTools panel/drawer tabbed
 // locations, replacing the "More tools" overflow menu.
 BASE_FEATURE(kDevToolsPlusButton, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Whether instrumentation breakpoints are enabled in DevTools.
+BASE_FEATURE(kDevToolsInstrumentationBreakpoints,
+             "DevToolsInstrumentationBreakpoints",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Whether source map scopes are enabled in the DevTools Sources panel.
+BASE_FEATURE(kDevToolsSourceMapScopesInSourcesPanel,
+             "DevToolsSourceMapScopesInSourcesPanel",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 }  // namespace features

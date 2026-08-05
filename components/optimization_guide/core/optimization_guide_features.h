@@ -136,8 +136,6 @@ COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 bool IsOnDeviceModelBackgroundDownloadEnabledForFeature(
     mojom::OnDeviceFeature feature);
 
-COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
-BASE_DECLARE_FEATURE(kOptimizationGuideIconView);
 
 // Whether model sessions may be brokered to untrusted processes.
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
@@ -372,6 +370,17 @@ COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 bool IsFreeDiskSpaceTooLowForOnDeviceModelInstall(
     base::ByteSize free_disk_space_bytes);
 
+// Whether on-device model session creation is gated on sufficient disk space to
+// build execution caches.
+COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
+BASE_DECLARE_FEATURE(kOnDeviceModelCachesDiskSpaceCheck);
+
+// Whether there is too little disk space to build caches for the
+// on-device model installed.
+COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
+bool IsFreeDiskSpaceTooLowForOnDeviceModelCachesBuild(
+    base::ByteSize free_disk_space_bytes);
+
 // Whether there is enough free disk space to allow on-device model
 // installation proactively in background.
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
@@ -416,9 +425,6 @@ double GetOnDeviceModelDefaultTemperature();
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 std::vector<uint32_t> GetOnDeviceModelAllowedAdaptationRanks();
 
-// Returns whether the icon view should be enabled.
-COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
-bool ShouldEnableOptimizationGuideIconView();
 
 // Returns what the timeout for calls to GetAIPageContent should be for
 // subframes. An empty return value indicates no timeout should be applied.

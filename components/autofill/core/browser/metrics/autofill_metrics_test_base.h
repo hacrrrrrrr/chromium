@@ -5,17 +5,19 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_METRICS_AUTOFILL_METRICS_TEST_BASE_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_METRICS_AUTOFILL_METRICS_TEST_BASE_H_
 
+#include <ranges>
+
 #include "base/check_deref.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
-#include "base/types/zip.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_field_test_api.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/payments/test_payments_data_manager.h"
 #include "components/autofill/core/browser/data_model/valuables/loyalty_card.h"
+#include "components/autofill/core/browser/foundations/autofill_manager_test_api.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager_test_api.h"
 #include "components/autofill/core/browser/foundations/test_autofill_client.h"
 #include "components/autofill/core/browser/foundations/test_autofill_driver.h"
@@ -200,25 +202,29 @@ class AutofillMetricsBaseTest : public WithTestAutofillClientDriverManager<
     field.set_is_autofilled_according_to_renderer(false);
     field.set_value(new_value);
     if (field.IsSelectElement()) {
-      autofill_manager().OnSelectControlSelectionChanged(form,
-                                                         field.global_id());
+      autofill_manager().OnSelectControlSelectionChanged(
+          form, field.global_id(), AutofillManagerTestApi::pass_key());
     } else {
-      autofill_manager().OnTextFieldValueChanged(form, field.global_id(),
-                                                 timestamp);
+      autofill_manager().OnTextFieldValueChanged(
+          form, field.global_id(), timestamp,
+          AutofillManagerTestApi::pass_key());
     }
   }
 
   void AutofillForm(const FormData& form) {
-    autofill_manager().OnDidAutofillForm(form);
+    autofill_manager().OnDidAutofillForm(form,
+                                         AutofillManagerTestApi::pass_key());
   }
 
   void SeeForm(const FormData& form) {
-    autofill_manager().OnFormsSeen({form}, {});
+    autofill_manager().OnFormsSeen({form}, {},
+                                   AutofillManagerTestApi::pass_key());
   }
 
   void SubmitForm(const FormData& form) {
-    autofill_manager().OnFormSubmitted(
-        form, mojom::SubmissionSource::FORM_SUBMISSION);
+    autofill_manager().OnFormSubmitted(form,
+                                       mojom::SubmissionSource::FORM_SUBMISSION,
+                                       AutofillManagerTestApi::pass_key());
   }
 
   static CreditCard BuildCard(const std::u16string& real_pan,
@@ -236,7 +242,7 @@ class AutofillMetricsBaseTest : public WithTestAutofillClientDriverManager<
     if (FormStructure* form_structure =
             test_api(autofill_manager()).FindCachedFormById(form.global_id())) {
       for (auto [field, field_description] :
-           base::zip(form_structure->fields(), form_description.fields)) {
+           std::views::zip(form_structure->fields(), form_description.fields)) {
         test_api(*field).set_initial_value(u"");
         if (field_description.is_autofilled_according_to_renderer) {
           field->set_autofilled_type(field_description.role);

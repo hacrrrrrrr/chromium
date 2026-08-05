@@ -30,6 +30,7 @@
 #include "content/browser/renderer_host/ipc_utils.h"
 #include "content/browser/renderer_host/navigation_metrics_utils.h"
 #include "content/browser/renderer_host/navigator.h"
+#include "content/browser/renderer_host/policy_container_host.h"
 #include "content/browser/renderer_host/render_frame_host_delegate.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
@@ -647,14 +648,7 @@ void RenderFrameProxyHost::RouteMessageEvent(
     // frame, ensure that any pending visual properties such as size are sent
     // to the target frame before the postMessage, as sites might implicitly
     // be relying on this ordering.
-    bool target_is_descendant_of_source = false;
-    for (RenderFrameHost* rfh = target_rfh; rfh; rfh = rfh->GetParent()) {
-      if (rfh == source_rfh) {
-        target_is_descendant_of_source = true;
-        break;
-      }
-    }
-    if (target_is_descendant_of_source) {
+    if (target_rfh->IsDescendantOfWithinFrameTree(source_rfh)) {
       target_rfh->GetRenderWidgetHost()
           ->SynchronizeVisualPropertiesIgnoringPendingAck();
     }
@@ -664,20 +658,16 @@ void RenderFrameProxyHost::RouteMessageEvent(
       // RenderFrameProxyHost because a persistent communication channel
       // shouldn't be persisted after the message is sent.
     } else if (is_embedder_to_guest_communication) {
-      // We create a RenderFrameProxyHost for the embedder in the guest's
-      // render process but we intentionally do not expose the embedder's
-      // opener chain to it.
-      // TODO(crbug.com/40261772): Using the main frame will lead to a null
-      // event.source if a subframe posts a message to the guest. See also
-      // https://crbug.com/41172969
       CHECK(target_rfh->is_main_frame());
-      source_rfh->GetMainFrame()
-          ->frame_tree_node()
-          ->render_manager()
-          ->CreateRenderFrameProxy(
-              target_rfh->GetSiteInstance()->group(),
-              source_rfh->GetMainFrame()->browsing_context_state(),
-              /*navigation_metrics_token=*/std::nullopt);
+      // Create proxies for the source frame and its ancestors up to the main
+      // frame. We explicitly avoid creating proxies for the entire frame tree
+      // to prevent leaking the embedder's full frame structure and the
+      // embedder's opener chain to the guest.
+
+      source_rfh->frame_tree_node()
+          ->GetRenderFrameHostManager()
+          .CreateRenderFrameProxyAndAncestorChainIfNeeded(
+              target_rfh->GetSiteInstance()->group());
     } else if (is_guest_to_embedder_communication) {
       // A RenderFrameProxyHost was already created when the guest was
       // attached.
@@ -849,6 +839,35 @@ void RenderFrameProxyHost::OpenURL(blink::mojom::OpenURLParamsPtr params) {
     }
   }
 
+  blink::LocalFrameToken* initiator_frame_token =
+      base::OptionalToPtr(params->initiator_frame_token);
+  // TODO(crbug.com/510258191): Ensure that a well behaving renderer always has
+  // an associated |initiator_navigation_state|, and terminate renderer
+  // processes whose |initiator_navigation_state| we cannot find.
+  scoped_refptr<InitiatorNavigationState> initiator_navigation_state =
+      RenderFrameHostImpl::GetInitiatorNavigationStateFromFrameToken(
+          initiator_frame_token, GetProcess()->GetDeprecatedID(),
+          current_rfh->GetBrowserContext());
+
+  bool is_initiator_sandboxed_with_forms = false;
+  if (initiator_navigation_state) {
+    auto* initiator_navigation_state_impl =
+        static_cast<InitiatorNavigationStateImpl*>(
+            initiator_navigation_state.get());
+    is_initiator_sandboxed_with_forms =
+        (initiator_navigation_state_impl->policy_container_policies()
+             .sandbox_flags &
+         network::mojom::WebSandboxFlags::kForms) !=
+        network::mojom::WebSandboxFlags::kNone;
+  }
+
+  if ((params->is_form_submission || params->post_body) &&
+      is_initiator_sandboxed_with_forms) {
+    bad_message::ReceivedBadMessage(
+        GetProcess(), bad_message::RFPH_FORM_SUBMISSION_FROM_SANDBOXED_FRAME);
+    return;
+  }
+
   // Since this navigation targeted a specific RenderFrameProxy, it should stay
   // in the current tab.
   CHECK_EQ(WindowOpenDisposition::CURRENT_TAB, params->disposition,
@@ -872,15 +891,6 @@ void RenderFrameProxyHost::OpenURL(blink::mojom::OpenURLParamsPtr params) {
   // the navigation start will be updated when the BeforeUnload ack is received.
   const auto navigation_start_time = base::TimeTicks::Now();
 
-  blink::LocalFrameToken* initiator_frame_token =
-      base::OptionalToPtr(params->initiator_frame_token);
-  // TODO(crbug.com/510258191): Ensure that a well behaving renderer always has
-  // an associated |initiator_navigation_state|, and terminate renderer
-  // processes whose |initiator_navigation_state| we cannot find.
-  scoped_refptr<InitiatorNavigationState> initiator_navigation_state =
-      RenderFrameHostImpl::GetInitiatorNavigationStateFromFrameToken(
-          initiator_frame_token, GetProcess()->GetDeprecatedID(),
-          current_rfh->GetBrowserContext());
   // TODO(lfg, lukasza): Remove |extra_headers| parameter from
   // RequestTransferURL method once both RenderFrameProxyHost and
   // RenderFrameHostImpl call RequestOpenURL from their OnOpenURL handlers.

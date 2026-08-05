@@ -555,6 +555,13 @@ targets.mixin(
 )
 
 targets.mixin(
+    name = "fuchsia-orchestrate",
+    args = [
+        "--orchestrate",
+    ],
+)
+
+targets.mixin(
     name = "upload_inv_extended_properties",
     resultdb = targets.resultdb(
         enable = True,
@@ -670,19 +677,6 @@ targets.mixin(
             "cpu": "x86-64",
             "gpu": "none",
             "os": "Ubuntu-22.04",
-            "pool": "chromium.tests.gpu",
-        },
-    ),
-)
-
-targets.mixin(
-    name = "gpu_nvidia_shield_tv_stable",
-    swarming = targets.swarming(
-        dimensions = {
-            "os": "Android",
-            "device_type": "mdarcy",
-            "device_os": "PPR1.180610.011",
-            "device_os_type": "userdebug",
             "pool": "chromium.tests.gpu",
         },
     ),
@@ -1189,6 +1183,18 @@ targets.mixin(
     ),
 )
 
+# Restricts Linux GPU High Tier AI WPT tasks to NVIDIA, AMD, or modern Intel GPUs
+# (Intel UHD 770 / Iris Xe) to avoid execution stalls on low-end Intel UHD 630
+# integrated graphics (lin-90-g582 and lin-91-g582).
+targets.mixin(
+    name = "linux_gpu_high_tier_ai_wpt_dimensions",
+    swarming = targets.swarming(
+        dimensions = {
+            "gpu": "10de|1002|8086:4680|8086:a780|8086:a7a0",
+        },
+    ),
+)
+
 targets.mixin(
     name = "linux_amd_780m_experimental",
     swarming = targets.swarming(
@@ -1341,23 +1347,6 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "mac_15_vm_optional",
-    swarming = targets.swarming(
-        dimensions = {
-            "cpu": "arm64",  # fallback on bare metal if no VMs are available
-            # TODO(crbug.com/521856600): Remove OR when Mac-26 once upgrade
-            # process is complete and CQ migrates to mac26-arm64-rel-tests.
-            "os": "Mac-15|Mac-26",
-        },
-        optional_dimensions = {
-            30: {
-                "cpu": "Apple_(Virtual)",
-            },
-        },
-    ),
-)
-
-targets.mixin(
     name = "mac_26_vm_optional",
     swarming = targets.swarming(
         dimensions = {
@@ -1473,6 +1462,16 @@ targets.mixin(
 )
 
 targets.mixin(
+    name = "mac_27_arm64",
+    swarming = targets.swarming(
+        dimensions = {
+            "cpu": "arm64",
+            "os": "Mac-27",
+        },
+    ),
+)
+
+targets.mixin(
     name = "mac_26_arm64",
     swarming = targets.swarming(
         dimensions = {
@@ -1552,7 +1551,7 @@ targets.mixin(
             "cpu": "arm64",
             "gpu": "apple:m2",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu",
             "display_attached": "1",
             "hidpi": "1",
@@ -1576,16 +1575,6 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "mac_beta_arm64",
-    swarming = targets.swarming(
-        dimensions = {
-            "cpu": "arm64",
-            "os": "Mac-15",
-        },
-    ),
-)
-
-targets.mixin(
     name = "mac_beta_x64",
     swarming = targets.swarming(
         dimensions = {
@@ -1595,25 +1584,15 @@ targets.mixin(
     ),
 )
 
+# mac_default_arm64 is used as a prefered OS dimension for mac platform
+# instead of any mac OS version. It selects the most representative
+# dimension on Swarming.
 targets.mixin(
     name = "mac_default_arm64",
     swarming = targets.swarming(
         dimensions = {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
-        },
-    ),
-)
-
-# mac_default_x64 is used as a prefered OS dimension for mac platform
-# instead of any mac OS version. It selects the most representative
-# dimension on Swarming.
-targets.mixin(
-    name = "mac_default_x64",
-    swarming = targets.swarming(
-        dimensions = {
-            "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
         },
     ),
 )
@@ -2154,8 +2133,8 @@ targets.mixin(
     swarming = targets.swarming(
         dimensions = {
             "display_attached": "1",
-            "gpu": "10de:2184-32.0.15.8180",
-            "os": "Windows-11-26100",
+            "gpu": "10de:2184-32.0.16.1074",
+            "os": "Windows-11-26200",
             "pool": "chromium.tests.gpu",
         },
     ),
@@ -2232,6 +2211,17 @@ targets.mixin(
     ),
 )
 
+# Shards the slower x64 bot to 8 shards (overriding the default of 4 shards).
+# Since these bots run sequentially to avoid resource starvation, they
+# take longer to complete the test suite, requiring more shards to keep
+# the total run time within the builder's limit.
+targets.mixin(
+    name = "x64_ai_wpt_shards",
+    swarming = targets.swarming(
+        shards = 8,
+    ),
+)
+
 targets.mixin(
     name = "x86-64",
     swarming = targets.swarming(
@@ -2261,12 +2251,12 @@ targets.mixin(
     name = "xcode_27_beta",
     args = [
         "--xcode-build-version",
-        "27a5218g",
+        "27a5228h",
     ],
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "xcode_ios_27a5218g",
+                name = "xcode_ios_27a5228h",
                 path = "Xcode.app",
             ),
         ],
@@ -2324,15 +2314,4 @@ targets.mixin(
     args = [
         "--force-main-user",
     ],
-)
-
-# Shards the slower x64 bot to 8 shards (overriding the default of 4 shards).
-# Since these bots run sequentially to avoid resource starvation, they
-# take longer to complete the test suite, requiring more shards to keep
-# the total run time within the builder's limit.
-targets.mixin(
-    name = "mac_x64_ai_wpt_shards",
-    swarming = targets.swarming(
-        shards = 8,
-    ),
 )

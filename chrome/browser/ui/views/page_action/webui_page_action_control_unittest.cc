@@ -10,6 +10,7 @@
 #include "base/callback_list.h"
 #include "base/test/gmock_expected_support.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/page_action/action_ids.h"
 #include "chrome/browser/ui/page_action/page_action_controller.h"
@@ -19,6 +20,8 @@
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/page_action/page_action_view_interface.h"
+#include "chrome/browser/ui/views/page_action/webui_page_action_view.h"
 #include "chrome/browser/ui/views/toolbar/mock_webui_toolbar_control_delegate.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/browser_apis/ui_controllers/toolbar/toolbar_ui_api_data_model.mojom.h"
@@ -28,6 +31,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/actions/actions.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/unowned_user_data/unowned_user_data_host.h"
 
 namespace page_actions {
@@ -52,9 +56,7 @@ class MockPageActionModelObserver
 
 class WebUIPageActionControlTest : public ChromeRenderViewHostTestHarness {
  public:
-  WebUIPageActionControlTest() {
-    scoped_feature_list_.InitAndEnableFeature(features::kPageActionsMigration);
-  }
+  WebUIPageActionControlTest() = default;
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
@@ -170,6 +172,15 @@ TEST_F(WebUIPageActionControlTest, StateMapping) {
 
   EXPECT_CALL(webui_delegate_, OnPageActionChanged(_))
       .Times(testing::AtLeast(1));
+  controller->OverrideImage(target_action_id,
+                            ui::ImageModel::FromVectorIcon(kZoomInIcon));
+
+  states = control_->GetPageActionStates();
+  ASSERT_EQ(1u, states.size());
+  EXPECT_FALSE(states[0]->icon.is_null());
+
+  EXPECT_CALL(webui_delegate_, OnPageActionChanged(_))
+      .Times(testing::AtLeast(1));
   controller->Hide(target_action_id);
 
   states = control_->GetPageActionStates();
@@ -256,10 +267,85 @@ TEST_F(WebUIPageActionControlTest, ChipShowingChangedForwarding) {
   run_loop.Run();
 }
 
+TEST_F(WebUIPageActionControlTest, AccessibilityAnnouncement) {
+  control_->UpdateController(web_contents());
+
+  tabs::TabInterface* tab =
+      tabs::TabInterface::MaybeGetFromContents(web_contents());
+  page_actions::PageActionController* controller =
+      page_actions::PageActionController::From(tab);
+
+  actions::ActionId target_action_id = kActionAiMode;
+
+  controller->OverrideText(target_action_id, u"Test Announcement");
+  controller->Show(target_action_id);
+
+  // Showing chip with should_announce_chip = true should trigger AnnounceAlert.
+  EXPECT_CALL(webui_delegate_,
+              AnnounceAlert(std::u16string(u"Test Announcement")))
+      .Times(1);
+  controller->ShowSuggestionChip(
+      target_action_id,
+      page_actions::SuggestionChipConfig{.should_announce_chip = true});
+
+  // Calling ShowSuggestionChip again while already showing shouldn't trigger
+  // AnnounceAlert again.
+  EXPECT_CALL(webui_delegate_, AnnounceAlert(_)).Times(0);
+  controller->ShowSuggestionChip(
+      target_action_id,
+      page_actions::SuggestionChipConfig{.should_announce_chip = true});
+
+  // Hiding chip and showing again should trigger AnnounceAlert again.
+  controller->HideSuggestionChip(target_action_id);
+  EXPECT_CALL(webui_delegate_,
+              AnnounceAlert(std::u16string(u"Test Announcement")))
+      .Times(1);
+  controller->ShowSuggestionChip(
+      target_action_id,
+      page_actions::SuggestionChipConfig{.should_announce_chip = true});
+}
+
 TEST_F(WebUIPageActionControlTest, TabDestroyedBeforeControl) {
   control_->UpdateController(web_contents());
   tab_features_.reset();
   control_.reset();
+}
+
+TEST_F(WebUIPageActionControlTest, GetPageActionViewInterfaceAndMethods) {
+  control_->UpdateController(web_contents());
+
+  tabs::TabInterface* tab =
+      tabs::TabInterface::MaybeGetFromContents(web_contents());
+  ASSERT_TRUE(tab);
+  page_actions::PageActionController* controller =
+      page_actions::PageActionController::From(tab);
+  ASSERT_TRUE(controller);
+
+  actions::ActionId target_action_id = kActionAiMode;
+
+  page_actions::PageActionViewInterface* view_interface =
+      control_->GetPageActionViewInterface(target_action_id);
+  ASSERT_TRUE(view_interface);
+
+  EXPECT_DEATH(view_interface->GetIconLabelBubbleViewNotMigrated(), "");
+
+  controller->OverrideTooltip(target_action_id, u"Test Tooltip");
+  controller->OverrideAccessibleName(target_action_id, u"Test Accessible Name");
+
+  EXPECT_EQ(view_interface->GetTooltipText(), u"Test Tooltip");
+  EXPECT_EQ(view_interface->GetAccessibleName(), u"Test Accessible Name");
+
+  EXPECT_CALL(webui_delegate_, OnPageActionChanged(_))
+      .Times(testing::AtLeast(1));
+  view_interface->SetVisible(true);
+
+  auto states = control_->GetPageActionStates();
+  ASSERT_EQ(states.size(), 1u);
+
+  EXPECT_CALL(webui_delegate_, OnPageActionChanged(_))
+      .Times(testing::AtLeast(1));
+  view_interface->SetVisible(false);
+  EXPECT_TRUE(control_->GetPageActionStates().empty());
 }
 
 }  // namespace

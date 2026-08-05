@@ -39,7 +39,10 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
         ui::mojom::MenuSourceType source) = 0;
     virtual void ShowContentSettingsBubble(
         ::toolbar_ui_api::mojom::ContentSettingImageType type,
+        bool is_pointer_interaction,
         ShowContentSettingsBubbleCallback callback) = 0;
+    virtual void OnContentSettingImagePointerDown(
+        ::toolbar_ui_api::mojom::ContentSettingImageType type) = 0;
     virtual void OnPageActionClick(
         ::toolbar_ui_api::mojom::PageActionId action_id,
         ::toolbar_ui_api::mojom::PageActionTrigger trigger,
@@ -57,6 +60,10 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
     virtual void MovePinnedToolbarActionBy(
         toolbar_ui_api::mojom::PinnedToolbarAction action_id,
         int32_t delta) = 0;
+    virtual void MoveExtensionAction(const std::string& extension_id,
+                                     int32_t target_index) = 0;
+    virtual void MoveExtensionActionBy(const std::string& extension_id,
+                                       int32_t delta) = 0;
     virtual void OnLhsChipMousePressed(
         toolbar_ui_api::mojom::LhsChipIdentifier identifier) = 0;
     virtual void OnLhsChipClicked(
@@ -91,6 +98,9 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
         mojo_base::mojom::ErrorPtr>
     AdjustOmniboxTextForCopy(const std::u16string& text,
                              int32_t selection_start) = 0;
+    virtual void OnPerformanceInterventionButtonClicked(
+        bool is_mouse_interaction) = 0;
+    virtual void OnPerformanceInterventionButtonMousePressed() = 0;
   };
 
   ToolbarUIService(
@@ -121,7 +131,10 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
   void OnPageInitialized() override;
   void ShowContentSettingsBubble(
       ::toolbar_ui_api::mojom::ContentSettingImageType type,
+      bool is_pointer_interaction,
       ShowContentSettingsBubbleCallback callback) override;
+  void OnContentSettingImagePointerDown(
+      ::toolbar_ui_api::mojom::ContentSettingImageType type) override;
   void OnPageActionClick(::toolbar_ui_api::mojom::PageActionId action_id,
                          ::toolbar_ui_api::mojom::PageActionTrigger trigger,
                          OnPageActionClickCallback callback) override;
@@ -137,6 +150,10 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
   void MovePinnedToolbarActionBy(
       toolbar_ui_api::mojom::PinnedToolbarAction action_id,
       int32_t delta) override;
+  void MoveExtensionAction(const std::string& extension_id,
+                           int32_t target_index) override;
+  void MoveExtensionActionBy(const std::string& extension_id,
+                             int32_t delta) override;
   void OnLhsChipMousePressed(
       toolbar_ui_api::mojom::LhsChipIdentifier identifier) override;
   void OnLhsChipClicked(toolbar_ui_api::mojom::LhsChipIdentifier identifier,
@@ -170,6 +187,9 @@ class ToolbarUIService : public toolbar_ui_api::mojom::ToolbarUIService {
       const std::u16string& text,
       int32_t selection_start,
       AdjustOmniboxTextForCopyCallback callback) override;
+  void OnPerformanceInterventionButtonClicked(
+      bool is_mouse_interaction) override;
+  void OnPerformanceInterventionButtonMousePressed() override;
 
  private:
   mojo::Receiver<toolbar_ui_api::mojom::ToolbarUIService> service_;

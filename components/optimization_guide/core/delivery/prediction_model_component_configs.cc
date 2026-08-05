@@ -4,17 +4,25 @@
 
 #include "components/optimization_guide/core/delivery/prediction_model_component_configs.h"
 
+#include <algorithm>
 #include <array>
+#include <string_view>
+#include <vector>
 
-#include "base/containers/span.h"
 #include "base/feature_list.h"
-#include "base/no_destructor.h"
+#include "base/metrics/field_trial_params.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "components/crx_file/id_util.h"
 
 namespace optimization_guide {
 
 BASE_FEATURE(kPredictionModelComponentDelivery,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::FeatureParam<std::string> kPredictionModelTargets{
+    &kPredictionModelComponentDelivery, "targets", ""};
 
 PredictionModelComponentConfig::PredictionModelComponentConfig(
     std::string name,
@@ -53,6 +61,11 @@ constexpr std::array<uint8_t, 32>
         0x97, 0x6f, 0x82, 0x51, 0xeb, 0xe1, 0x95, 0x60, 0xc6, 0xd7, 0x91,
         0xe6, 0x9f, 0xdc, 0x40, 0xce, 0x38, 0x30, 0xd2, 0x1a, 0x30};
 
+constexpr std::array<uint8_t, 32> kClientSidePhishingPublicKeySHA256 = {
+    0xec, 0x22, 0xd3, 0x7b, 0xe4, 0xb8, 0xca, 0x40, 0x26, 0x95, 0x90,
+    0x8f, 0x97, 0xdd, 0xe6, 0xc1, 0x01, 0x6e, 0x7a, 0xc3, 0x0c, 0x61,
+    0xa6, 0xcd, 0xa6, 0xa6, 0x95, 0xa3, 0x5a, 0xc4, 0x14, 0xe3};
+
 constexpr std::array<uint8_t, 32>
     kClientSidePhishingImageEmbedderPublicKeySHA256 = {
         0x27, 0x95, 0x4b, 0x35, 0x18, 0x93, 0x13, 0x4e, 0x99, 0x7e, 0x3d,
@@ -74,6 +87,9 @@ constexpr std::array kConfigs = {
         proto::OPTIMIZATION_TARGET_NOTIFICATION_PERMISSION_PREDICTIONS,
         "Optimization Guide Notification Permission Predictions",
         kNotificationPermissionPredictionsPublicKeySHA256},
+    ComponentConfigEntry{proto::OPTIMIZATION_TARGET_CLIENT_SIDE_PHISHING,
+                         "Optimization Guide Client Side Phishing",
+                         kClientSidePhishingPublicKeySHA256},
     ComponentConfigEntry{
         proto::OPTIMIZATION_TARGET_CLIENT_SIDE_PHISHING_IMAGE_EMBEDDER,
         "Optimization Guide Client Side Phishing Image Embedder",
@@ -89,11 +105,27 @@ const ComponentConfigEntry* FindConfigEntry(proto::OptimizationTarget target) {
   return nullptr;
 }
 
+std::optional<proto::OptimizationTarget> ParseOptimizationTarget(
+    std::string_view target_str) {
+  int target_num;
+  if (!base::StringToInt(target_str, &target_num)) {
+    return std::nullopt;
+  }
+  if (!proto::OptimizationTarget_IsValid(target_num)) {
+    return std::nullopt;
+  }
+  return static_cast<proto::OptimizationTarget>(target_num);
+}
+
+bool IsTargetEnabledForComponentDelivery(proto::OptimizationTarget target) {
+  return std::ranges::contains(GetPredictionModelTargets(), target);
+}
+
 }  // namespace
 
 std::optional<PredictionModelComponentConfig> GetPredictionModelComponentConfig(
     proto::OptimizationTarget target) {
-  if (!base::FeatureList::IsEnabled(kPredictionModelComponentDelivery)) {
+  if (!IsTargetEnabledForComponentDelivery(target)) {
     return std::nullopt;
   }
 
@@ -108,20 +140,33 @@ std::optional<PredictionModelComponentConfig> GetPredictionModelComponentConfig(
                            entry->public_key_sha256.end()));
 }
 
-base::span<const proto::OptimizationTarget> GetPredictionModelTargets() {
+std::vector<proto::OptimizationTarget> GetPredictionModelTargets() {
+  std::vector<proto::OptimizationTarget> targets;
   if (!base::FeatureList::IsEnabled(kPredictionModelComponentDelivery)) {
-    return {};
+    return targets;
   }
-  static const base::NoDestructor<std::vector<proto::OptimizationTarget>>
-      targets([] {
-        std::vector<proto::OptimizationTarget> t;
-        t.reserve(kConfigs.size());
-        for (const auto& entry : kConfigs) {
-          t.push_back(entry.target);
-        }
-        return t;
-      }());
-  return *targets;
+
+  const std::string targets_param = kPredictionModelTargets.Get();
+  if (targets_param.empty()) {
+    return targets;
+  }
+
+  std::vector<proto::OptimizationTarget> parsed_targets;
+  for (std::string_view target_str :
+       base::SplitStringPiece(targets_param, ",", base::TRIM_WHITESPACE,
+                              base::SPLIT_WANT_NONEMPTY)) {
+    if (std::optional<proto::OptimizationTarget> parsed_target =
+            ParseOptimizationTarget(target_str)) {
+      parsed_targets.push_back(*parsed_target);
+    }
+  }
+
+  for (const auto& entry : kConfigs) {
+    if (std::ranges::contains(parsed_targets, entry.target)) {
+      targets.push_back(entry.target);
+    }
+  }
+  return targets;
 }
 
 }  // namespace optimization_guide

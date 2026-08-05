@@ -13,6 +13,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/test/gmock_callback_support.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
@@ -24,8 +25,13 @@
 #include "components/multistep_filter/core/features.h"
 #include "components/multistep_filter/core/prefs/multistep_filter_retention_prefs.h"
 #include "components/multistep_filter/core/storage/filter_store.h"
+#include "components/multistep_filter/core/switches.h"
+#include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
+#include "components/optimization_guide/core/optimization_guide_prefs.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/test/test_sync_service.h"
 #include "components/unified_consent/pref_names.h"
@@ -36,9 +42,19 @@
 
 namespace multistep_filter {
 
+class MockFilterStore : public FilterStore {
+ public:
+  MockFilterStore() = default;
+  ~MockFilterStore() override = default;
 
-
-
+  MOCK_METHOD(void,
+              DeleteAnnotationsForHosts,
+              (std::vector<std::string> hosts,
+               base::Time delete_begin,
+               base::Time delete_end,
+               base::OnceCallback<void(std::optional<int64_t>)> callback),
+              (override));
+};
 
 class MultistepFilterServiceTest : public testing::Test {
  public:
@@ -47,22 +63,25 @@ class MultistepFilterServiceTest : public testing::Test {
     pref_service_.registry()->RegisterBooleanPref(
         unified_consent::prefs::kUrlKeyedAnonymizedDataCollectionEnabled, true);
     RegisterRetentionProfilePrefs(pref_service_.registry());
+    optimization_guide::model_execution::prefs::RegisterProfilePrefs(
+        pref_service_.registry());
+    optimization_guide::prefs::RegisterProfilePrefs(pref_service_.registry());
     sync_service_.GetUserSettings()->SetSelectedType(
         syncer::UserSelectableType::kHistory, true);
   }
 
-  void CreateService(signin::IdentityManager* identity_manager) {
+  void CreateService(std::unique_ptr<FilterStore> filter_store =
+                         std::make_unique<FilterStore>()) {
     auto annotation_index_client =
         std::make_unique<MockAnnotationIndexClient>();
     mock_client_ = annotation_index_client.get();
-    auto filter_store = std::make_unique<FilterStore>();
     auto consent_helper = unified_consent::UrlKeyedDataCollectionConsentHelper::
         NewAnonymizedDataCollectionConsentHelper(&pref_service_);
 
     MultistepFilterService::Params params;
     params.annotation_index_client = std::move(annotation_index_client);
     params.filter_store = std::move(filter_store);
-    params.identity_manager = identity_manager;
+    params.identity_manager = identity_test_env_.identity_manager();
     params.consent_helper = std::move(consent_helper);
     params.log_router = nullptr;
     params.pref_service = &pref_service_;
@@ -70,8 +89,6 @@ class MultistepFilterServiceTest : public testing::Test {
 
     service_ = std::make_unique<MultistepFilterService>(std::move(params));
   }
-
-  void CreateService() { CreateService(identity_test_env_.identity_manager()); }
 
   base::test::ScopedFeatureList scoped_feature_list_;
   base::test::TaskEnvironment task_environment_;
@@ -198,6 +215,106 @@ TEST_F(MultistepFilterServiceTest, HasUserProvidedConsent_FullyConsented) {
 
   CreateService();
   EXPECT_TRUE(service_->HasUserProvidedConsent(4, "example.com"));
+}
+
+// Tests that CanUseModelExecutionFeatures returns false when not signed in.
+TEST_F(MultistepFilterServiceTest, CanUseModelExecutionFeatures_NotSignedIn) {
+  CreateService();
+  EXPECT_FALSE(service_->CanUseModelExecutionFeatures());
+}
+
+// Tests that CanUseModelExecutionFeatures returns false when signed in but the
+// capability is false.
+TEST_F(MultistepFilterServiceTest,
+       CanUseModelExecutionFeatures_CapabilityFalse) {
+  AccountInfo account_info = identity_test_env_.MakePrimaryAccountAvailable(
+      "test@gmail.com", signin::ConsentLevel::kSignin);
+  AccountCapabilitiesTestMutator mutator(&account_info);
+  mutator.set_can_use_model_execution_features(false);
+  signin::UpdateAccountInfoForAccount(identity_test_env_.identity_manager(),
+                                      account_info);
+
+  CreateService();
+  EXPECT_FALSE(service_->CanUseModelExecutionFeatures());
+}
+
+// Tests that CanUseModelExecutionFeatures returns true when signed in and the
+// capability is true.
+TEST_F(MultistepFilterServiceTest,
+       CanUseModelExecutionFeatures_CapabilityTrue) {
+  AccountInfo account_info = identity_test_env_.MakePrimaryAccountAvailable(
+      "test@gmail.com", signin::ConsentLevel::kSignin);
+  AccountCapabilitiesTestMutator mutator(&account_info);
+  mutator.set_can_use_model_execution_features(true);
+  signin::UpdateAccountInfoForAccount(identity_test_env_.identity_manager(),
+                                      account_info);
+
+  CreateService();
+  EXPECT_TRUE(service_->CanUseModelExecutionFeatures());
+}
+
+// Tests that CanUseModelExecutionFeatures returns false when signed in and the
+// capability is not explicitly set (defaults to kUnknown).
+TEST_F(MultistepFilterServiceTest,
+       CanUseModelExecutionFeatures_CapabilityNotSet) {
+  identity_test_env_.MakePrimaryAccountAvailable("test@gmail.com",
+                                                 signin::ConsentLevel::kSignin);
+  CreateService();
+  EXPECT_FALSE(service_->CanUseModelExecutionFeatures());
+}
+
+// Tests that CanUseModelExecutionFeatures returns true when the bypass switch
+// is enabled, even if not signed in.
+TEST_F(MultistepFilterServiceTest,
+       CanUseModelExecutionFeatures_BypassSwitchEnabled) {
+  base::test::ScopedCommandLine scoped_command_line;
+  scoped_command_line.GetProcessCommandLine()->AppendSwitch(
+      switches::kMultistepFilterBypassCapabilityCheck);
+  CreateService();
+  EXPECT_TRUE(service_->CanUseModelExecutionFeatures());
+}
+
+// Tests that OnHistoryDeletions does not call DeleteAnnotationsForHosts when
+// there are no deletions.
+TEST_F(MultistepFilterServiceTest, OnHistoryDeletions_NoOpDeletionsIgnored) {
+  auto mock_store = std::make_unique<testing::NiceMock<MockFilterStore>>();
+  EXPECT_CALL(*mock_store, DeleteAnnotationsForHosts).Times(0);
+  CreateService(std::move(mock_store));
+  history::DeletionInfo deletion_info =
+      history::DeletionInfo::ForUrls(/*deleted_rows=*/{},
+                                     /*favicon_urls=*/{});
+  service_->OnHistoryDeletions(/*history_service=*/nullptr, deletion_info);
+}
+
+// Tests that IsSmartSuggestionsEnabled returns true by default (when prefs are
+// default/enabled).
+TEST_F(MultistepFilterServiceTest, IsSmartSuggestionsEnabled_DefaultEnabled) {
+  CreateService();
+  EXPECT_TRUE(service_->IsSmartSuggestionsEnabled());
+}
+
+// Tests that IsSmartSuggestionsEnabled returns false when the user-controlled
+// contextual cueing pref is disabled.
+TEST_F(MultistepFilterServiceTest,
+       IsSmartSuggestionsEnabled_OptInPrefDisabled) {
+  pref_service_.SetInteger(
+      optimization_guide::prefs::GetSettingEnabledPrefName(
+          optimization_guide::UserVisibleFeatureKey::kContextualCueing),
+      static_cast<int>(
+          optimization_guide::prefs::FeatureOptInState::kDisabled));
+  CreateService();
+  EXPECT_FALSE(service_->IsSmartSuggestionsEnabled());
+}
+
+// Tests that IsSmartSuggestionsEnabled returns false when the enterprise policy
+// ChromeSuggestionsSettings is set to disabled.
+TEST_F(MultistepFilterServiceTest,
+       IsSmartSuggestionsEnabled_EnterprisePolicyDisabled) {
+  pref_service_.SetInteger(
+      optimization_guide::prefs::kChromeSuggestionsSettings,
+      MultistepFilterService::kChromeSuggestionsSettingsDisabled);
+  CreateService();
+  EXPECT_FALSE(service_->IsSmartSuggestionsEnabled());
 }
 
 }  // namespace multistep_filter

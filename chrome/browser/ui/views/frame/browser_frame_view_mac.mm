@@ -88,9 +88,9 @@ BrowserFrameViewMac::BrowserFrameViewMac(BrowserWidget* frame,
   // GlassFrameService is only available if glass frame is enabled.
   if (auto* const glass_service = GlassFrameService::GetInstance()) {
     SetPaintToLayer();
-    layer()->SetFillsBoundsOpaquely(false);
     is_glass_frame_eligible_ =
         glass_service->IsBrowserWindowEligible(browser_view->browser());
+    layer()->SetFillsBoundsOpaquely(!is_glass_frame_eligible_);
     glass_frame_service_subscription_ =
         glass_service->RegisterGlassFrameEligibilityChangedCallback(
             browser_view->browser(),
@@ -451,8 +451,10 @@ BrowserFrameViewMac::GetCaptionButtonBounds() const {
 
   // In popups, the titlebar is system-drawn and the caption buttons aren't part
   // of the client area.
-  if (GetBrowserView()->browser()->is_type_popup() ||
-      GetBrowserView()->browser()->is_type_devtools()) {
+  if (GetBrowserView()->browser()->GetType() ==
+          BrowserWindowInterface::Type::TYPE_POPUP ||
+      GetBrowserView()->browser()->GetType() ==
+          BrowserWindowInterface::Type::TYPE_DEVTOOLS) {
     return result;
   }
 
@@ -497,7 +499,7 @@ void BrowserFrameViewMac::OnPaint(gfx::Canvas* canvas) {
     canvas->DrawColor(frame_color);
 
     auto* theme_service = ThemeServiceFactory::GetForProfile(
-        GetBrowserView()->browser()->profile());
+        GetBrowserView()->browser()->GetProfile());
     if (!theme_service->UsingSystemTheme()) {
       PaintThemedFrame(canvas);
     }
@@ -595,5 +597,6 @@ void BrowserFrameViewMac::OnGlassFrameEligibilityChanged(bool is_eligible) {
     return;
   }
   is_glass_frame_eligible_ = is_eligible;
+  layer()->SetFillsBoundsOpaquely(!is_glass_frame_eligible_);
   SchedulePaint();
 }

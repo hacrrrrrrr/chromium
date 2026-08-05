@@ -148,7 +148,7 @@ class SurfaceTest : public test::ExoTestBase,
 
   const viz::CompositorFrame& GetFrameFromSurface(ShellSurface* shell_surface) {
     viz::SurfaceId surface_id =
-        *shell_surface->host_window()->layer()->GetSurfaceId();
+        *shell_surface->host_window()->layer()->AsSurface()->GetSurfaceId();
     const viz::CompositorFrame& frame =
         GetSurfaceManager()->GetSurfaceForId(surface_id)->GetActiveFrame();
     return frame;
@@ -822,8 +822,8 @@ TEST_P(SurfaceTest, MirrorLayers) {
   EXPECT_EQ(buffer_size, surface->window()->bounds().size());
   EXPECT_EQ(buffer_size, surface->window()->layer()->bounds().size());
   EXPECT_EQ(buffer_size, old_layer_owner->root()->bounds().size());
-  EXPECT_TRUE(shell_surface->host_window()->layer()->has_external_content());
-  EXPECT_TRUE(old_layer_owner->root()->has_external_content());
+  EXPECT_TRUE(shell_surface->host_window()->layer()->HasExternalContent());
+  EXPECT_TRUE(old_layer_owner->root()->HasExternalContent());
 }
 
 TEST_P(SurfaceTest, SetViewport) {

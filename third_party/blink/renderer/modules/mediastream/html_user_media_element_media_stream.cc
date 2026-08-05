@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/mediastream/html_user_media_element_media_stream.h"
 
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/html/html_user_media_element.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 
 namespace blink {
@@ -17,8 +18,8 @@ const char HTMLUserMediaElementMediaStream::kSupplementName[] =
 HTMLUserMediaElementMediaStream& HTMLUserMediaElementMediaStream::From(
     HTMLUserMediaElement& element) {
   HTMLUserMediaElementMediaStream* supplement =
-      Supplement<HTMLUserMediaElement>::From<HTMLUserMediaElementMediaStream>(
-          element);
+      Supplement<HTMLMediaCaptureElementBase>::From<
+          HTMLUserMediaElementMediaStream>(element);
   if (!supplement) {
     supplement = MakeGarbageCollected<HTMLUserMediaElementMediaStream>(element);
     ProvideTo(element, supplement);
@@ -37,11 +38,11 @@ MediaStream* HTMLUserMediaElementMediaStream::stream(
 
 HTMLUserMediaElementMediaStream::HTMLUserMediaElementMediaStream(
     HTMLUserMediaElement& element)
-    : Supplement<HTMLUserMediaElement>(element) {}
+    : Supplement<HTMLMediaCaptureElementBase>(element) {}
 
 void HTMLUserMediaElementMediaStream::Trace(Visitor* visitor) const {
   visitor->Trace(media_stream_);
-  Supplement<HTMLUserMediaElement>::Trace(visitor);
+  Supplement<HTMLMediaCaptureElementBase>::Trace(visitor);
 }
 
 }  // namespace blink

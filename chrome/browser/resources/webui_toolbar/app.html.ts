@@ -48,18 +48,27 @@ ${this.isBackForwardButtonEnabled_ ? html`
   ` : ''}
   ${this.isExtensionsContainerEnabled_ ? html`
     <webui-toolbar-extensions id="extensions"
-        .state="${this.navigationControlsState_.extensionsState}">
+        .states="${this.navigationControlsState_.extensionsState}">
     </webui-toolbar-extensions>
   ` : ''}
   ${this.isPinnedToolbarActionsEnabled_ ? html`
     <pinned-toolbar-actions id="pinnedToolbarActions"
-        .state="${this.navigationControlsState_.pinnedToolbarActionsState}">
+        .states="${this.navigationControlsState_.pinnedToolbarActionsState}">
     </pinned-toolbar-actions>
   ` : ''}
   ${this.isBatterySaverButtonEnabled_ ? html`
     <battery-saver-button id="battery-saver"
         .hidden="${!this.navigationControlsState_.batterySaverButtonVisible}">
     </battery-saver-button>
+  ` : ''}
+  ${this.isPerformanceInterventionButtonEnabled_ ? html`
+    <performance-intervention-button id="performance-intervention"
+      .state="${
+        this.navigationControlsState_.performanceInterventionControlState}"
+      .hidden="${
+        !this.navigationControlsState_.performanceInterventionControlState
+            .shouldBeShown}">
+    </performance-intervention-button>
   ` : ''}
   ${this.isAvatarButtonEnabled_ ? html`
     <avatar-button id="avatar"

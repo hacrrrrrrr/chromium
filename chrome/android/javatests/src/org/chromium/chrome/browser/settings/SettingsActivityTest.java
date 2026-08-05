@@ -4,6 +4,10 @@
 
 package org.chromium.chrome.browser.settings;
 
+import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.matcher.ViewMatchers.withId;
+
 import static org.junit.Assert.assertEquals;
 
 import android.content.Intent;
@@ -26,8 +30,10 @@ import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.about_settings.AboutChromeSettings;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -39,6 +45,7 @@ import org.chromium.ui.util.AttrUtils;
 /** Tests for the Settings menu. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @DoNotBatch(reason = "Tests cannot run batched because they launch a Settings activity.")
+@DisableFeatures(ChromeFeatureList.SETTINGS_IN_TAB) // crbug.com/521895796
 public class SettingsActivityTest {
     @Rule
     public SettingsActivityTestRule<MainSettings> mSettingsActivityTestRule =
@@ -113,6 +120,18 @@ public class SettingsActivityTest {
                 SettingsIntentUtil.createIntent(activity, MainSettings.class.getName(), null);
         ApplicationTestUtils.waitForActivityWithClass(
                 SettingsActivity.class, Stage.CREATED, () -> activity.startActivity(intent3));
+    }
+
+    /** Regression test for crash. https://crbug.com/535398041 */
+    @Test
+    @SmallTest
+    public void testClickSearchDoesNotCrash() {
+        SettingsActivity activity = mSettingsActivityTestRule.startSettingsActivity();
+
+        // Search UI creation is asynchronous, so wait for the search box to be inflated.
+        CriteriaHelper.pollUiThread(() -> activity.findViewById(R.id.search_box) != null);
+
+        onView(withId(R.id.search_box)).perform(click());
     }
 
     public static class TestFragment extends Fragment implements SettingsFragment {

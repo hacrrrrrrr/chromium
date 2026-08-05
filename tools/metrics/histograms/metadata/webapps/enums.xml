@@ -553,6 +553,7 @@ chromium-metrics-reviews@google.com.
   <int value="8" label="Failure overlapping scope"/>
   <int value="9" label="Failure recursive install"/>
   <int value="10" label="Failure web apps not user installable"/>
+  <int value="11" label="Failure limit per prompt is exceeded"/>
 </enum>
 
 <!-- LINT.IfChange(WebAppApplyManifestMigrationResult) -->
@@ -777,7 +778,7 @@ chromium-metrics-reviews@google.com.
   <int value="20" label="InvalidFileHandlerNoActionOrLaunchType"/>
   <int value="21" label="InvalidFileHandlerAction"/>
   <int value="22" label="InvalidFileHandlerAcceptEntry"/>
-  <int value="23" label="InvalidIconsInFileHandler"/>
+  <int value="23" label="(Obsolete) InvalidIconsInFileHandler"/>
   <int value="24" label="InvalidShareTarget"/>
   <int value="25" label="InvalidShareTargetAction"/>
   <int value="26" label="InvalidShareTargetFile"/>

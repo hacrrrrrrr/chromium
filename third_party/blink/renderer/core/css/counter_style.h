@@ -18,6 +18,10 @@ namespace blink {
 
 class CSSValue;
 
+namespace cssvalue {
+class CSSSymbolsValue;
+}  // namespace cssvalue
+
 enum class CounterStyleSystem {
   kCyclic,
   kFixed,
@@ -58,6 +62,13 @@ class CORE_EXPORT CounterStyle final : public GarbageCollected<CounterStyle> {
   static CounterStyle* Create(
       const CascadeLayered<const StyleRuleCounterStyle>&);
 
+  // Creates the anonymous counter style described by a symbols() function
+  // value, applying the implied descriptor values from the spec, along with any
+  // fallback behavior.
+  // https://drafts.csswg.org/css-counter-styles-3/#symbols-function
+  static CounterStyle* CreateAnonymousCounterStyle(
+      const cssvalue::CSSSymbolsValue&);
+
   const StyleRuleCounterStyle& GetStyleRule() const { return *style_rule_; }
   CascadeLayered<const StyleRuleCounterStyle> GetLayeredStyleRule() const {
     return CascadeLayered<const StyleRuleCounterStyle>(style_rule_,
@@ -67,6 +78,11 @@ class CORE_EXPORT CounterStyle final : public GarbageCollected<CounterStyle> {
   AtomicString GetName() const;
   CounterStyleSystem GetSystem() const { return system_; }
 
+  // Compares the declared descriptors and the resolved `extends`, `fallback`
+  // and `speak-as` targets by identity, so two styles that resolve differently
+  // are not equal.
+  bool operator==(const CounterStyle& other) const;
+
   bool IsPredefined() const { return is_predefined_; }
   void SetIsPredefined() { is_predefined_ = true; }
 
@@ -74,6 +90,19 @@ class CORE_EXPORT CounterStyle final : public GarbageCollected<CounterStyle> {
   // 'square', 'disclosure-open' and 'disclosure-closed'.
   bool IsPredefinedSymbolMarker() const { return is_predefined_symbol_marker_; }
   void SetIsPredefinedSymbolMarker() { is_predefined_symbol_marker_ = true; }
+
+  // Returns the predefined symbol marker (`disc`, `circle`, `square`,
+  // `disclosure-open` or `disclosure-closed`) this style resolves to through
+  // the `extends` chain, or `g_null_atom` if none.
+  AtomicString GetEffectiveSymbolMarkerName() const;
+
+  // Returns true if this counter style is, or resolves through `extends` to,
+  // `disclosure-open` or `disclosure-closed`.
+  bool IsDisclosureMarker() const;
+
+  bool RendersAsSymbolMarker() const {
+    return IsPredefinedSymbolMarker() || IsDisclosureMarker();
+  }
 
   // A CounterStyle object is dirtied when the information it holds becomes
   // stale, e.g., when the style rule mutated or the 'extends' or 'fallback'

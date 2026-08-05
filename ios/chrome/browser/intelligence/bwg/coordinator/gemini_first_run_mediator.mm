@@ -137,6 +137,26 @@ const CGFloat kPromoMaxImpressionCount = 3;
                       country:nsCountry];
 }
 
+- (BOOL)shouldShowPromoForFirstRunType:(GeminiFirstRunType)firstRunType {
+  return self.shouldShowPromo && (firstRunType != GeminiFirstRunType::kLive);
+}
+
+- (BOOL)shouldShowBrandingHeaderForFirstRunType:
+    (GeminiFirstRunType)firstRunType {
+  return firstRunType != GeminiFirstRunType::kLive;
+}
+
+- (std::vector<GeminiFirstRunStepIdentifier>)stepsForFirstRunType:
+    (GeminiFirstRunType)firstRunType {
+  // Using std::vector to avoid boxing C++ enum class values into NSNumber.
+  std::vector<GeminiFirstRunStepIdentifier> steps;
+  if ([self shouldShowPromoForFirstRunType:firstRunType]) {
+    steps.push_back(GeminiFirstRunStepIdentifier::kPromo);
+  }
+  steps.push_back(GeminiFirstRunStepIdentifier::kConsent);
+  return steps;
+}
+
 #pragma mark - Private
 
 - (void)logPromoShown {
@@ -209,7 +229,7 @@ const CGFloat kPromoMaxImpressionCount = 3;
   }];
 }
 
-// Did dismiss the Consent UI.
+// Did refuse Gemini consent.
 - (void)didRefuseGeminiConsent {
   // Retain self to survive synchronous teardown from the delegate.
   __strong __typeof(self) strongSelf = self;
@@ -226,11 +246,13 @@ const CGFloat kPromoMaxImpressionCount = 3;
   [strongSelf handleFRECompletion:NO];
 }
 
-- (void)didRefuseLiveMicPermission {
+// Did refuse Live onboarding.
+- (void)didRefuseLiveOnboarding {
   // Retain self to survive synchronous teardown from the delegate.
   __strong __typeof(self) strongSelf = self;
-  [_delegate dismissGeminiFlow];
-  [strongSelf handleFRECompletion:NO];
+  [_delegate dismissGeminiConsentUIWithCompletion:^{
+    [strongSelf handleFRECompletion:NO];
+  }];
 }
 
 // Promo was shown.

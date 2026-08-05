@@ -131,9 +131,6 @@ BASE_FEATURE(kIPHMemorySaverModeFeature,
 BASE_FEATURE(kIPHMultistepFilterPromoFeature,
              "IPH_MultistepFilterPromo",
              base::FEATURE_DISABLED_BY_DEFAULT);
-BASE_FEATURE(kIPHLiveCaptionFeature,
-             "IPH_LiveCaption",
-             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHLensOverlayFeature,
              "IPH_LensOverlay",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -247,12 +244,15 @@ BASE_FEATURE(kIPHSideBySidePinnableFeature,
 BASE_FEATURE(kIPHSideBySideTabSwitchFeature,
              "IPH_SideBySideTabSwitchFeature",
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHSplitViewHorizontalIndirectAccessFeature,
+             "IPH_SplitViewHorizontalIndirectAccessFeature",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHVerticalTabsExpandOnHoverFeature,
              "IPH_VerticalTabsExpandOnHoverFeature",
              base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHVerticalTabstripTutorialFeature,
              "IPH_VerticalTabstripTutorialFeature",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHSidePanelGenericPinnableFeature,
              "IPH_SidePanelGenericPinnableFeature",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -525,6 +525,9 @@ BASE_FEATURE(kIPHIncognitoIndicatorCloseAllWindows,
 BASE_FEATURE(kIPHInstanceSwitcherFeature,
              "IPH_InstanceSwitcher",
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHRecentTabsFeature,
+             "IPH_RecentTabs",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHKeyboardAccessoryAddressFillingFeature,
              "IPH_KeyboardAccessoryAddressFilling",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -829,6 +832,12 @@ BASE_FEATURE(kIPHiOSPostDefaultAbandonmentPromoFeature,
 BASE_FEATURE(kIPHiOSPromoGenericDefaultBrowserFeature,
              "IPH_iOSPromoGenericDefaultBrowser",
              base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHiOSPromoSettingsCardDefaultBrowserFeature,
+             "IPH_iOSPromoSettingsCardDefaultBrowser",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHiOSPromoSettingsCellDefaultBrowserFeature,
+             "IPH_iOSPromoSettingsCellDefaultBrowser",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHiOSOverflowMenuCustomizationFeature,
              "IPH_iOSOverflowMenuCustomization",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -997,12 +1006,7 @@ BASE_FEATURE(kIPHAutofillAiOptInFeature,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHAutofillAiValuablesFeature,
              "IPH_AutofillAiValuables",
-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-             base::FEATURE_DISABLED_BY_DEFAULT
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT
-#endif
-);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHAutofillVirtualCardCVCSuggestionFeature,
              "IPH_AutofillVirtualCardCVCSuggestion",
              base::FEATURE_ENABLED_BY_DEFAULT);

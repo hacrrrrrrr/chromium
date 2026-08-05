@@ -166,6 +166,8 @@ mojom("mojom") {
       ]
     },
     {
+      # TODO(crbug.com/537760819): Consider consolidating BeginFrmeArgs and
+      # related types into shared_cpp_typemaps.
       types = [
         {
           mojom = "viz.mojom.BeginFrameArgs"
@@ -174,6 +176,10 @@ mojom("mojom") {
         {
           mojom = "viz.mojom.BeginFrameAck"
           cpp = "::viz::BeginFrameAck"
+        },
+        {
+          mojom = "viz.mojom.BeginFrameId"
+          cpp = "::viz::BeginFrameId"
         },
       ]
 
@@ -519,6 +525,10 @@ mojom("mojom") {
           mojom = "viz.mojom.BeginFrameAck"
           cpp = "::viz::BeginFrameAck"
         },
+        {
+          mojom = "viz.mojom.BeginFrameId"
+          cpp = "::viz::BeginFrameId"
+        },
       ]
       traits_headers =
           [ "//components/viz/common/frame_sinks/begin_frame_args.h" ]
@@ -669,7 +679,10 @@ mojom("surfaces") {
       traits_headers = [
         "//services/viz/public/cpp/compositing/frame_sink_id_mojom_traits.h",
       ]
-      traits_public_deps = [ "//components/viz/common" ]
+      traits_public_deps = [
+        "//components/viz/common",
+        "//services/viz/public/cpp:crash_keys",
+      ]
     },
     {
       types = [

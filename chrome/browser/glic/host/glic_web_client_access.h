@@ -18,6 +18,10 @@ namespace glic {
 // Access to the glic web client, from outside of the WebUI handler.
 class GlicWebClientAccess {
  public:
+  virtual ~GlicWebClientAccess() = default;
+  virtual mojom::WebClient* web_client() = 0;
+  virtual mojom::WebClientState web_client_state() const = 0;
+
   using PanelWillOpenCallback = mojom::WebClient::NotifyPanelWillOpenCallback;
 
   // Informs the web client that the panel will open. The panel should not be
@@ -50,6 +54,9 @@ class GlicWebClientAccess {
   // Informs the web client that an actor task list row was clicked.
   virtual void NotifyActorTaskListRowClicked(int32_t task_id) = 0;
 
+  virtual void NotifyZeroStateSuggestionsChanged(
+      mojom::ZeroStateSuggestionsV2Ptr suggestions,
+      mojom::ZeroStateSuggestionsOptionsPtr options) = 0;
 
   // Informs the web client that the browser wants to invoke Glic.
   virtual void Invoke(mojom::InvokeOptionsPtr options,

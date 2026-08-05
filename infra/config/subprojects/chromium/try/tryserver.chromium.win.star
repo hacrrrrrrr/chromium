@@ -285,6 +285,9 @@ try_.builder(
         cancel_stale = False,
         on_default_cq = True,
     ),
+    experiments = {
+        "luci.buildbucket.run_in_turboci": 100,
+    },
     main_list_view = "try",
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
 )
@@ -448,6 +451,9 @@ try_.builder(
         cancel_stale = False,
         on_default_cq = True,
     ),
+    experiments = {
+        "luci.buildbucket.run_in_turboci": 100,
+    },
     main_list_view = "try",
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
 )
@@ -625,4 +631,57 @@ gpu.try_.optional_tests_builder(
     # overloading the testing hardware.
     max_concurrent_builds = 9,
     siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
+)
+
+gpu.try_.optional_tests_builder(
+    name = "gpu-fyi-cq-win-arm64",
+    branch_selector = branches.selector.WINDOWS_BRANCHES,
+    description_html = "Runs GPU tests on Windows/ARM64 configs. Only automatically added to CLs that touch GPU-related files.",
+    mirrors = [
+        "ci/GPU FYI Win arm64 Builder",
+        "ci/Win11 FYI arm64 Release (Qualcomm Snapdragon X Elite)",
+    ],
+    builder_config_settings = builder_config.try_settings(
+        retry_failed_shards = False,
+    ),
+    gn_args = "ci/GPU FYI Win arm64 Builder",
+    pool = "luci.chromium.gpu.try",
+    builderless = True,
+    os = os.WINDOWS_DEFAULT,
+    ssd = builders.with_expiration(True, expiration = 5 * time.minute),
+    free_space = None,
+    alerts_enabled = False,
+    contact_team_email = "chrome-gpu-infra@google.com",
+    cq_settings = try_.cq_settings(
+        location_filters = gpu.try_.optional_trybot_location_filters.WINDOWS,
+    ),
+    # default is 6 in _gpu_optional_tests_builder()
+    execution_timeout = 5 * time.hour,
+    main_list_view = "try",
+    # This is higher than the default of 7 for optional GPU builders
+    # because Windows builds take longer than other platforms even
+    # when using SSDs. Increasing the max concurrent builds a bit
+    # allows us to avoid long pending times without risk of
+    # overloading the testing hardware.
+    max_concurrent_builds = 9,
+    siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "win-separate-renderer-rel",
+    description_html = "Runs separate renderer tests on Windows, mirroring win-separate-renderer-fyi-rel.",
+    mirrors = [
+        "ci/win-separate-renderer-fyi-rel",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/win-separate-renderer-fyi-rel",
+            "release_try_builder",
+            "dcheck_always_on",
+        ],
+    ),
+    contact_team_email = "toyoshim@chromium.org",
+    cq_settings = try_.cq_settings(
+        includable_only = True,
+    ),
 )

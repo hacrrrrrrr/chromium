@@ -75,7 +75,7 @@ class CertVerifierServicePolicyTest : public policy::PolicyTest {
 #if BUILDFLAG(CHROME_ROOT_STORE_CERT_MANAGEMENT_UI)
     base::test::TestFuture<void> cert_verifier_service_update_waiter;
     browser()
-        ->profile()
+        ->GetProfile()
         ->GetDefaultStoragePartition()
         ->GetCertVerifierServiceUpdater()
         ->WaitUntilNextUpdateForTesting(
@@ -184,8 +184,6 @@ class CertVerifierServiceCACertificatesPolicyMldsaTest
 
   net::EmbeddedTestServer https_test_server_{
       net::EmbeddedTestServer::TYPE_HTTPS};
-  base::test::ScopedFeatureList feature_list_{
-      net::features::kTlsMldsaSignatures};
 };
 
 IN_PROC_BROWSER_TEST_P(CertVerifierServiceCACertificatesPolicyMldsaTest,

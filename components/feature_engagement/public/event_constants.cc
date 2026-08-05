@@ -51,6 +51,10 @@ const char kGlicOnboardingCompleted[] = "glic_onboarding_completed";
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
         // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
 
+#if BUILDFLAG(IS_WIN)
+const char kSearchPromotionAccepted[] = "search_promotion_accepted";
+#endif  // BUILDFLAG(IS_WIN)
+
 #if BUILDFLAG(IS_IOS)
 const char kChromeOpened[] = "chrome_opened";
 const char kChromeActiveSessionDay[] = "chrome_active_session_day";
@@ -220,6 +224,10 @@ const char kIOSGeminiWhatCanGeminiDoTriggered[] =
     "ios_gemini_what_can_gemini_do_triggered";
 const char kIOSPinMVTSiteUsed[] = "ios_pin_mvt_site_used";
 const char kIOSChromeOpenedFromIcon[] = "ios_chrome_opened_from_icon";
+const char kDefaultBrowserSettingsCardPromoUsed[] =
+    "default_browser_settings_card_promo_used";
+const char kDefaultBrowserSettingsCellPromoUsed[] =
+    "default_browser_settings_cell_promo_used";
 #endif  // BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_ANDROID)

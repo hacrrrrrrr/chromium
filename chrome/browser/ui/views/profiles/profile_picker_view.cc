@@ -45,7 +45,9 @@
 #include "chrome/browser/ui/views/profiles/profile_picker_feature_promo_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_flow_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_glic_flow_controller.h"
+#include "chrome/browser/ui/views/profiles/profile_picker_omnibox_everywhere_flow_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_toolbar.h"
+#include "chrome/browser/ui/views/profiles/profile_picker_utils.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_widget.h"
 #include "chrome/browser/ui/webui/signin/profile_picker_ui.h"
 #include "chrome/browser/ui/webui/signin/signin_ui_error.h"
@@ -85,6 +87,7 @@
 
 #if BUILDFLAG(IS_MAC)
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
+#include "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_history_swiping_control.h"
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -129,6 +132,7 @@ bool IsClassicProfilePickerFlow(const ProfilePicker::Params& params) {
       return true;
     case ProfilePicker::EntryPoint::kFirstRun:
     case ProfilePicker::EntryPoint::kGlicManager:
+    case ProfilePicker::EntryPoint::kOmniboxEverywhere:
       return false;
   }
 }
@@ -480,12 +484,21 @@ void ProfilePickerView::SetNativeToolbarStartBrowsingButtonVisible(
   CHECK_DEREF(toolbar_).SetStartBrowsingButtonVisible(visible);
 }
 
+void ProfilePickerView::SetNativeToolbarEffectsControlButtonVisible(
+    bool visible) {
+  CHECK_DEREF(toolbar_).SetEffectsControlButtonVisible(visible);
+}
+
 bool ProfilePickerView::AreNativeToolbarSigninButtonsVisibleForTesting() const {
   return CHECK_DEREF(toolbar_).AreSigninButtonsVisibleForTesting();  // IN-TEST
 }
 
 SkColor ProfilePickerView::GetPreferredBackgroundColor() const {
   return GetColorProvider()->GetColor(kColorToolbar);
+}
+
+bool ProfilePickerView::CanNavigateBack() const {
+  return flow_controller_ && flow_controller_->CanNavigateBack();
 }
 
 bool ProfilePickerView::HandleKeyboardEvent(
@@ -502,6 +515,25 @@ bool ProfilePickerView::HandleContextMenu(
     const content::ContextMenuParams& params) {
   // Ignores context menu.
   return true;
+}
+
+content::WebContents* ProfilePickerView::AddNewContents(
+    content::WebContents* source,
+    std::unique_ptr<content::WebContents> new_contents,
+    const GURL& target_url,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
+    bool user_gesture,
+    bool* was_blocked) {
+  if (params_.entry_point() != ProfilePicker::EntryPoint::kFirstRun) {
+    return content::WebContentsDelegate::AddNewContents(
+        source, std::move(new_contents), target_url, disposition,
+        window_features, user_gesture, was_blocked);
+  }
+  CHECK(source);
+  OpenLearnMorePopup(Profile::FromBrowserContext(source->GetBrowserContext()),
+                     std::move(new_contents), target_url, window_features);
+  return nullptr;
 }
 
 gfx::NativeView ProfilePickerView::GetHostView() const {
@@ -610,6 +642,15 @@ void ProfilePickerView::Init(Profile* picker_profile) {
       contents_.get());
   web_modal::WebContentsModalDialogManager::FromWebContents(contents_.get())
       ->SetDelegate(this);
+#if BUILDFLAG(IS_MAC)
+  history_swiper::HistorySwipingControl::CreateForWebContents(
+      contents_.get(),
+      base::BindRepeating(
+          [](base::WeakPtr<ProfilePickerView> view) {
+            return view ? view->CanNavigateBack() : true;
+          },
+          weak_ptr_factory_.GetWeakPtr()));
+#endif
 
   // Destroy the System Profile when the ProfilePickerView is closed (assuming
   // its refcount hits 0). We need to use GetOriginalProfile() here because
@@ -686,6 +727,15 @@ ProfilePickerView::CreateFlowController(Profile* picker_profile,
         std::move(profile_picked_callback));
   }
 
+  if (params_.entry_point() == ProfilePicker::EntryPoint::kOmniboxEverywhere) {
+    auto profile_picked_callback =
+        base::BindOnce(&ProfilePicker::Params::NotifyProfilePicked,
+                       base::Unretained(&params_));
+    return std::make_unique<ProfilePickerOmniboxEverywhereFlowController>(
+        /*host=*/this, std::move(clear_host_callback),
+        std::move(profile_picked_callback));
+  }
+
   DCHECK(IsClassicProfilePickerFlow(params_));
   return std::make_unique<ProfilePickerFlowController>(
       /*host=*/this, std::move(clear_host_callback), params_.entry_point(),
@@ -714,6 +764,10 @@ void ProfilePickerView::WindowClosing() {
   // `ProfileKeepAliveOrigin::kWaitingForFirstBrowserWindow` to be able to
   // delete the profile.
   ClearLockedProfilesFirstBrowserKeepAlive();
+
+  if (flow_controller_) {
+    flow_controller_->OnWindowClosing();
+  }
 
   views::WidgetDelegateView::WindowClosing();
   // Now that the window is closed, we can allow a new one to be opened.
@@ -798,7 +852,9 @@ bool ProfilePickerView::AcceleratorPressed(const ui::Accelerator& accelerator) {
       GetWidget()->Minimize();
       break;
     case IDC_BACK: {
-      flow_controller_->OnNavigateBackRequested();
+      if (CanNavigateBack()) {
+        flow_controller_->OnNavigateBackRequested();
+      }
       break;
     }
     // Always reload bypassing cache.

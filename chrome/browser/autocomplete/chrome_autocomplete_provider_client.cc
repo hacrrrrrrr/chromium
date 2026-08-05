@@ -43,6 +43,7 @@
 #include "chrome/browser/preloading/prefetch/search_prefetch/search_prefetch_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_key.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/ai_mode_button_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -94,6 +95,7 @@
 #include "components/unified_consent/url_keyed_data_collection_consent_helper.h"
 #include "components/variations/service/variations_service.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/permission_controller_delegate.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
@@ -102,6 +104,7 @@
 #include "net/base/url_util.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom.h"
 #include "url/origin.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -145,9 +148,9 @@ namespace {
 // This list should be kept in sync with chrome/common/webui_url_constants.h.
 // Only include useful sub-pages, confirmation alerts are not useful.
 constexpr auto kChromeSettingsSubPages = std::to_array<base::cstring_view>({
-    chrome::kAddressesSubPage,
     chrome::kAutofillSubPage,
     chrome::kClearBrowserDataSubPage,
+    chrome::kContactInfoSubPage,
     chrome::kContentSettingsSubPage,
     chrome::kLanguageOptionsSubPage,
     chrome::kPasswordManagerSubPage,
@@ -242,7 +245,11 @@ ChromeAutocompleteProviderClient::ChromeAutocompleteProviderClient(
           unified_consent::UrlKeyedDataCollectionConsentHelper::
               NewPersonalizedDataCollectionConsentHelper(
                   SyncServiceFactory::GetForProfile(profile_))),
+#if BUILDFLAG(IS_ANDROID)
+      tab_matcher_(GetTemplateURLService(), profile_, web_contents_getter_),
+#else
       tab_matcher_(GetTemplateURLService(), profile_),
+#endif
       storage_partition_(nullptr),
       omnibox_triggered_feature_service_(
           std::make_unique<OmniboxTriggeredFeatureService>()) {
@@ -330,6 +337,13 @@ ChromeAutocompleteProviderClient::GetTemplateURLService() const {
 GeolocationHeaderService*
 ChromeAutocompleteProviderClient::GetGeolocationHeaderService() const {
   return GeolocationHeaderServiceFactory::GetForProfile(profile_);
+}
+
+void ChromeAutocompleteProviderClient::ResetGeolocationPermissionToAsk(
+    const GURL& url) const {
+  if (auto* delegate = profile_->GetPermissionControllerDelegate()) {
+    delegate->ResetPermission(blink::PermissionType::GEOLOCATION, url, url);
+  }
 }
 
 DocumentSuggestionsService*
@@ -730,6 +744,11 @@ ChromeAutocompleteProviderClient::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
+bool ChromeAutocompleteProviderClient::IsWebUiNtpEnabledForDesktopAndroid()
+    const {
+  return search::IsWebUiNtpEnabledForDesktopAndroid();
+}
+
 void ChromeAutocompleteProviderClient::OpenSharingHub() {
 #if !BUILDFLAG(IS_ANDROID)
   if (BrowserWindowInterface* const bwi =
@@ -804,14 +823,9 @@ void ChromeAutocompleteProviderClient::OpenCoBrowsePanel() {
                          : nullptr;
 
   if (ui_service) {
-    // TODO (crbug.com/532272763): Can likely unequivocally set the invocation
-    // source to kOmniboxPageActiom since this pathway is only ever called by
-    // kOmniboxPageAction.
-    if (omnibox::kAskGCoBrowseWithVisualSelection.Get()) {
-      if (auto* lens_controller = LensSearchController::From(tab)) {
-        lens_controller->SetInvocationSource(
-            lens::LensOverlayInvocationSource::kOmniboxPageAction);
-      }
+    if (auto* lens_controller = LensSearchController::From(tab)) {
+      lens_controller->SetInvocationSource(
+          lens::LensOverlayInvocationSource::kOmniboxPageAction);
     }
 
     GURL creation_url = ui_service->GetDefaultAiPageUrl();
@@ -832,9 +846,11 @@ void ChromeAutocompleteProviderClient::OpenLensOverlay(bool show) {
   if (auto* lens_search_controller =
           GetLensSearchController(GetWebContents(web_contents_getter_))) {
     if (show) {
-      // Force showing the contextual search box in the Lens Overlay.
+      // Force showing the contextual search box in the Lens Overlay, unless
+      // kAskGLensChipRoute is enabled.
+      bool show_csb = !omnibox::kAskGLensChipRoute.Get();
       lens_search_controller->OpenLensOverlay(
-          lens::LensOverlayInvocationSource::kOmniboxPageAction, true);
+          lens::LensOverlayInvocationSource::kOmniboxPageAction, show_csb);
     } else {
       // TODO(crbug.com/402497756): For prototyping, reusing the existing
       // omnibox entry point. However, for production, create a new invocation
@@ -881,3 +897,14 @@ void ChromeAutocompleteProviderClient::PromptPageTranslation() {
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 }
+
+bool ChromeAutocompleteProviderClient::ShouldOpenComposeboxForAskG() const {
+#if !BUILDFLAG(IS_ANDROID)
+  return omnibox::IsAimPopupFeatureEnabled() && omnibox::kAskGComposeBox.Get();
+#else
+  return false;
+#endif
+}
+
+// This is implemented in OmniboxEditModelActionClient.
+void ChromeAutocompleteProviderClient::OpenComposeboxForAskG() {}

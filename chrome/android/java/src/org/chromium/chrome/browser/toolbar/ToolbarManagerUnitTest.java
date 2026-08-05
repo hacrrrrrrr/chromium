@@ -82,9 +82,11 @@ import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.merchant_viewer.MerchantTrustSignalsCoordinator;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestrator;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceOrchestratorFactory;
+import org.chromium.chrome.browser.ntp.IncognitoNewTabPage;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
 import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifierJni;
+import org.chromium.chrome.browser.omnibox.NewTabPageDelegate;
 import org.chromium.chrome.browser.omnibox.OmniboxChipManager;
 import org.chromium.chrome.browser.omnibox.fusebox.ComposeboxQueryControllerBridge;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController;
@@ -97,6 +99,8 @@ import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.SigninManager;
+import org.chromium.chrome.browser.subscription_eligibility.SubscriptionEligibilityService;
+import org.chromium.chrome.browser.subscription_eligibility.SubscriptionEligibilityServiceFactory;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabBrowserControlsConstraintsHelper;
@@ -178,7 +182,8 @@ import java.util.function.Supplier;
     ChromeFeatureList.HTTPS_FIRST_DIALOG_UI,
     SigninFeatures.ENABLE_ACTIVITYLESS_SIGNIN_ALL_ENTRY_POINT,
     SigninFeatures.ENABLE_SEAMLESS_SIGNIN,
-    ChromeFeatureList.GLIC
+    ChromeFeatureList.GLIC,
+    SigninFeatures.ENABLE_AI_SUBSCRIPTION_AVATAR_RING
 })
 @DisableFeatures({
     SigninFeatures.MAKE_IDENTITY_MANAGER_SOURCE_OF_ACCOUNTS,
@@ -258,6 +263,7 @@ public class ToolbarManagerUnitTest {
     @Mock private PrefService mPrefService;
     @Mock private TabModel mIncognitoTabModel;
     @Mock private Profile mIncognitoProfile;
+    @Mock private SubscriptionEligibilityService mSubscriptionEligibilityService;
     @Mock private ButtonDataProvider mIdentityDiscProvider;
     @Mock private ButtonDataProvider mAdaptiveButtonProvider;
 
@@ -322,6 +328,7 @@ public class ToolbarManagerUnitTest {
         IdentityServicesProvider.setIdentityManagerForTesting(mIdentityManager);
         IdentityServicesProvider.setSigninManagerForTesting(mSigninManager);
         SyncServiceFactory.setInstanceForTesting(mSyncService);
+        SubscriptionEligibilityServiceFactory.setForTesting(mSubscriptionEligibilityService);
 
         mActivityController = Robolectric.buildActivity(TestActivity.class).setup();
         AppCompatActivity activity = mActivityController.get();
@@ -802,7 +809,8 @@ public class ToolbarManagerUnitTest {
                                         /* contentDescription= */ "Identity Disk",
                                         /* supportsTinting= */ false)
                                 .setButtonVariant(AdaptiveToolbarButtonVariant.UNKNOWN)
-                                .setIsIdentityDisc(true)
+                                .setIdentityDiscConfig(
+                                        /* isIdentityDisc= */ true, /* hasAiTierRing= */ false)
                                 .build());
         when(mIdentityDiscProvider.get(ntpTab)).thenReturn(identityDiskData);
 
@@ -833,7 +841,8 @@ public class ToolbarManagerUnitTest {
                                         /* contentDescription= */ "Identity Disk",
                                         /* supportsTinting= */ false)
                                 .setButtonVariant(AdaptiveToolbarButtonVariant.UNKNOWN)
-                                .setIsIdentityDisc(true)
+                                .setIdentityDiscConfig(
+                                        /* isIdentityDisc= */ true, /* hasAiTierRing= */ false)
                                 .build());
         when(mIdentityDiscProvider.get(webTab)).thenReturn(identityDiskData);
 
@@ -893,7 +902,8 @@ public class ToolbarManagerUnitTest {
                                         /* contentDescription= */ "Identity Disk",
                                         /* supportsTinting= */ false)
                                 .setButtonVariant(AdaptiveToolbarButtonVariant.UNKNOWN)
-                                .setIsIdentityDisc(true)
+                                .setIdentityDiscConfig(
+                                        /* isIdentityDisc= */ true, /* hasAiTierRing= */ false)
                                 .build());
         when(mIdentityDiscProvider.get(ntpTab)).thenReturn(identityDiskData);
 
@@ -1019,7 +1029,8 @@ public class ToolbarManagerUnitTest {
                                         /* contentDescription= */ "Identity Disk",
                                         /* supportsTinting= */ false)
                                 .setButtonVariant(AdaptiveToolbarButtonVariant.UNKNOWN)
-                                .setIsIdentityDisc(true)
+                                .setIdentityDiscConfig(
+                                        /* isIdentityDisc= */ true, /* hasAiTierRing= */ false)
                                 .build());
         when(mIdentityDiscProvider.get(ntpTab)).thenReturn(identityDiskData);
         when(mAdaptiveButtonProvider.get(ntpTab)).thenReturn(null);
@@ -1055,7 +1066,8 @@ public class ToolbarManagerUnitTest {
                                         /* contentDescription= */ "Identity Disk",
                                         /* supportsTinting= */ false)
                                 .setButtonVariant(AdaptiveToolbarButtonVariant.UNKNOWN)
-                                .setIsIdentityDisc(true)
+                                .setIdentityDiscConfig(
+                                        /* isIdentityDisc= */ true, /* hasAiTierRing= */ false)
                                 .build());
         when(mIdentityDiscProvider.get(ntpTab)).thenReturn(identityDiskData);
 
@@ -1109,5 +1121,28 @@ public class ToolbarManagerUnitTest {
         mActivityTabProvider.setForTesting(mTab);
         assertNotNull(getAutocompleteInput());
         assertEquals(userText, getAutocompleteInput().getUserText());
+    }
+
+    @Test
+    public void testIsIncognitoNewTabPageCurrentlyVisible() {
+        LocationBarModel locationBarModel = mToolbarManager.getLocationBarModelForTesting();
+        NewTabPageDelegate delegate = locationBarModel.getNewTabPageDelegate();
+
+        // 1. Regular web tab -> returns false
+        Tab webTab = mockTab(/* isNtp= */ false, /* isIncognito= */ false);
+        locationBarModel.setTab(webTab, mProfile);
+        assertFalse(delegate.isIncognitoNewTabPageCurrentlyVisible());
+
+        // 2. Incognito tab with null nativePage but NTP URL (e.g. during back navigation) ->
+        // returns true
+        Tab incognitoNtpTab = mockTab(/* isNtp= */ false, /* isIncognito= */ true);
+        when(incognitoNtpTab.getUrl()).thenReturn(JUnitTestGURLs.NTP_URL);
+        locationBarModel.setTab(incognitoNtpTab, mIncognitoProfile);
+        assertTrue(delegate.isIncognitoNewTabPageCurrentlyVisible());
+
+        // 3. Incognito tab with IncognitoNewTabPage nativePage -> returns true
+        IncognitoNewTabPage incognitoNtpPage = mock(IncognitoNewTabPage.class);
+        when(incognitoNtpTab.getNativePage()).thenReturn(incognitoNtpPage);
+        assertTrue(delegate.isIncognitoNewTabPageCurrentlyVisible());
     }
 }

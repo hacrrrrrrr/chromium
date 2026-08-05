@@ -32,6 +32,11 @@ BASE_DECLARE_FEATURE(kSafetyCheckUnusedSitePermissions);
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
 BASE_DECLARE_FEATURE(kActiveContentSettingExpiry);
 
+// Enables early querying of storage access permissions to populate the renderer
+// cache and eliminate synchronous IPCs during initial page load.
+COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
+BASE_DECLARE_FEATURE(kEagerStorageAccessPermissionCheck);
+
 // When enabled, site permissions will be considered as unused immediately in
 // order to facilitate testing.
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
@@ -63,6 +68,9 @@ BASE_DECLARE_FEATURE(kLeftHandSideActivityIndicators);
 // Move sensor activity indicators to the left-hand side of Omnibox.
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
 BASE_DECLARE_FEATURE(kLeftHandSideSensorActivityIndicators);
+
+COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
+BASE_DECLARE_FEATURE(kStorageAccessAPIRelatedWebsiteSets);
 
 }  // namespace features
 }  // namespace content_settings

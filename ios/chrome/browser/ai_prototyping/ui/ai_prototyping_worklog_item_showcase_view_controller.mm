@@ -4,8 +4,8 @@
 
 #import "ios/chrome/browser/ai_prototyping/ui/ai_prototyping_worklog_item_showcase_view_controller.h"
 
-#import "ios/chrome/browser/intelligence/actor/ui/actuation_worklog_item.h"
 #import "ios/chrome/browser/intelligence/actor/ui/actuation_worklog_item_view.h"
+#import "ios/chrome/browser/intelligence/actor/ui/actuation_worklog_view_data.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
@@ -30,8 +30,7 @@ ActuationWorklogItemView* CreateWorklogItemView(
   ActuationWorklogItem* item = [[ActuationWorklogItem alloc]
       initWithTitle:config.title
            subtitle:config.subtitle
-               icon:DefaultSymbolWithPointSize(kPersonBadgeKeyFillSymbol,
-                                               kSymbolSize)
+               icon:SymbolWithPointSize(SymbolPersonBadgeKeyFill, kSymbolSize)
               style:config.style
              active:config.active];
   ActuationWorklogItemView* view = [[ActuationWorklogItemView alloc] init];

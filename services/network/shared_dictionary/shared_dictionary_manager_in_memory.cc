@@ -8,6 +8,7 @@
 
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
+#include "base/memory_coordinator/traits.h"
 #include "base/notreached.h"
 #include "services/network/shared_dictionary/shared_dictionary_storage_in_memory.h"
 
@@ -78,12 +79,22 @@ class EvictionCandidate {
   std::set<mojom::RequestDestination> match_dest_;
 };
 
+constexpr base::MemoryConsumerTraits kInMemoryTraits(
+    base::MemoryConsumerTraits::EstimatedMemoryUsage::kMedium,
+    base::MemoryConsumerTraits::ReleaseMemoryCost::kRequiresTraversal,
+    base::MemoryConsumerTraits::InformationRetention::kLossless,
+    base::MemoryConsumerTraits::ExecutionType::kAsynchronous,
+    base::MemoryConsumerTraits::IsStateful::kYes);
+
 }  // namespace
 
 SharedDictionaryManagerInMemory::SharedDictionaryManagerInMemory(
     uint64_t cache_max_size,
     uint64_t cache_max_count)
-    : cache_max_size_(cache_max_size), cache_max_count_(cache_max_count) {}
+    : SharedDictionaryManager("SharedDictionaryManagerInMemory",
+                              kInMemoryTraits),
+      cache_max_size_(cache_max_size),
+      cache_max_count_(cache_max_count) {}
 
 SharedDictionaryManagerInMemory::~SharedDictionaryManagerInMemory() = default;
 
@@ -117,6 +128,12 @@ void SharedDictionaryManagerInMemory::ClearData(
       matcher.Reset();
     }
     storage->ClearData(start_time, end_time, std::move(matcher));
+  }
+  // Pervasive dictionaries are unpartitioned global resources, so they are
+  // only cleared during full bulk wipes (when url_matcher is null).
+  if (!url_matcher && pervasive_storage()) {
+    reinterpret_cast<SharedDictionaryStorageInMemory*>(pervasive_storage())
+        ->ClearData(start_time, end_time, url_matcher);
   }
   std::move(callback).Run();
 }

@@ -47,6 +47,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/profiles/profile_colors_util.h"
 #include "chrome/browser/ui/profiles/profile_view_utils.h"
 #include "chrome/browser/ui/signin/dice_migration_service.h"
@@ -828,7 +829,7 @@ class AvatarToolbarButtonInterfaceBaseBrowserTest {
                 GetIdentityManager()->GetPrimaryAccountInfo(
                     signin::ConsentLevel::kSignin));
         CHECK(!primary_account.IsEmpty());
-        GetBrowser()->profile()->GetPrefs()->SetString(
+        GetBrowser()->GetProfile()->GetPrefs()->SetString(
             prefs::kGoogleServicesLastSyncingGaiaId,
             primary_account.gaia.ToString());
         break;
@@ -936,7 +937,7 @@ class AvatarToolbarButtonBrowserTest
 };
 
 IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonBrowserTest, IncognitoWindowCount) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   Browser* browser1 = CreateIncognitoBrowser(profile);
   AvatarToolbarButtonTestAccessor avatar_accessor1(browser1);
   EXPECT_TRUE(avatar_accessor1.GetEnabled());
@@ -992,7 +993,7 @@ class AvatarToolbarButtonAshBrowserTest
 };
 
 IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAshBrowserTest, GuestSession) {
-  Profile* guest_profile = browser()->profile();
+  Profile* guest_profile = browser()->GetProfile();
   ASSERT_TRUE(guest_profile->IsGuestSession());
 
   EXPECT_TRUE(AvatarToolbarButtonTestAccessor(browser()).GetVisible());
@@ -1104,8 +1105,7 @@ class AvatarToolbarButtonReplaceSyncPromosWithSignInPromosBrowserTest
     ASSERT_TRUE(avatar_accessor.GetText().empty());                          \
                                                                              \
     SigninWithImage(test_email(), test_given_name());                        \
-    if (base::FeatureList::IsEnabled(                                        \
-            syncer::kReplaceSyncPromosWithSignInPromos)) {                   \
+    if (syncer::IsReplaceSyncPromosWithSignInPromosEnabled()) {              \
       ASSERT_EQ(                                                             \
           avatar_accessor.GetText(),                                         \
           l10n_util::GetStringUTF16(IDS_AVATAR_BUTTON_MAKING_CHROME_YOURS)); \
@@ -1686,7 +1686,7 @@ IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonBrowserTest,
 IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonBrowserTest,
                        SigninPendingDelayEndedNoBrowser) {
   ASSERT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   {
     AvatarToolbarButtonInterface* avatar =
         GetAvatarToolbarButtonInterface(browser());
@@ -1952,8 +1952,8 @@ TEST_WITH_SIGNED_IN_FROM_PRE(IN_PROC_BROWSER_TEST_P,
                              PromoNotShownWhenPromotionsDisabled) {
   SetupRequirementsForPromoType(GetAvatarPromoType());
 
-  TestingBrowserProcess::GetGlobal()->local_state()->SetBoolean(
-      prefs::kPromotionsEnabled, false);
+  g_browser_process->local_state()->SetBoolean(prefs::kPromotionsEnabled,
+                                               false);
   AvatarToolbarButtonInterface* avatar =
       GetAvatarToolbarButtonInterface(browser());
   AvatarToolbarButtonTestAccessor avatar_accessor(browser());
@@ -2502,7 +2502,7 @@ TEST_WITH_SIGNED_IN_FROM_PRE(
       signin_ui_util::
           CreateZeroOverrideDelayForCrossWindowAnimationReplayForTesting();
   base::HistogramTester histogram_tester;
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   Browser* browser_1 = browser();
   AvatarToolbarButtonInterface* avatar_1 =
       GetAvatarToolbarButtonInterface(browser_1);
@@ -2558,6 +2558,13 @@ class MAYBE_AvatarToolbarButtonSignedOutPromoBrowserTest
         /*disabled_features=*/{});
   }
 
+  void SetUpDefaultCommandLine(base::CommandLine* command_line) override {
+    AvatarToolbarButtonWithInteractiveFeaturePromoBrowserTest::
+        SetUpDefaultCommandLine(command_line);
+    command_line->RemoveSwitch(
+        switches::kDisableSigninPromoOnAvatarPillForTesting);
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
 };
@@ -2599,6 +2606,12 @@ class
         /*enabled_features=*/{syncer::kReplaceSyncPromosWithSignInPromos,
                               switches::kSigninPromoOnAvatarPill},
         /*disabled_features=*/{});
+  }
+
+  void SetUpDefaultCommandLine(base::CommandLine* command_line) override {
+    InProcessBrowserTest::SetUpDefaultCommandLine(command_line);
+    command_line->RemoveSwitch(
+        switches::kDisableSigninPromoOnAvatarPillForTesting);
   }
 
   // AvatarToolbarButtonInterfaceBaseBrowserTest
@@ -2719,7 +2732,7 @@ class AvatarToolbarButtonProfileColorBrowserTest
 // is set up.
 IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
                        PRE_AutogeneratedTheme) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ProfileAttributesEntry* entry = GetProfileAttributesEntry(profile);
   SetDefaultTheme(profile);
   EXPECT_EQ(entry->GetProfileThemeColors(),
@@ -2753,7 +2766,7 @@ IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
 // Tests that switching to the default theme updates profile colors.
 IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
                        DefaultTheme) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ProfileAttributesEntry* entry = GetProfileAttributesEntry(profile);
 
   SetColorTheme(profile, SK_ColorGREEN);
@@ -2769,7 +2782,7 @@ IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
 // Tests that a theme is updated after opening a browser.
 IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
                        UpdateThemeOnBrowserUpdate) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   // Keeps the browser process and the profile alive while a browser window is
   // closed.
   ScopedKeepAlive keep_alive(KeepAliveOrigin::BROWSER,
@@ -2795,7 +2808,7 @@ IN_PROC_BROWSER_TEST_P(AvatarToolbarButtonProfileColorBrowserTest,
                        ProfileColorsUpdateOnColorSchemeChange) {
   theme_service(browser()->GetProfile())
       ->SetBrowserColorScheme(ThemeService::BrowserColorScheme::kDark);
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ProfileAttributesEntry* entry = GetProfileAttributesEntry(profile);
 
   SetDefaultTheme(profile);
@@ -2940,7 +2953,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
                        DefaultBadgeDisabledbyPolicy) {
   std::u16string work_label = u"Work";
   AvatarToolbarButtonTestAccessor avatar_accessor(browser());
-  browser()->profile()->GetPrefs()->SetInteger(
+  browser()->GetProfile()->GetPrefs()->SetInteger(
       prefs::kEnterpriseProfileBadgeToolbarSettings, 1);
 
   enterprise_util::SetUserAcceptedAccountManagement(browser()->GetProfile(),
@@ -2961,9 +2974,9 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
                        CustomBadgeDisabledbyPolicy) {
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kEnterpriseCustomLabelForProfile, "Custom Label");
-  browser()->profile()->GetPrefs()->SetInteger(
+  browser()->GetProfile()->GetPrefs()->SetInteger(
       prefs::kEnterpriseProfileBadgeToolbarSettings, 1);
 
   AvatarToolbarButtonTestAccessor avatar_accessor(browser());
@@ -2986,7 +2999,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
                        CustomBadgeLengthLimited) {
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kEnterpriseCustomLabelForProfile,
       "Custom Label Can Be Max 16 Characters");
 
@@ -3007,7 +3020,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
                        WorkNewBrowserShowsBadgeWithCustomLabel) {
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kEnterpriseCustomLabelForProfile, "Custom Label");
   enterprise_util::SetUserAcceptedAccountManagement(browser()->GetProfile(),
                                                     true);
@@ -3017,7 +3030,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
       second_browser);
   EXPECT_EQ(second_browser_avatar_accessor.GetText(), u"Custom Label");
 
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kEnterpriseCustomLabelForProfile, "Updated Label");
   EXPECT_EQ(second_browser_avatar_accessor.GetText(), u"Updated Label");
 }
@@ -3141,7 +3154,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonEnterpriseBadgingBrowserTest,
   // Accept management and prepare work badge.
   enterprise_util::SetUserAcceptedAccountManagement(browser()->GetProfile(),
                                                     true);
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kEnterpriseCustomLabelForProfile, base::UTF16ToUTF8(work_badge()));
 
   EXPECT_EQ(avatar_accessor.GetText(),
@@ -3793,7 +3806,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonSignInBenefitsIphBrowserTest,
   // Sign in a user before the sync-to-signin migration.
   Signin(/*email=*/u"test@gmail.com", /*name=*/u"Account");
 
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
   ASSERT_FALSE(
       prefs->GetBoolean(prefs::kPrimaryAccountSetAfterSigninMigration));
 }
@@ -3835,7 +3848,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonSignInBenefitsIphBrowserTest,
   // Sign in a user before the sync-to-signin migration.
   Signin(/*email=*/u"test@gmail.com", /*name=*/u"Account");
 
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
   ASSERT_FALSE(
       prefs->GetBoolean(prefs::kPrimaryAccountSetAfterSigninMigration));
 
@@ -4137,16 +4150,16 @@ INSTANTIATE_TEST_SUITE_P(All,
                          AvatarToolbarButtonPasskeyUnlockErrorBrowserTest,
                          testing::Bool());
 
-class AvatarToolbarButtonAiRingBrowserTest
+class AvatarToolbarButtonGradientRingBrowserTest
     : public AvatarToolbarButtonBrowserTestBase {
  public:
-  AvatarToolbarButtonAiRingBrowserTest() {
+  AvatarToolbarButtonGradientRingBrowserTest() {
     scoped_feature_list_.InitAndEnableFeature(
         switches::kEnableAiSubscriptionAvatarRing);
   }
 
   void SetAiSubscriptionTierForProfile(int32_t subscription_tier) {
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         subscription_eligibility::prefs::kAiSubscriptionTier,
         subscription_tier);
   }
@@ -4155,7 +4168,7 @@ class AvatarToolbarButtonAiRingBrowserTest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
+IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonGradientRingBrowserTest,
                        PrefChangeTriggersLayoutAndIconUpdate) {
   AvatarToolbarButton* avatar_button = static_cast<AvatarToolbarButton*>(
       BrowserView::GetBrowserViewForBrowser(browser())
@@ -4164,8 +4177,8 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   ASSERT_TRUE(avatar_button);
   AvatarToolbarButtonTestAccessor avatar_accessor(browser());
 
-  // Assert that AI ring is not enabled initially.
-  ASSERT_FALSE(IsAiSubscriptionRingEnabled(browser()->GetProfile()));
+  // Assert that gradient ring is not enabled initially.
+  ASSERT_FALSE(ShouldShowAvatarGradientRing(browser()->GetProfile()));
 
   std::optional<ui::ImageModel> normal_icon =
       avatar_button->GetImageModel(views::Button::ButtonState::STATE_NORMAL);
@@ -4181,8 +4194,8 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   SetAiSubscriptionTierForProfile(1);
   waiter1->Wait();
 
-  // The AI ring should be enabled now.
-  EXPECT_TRUE(IsAiSubscriptionRingEnabled(browser()->GetProfile()));
+  // The gradient ring should be enabled now.
+  EXPECT_TRUE(ShouldShowAvatarGradientRing(browser()->GetProfile()));
   std::optional<ui::ImageModel> ring_icon =
       avatar_button->GetImageModel(views::Button::ButtonState::STATE_NORMAL);
   EXPECT_TRUE(ring_icon);
@@ -4205,7 +4218,7 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   SetAiSubscriptionTierForProfile(0);
   waiter2->Wait();
 
-  EXPECT_FALSE(IsAiSubscriptionRingEnabled(browser()->GetProfile()));
+  EXPECT_FALSE(ShouldShowAvatarGradientRing(browser()->GetProfile()));
   std::optional<ui::ImageModel> restored_icon =
       avatar_button->GetImageModel(views::Button::ButtonState::STATE_NORMAL);
   ASSERT_TRUE(restored_icon);
@@ -4216,8 +4229,8 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   EXPECT_EQ(restored_insets, standard_insets);
 }
 
-IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
-                       SigninPendingSuppressesAiRing) {
+IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonGradientRingBrowserTest,
+                       SigninPendingSuppressesGradientRing) {
   AvatarToolbarButton* avatar_button = static_cast<AvatarToolbarButton*>(
       GetAvatarToolbarButtonInterface(browser()));
   ASSERT_TRUE(avatar_button);
@@ -4241,13 +4254,13 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   const gfx::Insets standard_insets =
       avatar_button->GetLayoutInsets().value_or(gfx::Insets());
 
-  // Set AI subscription. This will not trigger the AI ring because SigninPending
-  // suppresses it.
+  // Set AI subscription. This will not trigger the gradient ring because
+  // SigninPending suppresses it.
   auto waiter2 = avatar_accessor.CreateUpdateWaiter();
   SetAiSubscriptionTierForProfile(1);
   waiter2->Wait();
 
-  // Verify that the AI ring is not enabled for the button.
+  // Verify that the gradient ring is not enabled for the button.
   std::optional<ui::ImageModel> current_icon =
       avatar_button->GetImageModel(views::Button::ButtonState::STATE_NORMAL);
   ASSERT_TRUE(current_icon);
@@ -4256,6 +4269,64 @@ IN_PROC_BROWSER_TEST_F(AvatarToolbarButtonAiRingBrowserTest,
   gfx::Insets current_insets =
       avatar_button->GetLayoutInsets().value_or(gfx::Insets());
   EXPECT_EQ(standard_insets, current_insets);
+}
+
+// Regression test for crbug.com/533663292
+class AvatarToolbarButtonAsyncPromoRaceRegressionTest
+    : public AvatarToolbarButtonBrowserTestBase {
+ public:
+  AvatarToolbarButtonAsyncPromoRaceRegressionTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {syncer::kReplaceSyncPromosWithSignInPromos,
+         syncer::kReplaceSyncPromosWithSigninPromosNewSignin},
+        {features::kWebUIAvatarButton});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+TEST_WITH_SIGNED_IN_FROM_PRE(IN_PROC_BROWSER_TEST_F,
+                             AvatarToolbarButtonAsyncPromoRaceRegressionTest,
+                             CrashOnPromoStateCollapseRegressionTest) {
+  AvatarToolbarButtonTestAccessor avatar_accessor(browser());
+
+  // Wait for the identity name to show up and then clear it, since its higher
+  // priority prevents the promo from displaying and making the test timeout.
+  ASSERT_TRUE(avatar_accessor.WaitForTextNotEqual(std::u16string()));
+  AvatarToolbarButtonInterface* avatar =
+      GetAvatarToolbarButtonInterface(browser());
+  avatar->ClearActiveStateForTesting();
+  ASSERT_TRUE(avatar_accessor.WaitForText(std::u16string()));
+
+  // Specifically enable BatchUploadPromo conditions and disable
+  // HistorySyncPromo
+  SetHistoryAndTabsSyncingPreference(true);
+  batch_upload_test_helper().SetLocalDataDescriptionForAllAvailableTypes();
+  batch_upload_test_helper().SetReturnDescriptionOnRequest(true);
+
+  // Manually set some delay to be sure tests don't timeout/fail from instant
+  // collapse
+  SetInfiniteAvatarDelay(AvatarDelayType::kPromo);
+
+  // Trigger both fetches.
+  avatar->ForceShowingPromoForTesting();
+  avatar->ForceShowingPromoForTesting();
+
+  // The first request will be implicitly cancelled by the second request
+  // starting. We fire it, and it should silently drop. (In the buggy code, it
+  // would be processed and start the promo).
+  batch_upload_test_helper().FireReturnDescriptionRequest();
+
+  // Fire second request, it resolves to NO promo.
+  // In the buggy code, this would collapse the underlying state but leaves the
+  // UI showing the promo, leading to a crash on click.
+  // With the fix, the UI never showed a promo so it's a no-op.
+  batch_upload_test_helper().ClearReturnDescriptions();
+  batch_upload_test_helper().FireReturnDescriptionRequest();
+
+  // Click the button to trigger a crash in the original code.
+  avatar_accessor.Click();
 }
 
 #endif  // !BUILDFLAG(IS_CHROMEOS)

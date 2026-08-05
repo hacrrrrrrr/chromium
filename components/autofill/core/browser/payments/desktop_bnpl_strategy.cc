@@ -31,6 +31,11 @@ DesktopBnplStrategy::GetNextActionOnUserDecisionToUseBnpl() {
   return UserDecisionToUseBnplNextAction::kShowSelectBnplIssuerUiForDesktop;
 }
 
+BnplStrategy::UserDecisionToUseBnplAgainNextAction
+DesktopBnplStrategy::GetNextActionOnUserDecisionToUseBnplAgain() {
+  return UserDecisionToUseBnplAgainNextAction::kDoNothing;
+}
+
 BnplStrategy::BnplAmountExtractionReturnedNextAction
 DesktopBnplStrategy::GetNextActionOnAmountExtractionReturned() {
   return BnplAmountExtractionReturnedNextAction::
@@ -46,6 +51,19 @@ BnplStrategy::BnplAiBasedAmountExtractionReturnedNextAction
 DesktopBnplStrategy::GetNextActionOnAiBasedAmountExtractionReturned() {
   return BnplAiBasedAmountExtractionReturnedNextAction::
       kReplaceLoadingThrobberWithIssuerSuggestionsOnDesktop;
+}
+
+BnplStrategy::UserDecisionToUseSavedCardsNextAction
+DesktopBnplStrategy::GetNextActionOnUserDecisionToUseSavedCards() {
+  return UserDecisionToUseSavedCardsNextAction::kUpdateDesktopPopupSuggestions;
+}
+
+BnplStrategy::UiDismissalAction DesktopBnplStrategy::GetUiDismissalAction() {
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillEnablePayNowPayLaterTabs)) {
+    return UiDismissalAction::kHideSuggestions;
+  }
+  return UiDismissalAction::kRemoveBnplUi;
 }
 
 bool DesktopBnplStrategy::ShouldRemoveExistingUiOnServerReturn(

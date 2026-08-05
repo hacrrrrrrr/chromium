@@ -17,6 +17,8 @@
 #include "base/check_deref.h"
 #include "base/compiler_specific.h"
 #include "base/containers/fixed_flat_map.h"
+#include "base/i18n/language_tag.h"
+#include "base/i18n/tag_converters.h"
 #include "base/json/string_escape.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/metrics_hashes.h"
@@ -473,6 +475,24 @@ void ReadAnythingAppController::OnDestruct() {
 
 void ReadAnythingAppController::OnNodeWillBeDeleted(ui::AXTree* tree,
                                                     ui::AXNode* node) {
+  // Node deletions are ignored for Readability because the Readability panel
+  // renders a static HTML snapshot and does not dynamically update its content
+  // on individual node deletions. The static DOM-to-AX mapping is still used
+  // for selection/links/read aloud:
+  // - Selection: If the deleted node is inside the selection range, selection
+  //   works normally. If the deleted node is the start or end of the selection,
+  //   the renderer's OnSelectionChange returns early and selection sync is
+  //   skipped.
+  // - Links: The browser ignores click events on non-existent node IDs.
+  // - Read Aloud: Text remains in the side panel's DOM and continues to be
+  //   read.
+  // TODO(crbug.com/538746675): Investigate whether this and the readability
+  // check in OnNodeDeleted are the right solution or if it impacts selection
+  // too much.
+  if (model_.is_readability_next_distillation_method() ||
+      tree->GetAXTreeID() != model_.active_tree_id()) {
+    return;
+  }
   ui::AXNodeID node_id = CHECK_DEREF(node).id();
   if (model_.GetCurrentlyVisibleNodes()->contains(node_id)) {
     displayed_nodes_pending_deletion_.insert(node_id);
@@ -485,8 +505,8 @@ void ReadAnythingAppController::OnNodeWillBeDeleted(ui::AXTree* tree,
 
 void ReadAnythingAppController::OnNodeDeleted(ui::AXTree* tree,
                                               ui::AXNodeID node_id) {
-  // Ignore node deletions for Readability as there is no mapping to the
-  // AXTree for this distillation method.
+  // Node deletions are ignored for Readability because the Readability panel
+  // renders a static HTML snapshot and does not dynamically update its content.
   if (model_.is_readability_next_distillation_method()) {
     return;
   }
@@ -546,8 +566,16 @@ void ReadAnythingAppController::OnStringAttributeChanged(
     const std::string& new_value) {
   // Return early when the images flag is disabled to avoid potential crashes.
   if (!features::IsReadAnythingImagesViaAlgorithmEnabled() ||
-      features::IsReadAnythingWithReadabilityEnabled() ||
       attr != ax::mojom::StringAttribute::kUrl) {
+    return;
+  }
+
+  // Also return early for Readability, since images for Readability are
+  // processed separately.
+  bool is_readability_distillation =
+      model_.is_readability_next_distillation_method() ||
+      model_.is_readability_current_distillation_method();
+  if (is_readability_distillation) {
     return;
   }
 
@@ -640,6 +668,8 @@ void ReadAnythingAppController::AccessibilityEventReceived(
           const_cast<std::vector<ui::AXEvent>&>(events));
     }
   }
+
+  MaybeLogAXTreeReady();
 
   // From this point onward, `updates` and `events` should not be accessed.
   if (tree_id != model_.active_tree_id() || IsUpdateProcessingPaused()) {
@@ -793,6 +823,11 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
   }
   VLOG(1) << "On active tree changed with new id: " << tree_id;
 
+  ax_tree_ready_for_current_active_tree_measured_ = false;
+  ax_tree_ready_for_current_active_tree_recorded_ = false;
+  active_tree_changed_start_time_ = base::TimeTicks::Now();
+  waiting_for_tree_id_ = false;
+
   // If the previous tree was not unknown (e.g. this is not the first tree
   // seen), log session metrics for the previous tree.
   if (model_.active_tree_id() != ui::AXTreeIDUnknown()) {
@@ -808,7 +843,9 @@ void ReadAnythingAppController::OnActiveAXTreeIDChanged(
   model_.SetRootTreeId(tree_id);
   model_.SetUkmSourceIdForTree(tree_id, ukm_source_id);
   model_.set_is_pdf(is_pdf);
-  if (is_pdf && !IsHidden()) {
+  // Reset the PDF draw timer (even if RM is hidden). The debouncer will check
+  // the state of RM at that point again and only act if it's still relevant.
+  if (is_pdf) {
     pdf_draw_debouncer_->Reset();
   }
 
@@ -868,6 +905,9 @@ void ReadAnythingAppController::PrepareForNewContentDistillation() {
 
 ReadAnythingAppModel::DistillationMethod
 ReadAnythingAppController::GetInitialDistillationMethod(bool is_pdf) const {
+  if (forced_distillation_method_for_testing_) {
+    return *forced_distillation_method_for_testing_;
+  }
   // If |is_pdf| = true, or if phrase highlighting is enabled, override
   // IsReadAnythingWithReadabilityEnabled flag and return kScreen2x.
   // TODO: crbug.com/444029483- Update the phrase highlighting implementation
@@ -971,6 +1011,30 @@ void ReadAnythingAppController::RecordEstimatedWordsHeard() {
   model_.set_words_heard(0);
 }
 
+// TODO(crbug.com/525868787): Incorporate OnAXTreeReady for getting the
+// processed AXTree after it is processed.
+void ReadAnythingAppController::MaybeLogAXTreeReady() {
+  if (ax_tree_ready_for_current_active_tree_recorded_) {
+    return;
+  }
+
+  if (model_.GetValidActiveTree()) {
+    if (!ax_tree_ready_for_current_active_tree_measured_) {
+      elapsed_time_ax_tree_ready_ =
+          base::TimeTicks::Now() - active_tree_changed_start_time_;
+      ax_tree_ready_for_current_active_tree_measured_ = true;
+    }
+
+    if (!IsHidden() && ax_tree_ready_for_current_active_tree_measured_) {
+      base::UmaHistogramLongTimes(
+          "Accessibility.ReadAnything."
+          "TimeFromActiveAXTreeIDChangedToAXTreeReady",
+          elapsed_time_ax_tree_ready_);
+      ax_tree_ready_for_current_active_tree_recorded_ = true;
+    }
+  }
+}
+
 void ReadAnythingAppController::OnAXTreeDestroyed(const ui::AXTreeID& tree_id) {
   // Cancel any running draw timers.
   VLOG(1) << "OnAXTreeDestroyed: " << tree_id;
@@ -1065,7 +1129,7 @@ void ReadAnythingAppController::OnAXTreeDistilled(
     return;
   }
   // Reset state, including the current side panel selection so we can update
-  // it based on the new main panel selection in PostProcessSelection below.ona
+  // it based on the new main panel selection in PostProcessSelection below.
   model_.Reset(content_node_ids);
   read_aloud_model_.ResetReadAloudState();
 
@@ -1462,6 +1526,8 @@ gin::ObjectTemplateBuilder ReadAnythingAppController::GetObjectTemplateBuilder(
                    &ReadAnythingAppController::IsImmersiveEnabled)
       .SetProperty("isImprovedReadAloudEnabled",
                    &ReadAnythingAppController::IsImprovedReadAloudEnabled)
+      .SetProperty("isReadAnythingImprovedUiEnabled",
+                   &ReadAnythingAppController::IsReadAnythingImprovedUiEnabled)
       .SetProperty(
           "isReadAnythingTranslateEntryPointEnabled",
           &ReadAnythingAppController::IsReadAnythingTranslateEntryPointEnabled)
@@ -2158,7 +2224,21 @@ bool ReadAnythingAppController::ShouldBold(ui::AXNodeID ax_node_id) const {
   bool is_bold = ax_node->HasTextStyle(ax::mojom::TextStyle::kBold);
   bool is_italic = ax_node->HasTextStyle(ax::mojom::TextStyle::kItalic);
   bool is_underline = ax_node->HasTextStyle(ax::mojom::TextStyle::kUnderline);
-  return is_bold || is_italic || is_underline;
+  if (is_bold || is_italic || is_underline) {
+    return true;
+  }
+
+  if (!features::IsPdfAccessibilityHeuristicEnhancementsEnabled() ||
+      !model_.is_pdf()) {
+    return false;
+  }
+
+  // TextStyle::kBold is only marked true on PDFs for font weights >= 700.
+  // Return true for ShouldBold if the font weight is at least semi-bold.
+  static constexpr int kSemiBoldFontWeight = 600;
+  float font_weight =
+      ax_node->GetFloatAttribute(ax::mojom::FloatAttribute::kFontWeight);
+  return font_weight >= kSemiBoldFontWeight;
 }
 
 bool ReadAnythingAppController::IsOverline(ui::AXNodeID ax_node_id) const {
@@ -2185,6 +2265,10 @@ bool ReadAnythingAppController::IsImmersiveEnabled() const {
 
 bool ReadAnythingAppController::IsImprovedReadAloudEnabled() const {
   return features::IsImprovedReadAloudEnabled();
+}
+
+bool ReadAnythingAppController::IsReadAnythingImprovedUiEnabled() const {
+  return features::IsReadAnythingImprovedUiEnabled();
 }
 
 bool ReadAnythingAppController::IsReadAnythingTranslateEntryPointEnabled()
@@ -2343,8 +2427,12 @@ const std::string ReadAnythingAppController::GetDisplayNameForLocale(
     const std::string& display_locale) const {
   bool found_valid_result = false;
   std::string locale_result;
-  if (l10n_util::IsValidLocaleSyntax(locale) &&
-      l10n_util::IsValidLocaleSyntax(display_locale)) {
+  if (base::i18n::LanguageTagConverter::GetInstance()
+          .FromString(locale)
+          .has_value() &&
+      base::i18n::LanguageTagConverter::GetInstance()
+          .FromString(display_locale)
+          .has_value()) {
     locale_result = base::UTF16ToUTF8(l10n_util::GetDisplayNameForLocale(
         locale, display_locale, /*is_for_ui=*/true));
     // Check for valid locales before getting the display name.
@@ -2401,8 +2489,18 @@ void ReadAnythingAppController::OnConnected() {
   render_frame()->GetBrowserInterfaceBroker().GetInterface(
       std::move(page_handler_factory_receiver));
 
-  // Get the dependency parser model used by phrase-based highlighting.
-  if (read_aloud_model_.GetDependencyParserModel().IsAvailable()) {
+  // Asynchronously check the availability of the sequence-bound dependency
+  // parser model used by phrase-based highlighting.
+  read_aloud_model_.GetDependencyParserModel()
+      .AsyncCall(&DependencyParserModel::IsAvailable)
+      .Then(base::BindOnce(&ReadAnythingAppController::
+                               OnDependencyParserModelAvailabilityChecked,
+                           weak_ptr_factory_.GetWeakPtr()));
+}
+
+void ReadAnythingAppController::OnDependencyParserModelAvailabilityChecked(
+    bool is_available) {
+  if (is_available) {
     return;
   }
 
@@ -2779,6 +2877,10 @@ void ReadAnythingAppController::OnReadingModeShown(
                           kListenToThisPageContextMenu) {
     ExecuteJavaScript("chrome.readingMode.setPlayOnOpen(true);");
   }
+
+  if (ax_tree_ready_for_current_active_tree_measured_) {
+    MaybeLogAXTreeReady();
+  }
 }
 
 void ReadAnythingAppController::OnSpeechEngineFirstStall() {
@@ -3134,11 +3236,12 @@ bool ReadAnythingAppController::IsDocsLoadMoreButtonVisible() const {
 
 void ReadAnythingAppController::UpdateDependencyParserModel(
     base::File model_file) {
-  read_aloud_model_.GetDependencyParserModel().UpdateWithFile(
-      std::move(model_file));
+  read_aloud_model_.GetDependencyParserModel()
+      .AsyncCall(&DependencyParserModel::UpdateWithFile)
+      .WithArgs(std::move(model_file));
 }
 
-DependencyParserModel&
+base::SequenceBound<DependencyParserModel>&
 ReadAnythingAppController::GetDependencyParserModelForTesting() {
   return read_aloud_model_.GetDependencyParserModel();
 }

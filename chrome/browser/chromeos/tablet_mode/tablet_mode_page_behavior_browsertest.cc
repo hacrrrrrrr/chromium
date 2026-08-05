@@ -109,12 +109,12 @@ IN_PROC_BROWSER_TEST_F(TabletModePageBehaviorTest, ExcludeHostedApps) {
   // Open a new app window.
   Browser::CreateParams params = Browser::CreateParams::CreateForApp(
       "test_browser_app", true /* trusted_source */, gfx::Rect(),
-      browser()->profile(), true);
+      browser()->GetProfile(), true);
   params.initial_show_state = ui::mojom::WindowShowState::kDefault;
   Browser* browser = Browser::Create(params);
   AddBlankTabAndShow(browser);
 
-  ASSERT_TRUE(browser->is_type_app());
+  ASSERT_EQ(browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   auto* web_contents = GetActiveWebContents(browser);
   ASSERT_TRUE(web_contents);
 

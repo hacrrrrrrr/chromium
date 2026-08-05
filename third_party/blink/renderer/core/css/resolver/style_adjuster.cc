@@ -667,6 +667,7 @@ void StyleAdjuster::AdjustOverflow(ComputedStyleBuilder& builder,
          builder.OverflowY() != EOverflow::kVisible);
 
   bool single_axis_scroller = false;
+  bool single_axis_scroller_overscroll_behavior = false;
 
   bool overflow_is_clip_or_visible =
       IsOverflowClipOrVisible(builder.OverflowY()) &&
@@ -698,6 +699,8 @@ void StyleAdjuster::AdjustOverflow(ComputedStyleBuilder& builder,
       builder.SetOverflowX(EOverflow::kAuto);
     } else if (builder.OverflowX() == EOverflow::kClip) {
       single_axis_scroller = true;
+      single_axis_scroller_overscroll_behavior =
+          builder.OverscrollBehaviorX() != EOverscrollBehavior::kAuto;
       if (!RuntimeEnabledFeatures::SingleAxisScrollContainersEnabled()) {
         builder.SetOverflowX(EOverflow::kHidden);
       }
@@ -709,6 +712,8 @@ void StyleAdjuster::AdjustOverflow(ComputedStyleBuilder& builder,
       builder.SetOverflowY(EOverflow::kAuto);
     } else if (builder.OverflowY() == EOverflow::kClip) {
       single_axis_scroller = true;
+      single_axis_scroller_overscroll_behavior =
+          builder.OverscrollBehaviorY() != EOverscrollBehavior::kAuto;
       if (!RuntimeEnabledFeatures::SingleAxisScrollContainersEnabled()) {
         builder.SetOverflowY(EOverflow::kHidden);
       }
@@ -717,6 +722,13 @@ void StyleAdjuster::AdjustOverflow(ComputedStyleBuilder& builder,
 
   if (single_axis_scroller) {
     UseCounter::Count(document, WebFeature::kSingleAxisScroller);
+
+    // Count when an overscroll-behavior that is not `auto` overlaps the axis
+    // set to `clip` of a single-axis scroll container.
+    if (single_axis_scroller_overscroll_behavior) {
+      UseCounter::Count(document,
+                        WebFeature::kSingleAxisScrollerOverscrollBehavior);
+    }
   }
 
   if (element && !element->IsPseudoElement() &&
@@ -743,8 +755,9 @@ static bool ForceStackingAndContainingBlockForCanvasLayoutSubtree(
   if (element && element->IsCanvasOrInCanvasSubtree() &&
       RuntimeEnabledFeatures::CanvasDrawElementEnabled(
           element->GetExecutionContext())) {
-    if (const auto* canvas =
-            DynamicTo<HTMLCanvasElement>(element->parentElement())) {
+    const Element* parent =
+        FlatTreeTraversal::ParentElementSkippingSlots(*element);
+    if (const auto* canvas = DynamicTo<HTMLCanvasElement>(parent)) {
       return canvas->layoutSubtree();
     }
   }
@@ -1399,6 +1412,11 @@ void StyleAdjuster::RunUncacheableStyleAdjustment(
           element.GetDocument().documentElement() == element;
       if (!is_document_element) {
         builder.SetContain(builder.Contain() | kContainsLayout);
+        if (view_transition->NeedsContainmentForDurationOfCapture() &&
+            RuntimeEnabledFeatures::
+                ScopedViewTransitionSizeContainmentEnabled()) {
+          builder.SetHasSizeContainmentForViewTransitionScope(true);
+        }
         builder.SetViewTransitionScope(EViewTransitionScope::kAll);
       }
       builder.SetForcesStackingContext(true);
@@ -1828,6 +1846,8 @@ StyleAdjuster::ElementTypeForCache StyleAdjuster::GetElementTypeCacheKey(
     case ElementType::kHTMLUListElement:
     case ElementType::kHTMLUnknownElement:
     case ElementType::kHTMLUserMediaElement:
+    case ElementType::kHTMLCameraElement:
+    case ElementType::kHTMLMicrophoneElement:
       return {ElementType::kHTMLDivElement};
 
       // Don't add a default here; new SVG/MathML elements need to be different

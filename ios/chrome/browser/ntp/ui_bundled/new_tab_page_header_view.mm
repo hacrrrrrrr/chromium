@@ -95,6 +95,7 @@ constexpr CGFloat kFakeboxMinimumFontScaleFactor = 0.57;
 // The constants for the constraints affecting the end button; either Lens or
 // Voice Search, depending on if Lens is enabled.
 constexpr CGFloat kEndButtonFakeboxTrailingSpace = 13.0;
+constexpr CGFloat kEndButtonFakeboxIPadTrailingSpace = 18.0;
 constexpr CGFloat kEndButtonNormalSizeFakeboxWithBadgeTrailingSpace = 7.0;
 constexpr CGFloat kEndButtonOmniboxTrailingSpace = 7.0;
 
@@ -108,6 +109,7 @@ constexpr CGFloat kHintLabelOmniboxLeadingSpaceWithIcon = 42.0;
 constexpr CGFloat kHintLabelOmniboxLeadingSpaceWithWithPlus = 52.0;
 
 // The constants for the search engine image.
+constexpr CGFloat kFakeboxIPadExtraLeadingSpace = 5.0;
 constexpr CGFloat kFakeboxImageLeadingSpace = 13.0;
 constexpr CGFloat kFakeboxPlusLeadingSpace = 18.0;
 constexpr CGFloat kOmniboxImageLeadingSpace = 22.0;
@@ -647,6 +649,8 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 - (CGFloat)fakeboxLeadingSpace {
   if ([self shouldShowPlusButton]) {
     return kFakeboxPlusLeadingSpace;
+  } else if (CanShowTabStrip(self) || !IsSplitToolbarMode(self)) {
+    return kFakeboxImageLeadingSpace + kFakeboxIPadExtraLeadingSpace;
   } else {
     return kFakeboxImageLeadingSpace;
   }
@@ -957,6 +961,7 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   if (!_isBottomOmnibox) {
     CGFloat currentWidth = self.fakeOmniboxContainer.bounds.size.width;
     CGFloat currentHeight = self.fakeOmniboxContainer.bounds.size.height;
+    CGPoint currentCenter = self.fakeOmniboxContainer.center;
 
     if (currentWidth <= 0 || currentHeight <= 0) {
       return;
@@ -964,14 +969,26 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 
     CGFloat targetWidth = topOmniboxView.frame.size.width;
     CGFloat targetHeight = topOmniboxView.frame.size.height;
+    CGPoint targetCenter = [topOmniboxView
+        convertPoint:CGPointMake(CGRectGetMidX(topOmniboxView.bounds),
+                                 CGRectGetMidY(topOmniboxView.bounds))
+              toView:self];
 
-    CGFloat scaleX = Interpolate(1.0, (targetWidth / currentWidth),
-                                 (progress * (2.0 - progress)));
-    CGFloat scaleY = Interpolate(1.0, (targetHeight / currentHeight),
-                                 (progress * (2.0 - progress)));
+    CGFloat progressEase = progress * (2.0 - progress);
+
+    CGFloat scaleX =
+        Interpolate(1.0, (targetWidth / currentWidth), progressEase);
+    CGFloat scaleY =
+        Interpolate(1.0, (targetHeight / currentHeight), progressEase);
+    CGFloat translateX = (targetCenter.x - currentCenter.x) * progressEase;
+
+    CGAffineTransform scaleTransform =
+        CGAffineTransformMakeScale(scaleX, scaleY);
+    CGAffineTransform translateTransform =
+        CGAffineTransformMakeTranslation(translateX, 0.0);
 
     self.fakeOmniboxContainer.transform =
-        CGAffineTransformMakeScale(scaleX, scaleY);
+        CGAffineTransformConcat(scaleTransform, translateTransform);
   } else {
     // Bottom omnibox.
     // No transform for the fakebox transition when the omnibox is pinned to the
@@ -1039,8 +1056,8 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   UIButtonConfiguration* configuration =
       [UIButtonConfiguration plainButtonConfiguration];
 
-  UIImage* icon = DefaultSymbolTemplateWithPointSize(
-      kPencilSymbol, ntp_home::kNTPMenuButtonIconSize);
+  UIImage* icon = SymbolTemplateWithPointSize(SymbolPencil,
+                                              ntp_home::kNTPMenuButtonIconSize);
   configuration.image = icon;
   configuration.background.cornerRadius = ntp_home::kNTPMenuButtonCornerRadius;
   customizationMenuButton.configuration = configuration;
@@ -1194,7 +1211,6 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   if (IsSplitToolbarMode(self)) {
     [self resetSplitToolbarResizing];
   }
-  [self.delegate didChangeOmniboxPosition:self];
 }
 
 - (void)setVoiceSearchIsEnabled:(BOOL)voiceSearchIsEnabled {
@@ -1357,7 +1373,7 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   self.plusButton.accessibilityLabel = l10n_util::GetNSString(
       IDS_IOS_COMPOSEBOX_ADD_ATTACHMENT_BUTTON_ACCESSIBILITY_LABEL);
   [self.plusButton
-      setImage:DefaultSymbolWithPointSize(kPlusSymbol, kSymbolActionPointSize)
+      setImage:SymbolWithPointSize(SymbolPlus, kSymbolActionPointSize)
       forState:UIControlStateNormal];
   [self.plusButton addTarget:self.NTPShortcutsHandler
                       action:@selector(openMultimodalActionsMenu)
@@ -1367,10 +1383,6 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 // Sets the background based on the current NTP background, current color
 // palette, or defaults if neither are set.
 - (void)applyBackgroundTheme {
-  [self.identityDiscButton
-      updateConfigurationWithPalette:[self.traitCollection
-                                             objectForNewTabPageTrait]];
-
   // Fakebox coloring looks at image/color/default to determine correct colors.
   [self setFakeboxColorsWithProgress:_lastAnimationPercent];
 }
@@ -1408,6 +1420,8 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
     self.lensButton =
         [ExtendedTouchTargetButton buttonWithType:UIButtonTypeSystem];
     [_buttonStack addArrangedSubview:self.lensButton];
+    [self.layoutGuideCenter referenceView:self.lensButton
+                                underName:kFakeboxLensIconGuide];
     if (_useNewBadgeForLensButton) {
       [self.lensButton addTarget:self
                           action:@selector(lensButtonWithNewBadgeTapped:)
@@ -1647,6 +1661,13 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   if (_useNewBadgeForLensButton && !IsAimEnabledInNtp()) {
     return kEndButtonNormalSizeFakeboxWithBadgeTrailingSpace;
   }
+
+  // Adjust the iPad voice button spacing to mirror the leading padding when no
+  // other buttons are present.
+  BOOL isSplitToolbarMode = IsSplitToolbarMode(self);
+  if (!isSplitToolbarMode) {
+    return kEndButtonFakeboxIPadTrailingSpace;
+  }
   // Common trailing space.
   return kEndButtonFakeboxTrailingSpace;
 }
@@ -1698,6 +1719,9 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
 - (CGFloat)hintLabelFakeboxLeadingSpace {
   if ([self shouldShowPlusButton]) {
     return kHintLabelFakeboxLeadingSpaceWithPlus;
+  } else if (CanShowTabStrip(self) || !IsSplitToolbarMode(self)) {
+    return kHintLabelFakeboxLeadingSpaceWithIcon +
+           kFakeboxIPadExtraLeadingSpace;
   } else {
     return kHintLabelFakeboxLeadingSpaceWithIcon;
   }
@@ -1922,11 +1946,18 @@ CGFloat Interpolate(CGFloat from, CGFloat to, CGFloat percent) {
   [self.identityDiscButton setSignedOutAccountImage];
 }
 
-- (void)updateAccountImage:(UIImage*)image
-                      name:(NSString*)name
-                     email:(NSString*)email {
+// Updates current signed-in user account avatar with the supplied images.
+// `avatarWithoutAITier` is the normal-sized avatar image to be displayed when
+// the AI tier ring is not shown.
+- (void)updateAccountWithName:(NSString*)name
+                        email:(NSString*)email
+                  avatarImage:(UIImage*)avatarImage
+                    hasAITier:(BOOL)hasAITier {
   _isSignedIn = YES;
-  [self.identityDiscButton updateAccountImage:image name:name email:email];
+  [self.identityDiscButton updateAccountWithName:name
+                                           email:email
+                                     avatarImage:avatarImage
+                                       hasAITier:hasAITier];
 }
 
 #pragma mark - SearchEngineLogoConsumer

@@ -25,7 +25,10 @@ BASE_DECLARE_FEATURE(kDataControlsSearchWith);
 BASE_DECLARE_FEATURE(kDataControlsGlic);
 
 // Controls enabling local evaluation of file size and URL regex conditions in Data Controls rules.
-BASE_DECLARE_FEATURE(kDataControlsLocalEvaluation);
+BASE_DECLARE_FEATURE(kDataControlsUrlRegexAndSizeAttributes);
+
+// Controls enabling custom message attributes in Data Controls rules.
+BASE_DECLARE_FEATURE(kDataControlsCustomMessage);
 
 }  // namespace data_controls
 

@@ -13,6 +13,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
+#include "base/task/current_thread.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
@@ -62,7 +63,7 @@ class TestDialogController : public SettingsOverriddenDialogController {
  private:
   bool ShouldShow() override { return true; }
   ShowParams GetShowParams() override { return show_params_; }
-  void OnDialogShown() override {}
+  void OnDialogWillBeShown() override {}
   void HandleDialogResult(DialogResult result) override {
     ASSERT_FALSE(dialog_result_out_->has_value());
     *dialog_result_out_ = result;
@@ -132,7 +133,9 @@ class SettingsOverriddenDialogBrowserTest : public DialogBrowserTest {
         std::make_unique<TestDialogController>(std::move(params),
                                                &dialog_result_),
         browser->GetWindow()->GetNativeWindow());
-    return waiter.WaitIfNeededAndGet();
+    views::Widget* widget = waiter.WaitIfNeededAndGet();
+    EXPECT_TRUE(base::test::RunUntil([&] { return widget->IsVisible(); }));
+    return widget;
   }
 
   void ShowNtpOverriddenDefaultDialog() {
@@ -181,7 +184,7 @@ class SettingsOverriddenDialogBrowserTest : public DialogBrowserTest {
     base::FilePath test_root_path;
     ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_root_path));
 
-    Profile* const profile = browser()->profile();
+    Profile* const profile = browser()->GetProfile();
     scoped_refptr<const extensions::Extension> extension =
         extensions::ChromeTestExtensionLoader(profile).LoadExtension(
             test_root_path.AppendASCII("extensions/api_test/override/newtab"));
@@ -192,7 +195,7 @@ class SettingsOverriddenDialogBrowserTest : public DialogBrowserTest {
     base::FilePath test_root_path;
     ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_root_path));
 
-    Profile* const profile = browser()->profile();
+    Profile* const profile = browser()->GetProfile();
     scoped_refptr<const extensions::Extension> extension =
         extensions::ChromeTestExtensionLoader(profile).LoadExtension(
             test_root_path.AppendASCII("extensions/search_provider_override"));

@@ -70,6 +70,7 @@ export class AcceleratorViewElement extends AcceleratorViewElementBase {
 
       pendingKeyEvent: {
         type: Object,
+        value: null,
       },
 
       viewState: {
@@ -151,7 +152,10 @@ export class AcceleratorViewElement extends AcceleratorViewElementBase {
       },
 
       /** The meta key on the keyboard to display to the user. */
-      metaKey: Object,
+      metaKey: {
+        type: Number,
+        value: MetaKey.kSearch,
+      },
 
       hasFunctionKey: {
         type: Boolean,
@@ -160,28 +164,29 @@ export class AcceleratorViewElement extends AcceleratorViewElementBase {
     };
   }
 
-  acceleratorInfo: StandardAcceleratorInfo;
-  viewState: ViewState;
-  private modifiers: string[];
-  statusMessage: string|TrustedHTML;
-  hasError: boolean;
-  recordedError: boolean;
-  description: string;
-  action: number;
-  source: AcceleratorSource;
-  sourceIsLocked: boolean;
-  showEditIcon: boolean;
-  subcategoryIsLocked: boolean;
-  isFirstAccelerator: boolean;
-  isDisabled: boolean;
-  metaKey: MetaKey = MetaKey.kSearch;
-  pendingKeyEvent: KeyEvent|null = null;
-  shortcutInput: ShortcutInputElement|null;
-  defaultAccelerators: Accelerator[];
-  hasFunctionKey: boolean;
-  protected isCapturing: boolean;
-  protected lastAccelerator: Accelerator;
-  protected lastResult: AcceleratorConfigResult;
+  declare acceleratorInfo: StandardAcceleratorInfo;
+  declare viewState: ViewState;
+  declare private modifiers: string[];
+  declare statusMessage: string|TrustedHTML;
+  declare hasError: boolean;
+  declare recordedError: boolean;
+  declare description: string;
+  declare action: number;
+  declare source: AcceleratorSource;
+  declare sourceIsLocked: boolean;
+  declare showEditIcon: boolean;
+  subcategoryIsLocked = false;
+  declare isFirstAccelerator: boolean;
+  declare isDisabled: boolean;
+  declare metaKey: MetaKey;
+  declare pendingKeyEvent: KeyEvent|null;
+  protected shortcutInput: ShortcutInputElement|null = null;
+  protected defaultAccelerators: Accelerator[] = [];
+  declare hasFunctionKey: boolean;
+  declare protected isCapturing: boolean;
+  protected lastAccelerator: Accelerator|null = null;
+  protected lastResult: AcceleratorConfigResult =
+      AcceleratorConfigResult.kSuccess;
   protected lastPendingKeyEvent: KeyEvent|null = null;
   private shortcutProvider: ShortcutProviderInterface = getShortcutProvider();
   private lookupManager: AcceleratorLookupManager =
@@ -313,7 +318,8 @@ export class AcceleratorViewElement extends AcceleratorViewElementBase {
       // last. If they match and a retry on the same accelerator
       // cannot bypass the error, exit early to prevent flickering error
       // messages.
-      if (areAcceleratorsEqual(pendingAccelerator, this.lastAccelerator) &&
+      if (this.lastAccelerator &&
+          areAcceleratorsEqual(pendingAccelerator, this.lastAccelerator) &&
           !canBypassErrorWithRetry(this.lastResult)) {
         return;
       }

@@ -171,8 +171,7 @@ public class CustomTabDelegateFactory implements TabDelegateFactory {
 
         @Override
         public boolean shouldDisableAllExternalIntents() {
-            return mActivityType == ActivityType.AUTH_TAB
-                    && ChromeFeatureList.sCctAuthTabDisableAllExternalIntents.isEnabled();
+            return false;
         }
 
         @Override
@@ -193,7 +192,7 @@ public class CustomTabDelegateFactory implements TabDelegateFactory {
 
         @Override
         public boolean allowExternalNavigationForHttpProtocols(GURL url) {
-            return false;
+            return true;
         }
 
         public void resumeDelayedVerificationForTesting() {

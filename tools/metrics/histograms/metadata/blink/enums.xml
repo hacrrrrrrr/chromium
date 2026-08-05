@@ -3800,7 +3800,7 @@ Called by update_use_counter_feature_enum.py.-->
   <int value="3282" label="OBSOLETE_RubyElementWithDisplayBlock"/>
   <int value="3283" label="OBSOLETE_LocationFragmentDirectiveAccessed"/>
   <int value="3284" label="CanvasRenderingContext"/>
-  <int value="3285" label="SchemefulSameSiteContextDowngrade"/>
+  <int value="3285" label="OBSOLETE_SchemefulSameSiteContextDowngrade"/>
   <int value="3286" label="OriginAgentClusterHeader"/>
   <int value="3287" label="V8WasmSimdOpcodes"/>
   <int value="3288" label="GridRowGapPercent"/>
@@ -5733,7 +5733,7 @@ Called by update_use_counter_feature_enum.py.-->
   <int value="5069" label="OBSOLETE_V8AIRewriter_Rewrite_Method"/>
   <int value="5070" label="OBSOLETE_V8AIRewriter_RewriteStreaming_Method"/>
   <int value="5071" label="OBSOLETE_V8AIRewriter_Destroy_Method"/>
-  <int value="5072" label="FencedFrameCanLoadOpaqueURL"/>
+  <int value="5072" label="OBSOLETE_FencedFrameCanLoadOpaqueURL"/>
   <int value="5073"
       label="V8Performance_Memory_AttributeGetter_NotLockedToSite"/>
   <int value="5074" label="OBSOLETE_PartitionedPopin_OpenAttempt"/>
@@ -5786,7 +5786,7 @@ Called by update_use_counter_feature_enum.py.-->
   <int value="5111"
       label="OBSOLETE_MaxInterStageShaderComponentsRequiredLimit"/>
   <int value="5112" label="ShowPickerSelect"/>
-  <int value="5113" label="AudioContextPlayoutStats"/>
+  <int value="5113" label="OBSOLETE_AudioContextPlayoutStats"/>
   <int value="5114" label="OBSOLETE_ThirdPartyCookieBlocked"/>
   <int value="5115"
       label="V8PerformanceResourceTiming_WorkerRouterEvaluationStart_AttributeGetter"/>
@@ -6718,6 +6718,22 @@ Called by update_use_counter_feature_enum.py.-->
   <int value="5966" label="DeclarativePerformanceObserver"/>
   <int value="5967" label="PrefetchAndPrerenderActivationBeacon"/>
   <int value="5968" label="LocalNetworkAccessForWebRTCOptOut"/>
+  <int value="5969" label="HTMLCameraElement"/>
+  <int value="5970" label="HTMLMicrophoneElement"/>
+  <int value="5971"
+      label="V8WorkerNavigator_GlobalPrivacyControl_AttributeGetter"/>
+  <int value="5972" label="V8Navigator_GlobalPrivacyControl_AttributeGetter"/>
+  <int value="5973" label="XmlCAPAlert"/>
+  <int value="5974" label="XmlCAPAlertWithXSLT"/>
+  <int value="5975" label="SingleAxisScrollerPositionSticky"/>
+  <int value="5976" label="SingleAxisScrollerOverscrollBehavior"/>
+  <int value="5977" label="SingleAxisScrollerAutoMinSize"/>
+  <int value="5978"
+      label="V8HTMLImageElement_ReplacedByUserAgent_AttributeGetter"/>
+  <int value="5979" label="UAReplaceStartAddListener"/>
+  <int value="5980" label="UAReplaceEndAddListener"/>
+  <int value="5981" label="AdImageHDR"/>
+  <int value="5982" label="AdVideoHDR"/>
 </enum>
 
 <!-- LINT.ThenChange(//third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom:WebFeature) -->
@@ -6801,7 +6817,7 @@ Called by update_permissions_policy_enum.py.-->
   <int value="70" label="StorageAccessAPI"/>
   <int value="71" label="ClientHintUAFullVersion"/>
   <int value="72" label="TrustTokenRedemption"/>
-  <int value="73" label="AttributionReporting"/>
+  <int value="73" label="Deprecated: AttributionReporting"/>
   <int value="74" label="ClientHintUAPlatformVersion"/>
   <int value="75" label="CrossOriginIsolated"/>
   <int value="76" label="ClipboardRead"/>
@@ -7061,6 +7077,9 @@ Called by update_permissions_policy_enum.py.-->
   <int value="17" label="WellKnownInvalidContentType"/>
   <int value="18" label="ConfigInvalidContentType"/>
   <int value="19" label="IdpNotPotentiallyTrustworthy"/>
+  <int value="20" label="WellKnownBlockedByConnectionAllowlist"/>
+  <int value="21" label="ConfigBlockedByConnectionAllowlist"/>
+  <int value="22" label="DisconnectBlockedByConnectionAllowlist"/>
 </enum>
 
 <!-- LINT.ThenChange(//content/browser/webid/metrics.h:DisconnectStatus) -->
@@ -7139,6 +7158,9 @@ Called by update_permissions_policy_enum.py.-->
   <int value="7"
       label="Browser has signed-out IDP status, accounts endpoint returned
              accounts."/>
+  <int value="8"
+      label="Browser has signed-in IDP status, accounts endpoint was blocked
+             by connection allowlist."/>
 </enum>
 
 <!-- LINT.ThenChange(//content/browser/webid/metrics.h:IdpSigninMatchStatus) -->
@@ -7190,9 +7212,12 @@ Called by update_permissions_policy_enum.py.-->
   <int value="0" label="Continue button clicked"/>
   <int value="1" label="Dismissed by user through clicking close icon"/>
   <int value="2" label="Dialog unhandled by user"/>
+  <int value="3" label="Swiped down on Android"/>
+  <int value="4" label="Back press on Android"/>
+  <int value="5" label="Tap scrim on Android"/>
 </enum>
 
-<!-- LINT.ThenChange(//chrome/browser/ui/views/webid/fedcm_account_selection_view_desktop.h:MismatchDialogResult) -->
+<!-- LINT.ThenChange(//chrome/browser/ui/webid/identity_ui_utils.h:MismatchDialogResult) -->
 
 <!-- LINT.IfChange(FedCmMismatchDialogType) -->
 
@@ -7322,6 +7347,10 @@ Called by update_permissions_policy_enum.py.-->
   <int value="51" label="LoginPopupClosedWithoutSignin"/>
   <int value="52" label="SuppressedBySegmentationPlatform"/>
   <int value="53" label="SuccessUsingRedirectTo"/>
+  <int value="54" label="WellKnownBlockedByConnectionAllowlist"/>
+  <int value="55" label="ConfigBlockedByConnectionAllowlist"/>
+  <int value="56" label="AccountsBlockedByConnectionAllowlist"/>
+  <int value="57" label="IdTokenBlockedByConnectionAllowlist"/>
 </enum>
 
 <!-- LINT.ThenChange(//content/browser/webid/metrics.h:RequestIdTokenStatus) -->
@@ -7355,16 +7384,6 @@ Called by update_permissions_policy_enum.py.-->
 </enum>
 
 <!-- LINT.ThenChange(//content/browser/webid/metrics.h:RpParameters) -->
-
-<!-- LINT.IfChange(FedCmSetLoginStatusIgnoredReason) -->
-
-<enum name="FedCmSetLoginStatusIgnoredReason">
-  <int value="0" label="Looking up the FrameTreeNode by ID failed"/>
-  <int value="1" label="Request came from within a fenced frame tree"/>
-  <int value="2" label="Request came from a cross-origin context"/>
-</enum>
-
-<!-- LINT.ThenChange(//content/browser/webid/metrics.h:SetLoginStatusIgnoredReason) -->
 
 <!-- LINT.IfChange(FedCmSheetType) -->
 
@@ -8613,6 +8632,7 @@ Called by update_use_counter_css.py.-->
   <int value="960" label="corner-inline-start"/>
   <int value="961" label="corner-inline-end"/>
   <int value="962" label="window-drag"/>
+  <int value="963" label="max-content-sizing"/>
 </enum>
 
 <!-- LINT.ThenChange(//third_party/blink/public/mojom/use_counter/metrics/css_property_id.mojom:CSSSampleId) -->
@@ -8649,7 +8669,7 @@ Called by update_use_counter_css.py.-->
   <int value="5" label="Invalid display property"/>
 </enum>
 
-<!-- LINT.ThenChange(//third_party/blink/renderer/core/html/html_capability_element_base.h:InvalidStyleReason) -->
+<!-- LINT.ThenChange(//third_party/blink/renderer/core/html/html_capability_element_metrics_util.h:InvalidStyleReason) -->
 
 <!-- LINT.IfChange(PermissionElementUserInteractionDeniedReason) -->
 
@@ -8666,25 +8686,16 @@ Called by update_use_counter_css.py.-->
   <int value="7" label="Intersection visiblity out of viewport or clipped"/>
   <int value="8" label="Intersection visiblity occluded or distorted"/>
   <int value="9" label="An attribute changed"/>
-  <int value="10" label="Web app installation data error"/>
+  <int value="10"
+      label="(Obsolete) Web app installation data error. Deprecated as of
+             2026-07"/>
 </enum>
 
-<!-- LINT.ThenChange(//third_party/blink/renderer/core/html/html_capability_element_base.h:UserInteractionDeniedReason) -->
+<!-- LINT.ThenChange(//third_party/blink/renderer/core/html/html_capability_element_metrics_util.h:UserInteractionDeniedReason) -->
 
 <enum name="RaceTaskPriority">
   <int value="0" label="LowerPriority"/>
   <int value="1" label="NormalPriority"/>
-</enum>
-
-<enum name="RequestedImageMimeType">
-  <int value="0" label="Png"/>
-  <int value="1" label="Jpeg"/>
-  <int value="2" label="Webp"/>
-  <int value="3" label="Gif"/>
-  <int value="4" label="Bmp"/>
-  <int value="5" label="Ico"/>
-  <int value="6" label="Tiff"/>
-  <int value="7" label="Unknown"/>
 </enum>
 
 <enum name="RevalidationPolicy">
@@ -9188,6 +9199,7 @@ Called by update_use_counter_feature_enum.py.-->
   <int value="443" label="DRAFT_HTMLSetterMethods"/>
   <int value="444" label="DRAFT_HTMLStreamMethods"/>
   <int value="445" label="CanvasHtml"/>
+  <int value="446" label="DRAFT_Symbols"/>
 </enum>
 
 <!-- LINT.ThenChange(//third_party/blink/public/mojom/use_counter/metrics/webdx_feature.mojom:WebDXFeature) -->

@@ -46,6 +46,7 @@
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/global_media_controls/media_toolbar_button.h"
 #include "chrome/browser/ui/views/location_bar/webui_content_setting_image_control.h"
 #include "chrome/browser/ui/views/location_bar/webui_location_bar.h"
 #include "chrome/browser/ui/views/profiles/profile_menu_coordinator.h"
@@ -60,6 +61,7 @@
 #include "chrome/browser/ui/webui/webui_toolbar/utils/toolbar_button_utils.h"
 #include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_drag_state.h"
 #include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_extensions_container.h"
+#include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_ui.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
@@ -231,7 +233,7 @@ class WebUIToolbarInternalWebView : public views::WebView {
     gfx::Point point(params.x, params.y);
     views::View::ConvertPointToScreen(this, &point);
     webui_toolbar_web_view_->HandleOmniboxContextMenu(point, params.source_type,
-                                                      params.edit_flags);
+                                                      params);
     // We handled this.
     return true;
   }
@@ -271,6 +273,7 @@ WebUIToolbarWebView::WebUIToolbarWebView(
       reload_control_(this),
       split_tabs_control_(this),
       home_control_(this),
+      performance_intervention_control_(this),
       app_menu_control_(*this),
       battery_saver_control_(this),
       avatar_control_(this, browser->GetBrowserForMigrationOnly()),
@@ -292,6 +295,8 @@ WebUIToolbarWebView::WebUIToolbarWebView(
       toolbar_ui_api::mojom::HomeControlState::New();
   last_queued_state_.battery_saver_button_visible =
       battery_saver_control_.IsVisible();
+  last_queued_state_.performance_intervention_control_state =
+      toolbar_ui_api::mojom::PerformanceInterventionControlState::New();
   last_queued_state_.location_bar_state =
       toolbar_ui_api::mojom::LocationBarState::New();
   last_queued_state_.location_bar_state->omnibox_view_state =
@@ -366,6 +371,8 @@ WebUIToolbarWebView::WebUIToolbarWebView(
 
   content::WebContents* web_contents = web_view->GetWebContents();
   if (web_contents) {
+    WebUIToolbarUIDependencyProviderUserData::CreateForWebContents(web_contents,
+                                                                   this);
     scoped_accessibility_mode_ =
         content::BrowserAccessibilityState::GetInstance()
             ->CreateScopedModeForWebContents(
@@ -387,7 +394,12 @@ WebUIToolbarWebView::WebUIToolbarWebView(
   }
 }
 
-WebUIToolbarWebView::~WebUIToolbarWebView() = default;
+WebUIToolbarWebView::~WebUIToolbarWebView() {
+  if (web_contents()) {
+    web_contents()->RemoveUserData(
+        WebUIToolbarUIDependencyProviderUserData::UserDataKey());
+  }
+}
 
 int WebUIToolbarWebView::GetLocationBarWidthForTesting() const {
   CHECK(location_bar_);
@@ -431,6 +443,9 @@ void WebUIToolbarWebView::AddedToWidget() {
     }
     if (features::IsWebUIBatterySaverButtonEnabled()) {
       battery_saver_control_.Init();
+    }
+    if (features::IsWebUIPerformanceInterventionButtonEnabled()) {
+      performance_intervention_control_.Init();
     }
     if (features::IsWebUIPinnedToolbarActionsEnabled()) {
       pinned_toolbar_actions_.Init();
@@ -574,17 +589,26 @@ void WebUIToolbarWebView::HandleContextMenu(
 
 void WebUIToolbarWebView::ShowContentSettingsBubble(
     ::toolbar_ui_api::mojom::ContentSettingImageType type,
+    bool is_pointer_interaction,
     toolbar_ui_api::ToolbarUIService::ShowContentSettingsBubbleCallback
         callback) {
   if (location_bar_) {
     location_bar_->content_setting_image_control().ShowContentSettingsBubble(
-        type, std::move(callback));
+        type, is_pointer_interaction, std::move(callback));
   } else {
     std::move(callback).Run(base::unexpected(Error::New(
         Code::kFailedPrecondition,
         base::StringPrintf("WebUIToolbarWebView: cannot create bubble without "
                            "location_bar_ for type: %d",
                            static_cast<int32_t>(type)))));
+  }
+}
+
+void WebUIToolbarWebView::OnContentSettingImagePointerDown(
+    ::toolbar_ui_api::mojom::ContentSettingImageType type) {
+  if (location_bar_) {
+    location_bar_->content_setting_image_control()
+        .OnContentSettingImagePointerDown(type);
   }
 }
 
@@ -669,6 +693,16 @@ void WebUIToolbarWebView::MovePinnedToolbarActionBy(
   }
 }
 
+void WebUIToolbarWebView::MoveExtensionAction(const std::string& extension_id,
+                                              int32_t target_index) {
+  extensions_container_.MoveExtension(extension_id, target_index);
+}
+
+void WebUIToolbarWebView::MoveExtensionActionBy(const std::string& extension_id,
+                                                int32_t delta) {
+  extensions_container_.MoveExtensionBy(extension_id, delta);
+}
+
 base::expected<std::monostate, mojo_base::mojom::ErrorPtr>
 WebUIToolbarWebView::OnOmniboxAction(
     toolbar_ui_api::mojom::OmniboxActionPtr action) {
@@ -733,10 +767,32 @@ WebUIToolbarWebView::AdjustOmniboxTextForCopy(const std::u16string& text,
   result->adjusted_text = text16;
   if (write_url) {
     result->adjusted_url = url;
+
+    std::u16string page_title;
+    if (location_bar) {
+      content::WebContents* web_contents = location_bar->GetWebContents();
+      if (web_contents) {
+        page_title = web_contents->GetTitle();
+      }
+    }
+    if (page_title.empty()) {
+      page_title = base::UTF8ToUTF16(url.spec());
+    }
+    result->page_title = std::move(page_title);
   } else {
     result->adjusted_url = std::nullopt;
+    result->page_title = std::nullopt;
   }
   return result;
+}
+
+void WebUIToolbarWebView::OnPerformanceInterventionButtonClicked(
+    bool is_mouse_interaction) {
+  performance_intervention_control_.OnClicked(is_mouse_interaction);
+}
+
+void WebUIToolbarWebView::OnPerformanceInterventionButtonMousePressed() {
+  performance_intervention_control_.OnMousePressed();
 }
 
 ReloadControl* WebUIToolbarWebView::GetReloadControl() {
@@ -746,6 +802,14 @@ ReloadControl* WebUIToolbarWebView::GetReloadControl() {
 AvatarToolbarButtonInterface*
 WebUIToolbarWebView::GetAvatarToolbarButtonInterface() {
   return &avatar_control_;
+}
+
+MediaToolbarButton* WebUIToolbarWebView::GetMediaToolbarButton() {
+  return nullptr;
+}
+
+ExtensionsContainerViews* WebUIToolbarWebView::extensions_container_views() {
+  return extensions_container_.extensions_container();
 }
 
 BrowserWindowInterface* WebUIToolbarWebView::GetBrowser() {
@@ -758,6 +822,14 @@ chrome::BrowserCommandController* WebUIToolbarWebView::GetCommandController() {
 
 views::View* WebUIToolbarWebView::GetView() {
   return this;
+}
+
+views::View* WebUIToolbarWebView::GetInternalWebView() {
+  return web_view_.get();
+}
+
+content::WebContents* WebUIToolbarWebView::GetWebContents() {
+  return web_view_->web_contents();
 }
 
 void WebUIToolbarWebView::AnnounceAlert(const std::u16string& announcement) {
@@ -775,6 +847,11 @@ void WebUIToolbarWebView::OnPreferredSizeChanged() {
 const toolbar_ui_api::mojom::NavigationControlsState&
 WebUIToolbarWebView::GetState() const {
   return last_queued_state_;
+}
+
+base::WeakPtr<WebUIToolbarUI::DependencyProvider>
+WebUIToolbarWebView::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 browser_controls_api::BrowserControlsService::BrowserControlsServiceDelegate*
@@ -1022,6 +1099,12 @@ float WebUIToolbarWebView::GetScaleFactor() const {
 views::FlexSpecification WebUIToolbarWebView::GetFlexSpecification(
     int navigation_button_flex_order,
     int location_bar_flex_order) {
+  // If the all controls are using WebUI, don't need to integrate with the Views
+  // overflow logic, and flex orders don't really make any sense, so this method
+  // should not be called. Instead, the caller should set a basic
+  // FlexSpecification itself.
+  CHECK(!is_webui_toolbar_fully_enabled_);
+
   // This is the base flex rule when using the lowest order / highest priority
   // for the WebUIToolbarWebView. If there's enough space for all the highest
   // priority controls, then we'll switch to the lower priority flex rule for
@@ -1226,6 +1309,15 @@ void WebUIToolbarWebView::OnHomeControlStateChanged(
   }
 }
 
+void WebUIToolbarWebView::OnPerformanceInterventionControlStateChanged(
+    toolbar_ui_api::mojom::PerformanceInterventionControlStatePtr state) {
+  if (*state != *last_queued_state_.performance_intervention_control_state) {
+    last_queued_state_.performance_intervention_control_state =
+        std::move(state);
+    PostPushNavigationState();
+  }
+}
+
 void WebUIToolbarWebView::OnAppMenuControlStateChanged(
     toolbar_ui_api::mojom::AppMenuControlStatePtr state) {
   if (*state != *last_queued_state_.app_menu_control_state) {
@@ -1391,10 +1483,9 @@ void WebUIToolbarWebView::OnFocusRequested(
 void WebUIToolbarWebView::HandleOmniboxContextMenu(
     const gfx::Point& point,
     ui::mojom::MenuSourceType source_type,
-    int edit_flags) {
+    content::ContextMenuParams params) {
   if (location_bar_) {
-    location_bar_->HandleContextMenu(GetWidget(), point, source_type,
-                                     edit_flags);
+    location_bar_->HandleContextMenu(GetWidget(), point, source_type, params);
   }
 }
 
@@ -1465,6 +1556,8 @@ gfx::Size WebUIToolbarWebView::ComputeLayout(
   button_count += features::IsWebUIAvatarButtonEnabled();
   button_count += features::IsWebUIBatterySaverButtonEnabled() &&
                   battery_saver_control_.IsVisible();
+  button_count += features::IsWebUIPerformanceInterventionButtonEnabled() &&
+                  performance_intervention_control_.IsButtonShowing();
 
   const int size = GetLayoutConstant(LayoutConstant::kToolbarButtonHeight);
   const int gap = GetLayoutConstant(LayoutConstant::kToolbarIconDefaultMargin);
@@ -1588,6 +1681,12 @@ gfx::Size WebUIToolbarWebView::ComputeLayout(
 }
 
 void WebUIToolbarWebView::UpdateButtonOverflowState() {
+  // If all controls are being managed by WebUI, overflow is handled entirely in
+  // Javascript instead of C++.
+  if (is_webui_toolbar_fully_enabled_) {
+    return;
+  }
+
   // Compute layout to determine which buttons to hide. Ignore the returned
   // Size.
   ButtonOverflowInfo button_overflow_info;

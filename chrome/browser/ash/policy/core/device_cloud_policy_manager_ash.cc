@@ -196,6 +196,13 @@ void DeviceCloudPolicyManagerAsh::StartConnection(
     std::unique_ptr<CloudPolicyClient> client_to_connect,
     ash::InstallAttributes* install_attributes) {
   CHECK(!service());
+  CHECK(local_state_);
+  CHECK(shared_url_loader_factory_);
+
+  // TODO(crbug.com/404133022): Inject NetworkQualityTracker to this class.
+  // Since NetworkQualityTracker is created after DeviceCommandsFactoryAsh, it
+  // should be injected via StartConnection or a dedicated call.
+  auto* network_quality_tracker = g_browser_process->network_quality_tracker();
 
   // If supported, set state keys here so the first policy fetch submits them to
   // the server.
@@ -229,7 +236,6 @@ void DeviceCloudPolicyManagerAsh::StartConnection(
   core()->TrackRefreshDelayPref(local_state_,
                                 ash::prefs::kDevicePolicyRefreshRate);
 
-  CHECK(shared_url_loader_factory_);
   external_data_manager_->Connect(shared_url_loader_factory_);
 
   enrollment_certificate_uploader_ =
@@ -238,7 +244,6 @@ void DeviceCloudPolicyManagerAsh::StartConnection(
   enrollment_id_upload_manager_ =
       std::make_unique<ash::attestation::EnrollmentIdUploadManager>(
           client(), enrollment_certificate_uploader_.get());
-  CHECK(local_state_);
   lookup_key_uploader_ = std::make_unique<LookupKeyUploader>(
       device_store(), local_state_, enrollment_certificate_uploader_.get());
   euicc_status_uploader_ =
@@ -257,6 +262,7 @@ void DeviceCloudPolicyManagerAsh::StartConnection(
   // Start remote commands services now that we have setup everything they need.
   core()->StartRemoteCommandsService(
       std::make_unique<DeviceCommandsFactoryAsh>(
+          local_state_, shared_url_loader_factory_,
           machine_certificate_uploader_.get(), *crd_delegate_),
       PolicyInvalidationScope::kDevice);
 
@@ -274,9 +280,10 @@ void DeviceCloudPolicyManagerAsh::StartConnection(
                                                     task_runner_),
         task_runner_, GetSystemLogUploadUrl());
     metric_reporting_manager_ = reporting::MetricReportingManager::Create(
-        managed_session_service_.get());
+        network_quality_tracker, managed_session_service_.get());
     os_updates_reporter_ = reporting::OsUpdatesReporter::Create();
-    event_based_log_manager_ = std::make_unique<EventBasedLogManager>(this);
+    event_based_log_manager_ =
+        std::make_unique<EventBasedLogManager>(local_state_, this);
   }
 
   NotifyConnected();

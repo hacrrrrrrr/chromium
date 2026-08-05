@@ -513,11 +513,8 @@ void IOSCollaborationControllerDelegate::OnFlowFinished() {
     tab_group_service_->UnregisterCollaborationControllerDelegate(
         tab_group_service_registration_id_.value());
   }
-  if (dismiss_join_screen_callback_) {
-    // The dismissal should be handled before the end of the flow.
-    NOTREACHED(base::NotFatalUntil::M140);
-    std::move(dismiss_join_screen_callback_).Run();
-  }
+  // The dismissal should be handled before the end of the flow.
+  CHECK(!dismiss_join_screen_callback_);
   RemoveScrimView(/*delayed=*/false);
 }
 
@@ -699,7 +696,7 @@ void IOSCollaborationControllerDelegate::FetchPreviewItems(
     ShareKitPreviewItem* preview_item = [[ShareKitPreviewItem alloc] init];
     preview_item.title = base::SysUTF8ToNSString(tabs[i].url.GetHost());
     preview_item.image = SymbolWithPalette(
-        DefaultSymbolWithPointSize(kGlobeAmericasSymbol, kFaviconSize),
+        SymbolWithPointSize(SymbolGlobeAmericas, kFaviconSize),
         @[ [UIColor colorNamed:kGrey400Color] ]);
     [preview_items addObject:preview_item];
   }

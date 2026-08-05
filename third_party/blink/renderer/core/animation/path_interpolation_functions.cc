@@ -58,12 +58,12 @@ enum PathComponentIndex : unsigned {
 };
 
 InterpolationValue PathInterpolationFunctions::ConvertValue(
-    const StylePath* style_path,
-    CoordinateConversion coordinate_conversion,
-    ShapeReferenceBox box) {
-  if (!style_path)
+    const BasicShapeInfo& info,
+    CoordinateConversion coordinate_conversion) {
+  if (!info.shape) {
     return nullptr;
-
+  }
+  const auto* style_path = To<StylePath>(info.shape);
   SVGPathByteStreamSource path_source(style_path->ByteStream());
   wtf_size_t length = 0;
   PathCoordinates current_coordinates;
@@ -92,8 +92,9 @@ InterpolationValue PathInterpolationFunctions::ConvertValue(
   result->Set(kPathNeutralIndex, MakeGarbageCollected<InterpolableNumber>(0));
 
   return InterpolationValue(
-      result, MakeGarbageCollected<SVGPathNonInterpolableValue>(
-                  std::move(path_seg_types), style_path->GetWindRule(), box));
+      result,
+      MakeGarbageCollected<SVGPathNonInterpolableValue>(
+          std::move(path_seg_types), style_path->GetWindRule(), info.box));
 }
 
 class UnderlyingPathSegTypesChecker final
@@ -195,11 +196,6 @@ bool PathInterpolationFunctions::PathsAreCompatible(
   return true;
 }
 
-ShapeReferenceBox PathInterpolationFunctions::GetBox(
-    const NonInterpolableValue& value) {
-  return To<SVGPathNonInterpolableValue>(value).GetBox();
-}
-
 PairwiseInterpolationValue PathInterpolationFunctions::MaybeMergeSingles(
     InterpolationValue&& start,
     InterpolationValue&& end) {
@@ -241,7 +237,7 @@ void PathInterpolationFunctions::Composite(
       value.non_interpolable_value.Get();
 }
 
-StylePath* PathInterpolationFunctions::AppliedValue(
+BasicShapeInfo PathInterpolationFunctions::AppliedValue(
     const InterpolableValue& interpolable_value,
     const NonInterpolableValue& non_interpolable_value) {
   auto& non_interpolable_path_value =
@@ -253,8 +249,10 @@ StylePath* PathInterpolationFunctions::AppliedValue(
   SVGPathByteStreamBuilder builder;
   svg_path_parser::ParsePath(source, builder);
 
-  return MakeGarbageCollected<StylePath>(
-      builder.CopyByteStream(), non_interpolable_path_value.GetWindRule());
+  return {
+      MakeGarbageCollected<StylePath>(
+          builder.CopyByteStream(), non_interpolable_path_value.GetWindRule()),
+      non_interpolable_path_value.GetBox()};
 }
 
 }  // namespace blink

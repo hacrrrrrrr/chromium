@@ -36,9 +36,11 @@ namespace content {
 class FrameTree;
 class RenderFrameHost;
 class RenderFrameHostImpl;
+class RenderWidgetHostImpl;
 class RenderViewHostDelegateView;
 class RenderWidgetHostViewChildFrame;
 class TextInputManager;
+class WebContentsDelegate;
 class WebContentsImpl;
 class WebContentsView;
 
@@ -52,6 +54,12 @@ class CONTENT_EXPORT SurfaceEmbedConnectorImpl
 
   WebContentsView* GetParentWebContentsView() const;
   RenderViewHostDelegateView* GetParentRenderViewHostDelegateView() const;
+
+  // Returns the first WebContentsDelegate found in the embedding chain.
+  // If this connector has a parent WebContents, it delegates the query
+  // to the parent; otherwise it returns nullptr (since the child's delegate
+  // was already checked and must have been null to reach here).
+  WebContentsDelegate* GetFirstWebContentsDelegate() const;
 
   // Returns the InputEventRouter appropriate for the child web contents to
   // register with. Note that this is the parent web contents's
@@ -67,9 +75,15 @@ class CONTENT_EXPORT SurfaceEmbedConnectorImpl
   SurfaceEmbedConnector::Delegate* GetDelegate() override;
   void OnSynchronizeVisualProperties(
       const blink::FrameVisualProperties& visual_properties) override;
+  void UpdateRenderThrottlingStatus(bool is_throttled,
+                                    bool subtree_throttled,
+                                    bool display_locked) override;
   const viz::FrameSinkId& GetFrameSinkId() const override;
   double GetCssZoomFactorForTesting() override;
   const gfx::Size& GetLocalFrameSizeInPixelsForTesting() override;
+  bool IsThrottledForTesting() override;
+  bool IsSubtreeThrottledForTesting() override;
+  bool IsDisplayLockedForTesting() override;
 
   // FrameConnector:
   void SetKeepSurfaceAlive(bool keep_alive) override;
@@ -129,11 +143,39 @@ class CONTENT_EXPORT SurfaceEmbedConnectorImpl
   // associated with the child WebContents.
   void UpdateViewForCurrentRenderFrameHost();
 
+  // Called by WebContentsImpl after the connector is set. Notifies the parent
+  // WebContents and updates the view.
+  void OnAttachedToParent();
+
+  // Called by WebContentsImpl before the connector is cleared. Notifies the
+  // parent WebContents.
+  void OnDetachedFromParent();
+
+  // Requests focus for all ancestor embed elements up the chain. This ensures
+  // that in a multi-level embedding scenario, each ancestor's <embed> element
+  // becomes the active element in its respective document.
+  void RequestFocusOnEmbedElement();
+
   // Returns nullptr if the focus is outside of this connector's child
   // WebContents.
   FrameTree* GetFocusFrameTreeIfContainsFocus();
   void SetFocusedFrameTree(FrameTree* frame_tree_to_focus);
   void ClearFocusOnInnerWebContents();
+
+  // Returns true if any WebContents in the parent chain has a pointer lock
+  // widget.
+  bool HasPointerLockWidgetInParentChain() const;
+
+  // Sets the pointer lock widget for all WebContents in the parent chain.
+  void SetPointerLockWidgetInParentChain(RenderWidgetHostImpl* widget);
+
+  // Returns true if the parent WebContents (or any ancestor) has a pointer lock
+  // for the given `render_widget_host`.
+  bool HasPointerLock(RenderWidgetHostImpl* render_widget_host) const;
+
+  // Returns the pointer lock widget from the parent WebContents (or any
+  // ancestor) if it exists and is locked.
+  RenderWidgetHostImpl* GetPointerLockWidget() const;
 
  private:
   class WCObserver;
@@ -178,6 +220,8 @@ class CONTENT_EXPORT SurfaceEmbedConnectorImpl
   // WeakPtr to the parent WebContents. Automatically clears to nullptr when the
   // observed parent is destroyed, safely notifying all consumers.
   base::WeakPtr<WebContents> parent_web_contents_;
+  // The RenderFrameHost in the parent that hosts the embed element.
+  base::WeakPtr<RenderFrameHostImpl> embedder_rfh_;
   raw_ptr<RenderWidgetHostViewChildFrame> view_ = nullptr;
 
   // The last received FrameSinkId from the guest WebContents's view.

@@ -36,11 +36,11 @@
 #include "base/auto_reset.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
-#include "base/feature_list.h"
 #include "partition_alloc/partition_alloc.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
+#include "third_party/blink/renderer/core/css/counter_style.h"
 #include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
@@ -133,7 +133,6 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_builder.h"
-#include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
 #include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
@@ -161,10 +160,6 @@
 namespace blink {
 
 namespace {
-
-// Kill switch for the new GeneratingNode() algorithm traversing ancestors
-BASE_FEATURE(kGeneratingNodeTraversesAncestorsKillSwitch,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 
 LayoutObject* FindColumnSpannerContainer(
     const LayoutObject* spanner,
@@ -865,8 +860,9 @@ bool LayoutObject::HasClipRelatedProperty() const {
   // CSS clip-path/mask/filter induces a stacking context and applies inherited
   // clip to that stacking context, while resetting clip for descendants. This
   // special behavior is already handled elsewhere.
-  if (HasClip() || ShouldClipOverflowAlongEitherAxis())
+  if (HasCSSClip() || ShouldClipOverflowAlongEitherAxis()) {
     return true;
+  }
   // Paint containment establishes isolation which creates clip isolation nodes.
   // Style & Layout containment also establish isolation (see
   // |NeedsIsolationNodes| in PaintPropertyTreeBuilder).
@@ -921,10 +917,8 @@ bool LayoutObject::IsListMarkerForSummary() const {
     if (ListMarker::GetListStyleCategory(GetDocument(), StyleRef()) !=
         ListMarker::ListStyleCategory::kSymbol)
       return false;
-    const AtomicString& name =
-        StyleRef().ListStyleType()->GetCounterStyleName();
-    return name == keywords::kDisclosureOpen ||
-           name == keywords::kDisclosureClosed;
+    return ListMarker::GetCounterStyle(GetDocument(), StyleRef())
+        .IsDisclosureMarker();
   }
   return false;
 }
@@ -1824,6 +1818,28 @@ const PaintLayer* LayoutObject::ContainingScrollContainerLayer(
   return nullptr;
 }
 
+const PaintLayer* LayoutObject::ContainingScrollContainerLayer(
+    PhysicalAxis axis,
+    bool ignore_layout_view_for_fixed_pos) const {
+  NOT_DESTROYED();
+  // Walk the chain of nearest scroll containers, skipping those not
+  // scrollable in the `axis`.
+  const PaintLayer* container =
+      ContainingScrollContainerLayer(ignore_layout_view_for_fixed_pos);
+  while (container) {
+    const auto& style = container->GetLayoutObject().StyleRef();
+    if ((axis == PhysicalAxis::kVertical &&
+         style.IsOverflowValueScrollableY()) ||
+        ((axis == PhysicalAxis::kHorizontal &&
+          style.IsOverflowValueScrollableX()))) {
+      return container;
+    }
+    container = container->GetLayoutObject().ContainingScrollContainerLayer(
+        ignore_layout_view_for_fixed_pos);
+  }
+  return nullptr;
+}
+
 const LayoutBox* LayoutObject::ContainingScrollContainer(
     bool ignore_layout_view_for_fixed_pos) const {
   NOT_DESTROYED();
@@ -1837,15 +1853,9 @@ const LayoutBox* LayoutObject::ContainingScrollContainer(
 const LayoutBox* LayoutObject::ContainingScrollContainer(
     PhysicalAxis axis) const {
   NOT_DESTROYED();
-  const LayoutObject* current = this;
-  while (const LayoutBox* container = current->ContainingScrollContainer()) {
-    const ComputedStyle& style = container->StyleRef();
-    if (axis == PhysicalAxis::kHorizontal
-            ? style.IsOverflowValueScrollableX()
-            : style.IsOverflowValueScrollableY()) {
-      return container;
-    }
-    current = container;
+  if (const PaintLayer* scroll_container_layer =
+          ContainingScrollContainerLayer(axis)) {
+    return scroll_container_layer->GetLayoutBox();
   }
   return nullptr;
 }
@@ -2822,13 +2832,6 @@ StyleDifference LayoutObject::AdjustStyleDifference(
     }
   }
 
-  // TODO(1088373): Pixel_WebGLHighToLowPower fails without this. This isn't the
-  // right way to ensure GPU switching. Investigate and do it in the right way.
-  if (!diff.NeedsNormalPaintInvalidation() && IsLayoutView() && Style() &&
-      !StyleRef().GetFont()->IsFallbackValid()) {
-    diff.SetNeedsNormalPaintInvalidation();
-  }
-
   // The answer to layerTypeRequired() for plugins, iframes, and canvas can
   // change without the actual style changing, since it depends on whether we
   // decide to composite these elements. When the/ layer status of one of these
@@ -2846,22 +2849,22 @@ StyleDifference LayoutObject::AdjustStyleDifference(
 void LayoutObject::SetPseudoElementStyle(const LayoutObject& owner,
                                          bool match_parent_size) {
   NOT_DESTROYED();
-  const ComputedStyle* pseudo_style = owner.Style();
-  DCHECK(pseudo_style->StyleType() == kPseudoIdCheckMark ||
-         pseudo_style->StyleType() == kPseudoIdBefore ||
-         pseudo_style->StyleType() == kPseudoIdAfter ||
-         pseudo_style->StyleType() == kPseudoIdExpandIcon ||
-         pseudo_style->StyleType() == kPseudoIdPickerIcon ||
-         pseudo_style->StyleType() == kPseudoIdInterestButton ||
-         pseudo_style->StyleType() == kPseudoIdMarker ||
-         pseudo_style->StyleType() == kPseudoIdFirstLetter ||
-         pseudo_style->StyleType() == kPseudoIdScrollMarkerGroup ||
-         pseudo_style->IsPageMarginBox() ||
-         pseudo_style->StyleType() == kPseudoIdScrollMarker ||
-         pseudo_style->StyleType() == kPseudoIdScrollButtonBlockStart ||
-         pseudo_style->StyleType() == kPseudoIdScrollButtonInlineStart ||
-         pseudo_style->StyleType() == kPseudoIdScrollButtonInlineEnd ||
-         pseudo_style->StyleType() == kPseudoIdScrollButtonBlockEnd);
+  const ComputedStyle& pseudo_style = owner.StyleRef();
+  DCHECK(pseudo_style.StyleType() == kPseudoIdCheckMark ||
+         pseudo_style.StyleType() == kPseudoIdBefore ||
+         pseudo_style.StyleType() == kPseudoIdAfter ||
+         pseudo_style.StyleType() == kPseudoIdExpandIcon ||
+         pseudo_style.StyleType() == kPseudoIdPickerIcon ||
+         pseudo_style.StyleType() == kPseudoIdInterestButton ||
+         pseudo_style.StyleType() == kPseudoIdMarker ||
+         pseudo_style.StyleType() == kPseudoIdFirstLetter ||
+         pseudo_style.StyleType() == kPseudoIdScrollMarkerGroup ||
+         pseudo_style.IsPageMarginBox() ||
+         pseudo_style.StyleType() == kPseudoIdScrollMarker ||
+         pseudo_style.StyleType() == kPseudoIdScrollButtonBlockStart ||
+         pseudo_style.StyleType() == kPseudoIdScrollButtonInlineStart ||
+         pseudo_style.StyleType() == kPseudoIdScrollButtonInlineEnd ||
+         pseudo_style.StyleType() == kPseudoIdScrollButtonBlockEnd);
 
   InheritIsInDetachedNonDomTree(owner);
 
@@ -2879,7 +2882,7 @@ void LayoutObject::SetPseudoElementStyle(const LayoutObject& owner,
     ComputedStyleBuilder builder =
         GetDocument()
             .GetStyleResolver()
-            .CreateComputedStyleBuilderInheritingFrom(*pseudo_style);
+            .CreateComputedStyleBuilderInheritingFrom(pseudo_style);
     if (match_parent_size) {
       DCHECK(IsImage());
       builder.SetWidth(Length::Percent(100));
@@ -2894,7 +2897,7 @@ void LayoutObject::SetPseudoElementStyle(const LayoutObject& owner,
     // See "accessibility/css-generated-content.html"
     const ComputedStyle* initial_letter_text_style =
         GetDocument().GetStyleResolver().StyleForInitialLetterText(
-            *pseudo_style, Parent()->ContainingBlock()->StyleRef());
+            pseudo_style, Parent()->ContainingBlock()->StyleRef());
     SetStyle(std::move(initial_letter_text_style));
     return;
   }
@@ -2904,13 +2907,13 @@ void LayoutObject::SetPseudoElementStyle(const LayoutObject& owner,
     ComputedStyleBuilder combined_text_style_builder =
         GetDocument()
             .GetStyleResolver()
-            .CreateComputedStyleBuilderInheritingFrom(*pseudo_style);
+            .CreateComputedStyleBuilderInheritingFrom(pseudo_style);
     StyleAdjuster::AdjustStyleForCombinedText(combined_text_style_builder);
     SetStyle(combined_text_style_builder.TakeStyle());
     return;
   }
 
-  SetStyle(std::move(pseudo_style));
+  SetStyle(&pseudo_style);
 }
 
 DISABLE_CFI_PERF
@@ -3441,6 +3444,7 @@ void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
 
   StyleDifference diff;
   bool has_diff = false;
+  bool first_line_highlight_changed = false;
   if (Parent() && has_old_first_line_style && has_new_first_line_style) {
     if (const auto* old_first_line_style =
             old_style->GetCachedPseudoElementStyle(kPseudoIdFirstLine)) {
@@ -3449,6 +3453,11 @@ void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
             GetDocument(), *new_first_line_style);
         diff = AdjustForCompositableAnimationPaint(
             old_first_line_style, new_first_line_style, GetNode(), diff);
+        // Highlight pseudo styles are stored  in StyleHighlightData and are
+        // intentionally ignored by VisualInvalidationDiff, because highlight
+        // repaints are normally driven by HighlightRegistry.
+        first_line_highlight_changed = old_first_line_style->HighlightData() !=
+                                       new_first_line_style->HighlightData();
         has_diff = true;
       }
     }
@@ -3458,8 +3467,9 @@ void LayoutObject::ApplyFirstLineChanges(const ComputedStyle* old_style) {
     diff.SetNeedsFullLayout();
   }
 
-  if (BehavesLikeBlockContainer() && (diff.NeedsNormalPaintInvalidation() ||
-                                      diff.text_decoration_or_color_changed)) {
+  if (BehavesLikeBlockContainer() &&
+      (diff.NeedsNormalPaintInvalidation() ||
+       diff.text_decoration_or_color_changed || first_line_highlight_changed)) {
     if (auto* first_line_container =
             To<LayoutBlock>(this)->NearestInnerBlockWithFirstLine())
       first_line_container->SetShouldDoFullPaintInvalidationForFirstLine();
@@ -3910,19 +3920,14 @@ bool LayoutObject::IsRooted() const {
 
 Node* LayoutObject::GeneratingNode() const {
   NOT_DESTROYED();
-  if (base::FeatureList::IsEnabled(
-          kGeneratingNodeTraversesAncestorsKillSwitch)) {
-    Node* node = GetNode();
-    if (!node) {
-      return Parent() ? Parent()->GeneratingNode() : nullptr;
-    }
-    if (node->IsPseudoElement()) {
-      return &To<PseudoElement>(node)->UltimateOriginatingElement();
-    }
-    return node;
-  } else {
-    return IsPseudoElement() ? GetNode()->ParentOrShadowHostNode() : GetNode();
+  Node* node = GetNode();
+  if (!node) {
+    return Parent() ? Parent()->GeneratingNode() : nullptr;
   }
+  if (node->IsPseudoElement()) {
+    return &To<PseudoElement>(node)->UltimateOriginatingElement();
+  }
+  return node;
 }
 
 Node* LayoutObject::EnclosingNode() const {
@@ -4546,16 +4551,32 @@ void LayoutObject::ImageNotifyFinished(ImageResourceContent* image) {
   if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
     cache->ImageLoaded(this);
 
-  if (LocalDOMWindow* window = GetDocument().domWindow()) {
-    ImageElementTiming::From(*window).NotifyImageFinished(*this, image);
+  if (GetDocument().domWindow()) {
     PaintTimingDetector::From(GetDocument()).NotifyImageFinished(*this, image);
   }
 
   if (!image->ErrorOccurred()) {
+    Element* element = DynamicTo<Element>(GetNode());
     if (const std::optional<AdProvenance>& ad_provenance =
             image->GetAdProvenance()) {
-      if (auto* element = DynamicTo<Element>(GetNode())) {
+      if (element) {
         element->SetIsAdRelated(*ad_provenance);
+      }
+    }
+
+    LocalFrame* frame = GetDocument().GetFrame();
+    bool is_ad = image->GetAdProvenance().has_value() ||
+                 (element && element->IsAdRelated()) ||
+                 (frame && frame->IsAdFrame());
+
+    if (is_ad) {
+      if (Image* img = image->GetImage()) {
+        // Headroom is on a log2 scale. 0.5f corresponds to 2^0.5 ~= 1.41x SDR
+        // white.
+        if (img->PaintImageForCurrentFrame().GetMaximumRenderedHdrHeadroom() >=
+            0.5f) {
+          UseCounter::Count(GetDocument(), WebFeature::kAdImageHDR);
+        }
       }
     }
   }
@@ -4699,8 +4720,7 @@ Element* LayoutObject::OffsetParent(const Element* base) const {
 
 void LayoutObject::NotifyImageFullyRemoved(ImageResourceContent* image) {
   NOT_DESTROYED();
-  if (LocalDOMWindow* window = GetDocument().domWindow()) {
-    ImageElementTiming::From(*window).NotifyImageRemoved(this, image);
+  if (GetDocument().domWindow()) {
     PaintTimingDetector::From(GetDocument()).NotifyImageRemoved(*this, image);
   }
 }
@@ -5051,12 +5071,14 @@ void LayoutObject::ClearPaintFlags() {
   bitfields_.SetEffectiveAllowedTouchActionChanged(false);
   bitfields_.SetBlockingWheelEventHandlerChanged(false);
   bitfields_.SetSoftNavigationContextChanged(false);
+  bitfields_.SetContainerTimingChanged(false);
 
   if (!ChildPrePaintBlockedByDisplayLock()) {
     bitfields_.SetDescendantNeedsPaintPropertyUpdate(false);
     bitfields_.SetDescendantEffectiveAllowedTouchActionChanged(false);
     bitfields_.SetDescendantBlockingWheelEventHandlerChanged(false);
     bitfields_.SetDescendantSoftNavigationContextChanged(false);
+    bitfields_.SetDescendantContainerTimingChanged(false);
     subtree_paint_property_update_reasons_ =
         static_cast<unsigned>(SubtreePaintPropertyUpdateReason::kNone);
   }
@@ -5226,6 +5248,39 @@ void LayoutObject::MarkDescendantSoftNavigationContextChanged() {
   LayoutObject* obj = this;
   while (obj && !obj->DescendantSoftNavigationContextChanged()) {
     obj->bitfields_.SetDescendantSoftNavigationContextChanged(true);
+    if (obj->ChildPrePaintBlockedByDisplayLock()) {
+      break;
+    }
+    obj = obj->Parent();
+  }
+}
+
+void LayoutObject::MarkContainerTimingChanged() {
+  NOT_DESTROYED();
+  DCHECK(RuntimeEnabledFeatures::ContainerTimingPrepaintTraversalEnabled(
+      GetDocument().GetExecutionContext()));
+  DCHECK(!GetDocument().InvalidationDisallowed());
+  bitfields_.SetContainerTimingChanged(true);
+  // If we're locked, mark our descendants as needing this change. This is used
+  // as a signal to ensure we mark the element as needing container timing
+  // recalculation when the element becomes unlocked.
+  if (ChildPrePaintBlockedByDisplayLock()) {
+    bitfields_.SetDescendantContainerTimingChanged(true);
+    return;
+  }
+  if (Parent()) {
+    Parent()->MarkDescendantContainerTimingChanged();
+  }
+}
+
+void LayoutObject::MarkDescendantContainerTimingChanged() {
+  NOT_DESTROYED();
+  DCHECK(RuntimeEnabledFeatures::ContainerTimingPrepaintTraversalEnabled(
+      GetDocument().GetExecutionContext()));
+  DCHECK(!GetDocument().InvalidationDisallowed());
+  LayoutObject* obj = this;
+  while (obj && !obj->DescendantContainerTimingChanged()) {
+    obj->bitfields_.SetDescendantContainerTimingChanged(true);
     if (obj->ChildPrePaintBlockedByDisplayLock()) {
       break;
     }
@@ -5437,6 +5492,26 @@ bool LayoutObject::IsBackdropForOverscrollAreaParent() const {
   NOT_DESTROYED();
   const auto* pseudo = DynamicTo<PseudoElement>(GetNode());
   return pseudo && pseudo->GetPseudoId() == kPseudoIdOverscrollBackdrop;
+}
+
+bool LayoutObject::IsCanvasOrInCanvasSubtree() const {
+  if (auto* element = DynamicTo<Element>(GetNode())) {
+    return element->IsCanvasOrInCanvasSubtree();
+  }
+  return IsInCanvasSubtree();
+}
+
+bool LayoutObject::IsInCanvasSubtree() const {
+  if (auto* node = GetNode()) {
+    if (auto* element = DynamicTo<Element>(node)) {
+      return element->IsInCanvasSubtree();
+    }
+    if (auto* document = DynamicTo<Document>(node)) {
+      auto* owner = document->LocalOwner();
+      return owner && owner->IsCanvasOrInCanvasSubtree();
+    }
+  }
+  return Parent() && Parent()->IsCanvasOrInCanvasSubtree();
 }
 
 }  // namespace blink

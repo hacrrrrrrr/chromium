@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/check_deref.h"
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
 
 namespace autofill {
@@ -17,6 +18,7 @@ AutofillDialogControllerImpl::AutofillDialogControllerImpl(
 
 AutofillDialogControllerImpl::~AutofillDialogControllerImpl() {
   // If the tab is killed then dismiss the dialog if it's showing.
+  min_show_time_ = base::TimeDelta();
   Dismiss();
 }
 
@@ -30,6 +32,8 @@ void AutofillDialogControllerImpl::Show(
     return;
   }
 
+  min_show_time_ = base::TimeDelta();
+
   title_ = title;
   description_ = description;
   button_text_ = button_text;
@@ -42,6 +46,30 @@ void AutofillDialogControllerImpl::Show(
     autofill_dialog_view_ = AutofillDialogView::Create(this);
   }
   autofill_dialog_view_->Show();
+}
+
+void AutofillDialogControllerImpl::ShowLoadingDialog(
+    const std::u16string& title,
+    base::TimeDelta min_time) {
+  if (autofill_dialog_view_) {
+    // A dialog is already showing. Ignore the new request.
+    return;
+  }
+
+  min_show_time_ = min_time;
+  dialog_show_time_ = base::ElapsedTimer();
+
+  title_ = title;
+  description_ = u"";
+  button_text_ = u"";
+  on_positive_button_clicked_callback_ = base::DoNothing();
+
+  if (view_factory_for_test_) {
+    autofill_dialog_view_ = view_factory_for_test_.Run();
+  } else {
+    autofill_dialog_view_ = AutofillDialogView::Create(this);
+  }
+  autofill_dialog_view_->ShowLoadingDialog();
 }
 
 void AutofillDialogControllerImpl::OnPositiveButtonClicked() {
@@ -72,6 +100,17 @@ void AutofillDialogControllerImpl::Dismiss() {
   if (!autofill_dialog_view_) {
     return;
   }
+
+  base::TimeDelta time_shown = dialog_show_time_.Elapsed();
+  if (time_shown < min_show_time_) {
+    if (!dismiss_timer_.IsRunning()) {
+      dismiss_timer_.Start(FROM_HERE, min_show_time_ - time_shown, this,
+                           &AutofillDialogControllerImpl::Dismiss);
+    }
+    return;
+  }
+
+  dismiss_timer_.Stop();
 
   autofill_dialog_view_->Dismiss();
   autofill_dialog_view_.reset();

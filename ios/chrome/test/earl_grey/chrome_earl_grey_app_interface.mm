@@ -106,7 +106,6 @@
 #import "ios/testing/verify_custom_webkit.h"
 #import "ios/web/common/features.h"
 #import "ios/web/common/uikit_ui_util.h"
-#import "ios/web/js_messaging/web_view_js_utils.h"
 #import "ios/web/public/browser_state_utils.h"
 #import "ios/web/public/js_messaging/content_world.h"
 #import "ios/web/public/js_messaging/web_frame.h"
@@ -358,6 +357,21 @@ UIViewController* FindBrowserViewController(UIViewController* root) {
   return chrome_test_util::IsLoading();
 }
 
++ (BOOL)isAnyWebStateLoading {
+  WebStateList* web_state_list =
+      chrome_test_util::GetMainBrowser()->GetWebStateList();
+  if (!web_state_list) {
+    return NO;
+  }
+  for (int i = 0; i < web_state_list->count(); ++i) {
+    web::WebState* web_state = web_state_list->GetWebStateAt(i);
+    if (web_state && web_state->IsLoading()) {
+      return YES;
+    }
+  }
+  return NO;
+}
+
 + (void)startReloading {
   WebNavigationBrowserAgent::FromBrowser(chrome_test_util::GetMainBrowser())
       ->Reload();
@@ -483,6 +497,25 @@ UIViewController* FindBrowserViewController(UIViewController* root) {
   const GURL gurl = GURL(base::SysNSStringToUTF8(url));
   OpenNewTabCommand* command =
       [OpenNewTabCommand commandWithURLFromChrome:gurl];
+  command.textFragment = textFragment;
+  command.sendTabToSelfEntryGUID = guid;
+
+  id<SceneCommands> handler = HandlerForProtocol(
+      chrome_test_util::GetCurrentBrowser()->GetCommandDispatcher(),
+      SceneCommands);
+  [handler openURLInNewTab:command];
+}
+
++ (void)openSendTabToSelfNewBackgroundTabWithURL:(NSString*)url
+                                    textFragment:(NSString*)textFragment
+                                       entryGUID:(NSString*)guid {
+  const GURL gurl = GURL(base::SysNSStringToUTF8(url));
+  OpenNewTabCommand* command =
+      [[OpenNewTabCommand alloc] initWithURL:gurl
+                                    referrer:web::Referrer()
+                                 inIncognito:NO
+                                inBackground:YES
+                                    appendTo:OpenPosition::kLastTab];
   command.textFragment = textFragment;
   command.sendTabToSelfEntryGUID = guid;
 
@@ -1339,6 +1372,10 @@ UIViewController* FindBrowserViewController(UIViewController* root) {
 
 + (BOOL)isTestFeatureEnabled {
   return base::FeatureList::IsEnabled(kTestFeature);
+}
+
++ (BOOL)isOverflowMenuHomeCustomizationEntrypointEnabled {
+  return base::FeatureList::IsEnabled(kOverflowMenuHomeCustomizationEntrypoint);
 }
 
 + (BOOL)isFullscreenSmoothScrollingSupported {

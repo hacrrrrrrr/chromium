@@ -39,6 +39,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tabs/public/tab_group.h"
+#include "components/vector_icons/vector_icons.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRRect.h"
 #include "ui/base/interaction/element_identifier.h"
@@ -255,7 +256,8 @@ void TabGroupHeader::Init(const tab_groups::TabGroupId& group) {
 bool TabGroupHeader::OnKeyPressed(const ui::KeyEvent& event) {
   if ((event.key_code() == ui::VKEY_SPACE ||
        event.key_code() == ui::VKEY_RETURN) &&
-      !editor_bubble_tracker_.is_open()) {
+      !editor_bubble_tracker_.is_open() &&
+      tab_slot_controller_->GetFocusedGroup() != group()) {
     tab_slot_controller_->ToggleTabGroupCollapsedState(
         group().value(), ToggleTabGroupCollapsedStateOrigin::kKeyboard);
     views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
@@ -322,7 +324,8 @@ void TabGroupHeader::OnMouseReleased(const ui::MouseEvent& event) {
   if (!dragging()) {
     bool open_editor_bubble =
         event.IsRightMouseButton() && !editor_bubble_tracker_.is_open();
-    bool toggle_collapse = event.IsLeftMouseButton();
+    bool toggle_collapse = event.IsLeftMouseButton() &&
+                           tab_slot_controller_->GetFocusedGroup() != group();
 
     if (open_editor_bubble) {
       editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
@@ -355,10 +358,12 @@ void TabGroupHeader::OnGestureEvent(ui::GestureEvent* event) {
       nullptr, TabSlotController::HoverCardUpdateType::kEvent);
   switch (event->type()) {
     case ui::EventType::kGestureTap:
-      tab_slot_controller_->ToggleTabGroupCollapsedState(
-          group().value(), ToggleTabGroupCollapsedStateOrigin::kGesture);
-      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
-          kTabGroupHeaderElementId, this);
+      if (tab_slot_controller_->GetFocusedGroup() != group()) {
+        tab_slot_controller_->ToggleTabGroupCollapsedState(
+            group().value(), ToggleTabGroupCollapsedStateOrigin::kGesture);
+        views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+            kTabGroupHeaderElementId, this);
+      }
       break;
     case ui::EventType::kGestureLongTap: {
       editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
@@ -635,7 +640,7 @@ void TabGroupHeader::UpdateSyncIconView() {
     sync_icon_->SetImage(ui::ImageModel::FromVectorIcon(
         use_share_icon ? features::IsRoundedIconsEnabled() ? kGroupCustomIcon
                                                            : kPeopleGroupOldIcon
-        : features::IsRoundedIconsEnabled() ? kSyncIcon
+        : features::IsRoundedIconsEnabled() ? vector_icons::kSyncIcon
                                             : kTabGroupsSyncOldIcon,
         color_utils::GetColorWithMaxContrast(color_),
         group_style_->GetSyncIconWidth()));

@@ -39,7 +39,6 @@
 #include "components/optimization_guide/core/model_execution/safety_config.h"
 #include "components/optimization_guide/core/model_execution/safety_model_info.h"
 #include "components/optimization_guide/core/model_execution/session_impl.h"
-#include "components/optimization_guide/core/optimization_guide_constants.h"
 #include "components/optimization_guide/core/optimization_guide_enums.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/core/optimization_guide_switches.h"
@@ -100,6 +99,8 @@ OnDeviceModelEligibilityReason GetBaseModelError(
       return OnDeviceModelEligibilityReason::kModelNotEligible;
     case OnDeviceModelStatus::kInsufficientDiskSpace:
       return OnDeviceModelEligibilityReason::kInsufficientDiskSpace;
+    case OnDeviceModelStatus::kInsufficientDiskSpaceForCaches:
+      return OnDeviceModelEligibilityReason::kInsufficientDiskSpaceForCaches;
     case OnDeviceModelStatus::kInstallNotComplete:
     case OnDeviceModelStatus::kModelInstallerNotRegisteredForUnknownReason:
     case OnDeviceModelStatus::kModelInstalledTooLate:
@@ -165,7 +166,8 @@ OnDeviceModelServiceController::OnDeviceModelServiceController(
       usage_tracker_(usage_tracker),
       model_broker_impl_(model_broker_impl),
       access_controller_(std::move(access_controller)),
-      safety_client_(service_client.GetWeakPtr()) {
+      safety_client_(service_client.GetWeakPtr()),
+      on_device_component_state_manager_(on_device_component_state_manager) {
   base_model_controller_.emplace(weak_ptr_factory_.GetSafeRef(), nullptr);
   service_client_->set_on_disconnect_fn(base::BindRepeating(
       &OnDeviceModelServiceController::OnServiceDisconnected,
@@ -510,9 +512,12 @@ OnDeviceModelServiceController::BaseModelController::PopulateModelPaths() {
   const ml::ModelBackendType backend_type =
       GetBackendType(model_metadata_->performance_hint());
 
-  if (backend_type == ml::ModelBackendType::kCpuBackend) {
-    // Weights cache is used for CPU backend (XNNPACK) only and re-built when
-    // it's deemed stale by version compatibility (see crbug.com/400998489).
+  if (backend_type == ml::ModelBackendType::kCpuBackend ||
+      base::FeatureList::IsEnabled(
+          on_device_model::features::kOnDeviceModelGpuWeightCache)) {
+    // Weights cache is used for CPU backend (XNNPACK) only (or enabled
+    // explicitly through feature flag) and re-built when it's deemed stale by
+    // version compatibility (see crbug.com/400998489).
     model_paths.cache = model_metadata_->model_path().Append(kWeightCacheFile);
   }
   model_paths.encoder_cache =
@@ -522,7 +527,7 @@ OnDeviceModelServiceController::BaseModelController::PopulateModelPaths() {
   // TODO(crbug.com/461547475): GPU cache is experimental for now, remove
   // once feature flag is no longer needed.
   if (base::FeatureList::IsEnabled(
-          on_device_model::features::kOnDeviceModelGpuCache) &&
+          on_device_model::features::kOnDeviceModelGpuProgramCache) &&
       backend_type == ml::ModelBackendType::kGpuBackend) {
     // Program cache will be used for GPU backend only.
     model_paths.program_cache =
@@ -542,6 +547,11 @@ void OnDeviceModelServiceController::BaseModelController::OnModelAssetsLoaded(
   params->assets = std::move(assets);
   params->max_tokens = kOnDeviceModelMaxTokens;
   params->adaptation_ranks = supported_adaptation_ranks_;
+  if (controller_->on_device_component_state_manager_) {
+    params->vram_mb = controller_->on_device_component_state_manager_
+                          ->performance_classifier()
+                          ->GetDeviceVramMb();
+  }
 
   proto::OnDeviceModelPerformanceHint hint =
       model_metadata_->performance_hint();

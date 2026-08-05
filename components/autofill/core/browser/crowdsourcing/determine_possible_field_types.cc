@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -23,7 +24,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/types/zip.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/crowdsourcing/disambiguate_possible_field_types.h"
@@ -148,7 +148,7 @@ FindDatesAndSetFormatStrings(
   std::vector<std::pair<data_util::Date, PossibleTypes*>> dates;
 
   // Match formats against individual fields.
-  for (auto [field, pt] : base::zip(fields, possible_types)) {
+  for (auto [field, pt] : std::views::zip(fields, possible_types)) {
     if (!may_be_interesting(field) || !may_be_complete_date(field)) {
       continue;
     }
@@ -195,7 +195,7 @@ void FindAndSetPossibleCvcFieldTypes(
     base::span<const std::unique_ptr<AutofillField>> fields,
     base::span<PossibleTypes> possible_types) {
   if (!last_unlocked_credit_card_cvc.empty()) {
-    for (auto [field, pt] : base::zip(fields, possible_types)) {
+    for (auto [field, pt] : std::views::zip(fields, possible_types)) {
       if (last_unlocked_credit_card_cvc ==
           base::TrimWhitespace(field->value_for_import(), base::TRIM_ALL)) {
         pt.types.insert(CREDIT_CARD_VERIFICATION_CODE);
@@ -222,7 +222,7 @@ void FindAndSetPossibleCvcFieldTypes(
   // * it does not look like an expiration year or an expiration year was
   //   already found;
   // * it is filled with a 3-4 digit number;
-  for (auto [field, pt] : base::zip(fields, possible_types)) {
+  for (auto [field, pt] : std::views::zip(fields, possible_types)) {
     if (pt.types.contains(CREDIT_CARD_NUMBER)) {
       credit_card_number_found = true;
       continue;
@@ -287,8 +287,8 @@ void AddPossibleAutofillAiTypesForUnmaskedValue(
     FieldType field_type,
     PossibleTypes& pt) {
   // Test if `value_in_field` and `value_on_file` match.
-  bool full_match =
-      AutofillProfileComparator::Compare(value_in_field, value_on_file);
+  bool full_match = AutofillProfileComparator::Compare(
+      value_in_field, value_on_file, normalization::WhitespaceSpec::kDiscard);
   if (full_match) {
     pt.types.insert(field_type);
     if (IsAffixFormatStringEnabledForType(field_type)) {
@@ -421,19 +421,19 @@ void FindAndSetPossibleDateFieldTypesAndFormatStrings(
 
 void RationalizePossibleSplitZipFieldTypes(
     base::span<PossibleTypes> possible_types) {
-  bool is_prev_zip_prefix = false;
-
-  for (auto& possible_type : possible_types) {
+  for (auto it = possible_types.begin(); it != possible_types.end(); ++it) {
     // Voting for ADDRESS_HOME_ZIP_SUFFIX is allowed only if the previous field
     // had ADDRESS_HOME_ZIP_PREFIX as one of its possible types.
-    if (possible_type.types.contains(ADDRESS_HOME_ZIP_SUFFIX) &&
-        !is_prev_zip_prefix) {
-      possible_type.types.erase(ADDRESS_HOME_ZIP_SUFFIX);
+    if (it->types.contains(ADDRESS_HOME_ZIP_SUFFIX)) {
+      if (it == possible_types.begin() ||
+          !(it - 1)->types.contains(ADDRESS_HOME_ZIP_PREFIX)) {
+        it->types.erase(ADDRESS_HOME_ZIP_SUFFIX);
+      }
     }
 
-    // Votes for ADDRESS_HOME_ZIP_PREFIX are mapped to ADDRESS_HOME_ZIP
-    // to prevent unexpected voting results on international forms.
-    // On such forms with a single zip code field, American users often
+    // Votes for single ADDRESS_HOME_ZIP_PREFIX fields are mapped to
+    // ADDRESS_HOME_ZIP to prevent unexpected voting results on international
+    // forms. On such forms with a single zip code field, American users often
     // enter a 5-digit zip code. Since these 5-digit values correspond to both
     // ADDRESS_HOME_ZIP and ADDRESS_HOME_ZIP_PREFIX, they can cause votes
     // for ADDRESS_HOME_ZIP_PREFIX, while users from other countries
@@ -441,10 +441,12 @@ void RationalizePossibleSplitZipFieldTypes(
     // If ADDRESS_HOME_ZIP_PREFIX wins the vote, it could result in
     // partial zip values autofilled in Japan, Brazil, and other
     // countries with split zip code formats.
-    is_prev_zip_prefix = false;
-    if (possible_type.types.erase(ADDRESS_HOME_ZIP_PREFIX)) {
-      possible_type.types.insert(ADDRESS_HOME_ZIP);
-      is_prev_zip_prefix = true;
+    if (it->types.contains(ADDRESS_HOME_ZIP_PREFIX)) {
+      if (it + 1 == possible_types.end() ||
+          !(it + 1)->types.contains(ADDRESS_HOME_ZIP_SUFFIX)) {
+        it->types.erase(ADDRESS_HOME_ZIP_PREFIX);
+        it->types.insert(ADDRESS_HOME_ZIP);
+      }
     }
   }
 }
@@ -500,7 +502,7 @@ void FindAndSetPossibleOtpFieldTypes(
     return;
   }
 
-  for (auto [field, pt] : base::zip(fields, possible_types)) {
+  for (auto [field, pt] : std::views::zip(fields, possible_types)) {
     const std::string field_value_u8 = base::UTF16ToUTF8(
         base::TrimWhitespace(field->value_for_import(), base::TRIM_ALL));
 
@@ -573,7 +575,7 @@ std::vector<PossibleTypes> DeterminePossibleFieldTypesForUpload(
   possible_types.resize(fields.size());
 
   // Most type detection happens in this loop.
-  for (auto [field, pt] : base::zip(fields, possible_types)) {
+  for (auto [field, pt] : std::views::zip(fields, possible_types)) {
     pt = GetPossibleTypes(*field, profiles, credit_cards, entities,
                           loyalty_cards, fields_that_match_state, app_locale);
   }
@@ -599,7 +601,7 @@ std::vector<PossibleTypes> DeterminePossibleFieldTypesForUpload(
     RationalizePossibleSplitZipFieldTypes(possible_types);
   }
 
-  for (auto [field, pt] : base::zip(fields, possible_types)) {
+  for (auto [field, pt] : std::views::zip(fields, possible_types)) {
     if (pt.types.empty()) {
       pt.types = {UNKNOWN_TYPE};
     }

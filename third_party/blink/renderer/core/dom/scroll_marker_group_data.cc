@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/scroll_marker_group_pseudo_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 #include "third_party/blink/renderer/core/html/html_anchor_element.h"
 #include "third_party/blink/renderer/core/layout/geometry/axis.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -98,9 +99,8 @@ std::optional<double> ScrollMarkerChooser::GetScrollTargetPosition(
           ? scroll_marker->GetLayoutObject()
           : target_object;
   CHECK(bounding_box_object);
-  PhysicalBoxStrut scroll_margin =
-      target_object->Style() ? target_object->StyleRef().ScrollMarginStrut()
-                             : PhysicalBoxStrut();
+  const PhysicalBoxStrut scroll_margin =
+      target_object->StyleRef().ScrollMarginStrut();
   // Ignore sticky position offsets for the purposes of scrolling elements
   // into view. See https://www.w3.org/TR/css-position-3/#stickypos-scroll for
   // details
@@ -175,18 +175,20 @@ HeapVector<Member<Element>> ScrollMarkerChooser::ComputeTargetPositions(
   // Update the target positions to account for unreachable targets.
   double before_range_start = min_position_;
   for (auto& target : before_targets) {
-    double previous_target_position = target_positions.at(target);
+    auto it = target_positions.find(target);
+    double previous_target_position = it->value;
     double current_target_position =
         ((previous_target_position - *min_candidate_position) /
          (before_range_start + distribute_range - *min_candidate_position)) *
             distribute_range +
         before_range_start;
-    target_positions.Set(target, current_target_position);
+    it->value = current_target_position;
   }
 
   double after_range_start = max_position_ - distribute_range;
   for (auto& target : after_targets) {
-    double previous_target_position = target_positions.at(target);
+    auto it = target_positions.find(target);
+    double previous_target_position = it->value;
     double current_target_position =
         ((previous_target_position - (after_range_start)) /
          (*max_candidate_position - (after_range_start))) *
@@ -584,6 +586,13 @@ Element* ScrollMarkerGroupData::ChooseMarkerRecursively() {
     // group.
     if (targets.empty()) {
       break;
+    }
+    // Form controls in autofill preview state may have been scrolled to bring
+    // the previewed value into view. Keep the current selection so that the
+    // suggested value cannot be observed via the selected scroll marker.
+    if (auto* form_control = DynamicTo<HTMLFormControlElement>(scroller);
+        form_control && form_control->IsPreviewed()) {
+      return selected_marker_;
     }
     LayoutBox* scroller_box = scroller->GetLayoutBox();
     DCHECK(scroller_box);

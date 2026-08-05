@@ -314,8 +314,8 @@ void ChromeWebUIControllerFactory::GetFaviconForURL(
     ui::ResourceScaleFactor selected_resource_scale =
         resource_scale_factors[selected_index];
 
-    scoped_refptr<base::RefCountedMemory> bitmap(
-        GetFaviconResourceBytes(url, selected_resource_scale));
+    scoped_refptr<base::RefCountedMemory> bitmap =
+        GetFaviconResourceBytes(url, selected_resource_scale);
     if (bitmap.get() && bitmap->size()) {
       favicon_base::FaviconRawBitmapResult bitmap_result;
       bitmap_result.bitmap_data = bitmap;
@@ -361,7 +361,8 @@ ChromeWebUIControllerFactory::ChromeWebUIControllerFactory() = default;
 
 ChromeWebUIControllerFactory::~ChromeWebUIControllerFactory() = default;
 
-base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
+scoped_refptr<base::RefCountedMemory>
+ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     const GURL& page_url,
     ui::ResourceScaleFactor scale_factor) const {
 #if !BUILDFLAG(IS_ANDROID)
@@ -414,6 +415,12 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     return HistoryUI::GetFaviconResourceBytes(scale_factor);
   }
 
+  if (page_url.host() == chrome::kChromeUISettingsHost) {
+    // Android doesn't have settings_util.cc, so load the resource directly.
+    return ui::ResourceBundle::GetSharedInstance()
+        .LoadDataResourceBytesForScale(IDR_SETTINGS_FAVICON, scale_factor);
+  }
+
 #if !BUILDFLAG(IS_ANDROID)
 #if !BUILDFLAG(IS_CHROMEOS)
   // The chrome://apps page is not available on Android or ChromeOS.
@@ -442,11 +449,6 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
     return DownloadsUI::GetFaviconResourceBytes(scale_factor);
   }
 
-  // Android doesn't use the Options/Settings pages.
-  if (page_url.host() == chrome::kChromeUISettingsHost) {
-    return settings_utils::GetFaviconResourceBytes(scale_factor);
-  }
-
   if (page_url.host() == chrome::kChromeUIManagementHost) {
     return ManagementUI::GetFaviconResourceBytes(scale_factor);
   }
@@ -473,7 +475,9 @@ base::RefCountedMemory* ChromeWebUIControllerFactory::GetFaviconResourceBytes(
 
 #if BUILDFLAG(IS_CHROMEOS)
   if (page_url.host() == ash::kChromeUIOSSettingsHost) {
-    return settings_utils::GetFaviconResourceBytes(scale_factor);
+    // Chrome OS uses the general settings favicon for OS settings.
+    return ui::ResourceBundle::GetSharedInstance()
+        .LoadDataResourceBytesForScale(IDR_SETTINGS_FAVICON, scale_factor);
   }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
@@ -487,6 +491,7 @@ bool ChromeWebUIControllerFactory::HasFaviconForNativePage(
     return false;
   }
   return page_url.host() == chrome::kChromeUIHistoryHost ||
-         page_url.host() == chrome::kChromeUIBookmarksHost;
+         page_url.host() == chrome::kChromeUIBookmarksHost ||
+         page_url.host() == chrome::kChromeUISettingsHost;
 }
 #endif

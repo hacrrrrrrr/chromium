@@ -15,6 +15,8 @@
 #import "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #import "components/autofill/core/browser/data_manager/payments/payments_data_manager.h"
 #import "components/autofill/core/browser/data_manager/personal_data_manager.h"
+#import "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
+#import "components/autofill/core/browser/data_model/payments/credit_card.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
 #import "components/autofill/ios/browser/personal_data_manager_observer_bridge.h"
@@ -22,6 +24,10 @@
 #import "components/autofill/ios/form_util/form_activity_params.h"
 #import "components/feature_engagement/public/tracker.h"
 #import "components/omnibox/browser/omnibox_pref_names.h"
+#import "components/password_manager/core/browser/password_form.h"
+#import "components/password_manager/core/browser/ui/credential_ui_entry.h"
+#import "components/password_manager/ios/password_suggestion_helper.h"
+#import "components/password_manager/ios/shared_password_controller.h"
 #import "components/prefs/pref_service.h"
 #import "components/webauthn/ios/ios_webauthn_credentials_delegate.h"
 #import "components/webauthn/ios/ios_webauthn_credentials_delegate_factory.h"
@@ -40,6 +46,7 @@
 #import "ios/chrome/browser/autofill/model/form_suggestion_tab_helper.h"
 #import "ios/chrome/browser/default_browser/model/default_browser_interest_signals.h"
 #import "ios/chrome/browser/passwords/model/password_counter_delegate_bridge.h"
+#import "ios/chrome/browser/passwords/model/password_tab_helper.h"
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/chrome_coordinator.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_backed_boolean.h"
@@ -63,19 +70,45 @@
 #import "ui/base/device_form_factor.h"
 #import "ui/base/l10n/l10n_util_mac.h"
 
+using ActivityType = autofill::FormActivityParams::ActivityType;
+using autofill::Suggestion;
+using autofill::SuggestionType;
 using base::UmaHistogramEnumeration;
 
 namespace {
 
 // Returns whether the input field type triggers the keyboard to open. If the
 // field type isn't recognized, it returns the provided default value.
-bool InputTriggersKeyboard(std::string field_type, bool default_value) {
-  static const auto triggers_keyboard = base::MakeFixedFlatSet<std::string>(
-      {"email", "number", "password", "search", "tel", "text", "url", "week"});
-  static const auto no_keyboard = base::MakeFixedFlatSet<std::string>(
-      {"button", "checkbox", "color", "date", "datetime-local", "file",
-       "hidden", "image", "month", "radio", "range", "reset", "submit",
-       "time"});
+bool InputTriggersKeyboard(autofill::FormActivityParams::FieldType field_type,
+                           bool default_value) {
+  static const auto triggers_keyboard =
+      base::MakeFixedFlatSet<autofill::FormActivityParams::FieldType>({
+          autofill::FormActivityParams::FieldType::kEmail,
+          autofill::FormActivityParams::FieldType::kNumber,
+          autofill::FormActivityParams::FieldType::kObfuscated,
+          autofill::FormActivityParams::FieldType::kSearch,
+          autofill::FormActivityParams::FieldType::kTel,
+          autofill::FormActivityParams::FieldType::kText,
+          autofill::FormActivityParams::FieldType::kUrl,
+          autofill::FormActivityParams::FieldType::kWeek,
+      });
+  static const auto no_keyboard =
+      base::MakeFixedFlatSet<autofill::FormActivityParams::FieldType>({
+          autofill::FormActivityParams::FieldType::kButton,
+          autofill::FormActivityParams::FieldType::kCheckbox,
+          autofill::FormActivityParams::FieldType::kColor,
+          autofill::FormActivityParams::FieldType::kDate,
+          autofill::FormActivityParams::FieldType::kDateTimeLocal,
+          autofill::FormActivityParams::FieldType::kFile,
+          autofill::FormActivityParams::FieldType::kHidden,
+          autofill::FormActivityParams::FieldType::kImage,
+          autofill::FormActivityParams::FieldType::kMonth,
+          autofill::FormActivityParams::FieldType::kRadio,
+          autofill::FormActivityParams::FieldType::kRange,
+          autofill::FormActivityParams::FieldType::kReset,
+          autofill::FormActivityParams::FieldType::kSubmit,
+          autofill::FormActivityParams::FieldType::kTime,
+      });
 
   if (triggers_keyboard.contains(field_type)) {
     return true;
@@ -373,7 +406,8 @@ bool IsStateless() {
 }
 
 - (BOOL)lastFocusedFieldWasObfuscated {
-  return _lastSeenParams.field_type == autofill::kObfuscatedFieldType;
+  return _lastSeenParams.field_type ==
+         autofill::FormActivityParams::FieldType::kObfuscated;
 }
 
 - (autofill::FillingProduct)currentProviderMainFillingProduct {
@@ -498,14 +532,15 @@ bool IsStateless() {
 
   // Ignore form_changed events to prevent gestureless form changes from
   // overwriting the active keyboard accessory's target web frame ID.
-  if (params.type == "form_changed") {
+  if (params.type == ActivityType::kFormChanged) {
     return;
   }
 
   BOOL isDefaultViewEnabled =
       IsIOSKeyboardAccessoryDefaultViewEnabled() &&
       ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_PHONE;
-  BOOL isSelectOne = params.field_type == "select-one";
+  BOOL isSelectOne =
+      params.field_type == autofill::FormActivityParams::FieldType::kSelectOne;
 
   // Return early and reset if element is a picker.
   if (isSelectOne && !isDefaultViewEnabled) {
@@ -522,7 +557,8 @@ bool IsStateless() {
   }
 
   // Skip retrieving suggestions for blur or change events.
-  if (params.type == "blur" || params.type == "change") {
+  if (params.type == ActivityType::kBlur ||
+      params.type == ActivityType::kChange) {
     return;
   }
 
@@ -796,7 +832,7 @@ bool IsStateless() {
   if (!self.suggestionsEnabled) {
     if (self.formInputInteractionDelegate) {
       [self.formInputInteractionDelegate
-          focusDidChangedWithFillingProduct:mainFillingProduct];
+          focusDidChangeWithFillingProduct:mainFillingProduct];
     }
     return;
   }
@@ -936,6 +972,23 @@ bool IsStateless() {
   [self didSelectSuggestion:formSuggestion atIndex:index completion:completion];
 }
 
+- (NSString*)usernameForSuggestion:(FormSuggestion*)suggestion {
+  if (suggestion.type != autofill::SuggestionType::kWebauthnCredential) {
+    return nil;
+  }
+  webauthn::IOSWebAuthnCredentialsDelegate* delegate =
+      [self webAuthnCredentialsDelegate];
+  if (!delegate) {
+    return nil;
+  }
+  auto passkeys = delegate->GetPasskeys();
+  if (!passkeys.has_value()) {
+    return nil;
+  }
+  return webauthn::GetPasskeyUsernameForSuggestion(suggestion,
+                                                   *passkeys.value());
+}
+
 - (BOOL)shouldShowRPId:(NSString*)rpId {
   if (!_webState) {
     return NO;
@@ -944,6 +997,24 @@ bool IsStateless() {
       base::SysUTF8ToNSString(_webState->GetLastCommittedURL().host());
   return rpId.length && pageHost.length &&
          !credential_provider::SecureHostsMatch(pageHost, rpId);
+}
+
+- (void)openEditForSuggestion:(FormSuggestion*)suggestion {
+  switch (suggestion.type) {
+    case SuggestionType::kPasswordEntry:
+    case SuggestionType::kBackupPasswordEntry:
+      [self openPasswordEditForSuggestion:suggestion];
+      break;
+    case SuggestionType::kCreditCardEntry:
+    case SuggestionType::kVirtualCreditCardEntry:
+      [self openCreditCardEditForSuggestion:suggestion];
+      break;
+    case SuggestionType::kAddressEntry:
+      [self openAddressEditForSuggestion:suggestion];
+      break;
+    default:
+      break;
+  }
 }
 
 #pragma mark - PasswordCounterObserver
@@ -1084,6 +1155,100 @@ bool IsStateless() {
 // the optional update.
 - (void)scheduleOptionalUpdate {
   _optionalUpdateScheduler->ScheduleOptionalUpdate();
+}
+
+- (void)openCreditCardEditForSuggestion:(FormSuggestion*)suggestion {
+  const autofill::CreditCard* card = nullptr;
+  const autofill::Suggestion::Payload& payload = suggestion.payload;
+  if (const Suggestion::Guid* guid = std::get_if<Suggestion::Guid>(&payload)) {
+    card = _personalDataManager->payments_data_manager().GetCreditCardByGUID(
+        guid->value());
+  } else if (const Suggestion::PaymentsPayload* payments_payload =
+                 std::get_if<Suggestion::PaymentsPayload>(&payload)) {
+    card = _personalDataManager->payments_data_manager().GetCreditCardByGUID(
+        payments_payload->guid.value());
+  } else if (const Suggestion::InstrumentId* instrument_id =
+                 std::get_if<Suggestion::InstrumentId>(&payload)) {
+    card = _personalDataManager->payments_data_manager()
+               .GetCreditCardByInstrumentId(
+                   static_cast<int64_t>(instrument_id->value()));
+  }
+
+  if (card) {
+    [self.handler openCreditCardDetails:*card inEditMode:YES];
+  }
+}
+
+- (void)openPasswordEditForSuggestion:(FormSuggestion*)suggestion {
+  if (!_webState) {
+    return;
+  }
+  PasswordTabHelper* password_tab_helper =
+      PasswordTabHelper::FromWebState(_webState);
+  if (!password_tab_helper) {
+    return;
+  }
+
+  GURL page_url = _webState->GetLastCommittedURL();
+  SharedPasswordController* password_controller =
+      password_tab_helper->GetSharedPasswordController();
+
+  password_manager::PasswordForm form;
+  form.url = page_url;
+
+  const autofill::Suggestion::Payload& payload = suggestion.payload;
+  if (const Suggestion::PasswordSuggestionDetails* details =
+          std::get_if<Suggestion::PasswordSuggestionDetails>(&payload)) {
+    form.username_value = details->username;
+    form.password_value = details->password;
+    form.signon_realm = details->signon_realm.value_or(
+        password_manager::GetSignonRealm(page_url));
+  } else {
+    form.username_value = base::SysNSStringToUTF16(suggestion.value);
+
+    // Try to retrieve the actual saved password and origin from suggestion
+    // helper cache.
+    if (password_controller && !_lastSeenParams.frame_id.empty()) {
+      password_manager::FillDataRetrievalResult fill_data_result =
+          [password_controller
+              passwordFillDataForUsername:suggestion.value
+                       isBackupCredential:suggestion.type ==
+                                          SuggestionType::kBackupPasswordEntry
+                               forFrameId:_lastSeenParams.frame_id];
+      if (fill_data_result.has_value()) {
+        form.password_value = fill_data_result.value()->password_value;
+        std::string raw_realm = !fill_data_result.value()->realm.empty()
+                                    ? fill_data_result.value()->realm
+                                    : fill_data_result.value()->origin.spec();
+        form.signon_realm = password_manager::GetSignonRealm(GURL(raw_realm));
+      }
+    }
+
+    if (form.signon_realm.empty()) {
+      form.signon_realm =
+          suggestion.displayDescription.length > 0
+              ? base::SysNSStringToUTF8(suggestion.displayDescription)
+              : password_manager::GetSignonRealm(page_url);
+    }
+  }
+
+  password_manager::CredentialUIEntry credential(form);
+  if (!credential.username.empty() ||
+      !credential.GetFirstSignonRealm().empty()) {
+    [self.handler openPasswordDetailsInEditMode:credential];
+  }
+}
+
+- (void)openAddressEditForSuggestion:(FormSuggestion*)suggestion {
+  const autofill::Suggestion::Payload& payload = suggestion.payload;
+  if (const Suggestion::AutofillProfilePayload* profile_payload =
+          std::get_if<Suggestion::AutofillProfilePayload>(&payload)) {
+    if (const autofill::AutofillProfile* profile =
+            _personalDataManager->address_data_manager().GetProfileByGUID(
+                profile_payload->guid.value())) {
+      [self.handler openAddressDetailsInEditModeForSuggestion:*profile];
+    }
+  }
 }
 
 @end

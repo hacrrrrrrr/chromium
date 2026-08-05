@@ -60,6 +60,7 @@ class MockDelegate : public TabGroupHeaderView::Delegate {
               (override));
   MOCK_METHOD(void, ShiftGroupUp, (), (override));
   MOCK_METHOD(void, ShiftGroupDown, (), (override));
+  MOCK_METHOD(bool, IsGroupFocused, (), (const, override));
 };
 
 int GetPlatformDependentAccelerator() {
@@ -85,6 +86,17 @@ class TabGroupHeaderViewTest : public views::ViewsTestBase,
 
   bool UseGroupHeaderHoverCards() { return GetParam(); }
 
+  void MoveMouseTo(ui::test::EventGenerator& generator,
+                   const views::View* view,
+                   bool inside_view) {
+    if (inside_view) {
+      generator.MoveMouseTo(view->GetBoundsInScreen().CenterPoint());
+    } else {
+      generator.MoveMouseTo(view->GetBoundsInScreen().bottom_right() +
+                            gfx::Vector2d(10, 10));
+    }
+  }
+
   ~TabGroupHeaderViewTest() override = default;
 
  private:
@@ -99,8 +111,8 @@ TEST_P(TabGroupHeaderViewTest, TooltipText) {
   EXPECT_CALL(delegate, GetGroupContentString())
       .WillRepeatedly(testing::Return(u"3 tabs"));
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -160,8 +172,8 @@ TEST_P(TabGroupHeaderViewTest, TitleLabelHeightWhenConstrained) {
 
   std::unique_ptr<views::Widget> widget =
       CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
-  auto* header = widget->SetContentsView(
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data));
+  auto* header = widget->SetContentsView(std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data));
   header->OnDataChanged(data);
 
   // Set the header bounds to a height smaller than the label's preferred line
@@ -183,8 +195,8 @@ TEST_P(TabGroupHeaderViewTest, ShowHoverCardOnMouseEnter) {
 
   std::unique_ptr<views::Widget> widget =
       CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
-  auto* header = widget->SetContentsView(
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data));
+  auto* header = widget->SetContentsView(std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data));
   widget->Show();
 
   if (UseGroupHeaderHoverCards()) {
@@ -194,7 +206,7 @@ TEST_P(TabGroupHeaderViewTest, ShowHoverCardOnMouseEnter) {
   }
 
   ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
-  generator.MoveMouseTo(header->GetBoundsInScreen().CenterPoint());
+  MoveMouseTo(generator, header, true);
 }
 
 TEST_P(TabGroupHeaderViewTest, EditorBubbleButtonVisibilityOnHover) {
@@ -204,20 +216,11 @@ TEST_P(TabGroupHeaderViewTest, EditorBubbleButtonVisibilityOnHover) {
 
   std::unique_ptr<views::Widget> widget =
       CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
-  auto* header = widget->SetContentsView(
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data));
+  auto* header = widget->SetContentsView(std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data));
   widget->Show();
 
   ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
-
-  auto move_mouse_to = [&](bool inside_view) {
-    if (inside_view) {
-      generator.MoveMouseTo(header->GetBoundsInScreen().CenterPoint());
-    } else {
-      generator.MoveMouseTo(header->GetBoundsInScreen().bottom_right() +
-                            gfx::Vector2d(10, 10));
-    }
-  };
 
   auto check_editor_bubble_button_visible = [&](bool expected_visibility) {
     EXPECT_EQ(expected_visibility,
@@ -225,16 +228,67 @@ TEST_P(TabGroupHeaderViewTest, EditorBubbleButtonVisibilityOnHover) {
   };
 
   // Move mouse outside the header.
-  move_mouse_to(false);
+  MoveMouseTo(generator, header, false);
   check_editor_bubble_button_visible(false);
 
   // Move mouse over the header.
-  move_mouse_to(true);
+  MoveMouseTo(generator, header, true);
   check_editor_bubble_button_visible(true);
 
   // Move mouse outside the header again.
-  move_mouse_to(false);
+  MoveMouseTo(generator, header, false);
   check_editor_bubble_button_visible(false);
+}
+
+TEST_P(TabGroupHeaderViewTest, FocusModeVisibility) {
+  MockDelegate delegate;
+  ON_CALL(delegate, IsGroupFocused()).WillByDefault(testing::Return(true));
+
+  tab_groups::TabGroupVisualData visual_data(
+      u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
+
+  std::unique_ptr<views::Widget> widget =
+      CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
+  auto* header = widget->SetContentsView(std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data));
+  widget->Show();
+
+  // In focus mode, the 3-dot menu should always be visible and collapse button
+  // hidden.
+  EXPECT_TRUE(header->editor_bubble_button()->GetVisible());
+  EXPECT_FALSE(header->collapse_icon_for_testing()->GetVisible());
+
+  ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
+
+  // Even when hovering over the header, 3-dot button is visible and collapse
+  // button is hidden.
+  MoveMouseTo(generator, header, true);
+  EXPECT_TRUE(header->editor_bubble_button()->GetVisible());
+  EXPECT_FALSE(header->collapse_icon_for_testing()->GetVisible());
+
+  // Move mouse outside the header.
+  MoveMouseTo(generator, header, false);
+  EXPECT_TRUE(header->editor_bubble_button()->GetVisible());
+  EXPECT_FALSE(header->collapse_icon_for_testing()->GetVisible());
+}
+
+TEST_P(TabGroupHeaderViewTest, LeftClickInFocusModeDoesNotToggleCollapse) {
+  MockDelegate delegate;
+  ON_CALL(delegate, IsGroupFocused()).WillByDefault(testing::Return(true));
+  EXPECT_CALL(delegate, ToggleCollapsedState(testing::_)).Times(0);
+
+  tab_groups::TabGroupVisualData visual_data(
+      u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
+
+  std::unique_ptr<views::Widget> widget =
+      CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
+  auto* header = widget->SetContentsView(std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data));
+  widget->Show();
+
+  ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
+  MoveMouseTo(generator, header, true);
+  generator.ClickLeftButton();
 }
 
 TEST_P(TabGroupHeaderViewTest, OnKeyPress_ShiftUp) {
@@ -242,8 +296,8 @@ TEST_P(TabGroupHeaderViewTest, OnKeyPress_ShiftUp) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   ui::KeyEvent event(ui::EventType::kKeyPressed, ui::VKEY_UP,
                      GetPlatformDependentAccelerator());
@@ -258,8 +312,8 @@ TEST_P(TabGroupHeaderViewTest, OnKeyPress_ShiftDown) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   ui::KeyEvent event(ui::EventType::kKeyPressed, ui::VKEY_DOWN,
                      GetPlatformDependentAccelerator());
@@ -278,8 +332,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_OneTab) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -320,8 +374,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_FiveTabs) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -368,8 +422,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_ExcessTabs) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -416,8 +470,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_UnnamedGroup) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -466,8 +520,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_LongTabTitleElided) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -514,8 +568,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_SharedGroup) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, false);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);
@@ -557,8 +611,8 @@ TEST_P(TabGroupHeaderViewTest, HoverCardAccessibilityText_CollapsedGroup) {
   tab_groups::TabGroupVisualData visual_data(
       u"Group Title", tab_groups::TabGroupColorId::kBlue, true);
 
-  auto header =
-      std::make_unique<TabGroupHeaderView>(delegate, nullptr, &visual_data);
+  auto header = std::make_unique<TabGroupHeaderView>(
+      delegate, TabStripOrientation::kVertical, nullptr, &visual_data);
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   tabs::MockTabGroup mock_tab_group(nullptr, group_id, visual_data);

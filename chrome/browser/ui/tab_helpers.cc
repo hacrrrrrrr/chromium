@@ -88,7 +88,6 @@
 #include "chrome/browser/ui/autofill/autofill_client_provider.h"
 #include "chrome/browser/ui/autofill/autofill_client_provider_factory.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
-#include "chrome/browser/ui/focus_tab_after_navigation_helper.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/recently_audible_helper.h"
@@ -109,7 +108,6 @@
 #include "components/blocked_content/popup_blocker_tab_helper.h"
 #include "components/blocked_content/popup_opener_tab_helper.h"
 #include "components/breadcrumbs/core/breadcrumbs_status.h"
-#include "components/browsing_topics/browsing_topics_redirect_observer.h"
 #include "components/captive_portal/core/buildflags.h"
 #include "components/client_hints/browser/client_hints_web_contents_observer.h"
 #include "components/commerce/content/browser/commerce_tab_helper.h"
@@ -175,7 +173,6 @@
 #include "chrome/browser/facilitated_payments/ui/chrome_facilitated_payments_client.h"
 #include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/loader/from_gws_navigation_and_keep_alive_request_tab_helper.h"
-#include "chrome/browser/net/http_auth_cache_status.h"
 #include "chrome/browser/plugins/plugin_observer_android.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_tab_modal_dialog_manager_delegate_android.h"
@@ -188,7 +185,6 @@
 #include "content/public/common/content_features.h"
 #else
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
-#include "chrome/browser/preloading/prefetch/zero_suggest_prefetch/zero_suggest_prefetch_tab_helper.h"
 #include "chrome/browser/tab_contents/form_interaction_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
@@ -313,7 +309,8 @@ std::optional<int64_t> GetPageContentAnnotationsTabId(
 // WARNING: Do not use this class for desktop chrome. Use TabFeatures instead.
 // See
 // https://chromium.googlesource.com/chromium/src/+/main/docs/chrome_browser_design_principles.md
-void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
+void TabHelpers::AttachTabHelpers(WebContents* web_contents,
+                                  bool enable_browser_autofill) {
   // If already adopted, nothing to be done.
   base::SupportsUserData::Data* adoption_tag =
       web_contents->GetUserData(&kTabContentsAttachedTabHelpersUserDataKey);
@@ -352,9 +349,13 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
                                                    optimization_guide_decider);
     }
   }
-  autofill::AutofillClientProvider& autofill_client_provider =
-      autofill::AutofillClientProviderFactory::GetForProfile(profile);
-  autofill_client_provider.CreateClientForWebContents(web_contents);
+  // AutofillClientProvider initializes ContentAutofillClient for web_contents,
+  // which is gated by enable_browser_autofill.
+  if (enable_browser_autofill) {
+    autofill::AutofillClientProvider& autofill_client_provider =
+        autofill::AutofillClientProviderFactory::GetForProfile(profile);
+    autofill_client_provider.CreateClientForWebContents(web_contents);
+  }
 
 #if BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(media::kAutoPictureInPictureAndroid)) {
@@ -367,32 +368,35 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 #if BUILDFLAG(IS_ANDROID)
   // The sensitive content client has to be instantiated after the autofill
   // client, because the sensitive content client starts a flow which uses
-  // `ScopedAutofillManagersObservation`.
-  if (base::android::android_info::sdk_int() >=
+  // `ScopedAutofillManagersObservation` and expects `ContentAutofillClient`
+  // to exist, which is gated by enable_browser_autofill.
+  if (enable_browser_autofill &&
+      base::android::android_info::sdk_int() >=
           base::android::android_info::SdkVersion::SDK_VERSION_V &&
       base::FeatureList::IsEnabled(
           sensitive_content::features::kSensitiveContent)) {
     sensitive_content::AndroidSensitiveContentClient::CreateForWebContents(
         web_contents, "SensitiveContent.Chrome.");
   }
-
-  // Create the HttpAuthCacheStatus to start observing resource load
-  // completions.
-  HttpAuthCacheStatus::HttpAuthCacheStatus::CreateForWebContents(web_contents);
 #endif  // BUILDFLAG(IS_ANDROID)
   if (breadcrumbs::IsEnabled(g_browser_process->local_state())) {
     BreadcrumbManagerTabHelper::CreateForWebContents(web_contents);
   }
-  browsing_topics::BrowsingTopicsRedirectObserver::MaybeCreateForWebContents(
-      web_contents);
   ChainedBackNavigationTracker::CreateForWebContents(web_contents);
   chrome_browser_net::NetErrorTabHelper::CreateForWebContents(web_contents);
-  if (!autofill_client_provider.uses_platform_autofill()) {
-    ChromePasswordManagerClient::CreateForWebContents(web_contents);
-  }
+  // Password manager and password reuse detection rely on ChromeAutofillClient
+  // initialized by browser autofill, which is gated by enable_browser_autofill.
+  if (enable_browser_autofill) {
+    autofill::AutofillClientProvider& autofill_client_provider =
+        autofill::AutofillClientProviderFactory::GetForProfile(profile);
+    if (!autofill_client_provider.uses_platform_autofill()) {
+      ChromePasswordManagerClient::CreateForWebContents(web_contents);
+    }
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
-  ChromePasswordReuseDetectionManagerClient::CreateForWebContents(web_contents);
+    ChromePasswordReuseDetectionManagerClient::CreateForWebContents(
+        web_contents);
 #endif
+  }
   CreateSubresourceFilterWebContentsHelper(web_contents);
 #if BUILDFLAG(ENABLE_RLZ)
   ChromeRLZTrackerWebContentsObserver::CreateForWebContentsIfNeeded(
@@ -587,9 +591,15 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   // events from PermissionRequestManager and AsyncCheckTracker in its
   // constructor. Therefore, PermissionRequestManager and AsyncCheckTracker need
   // to be created before SafeBrowsingTabObserver is created.
-  safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(
-      web_contents,
-      std::make_unique<safe_browsing::ChromeSafeBrowsingTabObserverDelegate>());
+  // ClientSideDetectionHost uses ScopedAutofillManagersObservation which
+  // expects ContentAutofillClient (gated by enable_browser_autofill) to be
+  // created.
+  if (enable_browser_autofill) {
+    safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(
+        web_contents,
+        std::make_unique<
+            safe_browsing::ChromeSafeBrowsingTabObserverDelegate>());
+  }
   safe_browsing::TriggerCreator::MaybeCreateTriggersForWebContents(
       profile, web_contents);
 #endif  // BUILDFLAG(SAFE_BROWSING_AVAILABLE)
@@ -683,10 +693,14 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   PluginObserverAndroid::CreateForWebContents(web_contents);
   task_manager::WebContentsTags::CreateForTabContents(web_contents);
 
+  // ChromeFacilitatedPaymentsClient requires ContentAutofillClient / payments
+  // autofill capabilities (gated by enable_browser_autofill).
+  if (enable_browser_autofill) {
     if (auto* optimization_guide_decider =
             OptimizationGuideKeyedServiceFactory::GetForProfile(profile)) {
       ChromeFacilitatedPaymentsClient::CreateForWebContents(
           web_contents, optimization_guide_decider);
+    }
   }
 #else   // BUILDFLAG(IS_ANDROID)
   if (web_app::AreWebAppsUserInstallable(profile)) {
@@ -695,7 +709,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   }
   BookmarkTabHelper::CreateForWebContents(web_contents);
   BrowserSyncedTabDelegate::CreateForWebContents(web_contents);
-  FocusTabAfterNavigationHelper::CreateForWebContents(web_contents);
   FormInteractionTabHelper::CreateForWebContents(web_contents);
   FramebustBlockTabHelper::CreateForWebContents(web_contents);
   IntentPickerTabHelper::CreateForWebContents(web_contents);
@@ -703,7 +716,12 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       web_contents,
       std::make_unique<JavaScriptTabModalDialogManagerDelegateDesktop>(
           web_contents));
-  ManagePasswordsUIController::CreateForWebContents(web_contents);
+
+  // ManagePasswordsUIController expects ChromePasswordManagerClient to be
+  // created, which is gated by enable_browser_autofill.
+  if (enable_browser_autofill) {
+    ManagePasswordsUIController::CreateForWebContents(web_contents);
+  }
 
   if (SearchEngineChoiceTabHelper::IsHelperNeeded()) {
     SearchEngineChoiceTabHelper::CreateForWebContents(web_contents);
@@ -719,13 +737,15 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   }
   UMABrowsingActivityObserver::TabHelper::CreateForWebContents(web_contents);
   web_modal::WebContentsModalDialogManager::CreateForWebContents(web_contents);
-  ZeroSuggestPrefetchTabHelper::CreateForWebContents(web_contents);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_COMPOSE)
   // We need to create the ChromeComposeClient to listen for the feature
   // being turned on, even if it is not enabled yet.
-  if (!profile->IsOffTheRecord()) {
+  // FieldChangeObserver in ChromeComposeClient uses
+  // ScopedAutofillManagersObservation which expects ContentAutofillClient
+  // (gated by enable_browser_autofill).
+  if (enable_browser_autofill && !profile->IsOffTheRecord()) {
     ChromeComposeClient::CreateForWebContents(web_contents);
   }
 #endif

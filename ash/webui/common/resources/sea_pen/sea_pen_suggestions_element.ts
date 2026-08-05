@@ -80,10 +80,10 @@ export class SeaPenSuggestionsElement extends SeaPenSuggestionsElementBase {
     };
   }
 
-  private suggestions_: string[];
-  private selectableSuggestions_: string[];
-  private hiddenSuggestions_: Set<string>;
-  private debouncer_: Debouncer;
+  declare private suggestions_: string[];
+  declare private selectableSuggestions_: string[];
+  declare private hiddenSuggestions_: Set<string>;
+  private debouncer_: Debouncer|null = null;
   private onResized_: () => void = () => {
     this.debouncer_ =
         Debouncer.debounce(this.debouncer_, timeOut.after(50), () => {

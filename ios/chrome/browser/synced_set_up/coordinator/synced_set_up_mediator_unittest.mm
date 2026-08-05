@@ -124,12 +124,12 @@ class SyncedSetUpMediatorTest : public PlatformTest {
     TestProfileIOS::Builder builder;
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
     profile_ = profile_manager_.AddProfileWithBuilder(std::move(builder));
-    scene_state_ = [[SceneState alloc] initWithAppState:nil];
+    scene_state_ = [[SceneState alloc] init];
     browser_ = std::make_unique<TestBrowser>(profile_.get(), scene_state_);
     web_state_list_ = browser_.get()->GetWebStateList();
     web_state_ = std::make_unique<web::FakeWebState>();

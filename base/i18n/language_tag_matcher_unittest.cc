@@ -23,6 +23,33 @@ LanguageTag LanguageTagOrDie(std::string_view tag) {
   return *LanguageTagConverter::GetInstance().FromString(tag);
 }
 
+TEST(LanguageTagMatcherTest, EnglishRegionalFallbackCanada) {
+  std::vector<LanguageTag> supported = {LanguageTagOrDie("en-US"),
+                                        LanguageTagOrDie("en-GB")};
+  LanguageTagMatcher matcher = LanguageTagMatcher::Create(supported);
+  EXPECT_THAT(matcher.Match(LanguageTagOrDie("en-CA")),
+              Optional(LanguageTagOrDie("en-GB")));
+}
+
+TEST(LanguageTagMatcherTest, EnglishUsAsDefault) {
+  std::vector<LanguageTag> supported = {LanguageTagOrDie("en-US"),
+                                        LanguageTagOrDie("en-GB")};
+  LanguageTagMatcher matcher = LanguageTagMatcher::Create(supported);
+  EXPECT_THAT(matcher.Match(LanguageTagOrDie("en")),
+              Optional(LanguageTagOrDie("en-US")));
+}
+
+TEST(LanguageTagMatcherTest, EnglishGbAsDefault) {
+  std::vector<LanguageTag> supported = {
+      LanguageTagOrDie("en-GB"),
+      LanguageTagOrDie("en-LR"),
+      LanguageTagOrDie("en-JA"),
+  };
+  LanguageTagMatcher matcher = LanguageTagMatcher::Create(supported);
+  EXPECT_THAT(matcher.Match(LanguageTagOrDie("en")),
+              Optional(LanguageTagOrDie("en-GB")));
+}
+
 TEST(LanguageTagMatcherTest, EnglishRegionalFallback) {
   std::vector<LanguageTag> supported = {LanguageTagOrDie("en-US"),
                                         LanguageTagOrDie("en-GB")};
@@ -32,8 +59,6 @@ TEST(LanguageTagMatcherTest, EnglishRegionalFallback) {
   EXPECT_THAT(matcher.Match(LanguageTagOrDie("en-LR")),
               Optional(LanguageTagOrDie("en-US")));
   EXPECT_THAT(matcher.Match(LanguageTagOrDie("en-PH")),
-              Optional(LanguageTagOrDie("en-US")));
-  EXPECT_THAT(matcher.Match(LanguageTagOrDie("en-CA")),
               Optional(LanguageTagOrDie("en-US")));
 
   // Other English regions (like Australia or New Zeland) should fallback to
@@ -402,6 +427,18 @@ TEST(LanguageTagMatcherTest, ChineseVariantsAndExtensions) {
     EXPECT_THAT(matcher.Match(LanguageTagOrDie("zh-Latn-wadegile")),
                 Optional(LanguageTagOrDie("zh-Latn")));
   }
+}
+
+TEST(LanguageTagMatcherTest, DefaultMatch) {
+  std::vector<LanguageTag> supported = {GetKnownLanguageTag("en-GB")};
+  LanguageTagMatcherWithDefault matcher = LanguageTagMatcherWithDefault::Create(
+      GetKnownLanguageTag("pt-BR"), supported);
+  EXPECT_THAT(matcher.Match(LanguageTagOrDie("en")),
+              GetKnownLanguageTag("en-GB"));
+  EXPECT_THAT(matcher.MatchOrDefault(LanguageTagOrDie("zh")),
+              GetKnownLanguageTag("pt-BR"));
+  EXPECT_THAT(matcher.MatchOrDefault(LanguageTagOrDie("und")),
+              GetKnownLanguageTag("pt-BR"));
 }
 
 }  // namespace

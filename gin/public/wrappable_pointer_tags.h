@@ -66,7 +66,6 @@ enum WrappablePointerTag : uint16_t {
   kSearchBoxBindings,            // SearchBoxBindings
   kSecurityInterstitialPageController,  // SecurityInterstitialPageController
   kSessionStorageArea,                  // extensions::SessionStorageArea
-  kSharedStorageMethod,                 // auction_worklet::SharedStorageMethod
   kSkiaBenchmarking,                    // content::SkiaBenchmarking
   kStatsCollectionController,           // content::StatsCollectionController
   kSupervisedUserErrorPageController,   // SupervisedUserErrorPageController
@@ -81,6 +80,7 @@ enum WrappablePointerTag : uint16_t {
   kTextInputControllerBindings,  // content::TextInputControllerBindings
   kWebAXObjectProxy,             // content::WebAXObjectProxy
   kWrappedExceptionHandler,      // extensions::WrappedExceptionHandler
+  kWrappedHandlerFunction,       // extensions::WrappedHandlerFunction
   // keep-sorted end
   kLastPointerTag,
 };

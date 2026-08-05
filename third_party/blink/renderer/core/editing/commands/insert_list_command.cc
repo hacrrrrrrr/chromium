@@ -606,8 +606,7 @@ void InsertListCommand::ToggleSelectedListItem(
     return;
 
   GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
-  if (RuntimeEnabledFeatures::PlaceholderVisibilityEnabled() &&
-      EnsureNodeVisibility(placeholder)) {
+  if (EnsureNodeVisibility(placeholder)) {
     GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kEditing);
   }
 
@@ -848,9 +847,7 @@ void InsertListCommand::MoveParagraphOverPositionIntoEmptyListItem(
     if (editing_state->IsAborted())
       return;
   }
-  if (RuntimeEnabledFeatures::
-          SelectionUpdateToInitialSelectionInListifyEnabled() &&
-      initial_selection.Anchor().IsConnected() &&
+  if (initial_selection.Anchor().IsConnected() &&
       initial_selection.Focus().IsConnected()) {
     SetEndingSelection(
         SelectionForUndoStep::From(initial_selection.AsSelection()));

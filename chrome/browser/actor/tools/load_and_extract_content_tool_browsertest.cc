@@ -91,7 +91,7 @@ class ActorLoadAndExtractContentToolBrowserTest : public ActorToolsTest {
       ]
     })json",
         net::GetHostAndPort(embedded_test_server()->base_url()));
-    SafetyListManager::GetInstance()->ParseSafetyLists(json);
+    ParseSafetyListsForTesting(SafetyListManager::GetInstance(), json);
   }
 
  protected:

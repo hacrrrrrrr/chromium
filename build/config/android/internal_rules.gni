@@ -266,7 +266,6 @@ template("write_build_config") {
     _deps_configs = []
     if (defined(invoker.config_deps)) {
       foreach(_dep, invoker.config_deps) {
-        _dep_label = get_label_info(_dep, "label_no_toolchain")
         _dep_gen_dir = get_label_info(_dep, "target_gen_dir")
         _dep_name = get_label_info(_dep, "name")
         _dep_config = "$_dep_gen_dir/$_dep_name.params.json"
@@ -985,10 +984,11 @@ template("test_runner_script") {
       assert(false, "Invalid test type: $_test_type.")
     }
 
-    # Devil does not reliably work with component builds of its tools. There's
-    # no benefit to them, so fall back to prebuilts for component builds.
+    # Devil does not reliably work with component builds of its tools, nor with
+    # sanitizer builds where transitive deps are instrumented. There's
+    # no benefit to them, so fall back to prebuilts for these builds.
     # https://crbug.com/1404180
-    if (_test_type != "junit" && !is_component_build) {
+    if (_test_type != "junit" && !is_component_build && !using_sanitizer) {
       executable_args += [ "--use-local-devil-tools" ]
     }
 
@@ -4003,8 +4003,8 @@ if (enable_java_templates) {
         _kt_allowlist = [
           "*/AsyncTabParamsManagerImpl.kt",
           "//third_party/androidx/*",
-          "*/webengine_shell_apk/*",
           "//chrome/browser/ui/android/bricks/internal/*",
+          "//android_webview/javatests/*",
         ]
         _found_kt = filter_exclude(_abs_kt_files, _kt_allowlist)
         assert(

@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.omnibox.suggestions;
 import androidx.annotation.IntDef;
 
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableIntPropertyKey;
@@ -63,6 +64,9 @@ public @interface SuggestionCommonProperties {
     /** Whether dark colors should be applied to text, icons. */
     WritableIntPropertyKey COLOR_SCHEME = new WritableIntPropertyKey();
 
+    /** The fusebox layout mode (TOOLBAR vs SUGGESTIONS_POPOVER). */
+    WritableIntPropertyKey FUSEBOX_LAYOUT_MODE = new WritableIntPropertyKey();
+
     /** The layout direction to be applied to the entire suggestion view. */
     WritableIntPropertyKey LAYOUT_DIRECTION = new WritableIntPropertyKey();
 
@@ -90,10 +94,15 @@ public @interface SuggestionCommonProperties {
     /** The total number of visible suggestions in the group. */
     WritableIntPropertyKey TOTAL_IN_GROUP = new WritableIntPropertyKey();
 
+    /** The provider for omnibox resources. */
+    WritableObjectPropertyKey<OmniboxResourceProvider> RESOURCE_PROVIDER =
+            new WritableObjectPropertyKey<>();
+
     PropertyKey[] ALL_KEYS =
             new PropertyKey[] {
                 APPLY_SIDE_SPACING,
                 COLOR_SCHEME,
+                FUSEBOX_LAYOUT_MODE,
                 LAYOUT_DIRECTION,
                 DEVICE_FORM_FACTOR,
                 BG_POSITIONAL_MODE,
@@ -102,6 +111,7 @@ public @interface SuggestionCommonProperties {
                 SHOW_GROUP_SEPARATOR,
                 HEADER_TITLE,
                 INDEX_IN_GROUP,
-                TOTAL_IN_GROUP
+                TOTAL_IN_GROUP,
+                RESOURCE_PROVIDER
             };
 }

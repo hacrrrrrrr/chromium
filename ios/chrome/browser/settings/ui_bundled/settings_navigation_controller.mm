@@ -10,6 +10,7 @@
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
 #import "components/autofill/core/browser/data_manager/personal_data_manager.h"
+#import "components/autofill/core/browser/metrics/autofill_settings_metrics.h"
 #import "components/password_manager/core/browser/ui/credential_ui_entry.h"
 #import "components/password_manager/core/browser/ui/password_check_referrer.h"
 #import "components/strings/grit/components_strings.h"
@@ -20,6 +21,7 @@
 #import "ios/chrome/browser/keyboard/ui_bundled/UIKeyCommand+Chrome.h"
 #import "ios/chrome/browser/metrics/model/activity_reporter.h"
 #import "ios/chrome/browser/settings/autofill/autofill_and_passwords/coordinator/autofill_and_passwords_coordinator.h"
+#import "ios/chrome/browser/settings/autofill/autofill_and_passwords/coordinator/autofill_settings_coordinator.h"
 #import "ios/chrome/browser/settings/google_services/coordinator/google_services_settings_coordinator.h"
 #import "ios/chrome/browser/settings/google_services/ui/google_services_settings_view_controller.h"
 #import "ios/chrome/browser/settings/manage_accounts/coordinator/manage_accounts_coordinator.h"
@@ -88,6 +90,7 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
 @interface SettingsNavigationController () <
     AutofillAndPasswordsCoordinatorDelegate,
     AutofillProfileEditCoordinatorDelegate,
+    AutofillSettingsCoordinatorDelegate,
     ContentSettingsCoordinatorDelegate,
     GeminiSettingsCoordinatorDelegate,
     GoogleServicesSettingsCoordinatorDelegate,
@@ -180,6 +183,8 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
   BOOL _dismissalUserActionReported;
   // Autofill and Passwords coordinator.
   AutofillAndPasswordsCoordinator* _autofillAndPasswordsCoordinator;
+  // Autofill settings coordinator.
+  AutofillSettingsCoordinator* _autofillSettingsCoordinator;
   ActivityReporter* _activityReporter;
 }
 
@@ -190,9 +195,23 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
                             delegate:(id<SettingsNavigationControllerDelegate>)
                                          delegate
             hasDefaultBrowserBlueDot:(BOOL)hasDefaultBrowserBlueDot {
+  return [self mainSettingsControllerForBrowser:browser
+                                       delegate:delegate
+                       hasDefaultBrowserBlueDot:hasDefaultBrowserBlueDot
+                shouldShowLevelUpWalkthroughIPH:NO];
+}
+
++ (instancetype)
+    mainSettingsControllerForBrowser:(Browser*)browser
+                            delegate:(id<SettingsNavigationControllerDelegate>)
+                                         delegate
+            hasDefaultBrowserBlueDot:(BOOL)hasDefaultBrowserBlueDot
+     shouldShowLevelUpWalkthroughIPH:(BOOL)shouldShowLevelUpWalkthroughIPH {
   SettingsTableViewController* controller = [[SettingsTableViewController alloc]
                initWithBrowser:browser
       hasDefaultBrowserBlueDot:hasDefaultBrowserBlueDot];
+  controller.shouldShowLevelUpPaymentMethodsWalkthroughIPH =
+      shouldShowLevelUpWalkthroughIPH;
   SettingsNavigationController* navigationController =
       [[SettingsNavigationController alloc]
           initWithRootViewController:controller
@@ -366,6 +385,9 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
 
 + (instancetype)
     autofillAndPasswordsControllerForBrowser:(Browser*)browser
+                                    referrer:
+                                        (autofill::autofill_metrics::
+                                             AutofillSettingsReferrer)referrer
                                     delegate:
                                         (id<SettingsNavigationControllerDelegate>)
                                             delegate {
@@ -374,7 +396,7 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
           initWithRootViewController:nil
                              browser:browser
                             delegate:delegate];
-  [navigationController showAutofillAndPasswords];
+  [navigationController showAutofillAndPasswordsWithReferrer:referrer];
 
   return navigationController;
 }
@@ -634,7 +656,6 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
                                           delegate {
   CHECK(browser);
   CHECK_EQ(browser->type(), Browser::Type::kRegular);
-  CHECK_EQ(browser->type(), Browser::Type::kRegular, base::NotFatalUntil::M146);
   self = [super initWithRootViewController:rootViewController];
   if (self) {
     _browser = browser;
@@ -745,6 +766,7 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
   [self stopAutofillProfileEditCoordinator];
   [self stopNotificationsCoordinator];
   [self stopGeminiSettingsCoordinator];
+  [self stopAutofillSettingsCoordinator];
 
   // Reset the delegate to prevent any queued transitions from attempting to
   // close the settings.
@@ -941,10 +963,12 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
 }
 
 // Shows the Autofill and Passwords settings.
-- (void)showAutofillAndPasswords {
+- (void)showAutofillAndPasswordsWithReferrer:
+    (autofill::autofill_metrics::AutofillSettingsReferrer)referrer {
   _autofillAndPasswordsCoordinator = [[AutofillAndPasswordsCoordinator alloc]
       initWithBaseNavigationController:self
-                               browser:self.browser];
+                               browser:self.browser
+                              referrer:referrer];
   _autofillAndPasswordsCoordinator.delegate = self;
   [_autofillAndPasswordsCoordinator start];
 }
@@ -1027,6 +1051,13 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
   [self.notificationsCoordinator stop];
   self.notificationsCoordinator.delegate = nil;
   self.notificationsCoordinator = nil;
+}
+
+// Stops the underlying Autofill settings coordinator.
+- (void)stopAutofillSettingsCoordinator {
+  [_autofillSettingsCoordinator stop];
+  _autofillSettingsCoordinator.delegate = nil;
+  _autofillSettingsCoordinator = nil;
 }
 
 #pragma mark - ContentSettingsCoordinatorDelegate
@@ -1126,6 +1157,14 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
     (NotificationsCoordinator*)coordinator {
   DCHECK_EQ(self.notificationsCoordinator, coordinator);
   [self stopNotificationsCoordinator];
+}
+
+#pragma mark - AutofillSettingsCoordinatorDelegate
+
+- (void)autofillSettingsCoordinatorDidRemove:
+    (AutofillSettingsCoordinator*)coordinator {
+  DCHECK_EQ(_autofillSettingsCoordinator, coordinator);
+  [self stopAutofillSettingsCoordinator];
 }
 
 #pragma mark - UIAdaptivePresentationControllerDelegate
@@ -1296,8 +1335,9 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
             shouldShowLevelUpWalkthroughIPH];
 }
 
-- (void)showAutofillAndPasswordsSettings {
-  [self showAutofillAndPasswords];
+- (void)showAutofillAndPasswordsSettingsWithReferrer:
+    (autofill::autofill_metrics::AutofillSettingsReferrer)referrer {
+  [self showAutofillAndPasswordsWithReferrer:referrer];
 }
 
 - (void)showPasswordManagerForCredentialImport:(NSUUID*)UUID
@@ -1441,12 +1481,19 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
   [self.notificationsCoordinator showTrackingPrice];
 }
 
+- (void)showAutofillSettings {
+  _autofillSettingsCoordinator = [[AutofillSettingsCoordinator alloc]
+      initWithBaseNavigationController:self
+                               browser:self.browser];
+  _autofillSettingsCoordinator.delegate = self;
+  [_autofillSettingsCoordinator start];
+}
+
 #pragma mark - SyncEncryptionPassphraseTableViewControllerPresentationDelegate
 
 - (void)syncEncryptionPassphraseTableViewControllerDidDisappear:
     (SyncEncryptionPassphraseTableViewController*)viewController {
-  CHECK_EQ(self.syncEncryptionPassphraseTableViewController, viewController,
-           base::NotFatalUntil::M142);
+  CHECK_EQ(self.syncEncryptionPassphraseTableViewController, viewController);
   self.syncEncryptionPassphraseTableViewController.presentationDelegate = nil;
   [self.syncEncryptionPassphraseTableViewController settingsWillBeDismissed];
   self.syncEncryptionPassphraseTableViewController = nil;
@@ -1457,8 +1504,7 @@ NSString* const kSettingsDoneButtonId = @"kSettingsDoneButtonId";
 // Requests the delegate to stop the manage accounts coordinator.
 - (void)manageAccountsCoordinatorWantsToBeStopped:
     (ManageAccountsCoordinator*)coordinator {
-  CHECK_EQ(coordinator, self.manageAccountsCoordinator,
-           base::NotFatalUntil::M144);
+  CHECK_EQ(coordinator, self.manageAccountsCoordinator);
   // If this navigation controller was opened directly with the account manager,
   // the navigation controller should be closed.
   BOOL stopNavigationController = [self viewControllers].count == 1;

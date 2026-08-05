@@ -104,6 +104,7 @@
 #include "third_party/blink/renderer/platform/graphics/blend_mode.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_2d_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
+#include "third_party/blink/renderer/platform/graphics/filters/filter_effect.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgpu_mailbox_texture.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
@@ -472,10 +473,14 @@ void Canvas2DRecorderContext::beginLayerImpl(ScriptState* script_state,
           1.0f,  // Deliberately ignore zoom on the canvas element.
           Color::kBlack, mojom::blink::ColorScheme::kLight);
 
-      filter = paint_filter_builder::Build(
-          filter_effect_builder.BuildFilterEffect(std::move(filter_operations),
-                                                  !OriginClean()),
-          kInterpolationSpaceSRGB);
+      FilterEffect* filter_effect = filter_effect_builder.BuildFilterEffect(
+          std::move(filter_operations), !OriginClean());
+      if (filter_effect && filter_effect->OriginTainted() &&
+          !origin_tainted_by_content_) {
+        SetOriginTaintedByContent();
+      }
+      filter =
+          paint_filter_builder::Build(filter_effect, kInterpolationSpaceSRGB);
     }
   }
 
@@ -855,8 +860,7 @@ void Canvas2DRecorderContext::reset() {
 RespectImageOrientationEnum
 Canvas2DRecorderContext::RespectImageOrientationInternal(
     CanvasImageSource* image_source) {
-  if ((image_source->IsImageBitmap() || image_source->IsImageElement()) &&
-      image_source->WouldTaintOrigin()) {
+  if (image_source->WouldTaintOrigin()) {
     return kRespectImageOrientation;
   }
   return RespectImageOrientation();
@@ -1588,6 +1592,13 @@ void Canvas2DRecorderContext::DrawPathInternal(
   }
 
   if (paint_type == CanvasRenderingContext2DState::kStrokePaintType) {
+    // Zero-size bounds mean all path points are coincident — a degenerate
+    // segment that the spec requires to be pruned before stroking. Exact
+    // float equality is intentional: near-degenerate paths (non-zero but
+    // very small bounds) are not pruned, matching spec intent.
+    if (bounds.width() == 0 && bounds.height() == 0) {
+      return;
+    }
     InflateStrokeRect(bounds);
   }
 
@@ -2725,45 +2736,6 @@ Canvas2DRecorderContext::UsageCounters::UsageCounters()
       num_clear_rect_calls(0),
       num_draw_focus_calls(0),
       num_frames_since_reset(0) {}
-
-namespace {
-
-void CanvasOverdrawHistogram(Canvas2DRecorderContext::OverdrawOp op) {
-  UMA_HISTOGRAM_ENUMERATION("Blink.Canvas.OverdrawOp", op);
-}
-
-}  // unnamed namespace
-
-void Canvas2DRecorderContext::WillOverwriteCanvas(
-    Canvas2DRecorderContext::OverdrawOp op) {
-  auto* host = GetCanvasRenderingContextHost();
-  if (host) {  // CSS paint use cases not counted.
-    UseCounter::Count(GetTopExecutionContext(),
-                      WebFeature::kCanvasRenderingContext2DHasOverdraw);
-    CanvasOverdrawHistogram(op);
-    CanvasOverdrawHistogram(OverdrawOp::kTotal);
-  }
-
-  // We only hit the kHasTransform bucket if the op is affected by transforms.
-  if (op == OverdrawOp::kClearRect || op == OverdrawOp::kDrawImage) {
-    const CanvasRenderingContext2DState& state = GetState();
-    bool has_clip = state.HasClip();
-    bool has_transform = !state.GetTransform().IsIdentity();
-    if (has_clip && has_transform) {
-      CanvasOverdrawHistogram(OverdrawOp::kHasClipAndTransform);
-    }
-    if (has_clip) {
-      CanvasOverdrawHistogram(OverdrawOp::kHasClip);
-    }
-    if (has_transform) {
-      CanvasOverdrawHistogram(OverdrawOp::kHasTransform);
-    }
-  }
-
-  if (MemoryManagedPaintRecorder* recorder = Recorder(); recorder != nullptr) {
-    recorder->RestartCurrentLayer();
-  }
-}
 
 HTMLCanvasElement* Canvas2DRecorderContext::HostAsHTMLCanvasElement() const {
   return nullptr;

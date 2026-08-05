@@ -175,10 +175,6 @@ source_set("signin") {
       ]
     }
   }
-
-  if (is_mac || is_linux) {
-    public += [ "before_fre_refresh_hats_field_trial.h" ]
-  }
 }
 
 source_set("impl") {
@@ -227,6 +223,7 @@ source_set("impl") {
     "//chrome/browser/ui/dialogs:browser_dialogs",
     "//chrome/browser/webdata_services",
     "//components/application_locale_storage",
+    "//components/browser_actuator/public:feature_list",
     "//components/contextual_tasks/public:feature_list",
     "//components/embedder_support:user_agent",
     "//components/plus_addresses/core/common:features",
@@ -309,6 +306,8 @@ source_set("impl") {
 
   if (is_android) {
     sources += [
+      "account_preview_data_service_android.cc",
+      "account_preview_data_service_android.h",
       "android/cross_device_signin_flow_navigation_throttle.cc",
       "android/signin_bridge.cc",
       "android/signin_bridge_factory.cc",
@@ -385,7 +384,10 @@ source_set("impl") {
       "accounts_policy_manager.cc",
       "accounts_policy_manager_factory.cc",
     ]
-    deps += [ "//chrome/browser/ui/startup" ]
+    deps += [
+      "//chrome/browser/ui/startup",
+      "//chrome/browser/ui/webui:profile_helper",
+    ]
   }
 
   if (enable_dice_support && is_win) {
@@ -430,10 +432,6 @@ source_set("impl") {
       ]
     }
   }
-
-  if (is_mac || is_linux) {
-    sources += [ "before_fre_refresh_hats_field_trial.cc" ]
-  }
 }
 
 source_set("signin_promo") {
@@ -459,6 +457,32 @@ source_set("google_accounts_private_api") {
     "//mojo/public/cpp/bindings",
   ]
   deps = [ "//google_apis" ]
+}
+
+# SigninBrowserTestBase derives from InProcessBrowserTest, which is not
+# built on Android.
+if (!is_android) {
+  source_set("signin_browser_test_base") {
+    testonly = true
+
+    sources = [ "signin_browser_test_base.h" ]
+
+    public_deps = [
+      ":identity_test_support",
+      ":signin",
+      ":test_support",
+      "//base",
+      "//chrome/browser:browser_process",
+      "//chrome/browser/profiles:profile_manager",
+      "//chrome/browser/profiles:profile_test_util",
+      "//chrome/browser/ui",
+      "//chrome/test:test_support_ui",
+      "//components/signin/public/identity_manager",
+      "//components/signin/public/identity_manager:test_support",
+      "//components/trusted_vault",
+      "//services/network:test_support",
+    ]
+  }
 }
 
 source_set("test_support") {
@@ -488,6 +512,23 @@ source_set("test_support") {
       "//content/test:test_support",
     ]
   }
+
+  if (enable_bound_session_credentials) {
+    public += [
+      "bound_session_credentials/fake_bound_session_cookie_refresh_service.h",
+      "bound_session_credentials/fake_bound_session_refresh_cookie_fetcher.h",
+      "bound_session_credentials/mock_bound_session_cookie_refresh_service.h",
+    ]
+    sources += [
+      "bound_session_credentials/fake_bound_session_cookie_refresh_service.cc",
+      "bound_session_credentials/fake_bound_session_refresh_cookie_fetcher.cc",
+      "bound_session_credentials/mock_bound_session_cookie_refresh_service.cc",
+    ]
+    deps += [
+      "//chrome/common",
+      "//testing/gmock",
+    ]
+  }
 }
 
 if (enable_bound_session_credentials) {
@@ -497,6 +538,33 @@ if (enable_bound_session_credentials) {
       "bound_session_credentials/rotation_debug_info.proto",
     ]
   }
+}
+
+source_set("identity_test_support") {
+  testonly = true
+
+  sources = [
+    "identity_test_environment_profile_adaptor.cc",
+    "identity_test_environment_profile_adaptor.h",
+    "test_signin_client_builder.cc",
+    "test_signin_client_builder.h",
+  ]
+
+  public_deps = [
+    "//base",
+    "//chrome/test/base:testing_profile",
+    "//components/signin/public/identity_manager:test_support",
+    "//components/sync_preferences:test_support",
+  ]
+
+  deps = [
+    ":signin",
+    "//chrome/browser:browser_process",
+    "//chrome/browser:browser_process_platform_part",
+    "//chrome/browser/metrics",
+    "//chrome/browser/profiles:profile",
+    "//components/signin/public/base:test_support",
+  ]
 }
 
 source_set("unit_tests") {
@@ -542,11 +610,22 @@ source_set("unit_tests") {
   }
 
   if (is_android) {
-    sources += [ "signin_ui_delegate_impl_android_unittest.cc" ]
+    sources += [
+      "android/cross_device_signin_flow_navigation_throttle_unittest.cc",
+      "android/signin_manager_android_unittest.cc",
+      "signin_ui_delegate_impl_android_unittest.cc",
+    ]
     deps += [
+      "//chrome/browser/bookmarks",
       "//chrome/browser/content_settings:content_settings_factory",
+      "//chrome/browser/offline_pages",
+      "//chrome/browser/password_manager/factories",
+      "//chrome/browser/reading_list",
       "//chrome/browser/ui/android/tab_model:test_support",
       "//components/contextual_tasks/public:feature_list",
+      "//components/reading_list/core",
+      "//components/reading_list/core:test_support",
+      "//services/tracing/public/cpp/background_tracing",
     ]
   }
 
@@ -677,6 +756,7 @@ if (!is_android) {
     deps = [
       ":signin",
       ":test_support",
+      "//chrome/browser/signin:signin_browser_test_base",
       "//chrome/browser/ui",
       "//chrome/test:test_support",
       "//chrome/test:test_support_ui",
@@ -718,6 +798,7 @@ if (!is_android) {
         "//chrome/browser/ui:ui_features",
         "//chrome/browser/ui/hats:test_support",
         "//chrome/browser/ui/signin",
+        "//chrome/browser/ui/webui/settings",
         "//chrome/browser/ui/webui/signin",
         "//chrome/browser/ui/webui/signin:login_ui_service",
         "//chrome/browser/ui/webui/signin:signin_ui_error",
@@ -810,7 +891,7 @@ if (!is_android && !is_chromeos_device) {
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
     sources = []
-    deps = []
+    deps = [ "//chrome/browser/signin:signin_browser_test_base" ]
 
     if (enable_dice_support) {
       sources += [ "history_sync_optin_screen_interactive_uitest.cc" ]

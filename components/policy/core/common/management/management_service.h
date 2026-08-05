@@ -13,6 +13,7 @@
 
 #include "base/containers/flat_map.h"
 #include "base/functional/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
@@ -105,8 +106,13 @@ class POLICY_EXPORT ManagementStatusProvider {
   const std::string& cache_pref_name() const { return cache_pref_name_; }
 
  private:
-  std::variant<PrefService*, scoped_refptr<PersistentPrefStore>> cache_ =
-      nullptr;
+  // TODO(crbug.com/531448879): Remove this when AzureAD logic migration is
+  // complete.
+  friend class ManagementService;
+
+  std::variant<raw_ptr<PrefService, DanglingUntriaged>,
+               scoped_refptr<PersistentPrefStore>>
+      cache_;
   const std::string cache_pref_name_;
   base::WeakPtrFactory<ManagementStatusProvider> weak_factory_{this};
 };
@@ -147,6 +153,13 @@ class POLICY_EXPORT ManagementService {
 
   // Returns the highest trustworthiness of the active management authorities.
   ManagementAuthorityTrustworthiness GetManagementAuthorityTrustworthiness();
+
+  // TODO(crbug.com/531448879): Remove this function when AzureAD logic
+  // migration is complete. Returns the trustworthiness of active management
+  // authorities for policy loading. By default, returns
+  // `GetManagementAuthorityTrustworthiness()`.
+  ManagementAuthorityTrustworthiness
+  GetManagementAuthorityTrustworthinessForPolicyLoading();
 
   // Returns whether there is any management authority at all.
   bool IsManaged();

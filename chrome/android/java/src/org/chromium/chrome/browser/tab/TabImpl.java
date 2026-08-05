@@ -15,6 +15,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.LongSparseArray;
 import android.util.SparseArray;
 import android.view.View;
 import android.view.View.OnAttachStateChangeListener;
@@ -60,6 +61,7 @@ import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
+import org.chromium.chrome.browser.compositor.CompositorViewHolderSupplier;
 import org.chromium.chrome.browser.content.ContentUtils;
 import org.chromium.chrome.browser.content.WebContentsFactory;
 import org.chromium.chrome.browser.desktop_site.DesktopSiteUtils;
@@ -73,6 +75,9 @@ import org.chromium.chrome.browser.pdf.PdfInfo;
 import org.chromium.chrome.browser.pdf.PdfUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.rlz.RevenueStats;
+import org.chromium.chrome.browser.selection.CompositeSelectionActionMenuDelegate;
+import org.chromium.chrome.browser.selection.TextSelectionActionMenuDelegate;
+import org.chromium.chrome.browser.settings.SettingsInTab;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.tab.Tab.LoadUrlResult;
 import org.chromium.chrome.browser.tab.Tab.SelectionStateSupplier;
@@ -126,8 +131,6 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -141,7 +144,7 @@ class TabImpl implements Tab, TabInternal {
 
     // Map from native tab pointer to TabImpl to allow scaling of unlimited tab objects.
     // ScopedGlobalRef tables are finite.
-    private static final Map<Long, TabImpl> sTabMap = new HashMap<>();
+    private static final LongSparseArray<TabImpl> sTabMap = new LongSparseArray<>();
 
     private static final String BACKGROUND_COLOR_CHANGE_PRE_OPTIMIZATION_HISTOGRAM =
             "Android.Tab.BackgroundColorChange.PreOptimization";
@@ -215,6 +218,8 @@ class TabImpl implements Tab, TabInternal {
     /** {@link WebContents} showing the current page, or {@code null} if the tab is frozen. */
     private @Nullable WebContents mWebContents;
 
+    private long mNavigationStartMs;
+
     /** The ContentView of this tab. */
     private @Nullable ContentView mContentView;
 
@@ -231,6 +236,8 @@ class TabImpl implements Tab, TabInternal {
     private @Nullable @ColorInt Integer mCustomViewBackgroundColor;
 
     @Nullable AutofillProvider mAutofillProvider;
+
+    private @Nullable CompositeSelectionActionMenuDelegate mSelectionActionMenuDelegate;
 
     /**
      * The {@link TabViewManager} associated with this Tab that is responsible for managing custom
@@ -491,6 +498,15 @@ class TabImpl implements Tab, TabInternal {
     @Override
     public @Nullable WebContents getWebContents() {
         return mWebContents;
+    }
+
+    @Override
+    public long getNavigationStartMs() {
+        return mNavigationStartMs;
+    }
+
+    void setNavigationStartMs(long navigationStartMs) {
+        mNavigationStartMs = navigationStartMs;
     }
 
     @Override
@@ -992,10 +1008,10 @@ class TabImpl implements Tab, TabInternal {
         if (getActivity(/* withLogs= */ true) == null) {
             Log.e(
                     TAG,
-                    "Tab couldn't be loaded because Context was null. mIsArchived: "
-                            + mIsArchived
-                            + ", mInitializedWithWindowAndroid: "
-                            + mInitializedWithWindowAndroid);
+                    "Tab couldn't be loaded because getActivity() was null. mIsArchived: %b,"
+                            + " mInitializedWithWindowAndroid: %b",
+                    mIsArchived,
+                    mInitializedWithWindowAndroid);
             return false;
         }
 
@@ -1351,21 +1367,42 @@ class TabImpl implements Tab, TabInternal {
      */
     @Deprecated
     @Nullable ChromeActivity getActivity(boolean withLogs) {
-        if (getWindowAndroid() == null) {
+        WindowAndroid windowAndroid = getWindowAndroid();
+        if (windowAndroid == null) {
             if (withLogs) {
                 Log.e(TAG, "WindowAndroid is null when requesting activity.");
             }
             return null;
         }
-        Activity activity = ContextUtils.activityFromContext(getWindowAndroid().getContext().get());
+        WeakReference<Context> contextRef = windowAndroid.getContext();
+        Context context = contextRef == null ? null : contextRef.get();
+        Activity activity = ContextUtils.activityFromContext(context);
         if (activity instanceof ChromeActivity chromeActivity) {
             return chromeActivity;
         }
         if (withLogs) {
-            if (activity == null) {
-                Log.e(TAG, "Activity is null when requesting activity.");
+            if (contextRef == null) {
+                Log.e(
+                        TAG,
+                        "Context weak reference in WindowAndroid is null when requesting"
+                                + " activity.");
+            } else if (context == null) {
+                Log.e(
+                        TAG,
+                        "Context weak reference target in WindowAndroid is null when requesting"
+                                + " activity (host Activity was destroyed / GC'd).");
+            } else if (activity == null) {
+                Log.e(
+                        TAG,
+                        "Context is not an Activity when requesting activity (e.g."
+                                + " ApplicationContext or detached tab). Context class: %s",
+                        context.getClass().getName());
             } else {
-                Log.e(TAG, "Activity is not a ChromeActivity when requesting activity.");
+                Log.e(
+                        TAG,
+                        "Activity is not a ChromeActivity when requesting activity. Activity"
+                                + " class: %s",
+                        activity.getClass().getName());
             }
         }
         return null;
@@ -1755,7 +1792,7 @@ class TabImpl implements Tab, TabInternal {
                     // A transition is starting. Hide the Java view to present that.
                     // Wait until the content/ draws the transition.
                     CompositorViewHolder viewHolder =
-                            assumeNonNull(getActivity()).getCompositorViewHolderSupplier().get();
+                            CompositorViewHolderSupplier.getValueOrNullFrom(getWindowAndroid());
                     assumeNonNull(viewHolder);
                     viewHolder.requestRender(
                             () -> {
@@ -1884,11 +1921,10 @@ class TabImpl implements Tab, TabInternal {
         String host = url.getHost();
         if (!UrlConstants.SETTINGS_HOST.equals(host)) return false;
 
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SETTINGS_IN_TAB)) return false;
+        if (SettingsInTab.isEnabled()) return false;
 
         // TODO(crbug.com/456164910): Use the URL path to open deeplinks into Settings.
-        SettingsNavigationFactory.createSettingsNavigation()
-                .startSettings(assumeNonNull(getActivity()));
+        SettingsNavigationFactory.createSettingsNavigation().startSettings(getContext());
         goBack(); // Keep showing the previous contents in the tab.
         return true;
     }
@@ -2146,7 +2182,8 @@ class TabImpl implements Tab, TabInternal {
     @CalledByNative
     void clearNativePtr() {
         assert mNativeTabAndroid != 0;
-        var oldValue = sTabMap.remove(mNativeTabAndroid);
+        var oldValue = sTabMap.get(mNativeTabAndroid);
+        sTabMap.remove(mNativeTabAndroid);
         assert oldValue == this;
         mNativeTabAndroid = 0;
     }
@@ -2155,8 +2192,8 @@ class TabImpl implements Tab, TabInternal {
     private void setNativePtr(long nativePtr) {
         assert nativePtr != 0;
         assert mNativeTabAndroid == 0;
-        var oldValue = sTabMap.put(nativePtr, this);
-        assert oldValue == null;
+        assert sTabMap.get(nativePtr) == null;
+        sTabMap.put(nativePtr, this);
         mNativeTabAndroid = nativePtr;
     }
 
@@ -2295,6 +2332,7 @@ class TabImpl implements Tab, TabInternal {
                             new TabContextMenuPopulatorFactory(contextMenuPopulatorFactory, this));
 
             mWebContents.notifyRendererPreferenceUpdate();
+            addTextSelectionActionMenuDelegate(webContents);
             if (mContentView != null) {
                 mContentView.setImportantForAutofill(
                         prepareAutofillProvider(webContents)
@@ -2541,11 +2579,12 @@ class TabImpl implements Tab, TabInternal {
                     failedRestoreUrl = mWebContentsState.getFallbackUrlForRestorationFailure();
                 }
             }
-            View compositorView =
-                    assumeNonNull(getActivity()).getCompositorViewHolderSupplier().get();
-            assumeNonNull(compositorView);
-            webContents.setSize(compositorView.getWidth(), compositorView.getHeight());
 
+            View compositorView =
+                    CompositorViewHolderSupplier.getValueOrNullFrom(getWindowAndroid());
+            if (compositorView != null) {
+                webContents.setSize(compositorView.getWidth(), compositorView.getHeight());
+            }
             mWebContentsState.destroy();
             mWebContentsState = null;
             initWebContents(webContents);
@@ -2610,18 +2649,40 @@ class TabImpl implements Tab, TabInternal {
         }
     }
 
+    private @Nullable CompositeSelectionActionMenuDelegate getOrCreateSelectionActionMenuDelegate(
+            WebContents webContents) {
+        SelectionPopupController controller = SelectionPopupController.fromWebContents(webContents);
+        if (controller == null) {
+            return null;
+        }
+        if (mSelectionActionMenuDelegate == null) {
+            mSelectionActionMenuDelegate = new CompositeSelectionActionMenuDelegate();
+            controller.setSelectionActionMenuDelegate(mSelectionActionMenuDelegate);
+        }
+        return mSelectionActionMenuDelegate;
+    }
+
     private void addAutofillItemsToSelectionActionMenu(WebContents webContents) {
         assert webContents != null;
         assert mAutofillProvider != null;
-        SelectionPopupController controller = SelectionPopupController.fromWebContents(webContents);
-        if (controller == null) {
-            return;
-        }
+        CompositeSelectionActionMenuDelegate compositeDelegate =
+                getOrCreateSelectionActionMenuDelegate(webContents);
+        if (compositeDelegate == null) return;
         AutofillSelectionActionMenuDelegate selectionActionMenuDelegate =
                 new AutofillSelectionActionMenuDelegate();
         selectionActionMenuDelegate.setAutofillSelectionMenuItemHelper(
                 new AutofillSelectionMenuItemHelper(mAutofillProvider));
-        controller.setSelectionActionMenuDelegate(selectionActionMenuDelegate);
+        compositeDelegate.addDelegate(selectionActionMenuDelegate);
+    }
+
+    private void addTextSelectionActionMenuDelegate(WebContents webContents) {
+        assert webContents != null;
+        CompositeSelectionActionMenuDelegate compositeDelegate =
+                getOrCreateSelectionActionMenuDelegate(webContents);
+        if (compositeDelegate == null) return;
+        TextSelectionActionMenuDelegate textSelectionDelegate =
+                new TextSelectionActionMenuDelegate(this);
+        compositeDelegate.addDelegate(textSelectionDelegate);
     }
 
     @CalledByNative
@@ -2831,6 +2892,9 @@ class TabImpl implements Tab, TabInternal {
             mAutofillProvider.destroy();
             mAutofillProvider = null;
         }
+        // mSelectionActionMenuDelegate needs to be null'ed out because a new web contents will add
+        // more providers to it.
+        mSelectionActionMenuDelegate = null;
 
         if (mContentView != null) {
             mContentView.removeOnAttachStateChangeListener(mAttachStateChangeListener);
@@ -3096,7 +3160,11 @@ class TabImpl implements Tab, TabInternal {
         mIsOffscreenRenderingSupplier.set(false);
         if (mWebContents != null && mNativeTabAndroid != 0) {
             TabImplJni.get().attachWebContentsToContentLayer(mNativeTabAndroid, mWebContents);
-            mWebContents.setTopLevelNativeWindow(mWindowAndroid);
+            WindowAndroid window =
+                    (mWindowAndroid != null && !mWindowAndroid.isDestroyed())
+                            ? mWindowAndroid
+                            : null;
+            mWebContents.setTopLevelNativeWindow(window);
         }
     }
 
@@ -3119,6 +3187,10 @@ class TabImpl implements Tab, TabInternal {
                         /* allowDialog= */ false);
     }
 
+    public void setWebContentsForTesting(WebContents webContents) {
+        mWebContents = webContents;
+    }
+
     private void clearCurrentTabSupplier(@DetachReason int detachReason) {
         if (mCurrentTabSupplier == null) return;
         if (mNativeTabAndroid != 0) {
@@ -3127,6 +3199,10 @@ class TabImpl implements Tab, TabInternal {
         mCurrentTabSupplier.removeObserver(mActiveTabObserver);
         mCurrentTabSupplier.removeLookAheadObserver(mActiveTabLookAheadObserver);
         mCurrentTabSupplier = null;
+        // Reset cached active state when detaching supplier (e.g. activity recreation or tab model
+        // changes). This ensures mActiveTabObserver re-evaluates tab state and re-fires
+        // sendDidActivateUpdate upon reattaching.
+        mWasLastActive = null;
     }
 
     void setNativePtrForTesting(long nativePtr) {

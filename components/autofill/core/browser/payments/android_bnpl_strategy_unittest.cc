@@ -58,6 +58,29 @@ TEST_F(AndroidBnplStrategyTest,
           kSwitchToIssuerSelectionScreenOnAndroid);
 }
 
+// Verify that GetNextActionOnUserDecisionToUseSavedCards() returns the correct
+// action for the Android platform.
+TEST_F(AndroidBnplStrategyTest, GetNextActionOnUserDecisionToUseSavedCards) {
+  EXPECT_EQ(android_bnpl_strategy_.GetNextActionOnUserDecisionToUseSavedCards(),
+            BnplStrategy::UserDecisionToUseSavedCardsNextAction::
+                kResetSelectedIssuerOrFlowStateOnAndroid);
+}
+
+// Verify that GetNextActionOnUserDecisionToUseBnplAgain() returns the correct
+// action for the Android platform.
+TEST_F(AndroidBnplStrategyTest, GetNextActionOnUserDecisionToUseBnplAgain) {
+  EXPECT_EQ(android_bnpl_strategy_.GetNextActionOnUserDecisionToUseBnplAgain(),
+            BnplStrategy::UserDecisionToUseBnplAgainNextAction::
+                kReshowSelectBnplIssuerUiOnAndroid);
+}
+
+// Verify that GetUiDismissalAction() returns the correct action for
+// the Android platform.
+TEST_F(AndroidBnplStrategyTest, GetUiDismissalAction) {
+  EXPECT_EQ(android_bnpl_strategy_.GetUiDismissalAction(),
+            BnplStrategy::UiDismissalAction::kRemoveBnplUi);
+}
+
 // Verify that ShouldRemoveExistingUiOnServerReturn() returns the correct
 // value for the Android platform.
 TEST_F(AndroidBnplStrategyTest, ShouldRemoveExistingUiOnServerReturn) {

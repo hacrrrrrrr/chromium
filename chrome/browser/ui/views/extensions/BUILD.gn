@@ -45,6 +45,17 @@ source_set("security_dialog_tracker") {
   public_deps = [ "//base" ]
 }
 
+source_set("windows_utils_views") {
+  sources = [ "windows_utils_views.cc" ]
+  deps = [
+    "//chrome/browser/extensions",
+    "//content/public/browser",
+    "//extensions/browser",
+    "//ui/base",
+    "//ui/views",
+  ]
+}
+
 source_set("test_support") {
   testonly = true
   sources = [
@@ -95,7 +106,10 @@ source_set("unit_tests") {
     "//chrome/browser/ui",
     "//chrome/browser/ui/extensions",
     "//chrome/browser/ui/toolbar:test_support",
+    "//chrome/browser/ui/views:device_chooser_content_view",
     "//chrome/browser/ui/views/controls",
+    "//chrome/browser/ui/views/frame:test_with_browser_view",
+    "//chrome/browser/ui/views/permissions/chip",
     "//chrome/browser/ui/views/toolbar",
     "//chrome/test:test_support",
     "//chrome/test/views",
@@ -124,7 +138,7 @@ source_set("browser_tests") {
   testonly = true
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
   sources = []
-  deps = []
+  deps = [ "//chrome/browser/ui/views/frame:test_with_browser_view" ]
 
   if (!is_android) {
     sources += [
@@ -146,6 +160,7 @@ source_set("browser_tests") {
       "//chrome/browser/extensions:test_support",
       "//chrome/browser/picture_in_picture:test_support_ui",
       "//chrome/browser/ui",
+      "//chrome/browser/ui:ui_features",
       "//chrome/browser/ui/extensions:extension_post_install_dialog",
       "//chrome/browser/ui/test:dialog",
       "//chrome/browser/ui/views/page_info",

@@ -125,7 +125,7 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   void RemoveStyledElement(Element*, EditingState*);
   // Returns |false| if the EditingState has been aborted.
   bool DeleteSelection(EditingState*, const DeleteSelectionOptions&);
-  virtual void DeleteTextFromNode(Text*, unsigned offset, unsigned count);
+  virtual void DeleteTextFromNode(Text*, wtf_size_t offset, wtf_size_t count);
   bool IsRemovableBlock(const Node*);
   void InsertNodeAfter(Node*, Node* ref_child, EditingState*);
   // Insert nodes starting `insert_first_child` after `ref_child`.
@@ -144,15 +144,15 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
       bool use_default_paragraph_element = false,
       bool paste_blockqutoe_into_unquoted_area = false);
   void InsertTextIntoNode(Text*,
-                          unsigned offset,
+                          wtf_size_t offset,
                           const String& text,
                           PasswordEchoBehavior);
   void MergeIdenticalElements(Element*, Element*, EditingState*);
   void RebalanceWhitespace();
   void RebalanceWhitespaceAt(const Position&);
   void RebalanceWhitespaceOnTextSubstring(Text*,
-                                          int start_offset,
-                                          int end_offset);
+                                          wtf_size_t start_offset,
+                                          wtf_size_t end_offset);
   void PrepareWhitespaceAtPositionForSplit(Position&);
   void ReplaceCollapsibleWhitespaceWithNonBreakingSpaceIfNeeded(
       const VisiblePosition&);
@@ -167,7 +167,10 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
       EditingState*,
       ShouldAssumeContentIsAlwaysEditable =
           ShouldAssumeContentIsAlwaysEditable(false));
-  void RemoveChildrenInRange(Node*, unsigned from, unsigned to, EditingState*);
+  void RemoveChildrenInRange(Node*,
+                             wtf_size_t from,
+                             wtf_size_t to,
+                             EditingState*);
   virtual void RemoveNode(Node*,
                           EditingState*,
                           ShouldAssumeContentIsAlwaysEditable =
@@ -189,8 +192,8 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   void UpdatePositionForNodeRemovalPreservingChildren(Position&, Node&);
   void Prune(Node*, EditingState*, Node* exclude_node = nullptr);
   void ReplaceTextInNode(Text*,
-                         unsigned offset,
-                         unsigned count,
+                         wtf_size_t offset,
+                         wtf_size_t count,
                          const String& replacement_text,
                          PasswordEchoBehavior);
   Position ReplaceSelectedTextInNode(const String&, PasswordEchoBehavior);
@@ -199,11 +202,11 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
                         const QualifiedName& attribute,
                         const AtomicString& value);
   void SplitElement(Element*, Node* at_child);
-  void SplitTextNode(Text*, unsigned offset);
-  void SplitTextNodeContainingElement(Text*, unsigned offset);
+  void SplitTextNode(Text*, wtf_size_t offset);
+  void SplitTextNodeContainingElement(Text*, wtf_size_t offset);
   void WrapContentsInDummySpan(Element*);
 
-  void DeleteInsignificantText(Text*, unsigned start, unsigned end);
+  void DeleteInsignificantText(Text*, wtf_size_t start, wtf_size_t end);
   void DeleteInsignificantText(const Position& start, const Position& end);
   void DeleteInsignificantTextDownstream(const Position&);
 
@@ -272,17 +275,15 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
                                              const Position& after_paragraph,
                                              EditingState* editing_state);
 
-  // Returns true when the move may proceed to the paste phase. With the
-  // `PartialCompletionNotAllowedInMoveParagraphs` flag enabled, verifies that
+  // Returns true when the move may proceed to the paste phase. Verifies that
   // both `destination` and the post-delete ending selection still have
   // editable roots; returns false (without aborting) to signal the caller to
   // bail out silently.
   bool DestinationStillEditableForPaste(const VisiblePosition& destination);
 
   // Returns the plain-text offset of `destination` from the document root,
-  // selecting the TextIteratorBehavior based on the EnterInOpenShadowRoots
-  // flag. Requires clean layout.
-  int ComputeDestinationIndex(const VisiblePosition& destination);
+  // selecting the TextIteratorBehavior. Requires clean layout.
+  wtf_size_t ComputeDestinationIndex(const VisiblePosition& destination);
 
   // Sets the ending selection to `destination` (mirroring into the raw-DOM
   // lane when EditingUseDomPositionApi is enabled) and runs the
@@ -301,9 +302,9 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   // relative to `document_element`. Silently no-ops when either offset
   // cannot be reconstituted (collapsed-whitespace edge cases). Mirrors into
   // the raw-DOM lane when EditingUseDomPositionApi is enabled.
-  void RestoreSelectionFromPlainText(int destination_index,
-                                     int start_index,
-                                     int end_index,
+  void RestoreSelectionFromPlainText(wtf_size_t destination_index,
+                                     wtf_size_t start_index,
+                                     wtf_size_t end_index,
                                      Element& document_element);
 
   bool IsCompositeEditCommand() const final { return true; }
@@ -327,11 +328,11 @@ class CORE_EXPORT CompositeEditCommand : public EditCommand {
   bool IsPreservedSelectionEndpointUsable(const Position& position) const;
   // Computes selection offsets relative to paragraph start, or std::nullopt
   // when selection is entirely outside the moved paragraph.
-  std::optional<std::pair<int, int>> ComputePreservedSelectionIndices(
-      const Position& start_of_paragraph,
-      const Position& end_of_paragraph,
-      const Position& selection_start,
-      const Position& selection_end);
+  std::optional<std::pair<wtf_size_t, wtf_size_t>>
+  ComputePreservedSelectionIndices(const Position& start_of_paragraph,
+                                   const Position& end_of_paragraph,
+                                   const Position& selection_start,
+                                   const Position& selection_end);
   EditingStyle* CaptureStyleInEmptyParagraph(
       const Position& start_of_paragraph);
   // Sets the ending selection to the delete range [start, end]. Mirrors into

@@ -14,6 +14,8 @@ namespace extensions_features {
 // API Features
 ///////////////////////////////////////////////////////////////////////////////
 
+BASE_FEATURE(kApiActionSetBadgeTextByteLimit, base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kApiAlarmsCreateLengthLimit, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kApiContentSettingsClipboard, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -80,6 +82,9 @@ BASE_FEATURE(kWebRequestSecurityInfo, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kWebRequestPerContextEventDispatch,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kApiDesktopAndroidNativeMessaging,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 ///////////////////////////////////////////////////////////////////////////////
 // Other Features
 ///////////////////////////////////////////////////////////////////////////////
@@ -96,6 +101,10 @@ BASE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs,
 BASE_FEATURE(kComponentExtensionAllowWorkerChromeResources,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kCWSReviewPromptingNativeUI,
+             "CWSReviewPromptingNativeUI",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kEnableWebHidInWebView, base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(ENABLE_DESKTOP_ANDROID_EXTENSIONS)
@@ -104,6 +113,9 @@ BASE_FEATURE(kEnableWebHidInWebView, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kEnableExtensionsForCorpDesktopAndroid,
              base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
+
+BASE_FEATURE(kExtensionAutoRejectIncognitoConnectability,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kExtensionDisableUnsupportedDeveloper,
              base::FEATURE_ENABLED_BY_DEFAULT);

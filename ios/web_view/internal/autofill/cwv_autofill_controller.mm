@@ -77,6 +77,8 @@
 using autofill::FieldRendererId;
 using autofill::FormData;
 using autofill::FormRendererId;
+using ActivityType = autofill::FormActivityParams::ActivityType;
+using FieldType = autofill::FormActivityParams::FieldType;
 using UserDecision = autofill::AutofillClient::AddressPromptUserDecision;
 
 NSErrorDomain const CWVAutofillErrorDomain =
@@ -182,7 +184,7 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   NSString* _lastFormActivityFrameID;
   std::string _lastFormActivityWebFrameID;
   NSString* _lastFormActivityTypedValue;
-  NSString* _lastFormActivityType;
+  ActivityType _lastFormActivityType;
   FormRendererId _lastFormActivityFormRendererID;
   FieldRendererId _lastFormActivityFieldRendererID;
   BOOL _lastFormActivityHasUserGesture;
@@ -190,6 +192,9 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   // YES to support xframe submission to correctly handle form submission when
   // autofill across iframes is enabled.
   BOOL _supportXframeSubmission;
+
+  // YES if CWVAutofillController is hardened against WebState destruction.
+  BOOL _safeLifecycleEnabled;
 }
 
 @synthesize delegate = _delegate;
@@ -203,7 +208,12 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                (std::unique_ptr<ios_web_view::WebViewPasswordManagerClient>)
                    passwordManagerClient
               passwordController:(SharedPasswordController*)passwordController {
+  PrefService* prefService =
+      ios_web_view::WebViewBrowserState::FromBrowserState(
+          webState->GetBrowserState())
+          ->GetPrefs();
   self = [self initWithWebState:webState
+                    prefService:prefService
           autofillClientForTest:nullptr
                   autofillAgent:autofillAgent
                 passwordManager:std::move(passwordManager)
@@ -223,12 +233,40 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
         (std::unique_ptr<ios_web_view::WebViewPasswordManagerClient>)
             passwordManagerClient
        passwordController:(SharedPasswordController*)passwordController {
+  PrefService* prefService =
+      ios_web_view::WebViewBrowserState::FromBrowserState(
+          webState->GetBrowserState())
+          ->GetPrefs();
+  self = [self initWithWebState:webState
+                    prefService:prefService
+          autofillClientForTest:std::move(autofillClientForTest)
+                  autofillAgent:autofillAgent
+                passwordManager:std::move(passwordManager)
+          passwordManagerClient:std::move(passwordManagerClient)
+             passwordController:passwordController];
+  return self;
+}
+
+- (instancetype)
+         initWithWebState:(web::WebState*)webState
+              prefService:(PrefService*)prefService
+    autofillClientForTest:(std::unique_ptr<autofill::WebViewAutofillClientIOS>)
+                              autofillClientForTest
+            autofillAgent:(AutofillAgent*)autofillAgent
+          passwordManager:(std::unique_ptr<password_manager::PasswordManager>)
+                              passwordManager
+    passwordManagerClient:
+        (std::unique_ptr<ios_web_view::WebViewPasswordManagerClient>)
+            passwordManagerClient
+       passwordController:(SharedPasswordController*)passwordController {
   self = [super init];
   if (self) {
     DCHECK(webState);
     _webState = webState;
     _supportXframeSubmission = base::FeatureList::IsEnabled(
         autofill::features::kAutofillAcrossIframesIos);
+    _safeLifecycleEnabled =
+        ios_web_view::IsAutofillSafeLifecycleEnabled(prefService);
 
     _autofillAgent = autofillAgent;
 
@@ -321,11 +359,15 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
 
 - (void)fetchSuggestionsForFormWithName:(NSString*)formName
                         fieldIdentifier:(NSString*)fieldIdentifier
-                              fieldType:(NSString*)fieldType
+                              fieldType:(NSInteger)fieldType
                                 frameID:(NSString*)frameID
                       completionHandler:
                           (void (^)(NSArray<CWVAutofillSuggestion*>* _Nonnull))
                               completionHandler {
+  if ([self isLifecycleStateInvalid]) {
+    completionHandler(@[]);
+    return;
+  }
   NSMutableArray<CWVAutofillSuggestion*>* allSuggestions =
       [NSMutableArray array];
   __block NSInteger pendingFetches = 0;
@@ -359,7 +401,7 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
         formRendererID:targetFormRendererID
        fieldIdentifier:fieldIdentifier
        fieldRendererID:targetFieldRendererID
-             fieldType:fieldType
+             fieldType:(FieldType)fieldType
                   type:_lastFormActivityType
             typedValue:_lastFormActivityTypedValue
                frameID:frameID
@@ -378,6 +420,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
       pendingFetches--;
       CWVAutofillController* strongSelf = weakSelf;
       if (!strongSelf) {
+        resultHandler(@[]);
+        return;
+      }
+      if ([strongSelf isLifecycleStateInvalid]) {
         resultHandler(@[]);
         return;
       }
@@ -479,6 +525,15 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
 - (void)fetchFullCardDetailsForCard:(CWVCreditCard*)card
                   completionHandler:(CWVFetchFullCardDetailsCompletionHandler)
                                         completionHandler {
+  if ([self isLifecycleStateInvalid]) {
+    if (completionHandler) {
+      NSError* error = [NSError errorWithDomain:CWVAutofillErrorDomain
+                                           code:CWVAutofillErrorUnknown
+                                       userInfo:nil];
+      completionHandler(/*fullCard=*/nil, error);
+    }
+    return;
+  }
   web::WebFrame* frame = autofill::AutofillJavaScriptFeature::GetInstance()
                              ->GetWebFramesManager(_webState)
                              ->GetFrameWithId(_lastFormActivityWebFrameID);
@@ -935,33 +990,33 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   NSString* nsFieldIdentifier =
       base::SysUTF8ToNSString(params.field_identifier);
   _lastFormActivityFieldRendererID = params.field_renderer_id;
-  NSString* nsFieldType = base::SysUTF8ToNSString(params.field_type);
+  FieldType fieldType = params.field_type;
   NSString* nsFrameID = base::SysUTF8ToNSString(frame_id);
   NSString* nsValue = base::SysUTF8ToNSString(params.value);
-  NSString* nsType = base::SysUTF8ToNSString(params.type);
   BOOL userInitiated = params.has_user_gesture;
 
   _lastFormActivityWebFrameID = frame_id;
   _lastFormActivityTypedValue = nsValue;
-  _lastFormActivityType = nsType;
+  _lastFormActivityType = params.type;
   _lastFormActivityHasUserGesture = userInitiated;
   _lastFormActivityFormName = nsFormName;
   _lastFormActivityFieldIdentifier = nsFieldIdentifier;
   _lastFormActivityFrameID = nsFrameID;
-  if (params.type == "focus") {
+  if (params.type == ActivityType::kFocus) {
     if ([_delegate respondsToSelector:@selector
                    (autofillController:
                        didFocusOnFieldWithIdentifier:fieldType:formName:frameID
                                                     :value:userInitiated:)]) {
       [_delegate autofillController:self
           didFocusOnFieldWithIdentifier:nsFieldIdentifier
-                              fieldType:nsFieldType
+                              fieldType:(NSInteger)fieldType
                                formName:nsFormName
                                 frameID:nsFrameID
                                   value:nsValue
                           userInitiated:userInitiated];
     }
-  } else if (params.type == "input" || params.type == "keyup") {
+  } else if (params.type == ActivityType::kInput ||
+             params.type == ActivityType::kKeyUp) {
     // Some fields only emit 'keyup' events and not 'input' events, which would
     // result in the delegate not being notified when the field is updated.
     if ([_delegate respondsToSelector:@selector
@@ -970,20 +1025,20 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                                                     :value:userInitiated:)]) {
       [_delegate autofillController:self
           didInputInFieldWithIdentifier:nsFieldIdentifier
-                              fieldType:nsFieldType
+                              fieldType:(NSInteger)fieldType
                                formName:nsFormName
                                 frameID:nsFrameID
                                   value:nsValue
                           userInitiated:userInitiated];
     }
-  } else if (params.type == "blur") {
+  } else if (params.type == ActivityType::kBlur) {
     if ([_delegate respondsToSelector:@selector
                    (autofillController:
                        didBlurOnFieldWithIdentifier:fieldType:formName:frameID
                                                    :value:userInitiated:)]) {
       [_delegate autofillController:self
           didBlurOnFieldWithIdentifier:nsFieldIdentifier
-                             fieldType:nsFieldType
+                             fieldType:(NSInteger)fieldType
                               formName:nsFormName
                                frameID:nsFrameID
                                  value:nsValue
@@ -1032,13 +1087,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                                                                webFrame)) {
     autofill::AutofillManager& manager = driver->GetAutofillManager();
     bool observed = _autofillManagerObservations->IsObservingSource(&manager);
-    // TODO(crbug.com/477633290): Cleanup check milestone.
-    // Expect -frameBecameAvailable to be only called once during the frame
-    // lifecyle.
-    CHECK(!observed, base::NotFatalUntil::M147);
-    if (!observed) {
-      _autofillManagerObservations->AddObservation(&manager);
-    }
+    // Expect `frameBecameAvailable` to be only called once during the frame
+    // lifecycle.
+    CHECK(!observed);
+    _autofillManagerObservations->AddObservation(&manager);
   }
 }
 
@@ -1191,6 +1243,11 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                     }];
 }
 
+- (void)showPasswordSavedInfoBar:
+    (std::unique_ptr<password_manager::PasswordFormManagerForUI>)formToSave {
+  // No op.
+}
+
 - (void)removePasswordInfoBarManualFallback:(BOOL)manual {
   // No op.
 }
@@ -1327,6 +1384,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   if (decision == CWVPasswordUserDecisionYes) {
     form->Save();
   }
+}
+
+- (BOOL)isLifecycleStateInvalid {
+  return _safeLifecycleEnabled && ![self hasValidState];
 }
 
 - (BOOL)hasValidState {

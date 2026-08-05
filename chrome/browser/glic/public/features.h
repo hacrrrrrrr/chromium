@@ -42,6 +42,10 @@ extern const base::FeatureParam<bool> kGlicSelectionAutoSendPrompt;
 extern const base::FeatureParam<std::string> kGlicSelectionPromptCta;
 inline constexpr char kGlicSelectionPromptCtaTellMe[] = "tell_me_about_this";
 inline constexpr char kGlicSelectionPromptCtaExplain[] = "explain";
+extern const base::FeatureParam<bool> kGlicSelectionPromptInlineFulfillment;
+extern const base::FeatureParam<std::string>
+    kGlicSelectionPromptInlinePromptTemplate;
+extern const base::FeatureParam<bool> kGlicSelectionPromptSkills;
 
 BASE_DECLARE_FEATURE(kGlicCreateTabAdjacent);
 
@@ -58,6 +62,8 @@ BASE_DECLARE_FEATURE(kGlicFixTimeToFirstQueryKillSwitch);
 BASE_DECLARE_FEATURE(kGlicContextMenu);
 extern const base::FeatureParam<std::string> kGlicContextMenuArm;
 extern const base::FeatureParam<bool> kGlicContextMenuWithOnboarding;
+
+BASE_DECLARE_FEATURE(kGlicContextMenuBelowSearch);
 
 BASE_DECLARE_FEATURE(kGlicTextSelectionContextMenu);
 
@@ -122,6 +128,22 @@ BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseSettingsEnabled);
 BASE_DECLARE_FEATURE(kGlicGeminiEnterpriseConsentEnabled);
 
 BASE_DECLARE_FEATURE(kGlicHotkeyLocalScope);
+
+BASE_DECLARE_FEATURE(kGlicPasteEligibilityCheck);
+BASE_DECLARE_FEATURE(kGlicWebPasteEligibilityCheck);
+BASE_DECLARE_FEATURE(kGlicOptInDialogLinkA11yFix);
+
+BASE_DECLARE_FEATURE(kGlicTabGroups);
+extern const base::FeatureParam<bool> kGlicTabGroupsUseFullTabEmbedder;
+BASE_DECLARE_FEATURE(kGlicSparkSettingsAccessibleLabels);
+
+BASE_DECLARE_FEATURE(kGlicOptInDialogA11yFix);
+BASE_DECLARE_FEATURE(kGlicStructuredYieldMetadata);
+
+BASE_DECLARE_FEATURE(kGlicEnableMojoJs);
+
+BASE_DECLARE_FEATURE(kGlicNoWebview);
+
 }  // namespace features
 
 #endif  // CHROME_BROWSER_GLIC_PUBLIC_FEATURES_H_

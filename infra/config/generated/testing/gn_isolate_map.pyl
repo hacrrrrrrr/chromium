@@ -1369,6 +1369,12 @@
     "module_scheme": "gtest",
     "skip_usage_check": True,
   },
+  "ios_web_content_unittests": {
+    "label": "//ios/web/content:ios_web_content_unittests",
+    "type": "generated_script",
+    "module_scheme": "gtest",
+    "skip_usage_check": True,
+  },
   "ios_web_inttests": {
     "label": "//ios/web:ios_web_inttests",
     "type": "generated_script",
@@ -1557,6 +1563,16 @@
     "module_scheme": "junit",
     "skip_usage_check": True,
   },
+  "mojo_legacy_unittests": {
+    "label": "//chromeos/ash/components/mojo_proxy/mojo_core:mojo_legacy_unittests",
+    "type": "console_test_launcher",
+    "module_scheme": "gtest",
+  },
+  "mojo_proxy_unittests": {
+    "label": "//chromeos/ash/components/mojo_proxy/service:mojo_proxy_unittests",
+    "type": "console_test_launcher",
+    "module_scheme": "gtest",
+  },
   "mojo_python_unittests": {
     "label": "//mojo/public/tools:mojo_python_unittests",
     "type": "script",
@@ -1629,11 +1645,6 @@
   "ondevice_model_benchmark": {
     "label": "//components/optimization_guide/internal:ondevice_model_benchmark",
     "type": "additional_compile_target",
-  },
-  "ondevice_model_benchmark_tests": {
-    "label": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-    "type": "generated_script",
-    "module_scheme": "flat",
   },
   "ondevice_stability_tests": {
     "label": "//components/optimization_guide/internal/testing:ondevice_stability_tests",
@@ -1847,6 +1858,12 @@
     "label": "//components/cronet/android:resource_sizes_cronet_sample_apk",
     "type": "generated_script",
     "module_scheme": "single",
+    "skip_usage_check": True,
+  },
+  "rlz_unittests": {
+    "label": "//rlz:rlz_unittests",
+    "type": "console_test_launcher",
+    "module_scheme": "gtest",
     "skip_usage_check": True,
   },
   "rust_build_tests": {
@@ -2372,6 +2389,17 @@
     "label": "//chrome/android/webapk/shell_apk:webapk_shell_apk_junit_tests",
     "type": "generated_script",
     "module_scheme": "junit",
+    "skip_usage_check": True,
+  },
+  "webdriver_bidi_e2e_tests": {
+    "label": "//third_party/chromium-bidi:webdriver_bidi_e2e_tests",
+    "type": "generated_script",
+    "skip_usage_check": True,
+  },
+  "webdriver_bidi_unittests": {
+    "label": "//third_party/chromium-bidi:webdriver_bidi_unittests",
+    "type": "generated_script",
+    "module_scheme": "mocha",
     "skip_usage_check": True,
   },
   "webgpu_blink_web_tests": {

@@ -50,11 +50,6 @@ BASE_FEATURE(kAndroidDesktopStyleScrollbars, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kAndroidDownloadableFontsMatching,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-// Removes the setLocalFocus workaround and delay for multi-display setups on
-// Baklava and above.
-BASE_FEATURE(kAndroidRemoveSetLocalFocusWorkaroundOnBaklava,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 #if BUILDFLAG(IS_WIN)
 // Flag guard for Windows Arabic Indic digit input solution.
 // crbug.com/440381284
@@ -205,6 +200,14 @@ BASE_FEATURE(kDocumentIsolationPolicyWithoutSiteIsolation,
 // Enable document policy negotiation mechanism.
 BASE_FEATURE(kDocumentPolicyNegotiation, base::FEATURE_DISABLED_BY_DEFAULT);
 
+#if BUILDFLAG(IS_ANDROID)
+// When enabled, sandboxed renderer processes (except spare renderers) are
+// initially bound with a strong (BIND_IMPORTANT) binding right at creation
+// time, putting them immediately in the top-app cpuset group on Android.
+BASE_FEATURE(kEarlyTopAppForSandboxedRenderer,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+
 // When enabled `EditContext::updateSelection` calls from async selectionchange
 // handlers sync the selection to the browser.
 // See https://crbug.com/516839844
@@ -272,35 +275,7 @@ BASE_FEATURE(kFilterInstalledAppsWebAppMatching,
 BASE_FEATURE(kFilterInstalledAppsWinMatching, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_WIN)
 
-// If enabled, limits the number of FLEDGE auctions that can be run between page
-// load and unload -- any attempt to run more than this number of auctions will
-// fail (return null to JavaScript).
-BASE_FEATURE(kFledgeLimitNumAuctions,
-             "LimitNumFledgeAuctions",
-             base::FEATURE_DISABLED_BY_DEFAULT);
-// The number of allowed auctions for each page load (load to unload).
-const base::FeatureParam<int> kFledgeLimitNumAuctionsParam{
-    &kFledgeLimitNumAuctions, "max_auctions_per_page", 8};
-
-// Enables a delay for the post-auction interest group update to avoid
-// immediately invalidating cached values.
-BASE_FEATURE(kFledgeDelayPostAuctionInterestGroupUpdate,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Enables multi-threaded seller worklet.
-BASE_FEATURE(kFledgeSellerWorkletThreadPool, base::FEATURE_ENABLED_BY_DEFAULT);
-
-// The number of seller worklet threads.
-const base::FeatureParam<int> kFledgeSellerWorkletThreadPoolSize{
-    &kFledgeSellerWorkletThreadPool, "seller_worklet_thread_pool_size", 1};
-
-// Enables multi-threaded bidder worklet.
-BASE_FEATURE(kFledgeBidderWorkletThreadPool, base::FEATURE_ENABLED_BY_DEFAULT);
-
 #if BUILDFLAG(IS_ANDROID)
-// Makes FLEDGE worklets on Android not use the main thread for their mojo.
-BASE_FEATURE(kFledgeAndroidWorkletOffMainThread,
-             base::FEATURE_ENABLED_BY_DEFAULT);
 // This is a kill switch for focusing the RenderWidgetHostViewAndroid on
 // MouseDown if not focused already, please see crbug.com/515000108. The root
 // view, RWHVA, is always focused for main tabs in Chrome, however this might
@@ -309,15 +284,6 @@ BASE_FEATURE(kFledgeAndroidWorkletOffMainThread,
 BASE_FEATURE(kFocusRenderWidgetHostViewAndroidOnMouseDown,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
-
-// The scaling factor for calculating the number of bidder worklet threads based
-// on the number of Interest Groups.
-// Formula: #threads = 1 + scaling_factor * log10(#IGs)
-const base::FeatureParam<double>
-    kFledgeBidderWorkletThreadPoolSizeLogarithmicScalingFactor{
-        &kFledgeBidderWorkletThreadPool,
-        "bidder_worklet_thread_pool_size_logarithmic_scaling_factor", 2};
-
 // This feature controls whether the renderer should use FontDataManager to
 // fetch fonts from the Browser's FontDataService. It is currently scoped to
 // Windows and Linux (via separate features and experiments). See
@@ -669,6 +635,13 @@ BASE_FEATURE_PARAM(bool,
                    &kReduceMojoURLLoaderFactoryCloning,
                    false);
 
+// Controls whether lazy URLLoaderFactory cloning is used for subresource
+// proxying factory bundle during navigation commit.
+BASE_FEATURE_PARAM(bool,
+                   kUseLazyURLLoaderFactoryForSubresourceProxying,
+                   &kReduceMojoURLLoaderFactoryCloning,
+                   false);
+
 // Causes hidden tabs with crashed subframes to be marked for reload, meaning
 // that if a user later switches to that tab, the current page will be
 // reloaded.  This will hide crashed subframes from the user at the cost of
@@ -832,7 +805,7 @@ BASE_FEATURE(kSharedWorkerSecureContextDerivationFromBrowser,
 // Storage Access API) will correctly restrict SameSite cookies on WebSocket
 // connections.
 BASE_FEATURE(kRestrictSharedWorkerWebSocketCrossSiteCookies,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables skipping the early call to CommitPending when navigating away from a
 // crashed frame.

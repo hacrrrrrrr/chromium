@@ -37,12 +37,12 @@
 #include "components/policy/policy_export.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 
-namespace chrome::cros::reporting::proto {
-class UploadEventsRequest;
-}
-
 namespace network {
 class SharedURLLoaderFactory;
+}
+
+namespace chrome::cros::reporting::proto {
+class UploadEventsRequest;
 }
 
 namespace policy {
@@ -142,12 +142,30 @@ class POLICY_EXPORT CloudPolicyClient {
   class POLICY_EXPORT Result {
    public:
     explicit Result(DeviceManagementStatus);
-    explicit Result(DeviceManagementStatus, int);
-    explicit Result(DeviceManagementStatus, int, base::DictValue);
+    Result(DeviceManagementStatus, int);
+    Result(DeviceManagementStatus, int, base::DictValue);
     explicit Result(NotRegistered);
+
+    static Result CreateForRealtimeUpload(
+        DeviceManagementStatus status,
+        int response_code,
+        base::DictValue response,
+        ::chrome::cros::reporting::proto::UploadEventsRequest upload_request);
+
+    static Result CreateForRealtimeUpload(
+        DeviceManagementStatus status,
+        int response_code,
+        ::chrome::cros::reporting::proto::UploadEventsRequest upload_request);
+
+    static Result CreateForRealtimeUpload(
+        NotRegistered not_registered,
+        ::chrome::cros::reporting::proto::UploadEventsRequest upload_request);
 
     Result(const Result& other);
     Result& operator=(const Result& other);
+    Result(Result&& other);
+    Result& operator=(Result&& other);
+    ~Result();
 
     bool IsSuccess() const;
     bool IsClientNotRegisteredError() const;
@@ -155,17 +173,20 @@ class POLICY_EXPORT CloudPolicyClient {
 
     DeviceManagementStatus GetDMServerError() const;
     int GetNetError() const;
-    bool operator==(const Result& other) const {
-      return this->result_ == other.result_ && net_error_ == other.net_error_ &&
-             response_ == other.response_;
-    }
+    int GetResponseCode() const;
+    bool operator==(const Result& other) const;
 
     const base::DictValue& GetResponse() const;
+    const ::chrome::cros::reporting::proto::UploadEventsRequest&
+    upload_events_request() const;
 
    private:
     std::variant<NotRegistered, DeviceManagementStatus> result_;
     int net_error_ = 0;
+    int response_code_ = 0;
     base::DictValue response_;
+    std::unique_ptr<::chrome::cros::reporting::proto::UploadEventsRequest>
+        upload_events_request_;
   };
 
   // A callback which receives the operations result.
@@ -484,18 +505,6 @@ class POLICY_EXPORT CloudPolicyClient {
   virtual void UploadSecurityEventReport(bool include_device_info,
                                          base::DictValue report,
                                          ResultCallback callback);
-
-  // Uploads a report on the status of app push-installs. The client must be in
-  // a registered state. The |callback| will be called when the operation
-  // completes.
-  // Only one outstanding app push-install report upload is allowed.
-  // In case the new push-installs report upload is started, the previous one
-  // will be canceled.
-  virtual void UploadAppInstallReport(base::DictValue report,
-                                      ResultCallback callback);
-
-  // Cancels the pending app push-install status report upload, if exists.
-  virtual void CancelAppInstallReportUpload();
 
   // Attempts to fetch remote commands, with `last_command_id` being the ID of
   // the last command that finished execution, `command_results` being
@@ -821,11 +830,24 @@ class POLICY_EXPORT CloudPolicyClient {
                                DMServerJobResult result);
 
   // Callback for realtime report upload requests.
-  void OnRealtimeReportUploadCompleted(ResultCallback callback,
-                                       DeviceManagementService::Job* job,
-                                       DeviceManagementStatus status,
-                                       int net_error,
-                                       std::optional<base::DictValue> response);
+  void OnRealtimeReportUploadCompleted(
+      ResultCallback callback,
+      DeviceManagementService::Job* job,
+      DeviceManagementStatus status,
+      int response_code,
+      std::optional<base::DictValue> response,
+      const ::chrome::cros::reporting::proto::UploadEventsRequest&
+          upload_request);
+
+  // Callback for realtime report upload requests - JSON format.
+  // TODO(crbug.com/478929452): Delete this callback after the proto-based
+  // reporting launch.
+  void OnRealtimeReportUploadCompletedDeprecated(
+      ResultCallback callback,
+      DeviceManagementService::Job* job,
+      DeviceManagementStatus status,
+      int response_code,
+      std::optional<base::DictValue> response);
 
   // Callback for remote command fetch requests.
   void OnRemoteCommandsFetched(RemoteCommandCallback callback,
@@ -931,11 +953,6 @@ class POLICY_EXPORT CloudPolicyClient {
 
   // All of the outstanding non-policy-fetch request jobs.
   std::vector<std::unique_ptr<DeviceManagementService::Job>> request_jobs_;
-
-  // Only one outstanding app push-install report upload is allowed, and it must
-  // be accessible so that it can be canceled.
-  raw_ptr<DeviceManagementService::Job> app_install_report_request_job_ =
-      nullptr;
 
   // Only one outstanding extension install report upload is allowed, and it
   // must be accessible so that it can be canceled.

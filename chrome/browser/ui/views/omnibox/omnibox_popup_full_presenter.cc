@@ -24,14 +24,13 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_delegate.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_base_content.h"
 #include "chrome/browser/ui/views/omnibox/rounded_omnibox_results_frame.h"
+#include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_ui.h"
 #include "chrome/browser/ui/webui/searchbox/webui_omnibox_handler.h"
 #include "chrome/browser/ui/webui/top_chrome/webui_contents_preload_manager.h"
 #include "chrome/browser/ui/webui/top_chrome/webui_contents_wrapper.h"
 #include "components/omnibox/common/omnibox_features.h"
-#include "components/permissions/permission_request_manager.h"
 #include "ui/views/focus/focus_manager.h"
-#include "ui/views/view_class_properties.h"
 #include "ui/views/view_utils.h"
 
 OmniboxPopupFullPresenter::OmniboxPopupFullPresenter(
@@ -182,9 +181,8 @@ void OmniboxPopupFullPresenter::SynchronizePopupBounds() {
   CHECK(results_frame);
   results_frame->SetElevation(target_elevation);
 
-  // Use the content height reported by WebUI. This avoids premature shrinking
-  // before the WebUI has had a chance to update its content.
-  widget_bounds.set_height(std::max(content_height_, default_height));
+  widget_bounds.set_height(content_height_ > 1 ? content_height_
+                                               : default_height);
 
   // Set width and height to at least their minimums (e.g. for permission
   // prompts).
@@ -197,22 +195,43 @@ void OmniboxPopupFullPresenter::SynchronizePopupBounds() {
   GetWidget()->SetBounds(widget_bounds);
 }
 
+void OmniboxPopupFullPresenter::NotifyEscapeKeyPressed() {
+  is_handling_escape_key_ = true;
+}
+
 void OmniboxPopupFullPresenter::OnWidgetActivationChanged(views::Widget* widget,
                                                           bool active) {
+  // If omnibox has received focus, it has been told by permission prompt that
+  // permission prompt is closed and omnibox can behave normally again.
+  // Therefore, turn off the 'embedded-permission-showing' flag that forces
+  // omnibox to ignore focus-out events via function.
+  if (active) {
+    weak_factory_.InvalidateWeakPtrs();
+    OnWidgetActivated();
+    return;
+  }
+
+  const bool is_esc = is_handling_escape_key_;
+  is_handling_escape_key_ = false;
+  const bool is_popup_open =
+      controller()->popup_state_manager()->popup_state() ==
+      OmniboxPopupState::kFull;
+  // If deactivation was triggered by an Escape key press while the popup is
+  // open, re-request focus asynchronously instead of closing the popup.
+  if (is_esc && is_popup_open) {
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(&OmniboxPopupFullPresenter::RequestFocus,
+                                  weak_factory_.GetWeakPtr()));
+    return;
+  }
+
+  // Close full omnibox popup if there is no directive (like permission prompt
+  // open) to ignore focus out events, and this is a focus out event.
   if (!active &&
       controller()->popup_state_manager()->popup_state() ==
           OmniboxPopupState::kFull &&
-      !location_bar()->in_popup_state_transition()) {
-    // Don't close popup if there's an active permission prompt.
-    if (auto* content = GetWebUIContent()) {
-      auto* permission_manager =
-          permissions::PermissionRequestManager::FromWebContents(
-              content->GetWebContents());
-      if (permission_manager && permission_manager->IsRequestInProgress()) {
-        return;
-      }
-    }
-
+      !location_bar()->in_popup_state_transition() &&
+      !IsPermissionPromptPreventingClose()) {
     // TODO(b/519724566): Look into using popup_closer here.
     // Clear results here since `DeactivatePopupAndKillFocus` can happen
     // after the new tab is opened and can pass on the stale results.
@@ -232,17 +251,12 @@ void OmniboxPopupFullPresenter::OnWidgetActivationChanged(views::Widget* widget,
 }
 
 void OmniboxPopupFullPresenter::DeactivatePopupAndKillFocus() {
-  // Abort deactivation if the widget has regained active status,
-  // which may occur when switching tabs.
-  if (GetWidget() && GetWidget()->IsActive()) {
-    return;
-  }
-
   const bool user_input_in_progress =
       controller()->edit_model()->user_input_in_progress();
   const std::u16string& user_text = controller()->edit_model()->user_text();
   const std::u16string permanent_text =
       controller()->edit_model()->GetPermanentDisplayText();
+  const std::u16string full_url = controller()->client()->GetFormattedFullURL();
 
   // If the view is showing text that's not user-text, revert the text to the
   // permanent display text. This usually occurs if Steady State Elisions is on
@@ -251,9 +265,10 @@ void OmniboxPopupFullPresenter::DeactivatePopupAndKillFocus() {
   // the permanent text. An example of this scenario is someone typing on the
   // new tab page and then deleting everything using backspace/delete.
   const bool should_revert_non_user_text =
-      !user_input_in_progress && (user_text != permanent_text);
+      !user_input_in_progress && user_text != permanent_text;
   const bool should_revert_matching_text =
-      user_input_in_progress && (user_text == permanent_text);
+      user_input_in_progress &&
+      (user_text == permanent_text || user_text == full_url);
 
   if (should_revert_non_user_text || should_revert_matching_text) {
     controller()->edit_model()->Revert();
@@ -261,6 +276,17 @@ void OmniboxPopupFullPresenter::DeactivatePopupAndKillFocus() {
 
   controller()->client()->FocusWebContents();
   controller()->edit_model()->OnKillFocus();
+
+  if (GetWebUIContent() && GetWebUIContent()->contents_wrapper()) {
+    if (auto* webui_controller =
+            GetWebUIContent()->contents_wrapper()->GetWebUIController()) {
+      if (auto* popup_ui = static_cast<OmniboxPopupUI*>(webui_controller)) {
+        if (auto* popup_handler = popup_ui->popup_handler()) {
+          popup_handler->SetFocus(false);
+        }
+      }
+    }
+  }
 
   // If the user is currently typing do not close the popup.
   if (!user_input_in_progress || user_text.empty()) {

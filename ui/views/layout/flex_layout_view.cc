@@ -159,7 +159,7 @@ BEGIN_METADATA(FlexLayoutView)
 ADD_PROPERTY_METADATA(LayoutOrientation, Orientation)
 ADD_PROPERTY_METADATA(LayoutAlignment, MainAxisAlignment)
 ADD_PROPERTY_METADATA(LayoutAlignment, CrossAxisAlignment)
-ADD_PROPERTY_METADATA(const gfx::Insets, InteriorMargin)
+ADD_PROPERTY_METADATA(gfx::Insets, InteriorMargin)
 ADD_PROPERTY_METADATA(int, MinimumCrossAxisSize)
 ADD_PROPERTY_METADATA(bool, CollapseMargins)
 ADD_PROPERTY_METADATA(bool, IncludeHostInsetsInLayout)
@@ -168,7 +168,3 @@ ADD_PROPERTY_METADATA(FlexAllocationOrder, FlexAllocationOrder)
 END_METADATA
 
 }  // namespace views
-
-DEFINE_ENUM_CONVERTERS(views::FlexAllocationOrder,
-                       {views::FlexAllocationOrder::kNormal, u"kNormal"},
-                       {views::FlexAllocationOrder::kReverse, u"kReverse"})

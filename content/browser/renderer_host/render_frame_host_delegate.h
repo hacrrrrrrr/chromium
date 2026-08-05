@@ -13,6 +13,7 @@
 
 #include "base/functional/callback_forward.h"
 #include "base/memory/safe_ref.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -170,6 +171,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Notifies that the manifest URL is updated.
   virtual void OnManifestUrlChanged(PageImpl& page) {}
+
+  // Notifies the delegate that the primary page is about to be deactivated.
+  virtual void NotifyPrimaryPageWillBeDeactivated(PageImpl& page) {}
 
   // A message was added to the console. |source_id| is a URL.
   // |untrusted_stack_trace| is not present for most messages; only when
@@ -764,7 +768,16 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual bool IsPopup() const;
 
   // Called when a first contentful paint happened in the primary main frame.
-  virtual void OnFirstContentfulPaintInPrimaryMainFrame() {}
+  // `presentation_time` is the renderer-side presentation timestamp of the
+  // paint.
+  virtual void OnFirstContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) {}
+
+  // Called when the largest contentful paint candidate changed in the primary
+  // main frame. `presentation_time` is the renderer-side presentation timestamp
+  // of the current candidate.
+  virtual void OnLargestContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) {}
 
   // Returns the top-level native window for the associated WebContents.
   virtual gfx::NativeWindow GetOwnerNativeWindow();

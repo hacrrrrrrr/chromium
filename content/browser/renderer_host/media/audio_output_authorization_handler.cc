@@ -24,14 +24,13 @@ namespace content {
 namespace {
 
 void GotSaltAndOrigin(
-    int render_process_id,
-    int render_frame_id,
+    GlobalRenderFrameHostId render_frame_host_id,
     bool override_permissions,
     bool permissions_override_value,
     base::OnceCallback<void(MediaDeviceSaltAndOrigin, bool)> cb,
     const MediaDeviceSaltAndOrigin& salt_and_origin) {
   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M152);
-  if (!MediaStreamManager::IsOriginAllowed(render_process_id,
+  if (!MediaStreamManager::IsOriginAllowed(render_frame_host_id.child_id,
                                            salt_and_origin.origin())) {
     // In this case, it's likely a navigation has occurred while processing this
     // request.
@@ -46,24 +45,23 @@ void GotSaltAndOrigin(
     return;
   }
 
-  std::move(cb).Run(salt_and_origin,
-                    MediaDevicesPermissionChecker().CheckPermissionOnUIThread(
-                        MediaDeviceType::kMediaAudioOutput, render_process_id,
-                        render_frame_id));
+  std::move(cb).Run(
+      salt_and_origin,
+      MediaDevicesPermissionChecker().CheckPermissionOnUIThread(
+          MediaDeviceType::kMediaAudioOutput, render_frame_host_id));
 }
 
 // Returns (by callback) the MediaDeviceSaltAndOrigin for the frame and
 // whether it may request nondefault audio devices.
 void CheckAccessOnUIThread(
-    int render_process_id,
-    int render_frame_id,
+    GlobalRenderFrameHostId render_frame_host_id,
     bool override_permissions,
     bool permissions_override_value,
     base::OnceCallback<void(MediaDeviceSaltAndOrigin, bool)> cb) {
   CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M152);
   GetMediaDeviceSaltAndOrigin(
-      GlobalRenderFrameHostId(render_process_id, render_frame_id),
-      base::BindOnce(&GotSaltAndOrigin, render_process_id, render_frame_id,
+      render_frame_host_id,
+      base::BindOnce(&GotSaltAndOrigin, render_frame_host_id,
                      override_permissions, permissions_override_value,
                      std::move(cb)));
 }
@@ -146,10 +144,10 @@ class AudioOutputAuthorizationHandler::TraceScope {
 AudioOutputAuthorizationHandler::AudioOutputAuthorizationHandler(
     media::AudioSystem* audio_system,
     MediaStreamManager* media_stream_manager,
-    int render_process_id)
+    GlobalRenderFrameHostId render_frame_host_id)
     : audio_system_(audio_system),
       media_stream_manager_(media_stream_manager),
-      render_process_id_(render_process_id) {
+      render_frame_host_id_(render_frame_host_id) {
   CHECK(media_stream_manager_, base::NotFatalUntil::M152);
 }
 
@@ -160,28 +158,18 @@ AudioOutputAuthorizationHandler::~AudioOutputAuthorizationHandler() {
 }
 
 void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
-    int render_frame_id,
     const base::UnguessableToken& session_id,
     const std::string& device_id,
     AuthorizationCompletedCallback cb) const {
   CHECK_CURRENTLY_ON(BrowserThread::IO, base::NotFatalUntil::M152);
   auto trace_scope = std::make_unique<TraceScope>(device_id);
 
-  if (!IsValidDeviceId(device_id)) {
-    trace_scope->SimpleEvent("Invalid device id");
-    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND,
-                      media::AudioParameters::UnavailableDeviceParams(),
-                      std::string(), std::string());
-    return;
-  }
-
   // If |session_id| should be used for output device selection and such an
   // output device is found, reuse the input device permissions.
   if (media::AudioDeviceDescription::UseSessionIdToSelectDevice(session_id,
                                                                 device_id)) {
-    if (!media_stream_manager_->ValidateAudioSession(
-            session_id,
-            GlobalRenderFrameHostId(render_process_id_, render_frame_id))) {
+    if (!media_stream_manager_->ValidateAudioSession(session_id,
+                                                     render_frame_host_id_)) {
       trace_scope->SimpleEvent("Unauthorized session");
       std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED,
                         media::AudioParameters::UnavailableDeviceParams(),
@@ -199,8 +187,7 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
       GetUIThreadTaskRunner({})->PostTask(
           FROM_HERE,
           base::BindOnce(
-              &GetMediaDeviceSaltAndOrigin,
-              GlobalRenderFrameHostId(render_process_id_, render_frame_id),
+              &GetMediaDeviceSaltAndOrigin, render_frame_host_id_,
               base::BindPostTaskToCurrentDefault(base::BindOnce(
                   &AudioOutputAuthorizationHandler::HashDeviceId,
                   weak_factory_.GetWeakPtr(), std::move(trace_scope),
@@ -221,9 +208,8 @@ void AudioOutputAuthorizationHandler::RequestDeviceAuthorization(
   // Check device permissions if nondefault device is requested.
   GetUIThreadTaskRunner({})->PostTask(
       FROM_HERE,
-      base::BindOnce(&CheckAccessOnUIThread, render_process_id_,
-                     render_frame_id, override_permissions_,
-                     permissions_override_value_,
+      base::BindOnce(&CheckAccessOnUIThread, render_frame_host_id_,
+                     override_permissions_, permissions_override_value_,
                      base::BindPostTaskToCurrentDefault(base::BindOnce(
                          &AudioOutputAuthorizationHandler::AccessChecked,
                          weak_factory_.GetWeakPtr(), std::move(trace_scope),
@@ -283,6 +269,14 @@ void AudioOutputAuthorizationHandler::AccessChecked(
                    ? true
                    : has_access;
 
+  if (has_access && !IsValidDeviceId(device_id)) {
+    trace_scope->SimpleEvent("Invalid device id");
+    std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_FOUND,
+                      media::AudioParameters::UnavailableDeviceParams(),
+                      std::string(), std::string());
+    return;
+  }
+
   if (!has_access) {
     std::move(cb).Run(media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED,
                       media::AudioParameters::UnavailableDeviceParams(),
@@ -291,8 +285,8 @@ void AudioOutputAuthorizationHandler::AccessChecked(
   }
 
   MediaDevicesManager::BoolDeviceTypes devices_to_enumerate;
-  devices_to_enumerate[static_cast<size_t>(MediaDeviceType::kMediaAudioOutput)] =
-      true;
+  devices_to_enumerate[static_cast<size_t>(
+      MediaDeviceType::kMediaAudioOutput)] = true;
   media_stream_manager_->media_devices_manager()->EnumerateDevices(
       devices_to_enumerate,
       base::BindOnce(&AudioOutputAuthorizationHandler::TranslateDeviceID,

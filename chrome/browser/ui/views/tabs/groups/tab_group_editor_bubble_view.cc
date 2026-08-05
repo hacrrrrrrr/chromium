@@ -24,9 +24,14 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/collaboration/collaboration_service_factory.h"
 #include "chrome/browser/data_sharing/data_sharing_service_factory.h"
+#include "chrome/browser/glic/public/features.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
+#include "chrome/browser/glic/service/glic_instance_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_group_sync/feature_utils.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -566,6 +571,10 @@ void TabGroupEditorBubbleView::RebuildMenuContents() {
     }
     simple_menu_items_.push_back(
         AddChildView(BuildMoveGroupToNewWindowButton()));
+    if (base::FeatureList::IsEnabled(features::kGlicTabGroups)) {
+      AddChildView(BuildSeparator());
+      simple_menu_items_.push_back(AddChildView(BuildAskGeminiButton()));
+    }
     AddChildView(BuildSeparator());
     simple_menu_items_.push_back(AddChildView(BuildUngroupButton()));
     simple_menu_items_.push_back(AddChildView(BuildCloseGroupButton()));
@@ -601,6 +610,10 @@ void TabGroupEditorBubbleView::RebuildMenuContents() {
     }
 
     simple_menu_items_.push_back(AddChildView(BuildCloseGroupButton()));
+    if (base::FeatureList::IsEnabled(features::kGlicTabGroups)) {
+      AddChildView(BuildSeparator());
+      simple_menu_items_.push_back(AddChildView(BuildAskGeminiButton()));
+    }
     AddChildView(BuildSeparator());
 
     if (!IsGroupShared()) {
@@ -608,13 +621,6 @@ void TabGroupEditorBubbleView::RebuildMenuContents() {
     }
 
     if (OwnsGroup()) {
-      // Convert to bookmark is only avaialable to saved group, not shared.
-      PrefService* pref_service = browser_->GetProfile()->GetPrefs();
-      if (features::IsBookmarkTabGroupConversionEnabled() && !IsGroupShared() &&
-          pref_service->GetBoolean(bookmarks::prefs::kEditBookmarksEnabled)) {
-        simple_menu_items_.push_back(
-            AddChildView(BuildConvertToBookmarkButton()));
-      }
       simple_menu_items_.push_back(AddChildView(BuildDeleteGroupButton()));
     } else {
       simple_menu_items_.push_back(AddChildView(BuildLeaveGroupButton()));
@@ -737,25 +743,6 @@ TabGroupEditorBubbleView::BuildCloseGroupButton() {
   menu_item->SetProperty(views::kElementIdentifierKey,
                          kTabGroupEditorBubbleCloseGroupButtonId);
   return menu_item;
-}
-
-std::unique_ptr<views::LabelButton>
-TabGroupEditorBubbleView::BuildConvertToBookmarkButton() {
-  std::unique_ptr<views::LabelButton> bookmark_group_menu_item = CreateMenuItem(
-      TAB_GROUP_HEADER_CXMENU_CONVERT_TO_BOOKMARK,
-      l10n_util::GetStringUTF16(
-          IDS_TAB_GROUP_HEADER_CXMENU_CONVERT_GROUP_TO_BOOKMARK_FOLDER),
-      base::BindRepeating(&TabGroupEditorBubbleView::ConvertToBookmarkPressed,
-                          base::Unretained(this)),
-      ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
-                                         ? kHotelClassIcon
-                                         : kBookmarkAllTabsChromeRefreshOldIcon,
-                                     ui::kColorMenuIcon, kDefaultIconSize));
-
-  bookmark_group_menu_item->SetProperty(
-      views::kElementIdentifierKey,
-      kTabGroupEditorBubbleConvertToBookmarkButtonId);
-  return bookmark_group_menu_item;
 }
 
 std::unique_ptr<views::LabelButton>
@@ -900,6 +887,28 @@ TabGroupEditorBubbleView::BuildRecentActivityButton() {
   return menu_item;
 }
 
+std::unique_ptr<views::LabelButton>
+TabGroupEditorBubbleView::BuildAskGeminiButton() {
+  std::unique_ptr<views::LabelButton> menu_item = CreateMenuItem(
+      TAB_GROUP_HEADER_CXMENU_ASK_GEMINI,
+      l10n_util::GetStringUTF16(IDS_TAB_GROUP_HEADER_CXMENU_ASK_GEMINI),
+      base::BindRepeating(&TabGroupEditorBubbleView::AskGeminiPressed,
+                          base::Unretained(this)),
+      ui::ImageModel::FromVectorIcon(vector_icons::kChatSparkIcon,
+                                     ui::kColorMenuIcon, kDefaultIconSize));
+  return menu_item;
+}
+
+void TabGroupEditorBubbleView::AskGeminiPressed() {
+  glic::GlicKeyedService* service =
+      glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser_->GetProfile(),
+                                                         /*create=*/true);
+  if (service) {
+    service->instance_coordinator().ShowInstanceForTabGroup(group_);
+  }
+  GetWidget()->Close();
+}
+
 void TabGroupEditorBubbleView::NewTabInGroupPressed() {
   base::RecordAction(
       base::UserMetricsAction("TabGroups_TabGroupBubble_NewTabInGroup"));
@@ -986,46 +995,6 @@ void TabGroupEditorBubbleView::CloseGroupPressed() {
   }
 }
 
-void TabGroupEditorBubbleView::ConvertToBookmarkPressed() {
-  TabGroup* tab_group =
-      browser_->tab_strip_model()->group_model()->GetTabGroup(group_);
-  if (tab_group) {
-    bookmarks::ShowBookmarkTabGroupDialog(
-        browser_, *tab_group,
-        base::BindOnce(
-            [](Browser* browser, const tab_groups::TabGroupId& group) {
-              tab_groups::TabGroupSyncService* tab_group_service =
-                  tab_groups::TabGroupSyncServiceFactory::GetForProfile(
-                      browser->GetProfile());
-              if (!tab_group_service) {
-                return;
-              }
-
-              std::optional<tab_groups::SavedTabGroup> saved_group =
-                  tab_group_service->GetGroup(group);
-
-              // Do not delete shared tab group.
-              if (!saved_group || saved_group->is_shared_tab_group()) {
-                return;
-              }
-
-              // Remove the group directly without prompt dialog since the
-              // bookmark editor dialog already did that.
-              tab_group_service->RemoveGroup(saved_group->saved_guid());
-              std::optional<tab_groups::TabGroupId> local_group_id =
-                  saved_group->local_group_id();
-              if (local_group_id) {
-                tab_group_service->RemoveGroup(local_group_id.value());
-                tab_groups::SavedTabGroupUtils::RemoveGroupFromTabstrip(
-                    nullptr, local_group_id.value());
-              } else {
-                tab_group_service->RemoveGroup(saved_group->saved_guid());
-              }
-            }));
-  }
-
-  GetWidget()->Close();
-}
 
 void TabGroupEditorBubbleView::DeleteGroupPressed() {
   base::RecordAction(

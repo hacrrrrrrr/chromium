@@ -83,6 +83,19 @@ constexpr char16_t kEllipsisOneSpace[] = u"\u2006";
 static constexpr int kPrefixLength = 2;
 static constexpr int kSuffixLength = 4;
 
+bool IsCardNumberFieldEmpty(const FormStructure* form_structure) {
+  if (!form_structure) {
+    return false;
+  }
+  return std::ranges::none_of(
+      form_structure->fields(),
+      [](const std::unique_ptr<AutofillField>& form_field) {
+        return form_field->Type().GetCreditCardType() ==
+                   FieldType::CREDIT_CARD_NUMBER &&
+               !SanitizedFieldIsEmpty(form_field->value());
+      });
+}
+
 // The priority ranking for deduplicating a duplicate card is:
 // 1. RecordType::kMaskedServerCard
 // 2. RecordType::kLocalCard
@@ -394,14 +407,12 @@ void AdjustVirtualCardSuggestionContent(Suggestion& suggestion,
   }
 
   suggestion.type = SuggestionType::kVirtualCreditCardEntry;
-  // If a virtual card is non-acceptable, it needs to be displayed in
-  // grayed-out style.
   if (!suggestion.IsAcceptable()) {
     suggestion.acceptability =
-        Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle;
+        Suggestion::Acceptability::kUnselectableAndUnacceptable;
   }
   suggestion.iph_metadata = Suggestion::IPHMetadata(
-      suggestion.HasDeactivatedStyle()
+      !suggestion.IsSelectable()
           ? &feature_engagement::
                 kIPHAutofillDisabledVirtualCardSuggestionFeature
           : &feature_engagement::kIPHAutofillVirtualCardSuggestionFeature);
@@ -841,8 +852,8 @@ Suggestion CreateBnplSuggestion(
   bnpl_suggestion.acceptability =
       amount_extraction_status.has_timed_out_for_page_load ||
               amount_extraction_status.seen_unsupported_currency_for_page_load
-          ? Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle
-          : Suggestion::Acceptability::kAcceptable;
+          ? Suggestion::Acceptability::kUnselectableAndUnacceptable
+          : Suggestion::Acceptability::kSelectableAndAcceptable;
 
   return bnpl_suggestion;
 }
@@ -871,16 +882,7 @@ bool ShouldCreateBnplSuggestionForTouchToFill(BrowserAutofillManager& manager,
     const FormStructure* form_structure = manager.FindCachedFormById(form_id);
     // Checks whether the credit card number field is empty. If the number field
     // is not empty, privacy restrictions prohibit showing the BNPL option.
-    passes_credit_card_number_check =
-        form_structure
-            ? std::ranges::none_of(
-                  form_structure->fields(),
-                  [](const std::unique_ptr<AutofillField>& form_field) {
-                    return form_field->Type().GetCreditCardType() ==
-                               FieldType::CREDIT_CARD_NUMBER &&
-                           !SanitizedFieldIsEmpty(form_field->value());
-                  })
-            : false;
+    passes_credit_card_number_check = IsCardNumberFieldEmpty(form_structure);
   }
   return base::FeatureList::IsEnabled(
              features::kAutofillEnableBuyNowPayLater) &&
@@ -953,9 +955,8 @@ std::vector<Suggestion> GetCreditCardSuggestionsForTouchToFill(
       bool acceptable =
           IsCardSuggestionAcceptable(credit_card, manager.client());
       suggestion.acceptability =
-          acceptable
-              ? Suggestion::Acceptability::kAcceptable
-              : Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle;
+          acceptable ? Suggestion::Acceptability::kSelectableAndAcceptable
+                     : Suggestion::Acceptability::kUnselectableAndUnacceptable;
       suggestion.labels.push_back(std::vector<Suggestion::Text>{
           Suggestion::Text(l10n_util::GetStringUTF16(
               acceptable
@@ -979,6 +980,12 @@ std::vector<Suggestion> GetCreditCardSuggestionsForTouchToFill(
                                  .payments_data_manager()
                                  .GetBnplIssuers(),
                              /*extracted_amount_in_micros=*/std::nullopt));
+    if (payments::BnplManager* bnpl_manager =
+            manager.GetPaymentsBnplManager()) {
+      const FormStructure* form_structure = manager.FindCachedFormById(form_id);
+      bnpl_manager->SetIsCardNumberFieldEmpty(
+          IsCardNumberFieldEmpty(form_structure));
+    }
     manager.GetCreditCardFormEventLogger().OnBnplSuggestionShown();
     manager.client()
         .GetPersonalDataManager()
@@ -1075,11 +1082,13 @@ bool IsCreditCardFooterSuggestion(
     case SuggestionType::kAllLoyaltyCardsEntry:
     case SuggestionType::kAllSavedPasswordsEntry:
     case SuggestionType::kAtMemoryAiDisclosure:
+    case SuggestionType::kAtMemoryFetching:
     case SuggestionType::kAtMemoryGenericError:
     case SuggestionType::kAtMemoryInactivityNudge:
     case SuggestionType::kAtMemoryNoConnection:
     case SuggestionType::kAtMemorySearchAffordance:
     case SuggestionType::kAtMemorySearchResult:
+    case SuggestionType::kAtMemorySourceAttribution:
     case SuggestionType::kAutocompleteAtMemoryButton:
     case SuggestionType::kAutocompleteEntry:
     case SuggestionType::kAutofillAiOtherOrders:
@@ -1281,9 +1290,10 @@ Suggestion CreateCreditCardSuggestion(
     autofill_metrics::CardMetadataLoggingContext& metadata_logging_context) {
   Suggestion suggestion(SuggestionType::kCreditCardEntry);
   suggestion.icon = credit_card.CardIconForAutofillSuggestion();
-  suggestion.acceptability = IsCardSuggestionAcceptable(credit_card, client)
-                                 ? Suggestion::Acceptability::kAcceptable
-                                 : Suggestion::Acceptability::kUnacceptable;
+  suggestion.acceptability =
+      IsCardSuggestionAcceptable(credit_card, client)
+          ? Suggestion::Acceptability::kSelectableAndAcceptable
+          : Suggestion::Acceptability::kSelectableButUnacceptable;
   suggestion.payload = Suggestion::Guid(credit_card.guid());
 
   // Manual fallback suggestions labels are computed as if the triggering field

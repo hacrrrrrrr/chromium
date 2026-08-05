@@ -63,11 +63,11 @@ export class CrRadioGroupElement extends PolymerElement {
     };
   }
 
-  disabled: boolean;
-  selected: string;
-  selectableElements: string;
-  nestedSelectable: boolean;
-  private selectableRegExp_: RegExp;
+  declare disabled: boolean;
+  declare selected: string;
+  declare selectableElements: string;
+  declare nestedSelectable: boolean;
+  declare private selectableRegExp_: RegExp;
 
   private buttons_: CrRadioButtonElement[]|null = null;
   private buttonEventTracker_: EventTracker = new EventTracker();
@@ -184,12 +184,12 @@ export class CrRadioGroupElement extends PolymerElement {
     }
   }
 
-  private computeSelectableRegExp_(): RegExp {
+  protected computeSelectableRegExp_(): RegExp {
     const tags = this.selectableElements.split(', ').join('|');
     return new RegExp(`^(${tags})$`, 'i');
   }
 
-  private onClick_(event: Event) {
+  protected onClick_(event: Event) {
     const path = event.composedPath();
     if (path.some(target => /^a$/i.test((target as HTMLElement).tagName))) {
       return;

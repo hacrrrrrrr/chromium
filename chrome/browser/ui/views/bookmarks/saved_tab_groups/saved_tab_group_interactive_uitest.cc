@@ -33,6 +33,7 @@
 #include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_tabs_menu_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+#include "chrome/browser/ui/views/tabs/common/tab_collection_node.h"
 #include "chrome/browser/ui/views/tabs/groups/tab_group_editor_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab/tab_close_button.h"
@@ -167,7 +168,7 @@ class SavedTabGroupInteractiveTestBase
   MultiStep ShowBookmarksBar() {
     return Steps(
         Do([this]() {
-          PrefService* prefs = browser()->profile()->GetPrefs();
+          PrefService* prefs = browser()->GetProfile()->GetPrefs();
           if (base::FeatureList::IsEnabled(
                   ntp_features::kNtpSimplificationBookmarkBar)) {
             prefs->SetInteger(
@@ -208,6 +209,35 @@ class SavedTabGroupInteractiveTestBase
       EXPECT_FALSE(group->local_group_id());
     });
   }
+
+  auto NameTabCloseButtonAt(const std::string_view name, int index) {
+    return Steps(
+        FinishTabstripAnimations(),
+        NameDescendantView(
+            kBrowserViewElementId, name,
+            base::BindRepeating(
+                [](int target_index, Browser* browser,
+                   const views::View* view) -> bool {
+                  if (const auto* tab_close_button =
+                          views::AsViewClass<TabCloseButton>(view)) {
+                    if (const auto* tab_view = views::AsViewClass<TabView>(
+                            tab_close_button->parent())) {
+                      const auto* tab_interface =
+                          std::get<const tabs::TabInterface*>(
+                              tab_view->collection_node()->GetNodeData());
+                      return browser->tab_strip_model()->GetIndexOfTab(
+                                 tab_interface) == target_index;
+                    }
+                    if (const auto* tab = views::AsViewClass<Tab>(
+                            tab_close_button->parent())) {
+                      return browser->tab_strip_model()->GetIndexOfTab(
+                                 tab->tab_handle().Get()) == target_index;
+                    }
+                  }
+                  return false;
+                },
+                index, browser())));
+  }
 };
 
 class SavedTabGroupInteractiveTest
@@ -217,18 +247,12 @@ class SavedTabGroupInteractiveTest
   void SetUp() override {
     if (GetParam()) {
       scoped_feature_list_.InitWithFeatures(
-          {features::kTabGroupMenuMoreEntryPoints,
-           features::kBookmarkTabGroupConversion,
-           data_sharing::features::kDataSharingFeature},
-          {data_sharing::features::kDataSharingJoinOnly,
-           tab_groups::kProjectsPanel});
+          {data_sharing::features::kDataSharingFeature},
+          {data_sharing::features::kDataSharingJoinOnly});
     } else {
       scoped_feature_list_.InitWithFeatures(
-          {features::kTabGroupMenuMoreEntryPoints,
-           features::kBookmarkTabGroupConversion},
-          {data_sharing::features::kDataSharingFeature,
-           data_sharing::features::kDataSharingJoinOnly,
-           tab_groups::kProjectsPanel});
+          {}, {data_sharing::features::kDataSharingFeature,
+               data_sharing::features::kDataSharingJoinOnly});
     }
 
     SavedTabGroupInteractiveTestBase::SetUp();
@@ -401,13 +425,9 @@ class SavedTabGroupInteractiveTest
       views::SubmenuView* submenu = menu_item_view->GetSubmenu();
       CHECK(submenu);
 
-      // There are 5 or 6 menu items in the menu not including the separator or
-      // tabs: Open, move, unpin, delete, [convert to bookmark], and the tabs
-      // title
+      // There are 5 menu items in the menu not including the separator or
+      // tabs: Open, move, unpin, delete, and the tabs title
       int num_non_tab_items_in_menu = 5;
-      if (features::IsBookmarkTabGroupConversionEnabled()) {
-        num_non_tab_items_in_menu++;
-      }
       const int total_items = submenu->GetMenuItems().size();
       const int num_tabs = total_items - num_non_tab_items_in_menu;
       EXPECT_EQ(num_tabs, expected_count);
@@ -512,19 +532,6 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
             "Check all groups is empty."));
 }
 
-IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
-                       ConvertGroupToBookmarkFromButtonMenu) {
-  browser()->tab_strip_model()->AddToNewGroup({0});
-
-  RunTestSequence(FinishTabstripAnimations(), ShowBookmarksBar(),
-                  EnsurePresent(kSavedTabGroupButtonElementId),
-                  FinishTabstripAnimations(), OpenTabGroupContextMenu(),
-                  EnsurePresent(STGTabsMenuModel::kConvertToBookmarkMenuItem),
-                  SelectMenuItem(STGTabsMenuModel::kConvertToBookmarkMenuItem),
-                  WaitForShow(kBookmarkEditorId),
-                  PressButton(kBookmarkEditorOkButtonId),
-                  WaitForHide(kSavedTabGroupButtonElementId));
-}
 
 IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest, UnpinGroupFromButtonMenu) {
   // Add 1 tab into the browser. And verify there are 2 tabs (The tab when you
@@ -579,7 +586,6 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
       EnsurePresent(STGTabsMenuModel::kMoveGroupToNewWindowMenuItem),
       EnsurePresent(STGTabsMenuModel::kToggleGroupPinStateMenuItem),
       EnsurePresent(STGTabsMenuModel::kDeleteGroupMenuItem),
-      EnsurePresent(STGTabsMenuModel::kConvertToBookmarkMenuItem),
       EnsurePresent(STGTabsMenuModel::kTabsTitleItem));
 }
 
@@ -601,7 +607,6 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
       EnsurePresent(STGTabsMenuModel::kMoveGroupToNewWindowMenuItem),
       EnsurePresent(STGTabsMenuModel::kToggleGroupPinStateMenuItem),
       EnsurePresent(STGTabsMenuModel::kDeleteGroupMenuItem),
-      EnsurePresent(STGTabsMenuModel::kConvertToBookmarkMenuItem),
       EnsurePresent(STGTabsMenuModel::kTabsTitleItem),
       EnsurePresent(STGTabsMenuModel::kTab));
 }
@@ -1024,8 +1029,6 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
       PressButton(kSavedTabGroupOverflowButtonElementId),
       WaitForHide(kTabGroupEditorBubbleId),
       SelectMenuItem(STGEverythingMenu::kTabGroup), FinishTabstripAnimations(),
-      EnsurePresent(STGTabsMenuModel::kOpenGroup),
-      SelectMenuItem(STGTabsMenuModel::kOpenGroup), FinishTabstripAnimations(),
       WaitForShow(kTabGroupHeaderElementId));
 }
 
@@ -1079,10 +1082,7 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
   browser()->tab_strip_model()->AddToNewGroup({0});
   RunTestSequence(
       FinishTabstripAnimations(), SelectTab(kTabStripElementId, 0),
-      NameViewRelative(kTabStripElementId, kTabCloseButton,
-                       [](TabStrip* tab_strip) {
-                         return tab_strip->tab_at(0)->close_button().get();
-                       }),
+      NameTabCloseButtonAt(kTabCloseButton, 0),
       // Close the last tab in the browser which.
       PressButton(kTabCloseButton), PressButton(kDeletionDialogOkButtonId),
       // Ensure the saved group was deleted.
@@ -1166,61 +1166,9 @@ IN_PROC_BROWSER_TEST_P(SavedTabGroupInteractiveTest,
       EnsureNotPresent(STGEverythingMenu::kTabGroup));
 }
 
-class SavedTabGroupEverythingMenuMoreEntryPointsFeature
-    : public SavedTabGroupInteractiveTestBase {
- public:
-  SavedTabGroupEverythingMenuMoreEntryPointsFeature() {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kTabGroupMenuMoreEntryPoints}, {tab_groups::kProjectsPanel});
-  }
 
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
 
-IN_PROC_BROWSER_TEST_F(SavedTabGroupEverythingMenuMoreEntryPointsFeature,
-                       CheckCreateNewTabGroupInEverythingMenuHasSubmenu) {
-  browser()->tab_strip_model()->AddToNewGroup({0});
 
-  RunTestSequence(
-      // Show the bookmarks bar where the buttons will be displayed.
-      FinishTabstripAnimations(), ShowBookmarksBar(),
-      // Ensure the group was saved when created.
-      EnsurePresent(kSavedTabGroupButtonElementId), FinishTabstripAnimations(),
-      EnsurePresent(kSavedTabGroupOverflowButtonElementId),
-      PressButton(kSavedTabGroupOverflowButtonElementId),
-      SelectMenuItem(STGEverythingMenu::kTabGroup),
-      EnsurePresent(STGTabsMenuModel::kOpenGroup),
-      EnsurePresent(STGTabsMenuModel::kMoveGroupToNewWindowMenuItem),
-      EnsurePresent(STGTabsMenuModel::kToggleGroupPinStateMenuItem),
-      EnsurePresent(STGTabsMenuModel::kDeleteGroupMenuItem),
-      EnsurePresent(STGTabsMenuModel::kTabsTitleItem),
-      EnsurePresent(STGTabsMenuModel::kTab));
-}
-
-class SavedTabGroupsCreateNewTabGroupAppMenu
-    : public SavedTabGroupInteractiveTestBase {
- public:
-  SavedTabGroupsCreateNewTabGroupAppMenu() {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kCreateNewTabGroupAppMenuTopLevel},
-        {tab_groups::kProjectsPanel});
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(
-    SavedTabGroupsCreateNewTabGroupAppMenu,
-    CheckCreateNewTabGroupPresentInEverythingMenuFromAppMenu) {
-  RunTestSequence(FinishTabstripAnimations(),
-                  EnsurePresent(kToolbarAppMenuButtonElementId),
-                  PressButton(kToolbarAppMenuButtonElementId),
-                  WaitForShow(AppMenuModel::kTabGroupsMenuItem),
-                  SelectMenuItem(AppMenuModel::kTabGroupsMenuItem),
-                  EnsurePresent(STGEverythingMenu::kCreateNewTabGroup));
-}
 
 #if !BUILDFLAG(IS_CHROMEOS)
 // TODO(crbug.com/438799035): This test is flaky on chromeos when waiting for
@@ -1248,7 +1196,7 @@ class TabGroupShortcutsInteractiveTest
     : public SavedTabGroupInteractiveTestBase {
  public:
   TabGroupShortcutsInteractiveTest() {
-    scoped_feature_list_.InitWithFeatures({}, {tab_groups::kProjectsPanel});
+    scoped_feature_list_.InitWithFeatures({}, {});
   }
   ~TabGroupShortcutsInteractiveTest() override = default;
 
@@ -1493,107 +1441,5 @@ IN_PROC_BROWSER_TEST_F(TabGroupShortcutsInteractiveTest,
 INSTANTIATE_TEST_SUITE_P(SavedTabGroupBar,
                          SavedTabGroupInteractiveTest,
                          testing::Bool());
-
-class SavedTabGroupFocusInteractiveTestNonSubmenu
-    : public SavedTabGroupInteractiveTestBase {
- public:
-  void SetUp() override {
-    scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{features::kTabGroupsFocusing,
-          {{"tab_groups_focusing_default_to_focused", "true"}}}},
-        {features::kTabGroupMenuMoreEntryPoints, tab_groups::kProjectsPanel});
-    SavedTabGroupInteractiveTestBase::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-class SavedTabGroupFocusInteractiveTestSubmenu
-    : public SavedTabGroupInteractiveTestBase {
- public:
-  void SetUp() override {
-    scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{features::kTabGroupsFocusing,
-          {{"tab_groups_focusing_default_to_focused", "true"}}},
-         {features::kTabGroupMenuMoreEntryPoints, {}}},
-        {tab_groups::kProjectsPanel});
-    SavedTabGroupInteractiveTestBase::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(SavedTabGroupFocusInteractiveTestNonSubmenu,
-                       OpenSavedGroupFromEverythingMenuFocused) {
-  ASSERT_TRUE(
-      AddTabAtIndex(0, GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_TYPED));
-  ASSERT_EQ(2, browser()->tab_strip_model()->count());
-
-  const tab_groups::TabGroupId local_group_id =
-      browser()->tab_strip_model()->AddToNewGroup({0});
-  base::Uuid saved_guid;
-
-  RunTestSequence(
-      FinishTabstripAnimations(), ShowBookmarksBar(), Do([&]() {
-        const std::optional<SavedTabGroup> saved_group =
-            service()->GetGroup(local_group_id);
-        ASSERT_TRUE(saved_group);
-        saved_guid = saved_group->saved_guid();
-      }),
-      OpenTabGroupEditorMenu(local_group_id),
-      PressButton(kTabGroupEditorBubbleCloseGroupButtonId),
-      FinishTabstripAnimations(), CheckIfSavedGroupIsClosed(&saved_guid),
-      PressButton(kSavedTabGroupOverflowButtonElementId),
-      WaitForHide(kTabGroupEditorBubbleId),
-      SelectMenuItem(STGEverythingMenu::kTabGroup), FinishTabstripAnimations(),
-      WaitForShow(kTabGroupHeaderElementId), Do([&]() {
-        EXPECT_TRUE(
-            browser()->tab_strip_model()->GetFocusedGroup().has_value());
-      }),
-      Do([&]() {
-        const std::optional<SavedTabGroup> saved_group =
-            service()->GetGroup(saved_guid);
-        EXPECT_EQ(browser()->tab_strip_model()->GetFocusedGroup(),
-                  saved_group->local_group_id());
-      }));
-}
-
-IN_PROC_BROWSER_TEST_F(SavedTabGroupFocusInteractiveTestSubmenu,
-                       OpenSavedGroupFromEverythingMenuSubmenuFocused) {
-  ASSERT_TRUE(
-      AddTabAtIndex(0, GURL(url::kAboutBlankURL), ui::PAGE_TRANSITION_TYPED));
-  ASSERT_EQ(2, browser()->tab_strip_model()->count());
-
-  const tab_groups::TabGroupId local_group_id =
-      browser()->tab_strip_model()->AddToNewGroup({0});
-  base::Uuid saved_guid;
-
-  RunTestSequence(
-      FinishTabstripAnimations(), ShowBookmarksBar(), Do([&]() {
-        const std::optional<SavedTabGroup> saved_group =
-            service()->GetGroup(local_group_id);
-        ASSERT_TRUE(saved_group);
-        saved_guid = saved_group->saved_guid();
-      }),
-      OpenTabGroupEditorMenu(local_group_id),
-      PressButton(kTabGroupEditorBubbleCloseGroupButtonId),
-      FinishTabstripAnimations(), CheckIfSavedGroupIsClosed(&saved_guid),
-      PressButton(kSavedTabGroupOverflowButtonElementId),
-      WaitForHide(kTabGroupEditorBubbleId),
-      SelectMenuItem(STGEverythingMenu::kTabGroup),
-      SelectMenuItem(STGTabsMenuModel::kOpenGroup), FinishTabstripAnimations(),
-      WaitForShow(kTabGroupHeaderElementId), Do([&]() {
-        EXPECT_TRUE(
-            browser()->tab_strip_model()->GetFocusedGroup().has_value());
-      }),
-      Do([&]() {
-        const std::optional<SavedTabGroup> saved_group =
-            service()->GetGroup(saved_guid);
-        EXPECT_EQ(browser()->tab_strip_model()->GetFocusedGroup(),
-                  saved_group->local_group_id());
-      }));
-}
 
 }  // namespace tab_groups

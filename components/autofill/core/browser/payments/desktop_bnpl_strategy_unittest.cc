@@ -70,6 +70,37 @@ TEST_F(DesktopBnplStrategyTest,
           kReplaceLoadingThrobberWithIssuerSuggestionsOnDesktop);
 }
 
+// Verify that GetNextActionOnUserDecisionToUseSavedCards() returns the correct
+// action for the desktop platform.
+TEST_F(DesktopBnplStrategyTest, GetNextActionOnUserDecisionToUseSavedCards) {
+  EXPECT_EQ(desktop_bnpl_strategy_.GetNextActionOnUserDecisionToUseSavedCards(),
+            BnplStrategy::UserDecisionToUseSavedCardsNextAction::
+                kUpdateDesktopPopupSuggestions);
+}
+
+// Verify that GetNextActionOnUserDecisionToUseBnplAgain() returns the correct
+// action for the desktop platform.
+TEST_F(DesktopBnplStrategyTest, GetNextActionOnUserDecisionToUseBnplAgain) {
+  EXPECT_EQ(desktop_bnpl_strategy_.GetNextActionOnUserDecisionToUseBnplAgain(),
+            BnplStrategy::UserDecisionToUseBnplAgainNextAction::kDoNothing);
+}
+
+// Verify that GetUiDismissalAction() returns the correct action for
+// the desktop platform.
+TEST_F(DesktopBnplStrategyTest, GetUiDismissalAction) {
+  EXPECT_EQ(desktop_bnpl_strategy_.GetUiDismissalAction(),
+            BnplStrategy::UiDismissalAction::kRemoveBnplUi);
+}
+
+// Verify that GetUiDismissalAction() returns the correct action for
+// the desktop platform in the Pay later tabs case.
+TEST_F(DesktopBnplStrategyTest, GetUiDismissalAction_PayLaterTabs) {
+  base::test::ScopedFeatureList feature_list{
+      features::kAutofillEnablePayNowPayLaterTabs};
+  EXPECT_EQ(desktop_bnpl_strategy_.GetUiDismissalAction(),
+            BnplStrategy::UiDismissalAction::kHideSuggestions);
+}
+
 // Verify that ShouldRemoveExistingUiOnServerReturn() returns the correct
 // value for the desktop platform.
 TEST_F(DesktopBnplStrategyTest, ShouldRemoveExistingUiOnServerReturn) {

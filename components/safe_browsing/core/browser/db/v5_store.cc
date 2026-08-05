@@ -461,14 +461,18 @@ V5Store::ConvertExtensionsBlocklistFromV4ToV5(
     return ConvertExtensionBlocklistV4ToV5Result::kReadV4Failed;
   }
 
+  base::TimeDelta checksum_duration;
+
   // Verify V4 checksum if provided and not empty. For the purposes of the disk
   // migration, we don't fail when the checksum is missing, because
   // `V4Store::VerifyChecksum` allows it. `V5Store::VerifyChecksum` may end up
   // being different.
   if (checksum_sha256 && !checksum_sha256->empty()) {
+    base::ElapsedTimer checksum_timer;
     std::array<uint8_t, crypto::hash::kSha256Size> calculated_checksum;
     crypto::hash::Hash(crypto::hash::HashKind::kSha256,
                        base::as_byte_span(v4_data), calculated_checksum);
+    checksum_duration += checksum_timer.Elapsed();
     if (checksum_sha256->size() != crypto::hash::kSha256Size ||
         base::as_byte_span(*checksum_sha256) != calculated_checksum) {
       return ConvertExtensionBlocklistV4ToV5Result::kV4ChecksumMismatch;
@@ -484,7 +488,7 @@ V5Store::ConvertExtensionsBlocklistFromV4ToV5(
     if (!crx_file::id_util::IdIsValid(id)) {
       return ConvertExtensionBlocklistV4ToV5Result::kInvalidExtensionId;
     }
-    v5_hash_data.append(SBStore::ExtensionV4IdToV5Hash(id));
+    v5_hash_data.append(SBStore::ExtensionIdToHash(id));
   }
   if (!base::WriteFile(v5_hash_file_path, v5_hash_data)) {
     return ConvertExtensionBlocklistV4ToV5Result::kWriteV5Failed;
@@ -492,10 +496,16 @@ V5Store::ConvertExtensionsBlocklistFromV4ToV5(
   *file_size = v5_hash_data.size();
 
   if (checksum_sha256 && !checksum_sha256->empty()) {
+    base::ElapsedTimer checksum_timer;
     std::array<uint8_t, crypto::hash::kSha256Size> v5_checksum;
     crypto::hash::Hash(crypto::hash::HashKind::kSha256,
                        base::as_byte_span(v5_hash_data), v5_checksum);
+    checksum_duration += checksum_timer.Elapsed();
     checksum_sha256->assign(v5_checksum.begin(), v5_checksum.end());
+
+    base::UmaHistogramTimes(
+        "SafeBrowsing.V5Store.ConvertExtensionBlocklistV4ToV5.ChecksumDuration",
+        checksum_duration);
   }
 
   return ConvertExtensionBlocklistV4ToV5Result::kSuccess;
@@ -551,13 +561,15 @@ void V5Store::CollectStoreInfo(
   SBStore::CollectStoreInfo(store_info);
   store_info->set_v5_update_status(
       V5ApplyUpdateResultToDebuggingString(last_apply_update_result_));
-  // TODO(crbug.com/362791941): report back checks_attempted_ once added.
+  store_info->set_checks_attempted(checks_attempted_);
   hash_prefix_list_->GetPrefixInfo(store_info->mutable_prefix_sets());
 }
 
 HashPrefixStr V5Store::GetMatchingHashPrefix(const FullHashStr& full_hash) {
-  // TODO(crbug.com/362791941): implement
-  NOTREACHED();
+  CHECK(full_hash.size() == 32u || full_hash.size() == 16u);
+  CHECK_GE(full_hash.size(), prefix_size_);
+  checks_attempted_++;
+  return hash_prefix_list_->GetMatchingHashPrefix(full_hash);
 }
 
 void V5Store::ApplyUpdate(

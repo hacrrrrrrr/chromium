@@ -302,7 +302,7 @@ void NavigationApi::UpdateForNavigation(HistoryItem& item,
 
   if (auto* routemap = RouteMap::Get(window_->document())) {
     if (transition_) {
-      routemap->OnNavigationCommitted();
+      routemap->SetCommitted();
     }
   }
 
@@ -346,10 +346,8 @@ void NavigationApi::SetEntriesForRestore(
   // Avoid a dangling navigate event when restoring.
   // This prevents the successful cross-document navigation that exited this
   // page from remaining as an ongoing event that would be "aborted".
-  if (RuntimeEnabledFeatures::NavigateEventClearOnRestoreEnabled()) {
-    ongoing_navigate_event_ = nullptr;
-    ongoing_api_method_tracker_ = nullptr;
-  }
+  ongoing_navigate_event_ = nullptr;
+  ongoing_api_method_tracker_ = nullptr;
 
   HeapVector<Member<NavigationHistoryEntry>> new_entries;
   new_entries.reserve(
@@ -874,9 +872,13 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
   CHECK(!ongoing_navigate_event_);
   ongoing_navigate_event_ = navigate_event;
 
+  if (RuntimeEnabledFeatures::NavigationStateEnabled()) {
+    NavigationState::Create(*window_->document(), window_->Url(), params->url,
+                            params->source_element);
+  }
+
   if (auto* routemap = RouteMap::Get(window_->document())) {
-    routemap->OnNavigationStart(window_->Url(), params->url,
-                                params->source_element);
+    routemap->SetNavigationStarted();
     if (params->frame_load_type == WebFrameLoadType::kBackForward &&
         routemap->HasHistoryRules() && destination_entry) {
       int previous_index = GetIndexFor(currentEntry());
@@ -884,7 +886,7 @@ NavigationApi::DispatchResult NavigationApi::DispatchNavigateEvent(
       NavigationState::HistoryTraverseType direction =
           next_index < previous_index ? NavigationState::kBack
                                       : NavigationState::kForward;
-      routemap->OnNavigationTraverse(direction);
+      routemap->SetTraverseType(direction);
     }
   }
 
@@ -1053,8 +1055,9 @@ void NavigationApi::DidAbort(ScriptValue value) {
       ErrorEvent::Create(ToCoreStringWithNullCheck(isolate, message->Get()),
                          location, value, &DOMWrapperWorld::MainWorld(isolate));
   event->SetType(event_type_names::kNavigateerror);
-  if (auto* routemap = RouteMap::Get(window_->document())) {
-    routemap->OnNavigationDone();
+
+  if (RuntimeEnabledFeatures::NavigationStateEnabled()) {
+    NavigationState::AttemptFinishNavigationAndDestroy(window_->document());
   }
   DispatchEvent(*event);
 
@@ -1084,8 +1087,8 @@ void NavigationApi::DidFinishOngoingNavigation() {
     ongoing_api_method_tracker_ = nullptr;
   }
 
-  if (auto* routemap = RouteMap::Get(window_->document())) {
-    routemap->OnNavigationDone();
+  if (RuntimeEnabledFeatures::NavigationStateEnabled()) {
+    NavigationState::AttemptFinishNavigationAndDestroy(window_->document());
   }
   DispatchEvent(*Event::Create(event_type_names::kNavigatesuccess));
 

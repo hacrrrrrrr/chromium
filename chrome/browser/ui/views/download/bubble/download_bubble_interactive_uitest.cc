@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/download/bubble/download_bubble_contents_view.h"
 #include "chrome/browser/ui/views/download/bubble/download_toolbar_ui_controller.h"
-#include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
+#include "chrome/browser/ui/views/exclusive_access/exclusive_access_bubble_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -385,8 +385,8 @@ IN_PROC_BROWSER_TEST_F(DownloadBubbleInteractiveUiTest,
 IN_PROC_BROWSER_TEST_F(
     DownloadBubbleInteractiveUiTest,
     DangerousDownloadDoesNotShowEsbIphPromo_WhenSafeBrowsingDisabled) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
-                                               false);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnabled,
+                                                  false);
   RunTestSequence(
       Do(DownloadDangerousTestFile()),
       ObserveState(kDownloadsButtonVisible, GetContainerView()),
@@ -402,8 +402,8 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     DownloadBubbleInteractiveUiTest,
     DangerousDownloadDoesNotShowEsbIphPromo_WhenEnhancedSafeBrowsingEnabled) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnhanced,
-                                               true);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kSafeBrowsingEnhanced,
+                                                  true);
   RunTestSequence(
       Do(DownloadDangerousTestFile()),
       ObserveState(kDownloadsButtonVisible, GetContainerView()),

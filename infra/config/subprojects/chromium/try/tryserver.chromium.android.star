@@ -61,8 +61,8 @@ try_.builder(
             "release_try_builder",
         ],
     ),
-    builderless = False,
     cores = 16,
+    ssd = 1,
     contact_team_email = "clank-engprod@google.com",
     cq_settings = try_.cq_settings(
         location_filters = [
@@ -550,7 +550,6 @@ try_.builder(
             "minimal_symbols",
             "official_optimize",
             "stable_channel",
-            "v8_release_branch",
             # Allows the bot to measure low-end arm32 and high-end arm64 using
             # a single build.
             "android_low_end_secondary_toolchain",
@@ -1604,10 +1603,11 @@ gpu.try_.optional_tests_builder(
 gpu.try_.optional_tests_builder(
     name = "gpu-fyi-cq-android-arm64",
     branch_selector = branches.selector.ANDROID_BRANCHES,
-    description_html = "Runs GPU tests on Pixel 6 devices. Only automatically added to CLs that touch GPU-related files.",
+    description_html = "Runs GPU tests on Pixel 6/10 devices. Only automatically added to CLs that touch GPU-related files.",
     mirrors = [
         "ci/GPU FYI Android arm64 Builder",
         "ci/Android FYI Release (Pixel 6)",
+        "ci/Android FYI Release (Pixel 10)",
     ],
     builder_config_settings = builder_config.try_settings(
         retry_failed_shards = False,

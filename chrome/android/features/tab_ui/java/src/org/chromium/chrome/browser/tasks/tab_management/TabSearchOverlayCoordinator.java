@@ -10,14 +10,20 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.Browser;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.TextView;
 
+import androidx.annotation.DrawableRes;
 import androidx.annotation.IdRes;
 import androidx.annotation.VisibleForTesting;
 
@@ -28,6 +34,7 @@ import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NonNullObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -36,6 +43,7 @@ import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.app.tabwindow.TabWindowManagerSingleton;
 import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
+import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.omnibox.BackKeyBehaviorDelegate;
@@ -46,13 +54,21 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.searchwidget.SearchActivityUtils;
 import org.chromium.chrome.browser.searchwidget.SearchBoxDataProvider;
 import org.chromium.chrome.browser.searchwidget.SearchUiCoordinator;
+import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.chrome.browser.tab_group_sync.TabGroupSyncServiceFactory;
+import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.tabwindow.TabWindowInfo;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.IntentOrigin;
 import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.SearchType;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.tab_group_sync.SavedTabGroup;
+import org.chromium.components.tab_group_sync.TabGroupSyncService;
+import org.chromium.components.tab_group_sync.TabGroupUiActionHandler;
 import org.chromium.ui.AsyncViewStub;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.edge_to_edge.EdgeToEdgeSystemBarColorHelper;
@@ -61,6 +77,9 @@ import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.url.GURL;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Coordinator that hosts SearchUiCoordinator in a floating Tab Search panel positioned overlaying
@@ -78,9 +97,16 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
     private final MonotonicObservableSupplier<TabModelSelector> mTabModelSelectorSupplier;
     private final @Nullable EdgeToEdgeSystemBarColorHelper mEdgeToEdgeSystemBarColorHelper;
     private final BackPressManager mBackPressManager;
+    private final MonotonicObservableSupplier<CompositorViewHolder> mCompositorViewHolderSupplier;
+    private final OneshotSupplier<TabGroupUiActionHandler> mTabGroupUiActionHandlerSupplier;
+    // Recursion guard to prevent event dispatch loops when forwarding scrim scroll/drag events
+    // to the underlying compositor view hierarchy.
+    private boolean mIsForwardingScroll;
     private final SettableNonNullObservableSupplier<Boolean> mBackPressStateSupplier =
             ObservableSuppliers.createNonNull(false);
     private final PropertyModel mModel;
+    private final SearchBoxDataProvider mSearchBoxDataProvider;
+    private final Callback<Profile> mProfileObserver;
 
     private @Nullable
             PropertyModelChangeProcessor<
@@ -88,8 +114,7 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
             mChangeProcessor;
     private @Nullable LinearLayout mPanelContainer;
     private @Nullable SearchUiCoordinator mSearchUiCoordinator;
-    private final SearchBoxDataProvider mSearchBoxDataProvider;
-    private final Callback<Profile> mProfileObserver;
+    private final Callback<Boolean> mSuggestionsObserver = this::onSuggestionsChanged;
 
     /**
      * Constructs a new TabSearchOverlayCoordinator.
@@ -115,7 +140,9 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
             ActivityLifecycleDispatcher lifecycleDispatcher,
             MonotonicObservableSupplier<TabModelSelector> tabModelSelectorSupplier,
             @Nullable EdgeToEdgeSystemBarColorHelper edgeToEdgeSystemBarColorHelper,
-            BackPressManager backPressManager) {
+            BackPressManager backPressManager,
+            MonotonicObservableSupplier<CompositorViewHolder> compositorViewHolderSupplier,
+            OneshotSupplier<TabGroupUiActionHandler> tabGroupUiActionHandlerSupplier) {
         mActivity = activity;
         mParentContainer = parentContainer;
         mWindowAndroid = windowAndroid;
@@ -126,14 +153,19 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
         mTabModelSelectorSupplier = tabModelSelectorSupplier;
         mEdgeToEdgeSystemBarColorHelper = edgeToEdgeSystemBarColorHelper;
         mBackPressManager = backPressManager;
+        mCompositorViewHolderSupplier = compositorViewHolderSupplier;
+        mTabGroupUiActionHandlerSupplier = tabGroupUiActionHandlerSupplier;
         mBackPressManager.addHandler(this, BackPressHandler.Type.TAB_SEARCH_OVERLAY);
 
         mModel = TabSearchOverlayProperties.createDefaultModel();
         mModel.set(TabSearchOverlayProperties.VISIBLE, false);
         mModel.set(TabSearchOverlayProperties.ON_SCRIM_CLICK, (v) -> hide());
+        mModel.set(TabSearchOverlayProperties.ON_CLOSE_CLICK, (v) -> hide());
+        mModel.set(TabSearchOverlayProperties.ON_HIDE_FINISHED, this::onHideFinished);
 
         mSearchBoxDataProvider = new SearchBoxDataProvider();
-        mSearchBoxDataProvider.setPageClassification(PageClassification.ANDROID_HUB_VALUE);
+        mSearchBoxDataProvider.setPageClassification(
+                PageClassification.ANDROID_TAB_SEARCH_OVERLAY_VALUE);
 
         mProfileObserver = this::onProfileChanged;
         mProfileSupplier.addSyncObserverAndCallIfNonNull(mProfileObserver);
@@ -148,6 +180,10 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
             mChangeProcessor = null;
         }
         if (mSearchUiCoordinator != null) {
+            mSearchUiCoordinator
+                    .getLocationBarCoordinator()
+                    .getSuggestionsListNonEmptySupplier()
+                    .removeObserver(mSuggestionsObserver);
             mSearchUiCoordinator.destroy();
             mSearchUiCoordinator = null;
         }
@@ -171,8 +207,11 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
                                         mParentContainer,
                                         false);
         final LinearLayout panelContainer = mPanelContainer;
-        View scrim = panelContainer.findViewById(R.id.tab_search_overlay_scrim);
         View panelView = panelContainer.findViewById(R.id.tab_search_overlay_panel);
+        panelView.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    updateExclusionRects();
+                });
         View searchActivityView = panelContainer.findViewById(R.id.search_activity_container);
         mParentContainer.addView(panelContainer);
 
@@ -185,6 +224,28 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
         panelView.setOnHoverListener(this::consumeMotionEvent);
         panelView.setOnGenericMotionListener(this::consumeMotionEvent);
         panelView.setOnContextClickListener(this::consumeContextClick);
+
+        // Set up listeners on the scrim view to forward scroll and drag events to the
+        // underlying web contents page, which is managed by the compositor view.
+        View scrimView = panelContainer.findViewById(R.id.tab_search_overlay_scrim);
+        float touchSlop = ViewConfiguration.get(mActivity).getScaledTouchSlop();
+        // Forward standard touch screen gestures (e.g. scroll/drag) to the compositor.
+        scrimView.setOnTouchListener(new ScrimTouchForwarder(touchSlop));
+        // Forward mouse scroll wheel and trackpad scroll gestures to the compositor.
+        scrimView.setOnGenericMotionListener(
+                (v, event) -> {
+                    if (event.getAction() == MotionEvent.ACTION_SCROLL) {
+                        if (mIsForwardingScroll) {
+                            return false;
+                        }
+                        return forwardEvent(v, event, false);
+                    }
+                    // Consume non-scroll generic motion events (such as pointer clicks or hover)
+                    // to prevent them from falling through to the background web contents and
+                    // stealing focus from the UrlBar, which would cause the suggestions dropdown to
+                    // dismiss on focus loss and cause animation flicker during panel hide.
+                    return true;
+                });
 
         if (mSearchUiCoordinator == null) {
             mSearchUiCoordinator = new SearchUiCoordinator(mActivity, mSearchBoxDataProvider);
@@ -248,8 +309,17 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
                 mEdgeToEdgeSystemBarColorHelper);
         setSearchUiElements();
 
+        mSearchUiCoordinator
+                .getLocationBarCoordinator()
+                .getSuggestionsListNonEmptySupplier()
+                .addSyncObserver(mSuggestionsObserver);
+
+        View emptyStateView = panelView.findViewById(R.id.empty_state_container);
+        setupEmptyStateView(emptyStateView);
+
         TabSearchOverlayViewBinder.ViewHolder viewHolder =
-                new TabSearchOverlayViewBinder.ViewHolder(panelContainer, scrim, panelView);
+                new TabSearchOverlayViewBinder.ViewHolder(
+                        panelContainer, panelView, emptyStateView);
         mChangeProcessor =
                 PropertyModelChangeProcessor.create(
                         mModel, viewHolder, TabSearchOverlayViewBinder::bind);
@@ -271,6 +341,26 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
                 .getLocationBarCoordinator()
                 .getUrlBarCoordinator()
                 .setUrlBarHintText(mActivity.getResources().getString(hintTextRes));
+    }
+
+    private void setupEmptyStateView(View emptyStateView) {
+        @DrawableRes int emptyImageResId = R.drawable.tablet_tab_switcher_empty_state_illustration;
+        ImageView icon = emptyStateView.findViewById(R.id.empty_state_icon);
+        icon.setImageResource(emptyImageResId);
+        TextView title = emptyStateView.findViewById(R.id.empty_state_text_title);
+        title.setText(R.string.search_in_settings_no_match);
+        TextView description = emptyStateView.findViewById(R.id.empty_state_text_description);
+        description.setVisibility(View.GONE);
+    }
+
+    private void onSuggestionsChanged(boolean hasSuggestions) {
+        // Guard against empty-state updates from input clearing during the hide animation.
+        if (!isVisible()) return;
+
+        var locationBar = assumeNonNull(mSearchUiCoordinator).getLocationBarCoordinator();
+        String query = locationBar.getUrlBarCoordinator().getTextWithoutAutocomplete();
+        boolean showEmptyState = query != null && !query.isEmpty() && !hasSuggestions;
+        mModel.set(TabSearchOverlayProperties.EMPTY_STATE_VISIBLE, showEmptyState);
     }
 
     private boolean loadUrl(OmniboxLoadUrlParams params, boolean isIncognito) {
@@ -311,7 +401,41 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
     }
 
     private void bringTabGroupToFront(String tabGroupId) {
-        IntentHandler.bringTabGroupToFront(tabGroupId);
+        Profile profile = mProfileSupplier.get();
+        if (profile == null) return;
+
+        TabGroupSyncService syncService = TabGroupSyncServiceFactory.getForProfile(profile);
+        if (syncService == null) return;
+
+        SavedTabGroup syncGroup = syncService.getGroup(tabGroupId);
+        if (syncGroup == null || syncGroup.syncId == null) return;
+
+        // If the group is not yet open locally, materialize/open it first.
+        if (syncGroup.localId == null) {
+            TabGroupUiActionHandler handler = mTabGroupUiActionHandlerSupplier.get();
+            if (handler == null) return;
+
+            handler.openTabGroup(syncGroup.syncId);
+            // Re-fetch the synced group to obtain the newly mapped local group ID.
+            syncGroup = syncService.getGroup(tabGroupId);
+            if (syncGroup == null || syncGroup.localId == null) return;
+        }
+
+        TabModelSelector selector = mTabModelSelectorSupplier.get();
+        if (selector == null) return;
+
+        // Find the last active tab ID inside this local group (or the first tab if last active
+        // cannot be determined).
+        TabModel model = selector.getModel(mSearchBoxDataProvider.isIncognito());
+        int tabId = model.getGroupLastShownTabId(syncGroup.localId.tabGroupId);
+        if (tabId == Tab.INVALID_TAB_ID) return;
+
+        // Select the active tab inside the local TabModel to focus on the group.
+        int index = TabModelUtils.getTabIndexById(model, tabId);
+        if (index != TabModel.INVALID_TAB_INDEX) {
+            model.setIndex(index, TabSelectionType.FROM_USER);
+        }
+
         hide();
     }
 
@@ -323,25 +447,58 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
         ensureInitialized();
         if (mModel.get(TabSearchOverlayProperties.VISIBLE)) return;
 
+        // Ensure that transient properties (like empty state visibility) are reset to their
+        // default states before showing the search UI.
+        mModel.set(TabSearchOverlayProperties.EMPTY_STATE_VISIBLE, false);
         mModel.set(TabSearchOverlayProperties.VISIBLE, true);
         mBackPressStateSupplier.set(true);
         assumeNonNull(mSearchUiCoordinator)
                 .beginQuery(IntentOrigin.HUB, SearchType.TEXT, /* query= */ null, mWindowAndroid);
+        updateExclusionRects();
     }
 
     /** Hides the tab search overlay and clears the focus from the search box. */
     public void hide() {
         mModel.set(TabSearchOverlayProperties.VISIBLE, false);
         mBackPressStateSupplier.set(false);
-        if (mSearchUiCoordinator != null) {
-            var locationBar = mSearchUiCoordinator.getLocationBarCoordinator();
-            locationBar.clearOmniboxFocus();
-        }
+        updateExclusionRects();
     }
 
     /** Returns whether the tab search overlay is currently visible. */
     public boolean isVisible() {
         return mModel.get(TabSearchOverlayProperties.VISIBLE);
+    }
+
+    /**
+     * Updates the system gesture exclusion rects for the overlay panel.
+     *
+     * <p>#setSystemGestureExclusionRects allows Chrome to receive touch events on the header area
+     * of the panel when it is drawn under the system gesture area so that it remains accessible.
+     * The exclusion rect gets removed when the panel is no longer visible.
+     */
+    private void updateExclusionRects() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || mPanelContainer == null) {
+            return;
+        }
+
+        View panelView = mPanelContainer.findViewById(R.id.tab_search_overlay_panel);
+        if (panelView == null) return;
+
+        List<Rect> rects = new ArrayList<>();
+        if (mModel.get(TabSearchOverlayProperties.VISIBLE)) {
+            // Exclude the close button's interactive area to ensure it remains clickable even
+            // when under the system gesture area.
+            View closeButton = panelView.findViewById(R.id.tab_search_close_button);
+            if (closeButton != null && closeButton.getWidth() > 0) {
+                Rect rect = new Rect();
+                rect.left = closeButton.getLeft();
+                rect.top = closeButton.getTop();
+                rect.right = closeButton.getRight();
+                rect.bottom = closeButton.getBottom();
+                rects.add(rect);
+            }
+        }
+        panelView.setSystemGestureExclusionRects(rects);
     }
 
     /**
@@ -359,6 +516,14 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
         }
     }
 
+    private void onHideFinished() {
+        // Clear focus only after the hide animation finishes to prevent animation flicker.
+        if (mSearchUiCoordinator != null) {
+            var locationBar = mSearchUiCoordinator.getLocationBarCoordinator();
+            locationBar.clearOmniboxFocus();
+        }
+    }
+
     // BackPressHandler implementation.
 
     @Override
@@ -372,6 +537,173 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
         return mBackPressStateSupplier;
     }
 
+    /**
+     * Translates coordinates and forwards a MotionEvent to the underlying CompositorViewHolder.
+     *
+     * @param v The view that received the event (scrim).
+     * @param event The original MotionEvent.
+     * @param isTouchEvent True if this is a standard touch event, false if generic motion (scroll).
+     * @return True if the event was handled by the compositor, false otherwise.
+     */
+    private boolean forwardEvent(View v, MotionEvent event, boolean isTouchEvent) {
+        CompositorViewHolder compositorViewHolder = mCompositorViewHolderSupplier.get();
+        if (compositorViewHolder == null) {
+            return false;
+        }
+
+        // Get window locations of both the scrim and the compositor views to compute coordinate
+        // translation offset.
+        int[] scrimLocation = new int[2];
+        v.getLocationInWindow(scrimLocation);
+        int[] targetLocation = new int[2];
+        compositorViewHolder.getLocationInWindow(targetLocation);
+
+        // Copy and offset the event coordinates to match the CompositorViewHolder's coordinate
+        // space.
+        MotionEvent offsetEvent = MotionEvent.obtain(event);
+        offsetEvent.offsetLocation(
+                scrimLocation[0] - targetLocation[0], scrimLocation[1] - targetLocation[1]);
+
+        // Dispatch the translated event using a recursion guard to prevent dispatch loops.
+        mIsForwardingScroll = true;
+        boolean handled =
+                isTouchEvent
+                        ? compositorViewHolder.dispatchTouchEvent(offsetEvent)
+                        : compositorViewHolder.dispatchGenericMotionEvent(offsetEvent);
+        mIsForwardingScroll = false;
+        offsetEvent.recycle();
+        return handled;
+    }
+
+    /**
+     * Touch listener for the overlay scrim that forwards drag/scroll events to the underlying
+     * compositor webpage view, while preserving standard tap-to-dismiss clicks on the scrim. This
+     * listener primarily handles touchscreen gestures (finger dragging and tapping).
+     */
+    private class ScrimTouchForwarder implements View.OnTouchListener {
+        private final float mTouchSlop;
+        private float mTouchDownX;
+        private float mTouchDownY;
+        private boolean mIsDragging;
+        // Stores a copy of the ACTION_DOWN event. Deferring the dispatch of ACTION_DOWN to the
+        // background view avoids clearing search box focus while the tap gesture is in-flight. If
+        // focus is cleared immediately (on touch down), the suggestions list hides or the keyboard
+        // is dismissed, triggering a layout pass or window resize layout shift. This layout shift
+        // causes Android to send an ACTION_CANCEL to the scrim, swallowing the subsequent ACTION_UP
+        // and preventing the scrim click (panel dismissal) from triggering. If the gesture is
+        // confirmed as a drag, we replay this saved event before forwarding MOVE events so the
+        // background compositor receives a complete gesture stream.
+        private @Nullable MotionEvent mPendingDownEvent;
+
+        /**
+         * Constructs a new ScrimTouchForwarder.
+         *
+         * @param touchSlop The minimum distance a touch gesture must travel to be considered drag.
+         */
+        public ScrimTouchForwarder(float touchSlop) {
+            mTouchSlop = touchSlop;
+        }
+
+        /**
+         * Intercepts and processes touchscreen motion events on the scrim view.
+         *
+         * @param v The view that received the event (scrim).
+         * @param event The touch event being processed.
+         * @return True if the event was handled (consumed), false otherwise.
+         */
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            // Recursion guard to ignore events dispatched back from the compositor hierarchy.
+            if (mIsForwardingScroll) {
+                return false;
+            }
+
+            int action = event.getActionMasked();
+
+            // Start of gesture: record initial down location and save a copy of the down event.
+            // Defer forwarding to prevent focus loss and layout shifts (e.g. from hiding
+            // suggestions or keyboard) from cancelling the click gesture on simple taps.
+            if (action == MotionEvent.ACTION_DOWN) {
+                mTouchDownX = event.getX();
+                mTouchDownY = event.getY();
+                mIsDragging = false;
+                clearPendingDownEvent();
+                mPendingDownEvent = MotionEvent.obtain(event);
+                return true;
+            }
+
+            // Gesture movement: check if distance traveled exceeds the touch-slop threshold.
+            // If it does, classify the gesture as a drag and forward the move events.
+            if (action == MotionEvent.ACTION_MOVE) {
+                if (!mIsDragging) {
+                    float dx = event.getX() - mTouchDownX;
+                    float dy = event.getY() - mTouchDownY;
+                    if (Math.hypot(dx, dy) > mTouchSlop) {
+                        mIsDragging = true;
+                        // Drag confirmed: replay the saved DOWN event first so the compositor view
+                        // starts the touch gesture correctly before receiving movement.
+                        if (mPendingDownEvent != null) {
+                            forwardEvent(v, mPendingDownEvent, true);
+                            clearPendingDownEvent();
+                        }
+                    }
+                }
+                if (mIsDragging) {
+                    forwardEvent(v, event, true);
+                }
+                return true;
+            }
+
+            // End of gesture:
+            if (action == MotionEvent.ACTION_UP) {
+                if (mIsDragging) {
+                    // If dragging/scrolling, forward the final UP event to finish the scroll.
+                    forwardEvent(v, event, true);
+                } else {
+                    // Tap detected: Since we never forwarded the DOWN event, we do not need to send
+                    // a CANCEL event to the compositor. Recycle the pending event.
+                    clearPendingDownEvent();
+
+                    // Call performClick to natively invoke the registered onClickListener (which
+                    // dismisses/hides the overlay) and notify accessibility services of the tap.
+                    v.performClick();
+                }
+                mIsDragging = false;
+                return true;
+            }
+
+            // Cancel event: Forward cancel events directly to keep background view state in
+            // sync if we were already dragging, otherwise discard the pending down event.
+            if (action == MotionEvent.ACTION_CANCEL) {
+                if (mIsDragging) {
+                    forwardEvent(v, event, true);
+                }
+                clearPendingDownEvent();
+                mIsDragging = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        /**
+         * Recycles the cached {@link #mPendingDownEvent} and clears the reference.
+         *
+         * <p>MotionEvents in Android are pooled by the system. If we copy an event using {@link
+         * MotionEvent#obtain(MotionEvent)}, we must release it back to the pool by calling {@link
+         * MotionEvent#recycle()} when done to prevent memory leaks. This helper ensures the cached
+         * event is safely recycled and nullified when the gesture ends (via UP or CANCEL), when a
+         * new touch sequence begins (via DOWN), or when the deferred DOWN event is successfully
+         * forwarded.
+         */
+        private void clearPendingDownEvent() {
+            if (mPendingDownEvent != null) {
+                mPendingDownEvent.recycle();
+                mPendingDownEvent = null;
+            }
+        }
+    }
+
     // Testing methods.
 
     @Nullable SearchUiCoordinator getSearchUiCoordinatorForTesting() {
@@ -380,6 +712,10 @@ public class TabSearchOverlayCoordinator implements BackPressHandler {
 
     @Nullable LinearLayout getPanelContainerForTesting() {
         return mPanelContainer;
+    }
+
+    PropertyModel getModelForTesting() {
+        return mModel;
     }
 
     void setSearchUiCoordinatorForTesting(SearchUiCoordinator searchUiCoordinator) {

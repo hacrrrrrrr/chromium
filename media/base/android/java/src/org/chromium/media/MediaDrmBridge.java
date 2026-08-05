@@ -337,13 +337,7 @@ public class MediaDrmBridge {
 
             // Cannot provision. Defer MediaCrypto creation and try again later.
             Log.d(TAG, "defer CreateMediaCrypto() calls");
-            sMediaCryptoDeferrer.defer(
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            createMediaCrypto();
-                        }
-                    });
+            sMediaCryptoDeferrer.defer(() -> createMediaCrypto());
 
             return true;
         }
@@ -435,6 +429,27 @@ public class MediaDrmBridge {
             Log.e(TAG, "Exception in isCryptoSchemeSupported", e);
             return false;
         }
+    }
+
+    @CalledByNative
+    private static String[] getSupportedContainers(byte[] keySystemUuid) {
+        UUID cryptoScheme = getUuidFromBytes(keySystemUuid);
+        if (cryptoScheme == null) {
+            return new String[0];
+        }
+
+        List<String> containers = new ArrayList<>();
+        try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
+            if (MediaDrm.isCryptoSchemeSupported(cryptoScheme, "video/webm")) {
+                containers.add("video/webm");
+            }
+            if (MediaDrm.isCryptoSchemeSupported(cryptoScheme, "video/mp4")) {
+                containers.add("video/mp4");
+            }
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "Exception in getSupportedContainers", e);
+        }
+        return containers.toArray(new String[0]);
     }
 
     /**
@@ -534,7 +549,7 @@ public class MediaDrmBridge {
         Log.d(TAG, "Set origin: %s", origin);
 
         if (!isWidevine()) {
-            Log.d(TAG, "Property " + ORIGIN + " isn't supported");
+            Log.d(TAG, "Property %s isn't supported", ORIGIN);
             return true;
         }
 
@@ -797,6 +812,11 @@ public class MediaDrmBridge {
                             + "MediaDrmBridge creation can trigger the provision flow.",
                     e);
             unprovision();
+        } catch (MediaDrm.SessionException e) {
+            // getKeyRequest sometimes has transient SessionException.
+            // We just catch and log it, and let the player retry if they would like to.
+            // Refer to crbug.com/537329064 for details.
+            Log.e(TAG, "Failed to getKeyRequest().", e);
         } catch (java.lang.IllegalStateException e) {
             // We've seen both MediaDrmStateException and MediaDrmResetException happening.
             // Since both are IllegalStateExceptions, so they will be handled here.
@@ -1086,16 +1106,13 @@ public class MediaDrmBridge {
 
         mSessionManager.load(
                 emeId,
-                new Callback<@Nullable SessionId>() {
-                    @Override
-                    public void onResult(@Nullable SessionId sessionId) {
-                        if (sessionId == null) {
-                            onPersistentLicenseNoExist(promiseId);
-                            return;
-                        }
-
-                        loadSessionWithLoadedStorage(sessionId, promiseId);
+                sessionId -> {
+                    if (sessionId == null) {
+                        onPersistentLicenseNoExist(promiseId);
+                        return;
                     }
+
+                    loadSessionWithLoadedStorage(sessionId, promiseId);
                 });
     }
 
@@ -1185,15 +1202,12 @@ public class MediaDrmBridge {
         closeSessionNoException(sessionId);
         mSessionManager.clearPersistentSessionInfo(
                 sessionId,
-                new Callback<Boolean>() {
-                    @Override
-                    public void onResult(Boolean success) {
-                        if (!success) {
-                            Log.w(TAG, "Failed to clear persistent storage for non-exist license");
-                        }
-
-                        onPersistentLicenseNoExist(promiseId);
+                success -> {
+                    if (!success) {
+                        Log.w(TAG, "Failed to clear persistent storage for non-exist license");
                     }
+
+                    onPersistentLicenseNoExist(promiseId);
                 });
     }
 
@@ -1242,19 +1256,16 @@ public class MediaDrmBridge {
         mSessionManager.setKeyType(
                 sessionId,
                 MediaDrm.KEY_TYPE_RELEASE,
-                new Callback<Boolean>() {
-                    @Override
-                    public void onResult(Boolean success) {
-                        if (!success) {
-                            onPromiseRejected(
-                                    promiseId,
-                                    MediaDrmSystemCode.SET_KEY_TYPE_RELEASE_FAILED,
-                                    "Fail to update persistent storage");
-                            return;
-                        }
-
-                        doRemoveSession(sessionId, sessionInfo.mimeType(), promiseId);
+                success -> {
+                    if (!success) {
+                        onPromiseRejected(
+                                promiseId,
+                                MediaDrmSystemCode.SET_KEY_TYPE_RELEASE_FAILED,
+                                "Fail to update persistent storage");
+                        return;
                     }
+
+                    doRemoveSession(sessionId, sessionInfo.mimeType(), promiseId);
                 });
     }
 
@@ -1521,19 +1532,16 @@ public class MediaDrmBridge {
         // When |mOriginSet|, notify the storage onProvisioned, and continue
         // creating MediaCrypto after that.
         mStorage.onProvisioned(
-                new Callback<Boolean>() {
-                    @Override
-                    public void onResult(Boolean initSuccess) {
-                        assert mMediaCryptoSession == null;
+                initSuccess -> {
+                    assert mMediaCryptoSession == null;
 
-                        if (!initSuccess) {
-                            Log.e(TAG, "Failed to initialize storage for origin");
-                            release();
-                            return;
-                        }
-
-                        createMediaCrypto();
+                    if (!initSuccess) {
+                        Log.e(TAG, "Failed to initialize storage for origin");
+                        release();
+                        return;
                     }
+
+                    createMediaCrypto();
                 });
     }
 
@@ -1759,26 +1767,23 @@ public class MediaDrmBridge {
 
             deferEventHandleIfNeeded(
                     sessionId,
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            if (sessionId == null) {
-                                Log.w(
-                                        TAG,
-                                        "SessionLost: Unknown session %s",
-                                        SessionId.toHexString(drmSessionId));
-                                return;
-                            }
-
-                            Log.d(TAG, "SessionLost: " + sessionId);
-                            if (mMediaDrm != null) {
-                                closeSessionNoException(sessionId);
-                            }
-                            mSessionManager.remove(sessionId);
-                            // TODO(crbug.com/40181810): Consider passing a reason for sessionClosed
-                            // that more closely represents a lost state.
-                            onSessionClosed(sessionId, MediaDrmCdmSessionClosedReason.CLOSE);
+                    () -> {
+                        if (sessionId == null) {
+                            Log.w(
+                                    TAG,
+                                    "SessionLost: Unknown session %s",
+                                    SessionId.toHexString(drmSessionId));
+                            return;
                         }
+
+                        Log.d(TAG, "SessionLost: %s", sessionId);
+                        if (mMediaDrm != null) {
+                            closeSessionNoException(sessionId);
+                        }
+                        mSessionManager.remove(sessionId);
+                        // TODO(crbug.com/40181810): Consider passing a reason for sessionClosed
+                        // that more closely represents a lost state.
+                        onSessionClosed(sessionId, MediaDrmCdmSessionClosedReason.CLOSE);
                     });
         }
     }
@@ -1803,33 +1808,29 @@ public class MediaDrmBridge {
 
             deferEventHandleIfNeeded(
                     sessionId,
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            if (sessionId == null) {
-                                Log.w(
-                                        TAG,
-                                        "KeyStatusChange: Unknown session %s",
-                                        SessionId.toHexString(drmSessionId));
-                                return;
-                            }
-
-                            SessionInfo sessionInfo = mSessionManager.get(sessionId);
-                            if (sessionInfo == null) {
-                                Log.w(TAG, "KeyStatusChange: No info for session %s", sessionId);
-                                return;
-                            }
-
-                            boolean isKeyRelease =
-                                    sessionInfo.keyType() == MediaDrm.KEY_TYPE_RELEASE;
-
-                            Log.i(TAG, "KeysStatusChange(%s): %b", sessionId, hasNewUsableKey);
-                            onSessionKeysChange(
-                                    sessionId,
-                                    getKeysInfo(keyInformation).toArray(),
-                                    hasNewUsableKey,
-                                    isKeyRelease);
+                    () -> {
+                        if (sessionId == null) {
+                            Log.w(
+                                    TAG,
+                                    "KeyStatusChange: Unknown session %s",
+                                    SessionId.toHexString(drmSessionId));
+                            return;
                         }
+
+                        SessionInfo sessionInfo = mSessionManager.get(sessionId);
+                        if (sessionInfo == null) {
+                            Log.w(TAG, "KeyStatusChange: No info for session %s", sessionId);
+                            return;
+                        }
+
+                        boolean isKeyRelease = sessionInfo.keyType() == MediaDrm.KEY_TYPE_RELEASE;
+
+                        Log.i(TAG, "KeysStatusChange(%s): %b", sessionId, hasNewUsableKey);
+                        onSessionKeysChange(
+                                sessionId,
+                                getKeysInfo(keyInformation).toArray(),
+                                hasNewUsableKey,
+                                isKeyRelease);
                     });
         }
     }
@@ -1843,25 +1844,22 @@ public class MediaDrmBridge {
 
             deferEventHandleIfNeeded(
                     sessionId,
-                    new Runnable() {
-                        @Override
-                        public void run() {
-                            if (sessionId == null) {
-                                Log.w(
-                                        TAG,
-                                        "ExpirationUpdate: Unknown session %s",
-                                        SessionId.toHexString(drmSessionId));
-                                return;
-                            }
-
-                            Log.i(
+                    () -> {
+                        if (sessionId == null) {
+                            Log.w(
                                     TAG,
-                                    "ExpirationUpdate(%s): %tF %tT",
-                                    sessionId,
-                                    expirationTime,
-                                    expirationTime);
-                            onSessionExpirationUpdate(sessionId, expirationTime);
+                                    "ExpirationUpdate: Unknown session %s",
+                                    SessionId.toHexString(drmSessionId));
+                            return;
                         }
+
+                        Log.i(
+                                TAG,
+                                "ExpirationUpdate(%s): %tF %tT",
+                                sessionId,
+                                expirationTime,
+                                expirationTime);
+                        onSessionExpirationUpdate(sessionId, expirationTime);
                     });
         }
     }

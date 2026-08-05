@@ -85,6 +85,7 @@ constexpr int kVP8AWebMFileDurationMs = 2733;
 constexpr char kSfxLosslessHash[] = "3.03,2.86,2.99,3.31,3.57,4.06,";
 constexpr char kBear320x240AudioHash[] = "-3.59,-2.06,-0.43,2.15,0.77,-0.95,";
 constexpr char kSfxMp3Hash[] = "1.30,2.72,4.56,5.08,3.74,2.03,";
+constexpr char kSilentSectionMp3Hash[] = "-4.37,-4.44,-3.23,-6.92,-6.71,-8.27,";
 
 constexpr char kSfxMseMp3Hash[] = "1.01,2.71,4.18,4.32,3.04,1.12,";
 
@@ -1844,6 +1845,13 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_MP3) {
   EXPECT_AUDIO_HASH(kSfxMp3Hash);
 }
 
+TEST_F(PipelineIntegrationTest, BasicPlayback_SilentSection_MP3) {
+  ASSERT_EQ(PIPELINE_OK, Start("silent-section.mp3", kHashed));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_AUDIO_HASH(kSilentSectionMp3Hash);
+}
+
 TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_FlacInMp4) {
   ASSERT_EQ(PIPELINE_OK, Start("sfx-flac.mp4", kHashed));
   Play();
@@ -2060,20 +2068,9 @@ TEST_F(PipelineIntegrationTest, BasicPlaybackHashed_M4A) {
   Play();
   ASSERT_TRUE(WaitUntilOnEnded());
 
-  // Verify preroll is stripped. This file uses a preroll of 2112 frames, which
-  // spans all three packets in the file. Postroll is not correctly stripped at
-  // present; see the note below.
-  EXPECT_AUDIO_HASH("3.84,4.25,4.33,3.58,3.27,3.16,");
-
-  // Note the above hash is incorrect since the <audio> path doesn't properly
-  // trim trailing silence at end of stream for AAC decodes. This isn't a huge
-  // deal since plain src= tags can't splice streams and MSE requires an
-  // explicit append window for correctness.
-  //
-  // The WebAudio path via AudioFileReader computes this correctly, so the hash
-  // below is taken from that test.
-  //
-  // EXPECT_AUDIO_HASH("3.77,4.53,4.75,3.48,3.67,3.76,");
+  // Verify preroll and postroll are correctly stripped. This file uses a
+  // preroll of 2112 frames, which spans all three packets in the file.
+  EXPECT_AUDIO_HASH("3.77,4.53,4.75,3.48,3.67,3.76,");
 }
 
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN)
@@ -3122,6 +3119,13 @@ TEST_F(SymphoniaPipelineIntegrationTest, BasicPlaybackHashed_MP3) {
   EXPECT_AUDIO_HASH(kSfxMp3Hash);
 }
 
+TEST_F(SymphoniaPipelineIntegrationTest, BasicPlayback_SilentSection_MP3) {
+  ASSERT_EQ(PIPELINE_OK, Start("silent-section.mp3", kHashed));
+  Play();
+  ASSERT_TRUE(WaitUntilOnEnded());
+  EXPECT_AUDIO_HASH(kSilentSectionMp3Hash);
+}
+
 TEST_F(SymphoniaPipelineIntegrationTest, BasicPlayback_Flac) {
   ASSERT_EQ(PIPELINE_OK, Start("sfx-flac.mp4", kHashed));
   Play();
@@ -3166,7 +3170,8 @@ TEST_F(SymphoniaPipelineIntegrationTest, BasicPlayback_Vorbis_AudioOnly) {
 
 #endif  // BUILDFLAG(ENABLE_SYMPHONIA)
 
-#if BUILDFLAG(ENABLE_IAMF_TOOLS)
+#if BUILDFLAG(ENABLE_IAMF_TOOLS) && BUILDFLAG(USE_PROPRIETARY_CODECS) && \
+    BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
 TEST_F(PipelineIntegrationTest, MSE_BasicPlayback_Iamf_714) {
   base::test::ScopedFeatureList scoped_feature_list(kIamfAudioDecoding);
   TestMediaSource source("iamf_alternating_sine_waves_714.mp4",
@@ -3190,6 +3195,7 @@ TEST_F(PipelineIntegrationTest, MSE_BasicPlayback_Iamf_Stereo) {
   source.Shutdown();
   Stop();
 }
-#endif  // BUILDFLAG(ENABLE_IAMF_TOOLS)
+#endif  // BUILDFLAG(ENABLE_IAMF_TOOLS) && BUILDFLAG(USE_PROPRIETARY_CODECS) &&
+        // \ BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
 
 }  // namespace media

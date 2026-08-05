@@ -5,109 +5,78 @@
 #include "base/i18n/tag_converters.h"
 
 #include <algorithm>
+#include <array>
 #include <string_view>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/containers/span.h"
-#include "base/i18n/internal/icu_bridge.rs.h"
+#include "base/i18n/internal/immutable_string.h"
 #include "base/i18n/internal/legacy_icu_converter.h"
 #include "base/i18n/language_tag.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
-#include "base/values.h"
+#include "third_party/icu/source/common/unicode/locid.h"
+#include "third_party/rust/chromium_crates_io/vendor/icu_capi-v2/bindings/cpp/icu4x/Locale.hpp"
+#include "third_party/rust/chromium_crates_io/vendor/icu_capi-v2/bindings/cpp/icu4x/LocaleCanonicalizer.hpp"
 
 namespace base::i18n {
 namespace {
 
-constexpr std::string_view kBcp47SubtagSeparator = "-";
-
 using ::base::i18n_internal::ConvertLegacyCodeToBcp47IfNecessary;
-using ::base::i18n_internal::create_icu_canonicalizer;
-using ::base::i18n_internal::create_icu_locale;
-using ::base::i18n_internal::Icu4xLocale;
+using ::base::i18n_internal::ImmutableString;
 
 bool ShouldSkipCanonicalization(std::string_view tag) {
   size_t dash_pos = tag.find('-');
   std::string_view lang = tag.substr(0, dash_pos);
   static constexpr auto kLanguagesToSkipCanonicalization =
-      base::MakeFixedFlatSet<std::string_view>({"tl", "sh"});
+      base::MakeFixedFlatSet<std::string_view>({"sh"});
   return kLanguagesToSkipCanonicalization.contains(base::ToLowerASCII(lang));
-}
-
-i18n_internal::ImmutableString ImmutableStringFromIcu4xLocale(
-    const i18n_internal::Icu4xLocale& locale) {
-  std::vector<std::string_view> parts;
-
-  // We must keep the temporary strings alive until ImmutableString has
-  // copied them.
-  rust::Vec<rust::String> variants = locale.variants();
-  rust::Vec<rust::String> extensions = locale.extensions_as_strings();
-  rust::Str script = locale.script();
-  rust::Str region = locale.region();
-
-  parts.emplace_back(locale.language());
-
-  if (!script.empty()) {
-    parts.emplace_back(kBcp47SubtagSeparator);
-    parts.emplace_back(script.data(), script.size());
-  }
-
-  if (!region.empty()) {
-    parts.emplace_back(kBcp47SubtagSeparator);
-    parts.emplace_back(region.data(), region.size());
-  }
-
-  for (const rust::String& variant : variants) {
-    parts.emplace_back(kBcp47SubtagSeparator);
-    parts.emplace_back(variant.data(), variant.size());
-  }
-
-  for (const rust::String& ext : extensions) {
-    parts.emplace_back(kBcp47SubtagSeparator);
-    parts.emplace_back(ext.data(), ext.size());
-  }
-
-  return i18n_internal::ImmutableString(parts);
 }
 
 }  // namespace
 
 class LanguageTagConverter::Impl {
  public:
-  explicit Impl() : canonicalizer_(create_icu_canonicalizer()) {}
+  Impl() : canonicalizer_(icu4x::LocaleCanonicalizer::create_extended()) {}
   ~Impl() = default;
 
   std::optional<LanguageTag> FromString(std::string_view tag) const;
-  LanguageTag FromIcu4xLocale(const Icu4xLocale& icu_locale) const;
+  LanguageTag FromIcu4xCapiLocale(const icu4x::Locale& locale) const;
 
  private:
-  rust::Box<i18n_internal::IcuCanonicalizer> canonicalizer_;
+  std::unique_ptr<icu4x::LocaleCanonicalizer> canonicalizer_;
 };
 
-LanguageTag LanguageTagConverter::Impl::FromIcu4xLocale(
-    const Icu4xLocale& icu_locale) const {
-  return LanguageTag(ImmutableStringFromIcu4xLocale(icu_locale));
+LanguageTag LanguageTagConverter::Impl::FromIcu4xCapiLocale(
+    const icu4x::Locale& locale) const {
+  std::string tag_str = locale.to_string();
+  std::array<std::string_view, 1> parts = {tag_str};
+  return LanguageTag(ImmutableString(parts));
 }
 
 std::optional<LanguageTag> LanguageTagConverter::Impl::FromString(
     std::string_view tag) const {
-  rust::Slice<const uint8_t> locale_bytes(
-      reinterpret_cast<const uint8_t*>(tag.data()), tag.size());
-
-  // Skip canonicalization for "tl" and "sh".
-  i18n_internal::OptionalIcu4xLocale opt_locale =
-      ShouldSkipCanonicalization(tag)
-          ? create_icu_locale(locale_bytes)
-          : canonicalizer_->canonicalize(locale_bytes);
-
-  if (!opt_locale.has_value) {
+  // TODO(crbug.com/537806159): Handle private use tags.
+  if (base::StartsWith(tag, "x-", base::CompareCase::INSENSITIVE_ASCII)) {
     return std::nullopt;
   }
 
-  return FromIcu4xLocale(*opt_locale.value);
+  auto result = icu4x::Locale::from_string(tag);
+  if (!result.is_ok()) {
+    return std::nullopt;
+  }
+  std::unique_ptr<icu4x::Locale> locale = std::move(result).ok().value();
+
+  if (!ShouldSkipCanonicalization(tag)) {
+    canonicalizer_->canonicalize(*locale);
+  }
+
+  LanguageTag language_tag = FromIcu4xCapiLocale(*locale);
+  return language_tag;
 }
 
 LanguageTagConverter::~LanguageTagConverter() = default;
@@ -119,9 +88,24 @@ const LanguageTagConverter& LanguageTagConverter::GetInstance() {
   return *instance;
 }
 
-LanguageTag LanguageTagConverter::FromIcu4xLocale(
-    const Icu4xLocale& icu_locale) const {
-  return impl_->FromIcu4xLocale(icu_locale);
+LanguageTag LanguageTagConverter::FromIcu4xCapiLocale(
+    const icu4x::Locale& locale) const {
+  return impl_->FromIcu4xCapiLocale(locale);
+}
+
+LanguageTag LanguageTagConverter::FromIcuLocale(
+    const icu::Locale& icu_locale) const {
+  UErrorCode status = U_ZERO_ERROR;
+  std::string tag = icu_locale.toLanguageTag<std::string>(status);
+  if (U_FAILURE(status)) {
+    return GetKnownLanguageTag("und");
+  }
+
+  // The `tag` returned by ICU4C will certainly produce a valid LanguageTag,
+  // that is why we always return a valid LanguageTag.
+  // Note: we call FromString on the `tag` to make sure we apply the same
+  // cannonicalizations.
+  return FromString(tag).value_or(GetKnownLanguageTag("und"));
 }
 
 std::optional<LanguageTag> LanguageTagConverter::FromString(
@@ -142,20 +126,41 @@ std::optional<LanguageTag> LanguageTagConverter::FromString(
   return impl_->FromString(*bcp47_converted_tag);
 }
 
-base::Value LanguageTagToValue(const LanguageTag& tag) {
-  return base::Value(tag.tag_string());
+std::optional<LanguageTag> GetLanguageTagFromString(std::string_view tag) {
+  return LanguageTagConverter::GetInstance().FromString(tag);
 }
 
-std::optional<LanguageTag> ValueToLanguageTag(const base::Value* value) {
-  return value ? ValueToLanguageTag(*value) : std::nullopt;
-}
+IcuLocaleConverter::IcuLocaleConverter() {
+  std::vector<std::pair<std::string, icu::Locale>> locales;
 
-std::optional<LanguageTag> ValueToLanguageTag(const base::Value& value) {
-  const std::string* str = value.GetIfString();
-  if (!str) {
-    return std::nullopt;
+#define IMPL_LANGUAGECODE_TAG_NAME(tag, name)                            \
+  {                                                                      \
+    UErrorCode status = U_ZERO_ERROR;                                    \
+    locales.emplace_back(tag, icu::Locale::forLanguageTag(tag, status)); \
   }
-  return LanguageTagConverter::GetInstance().FromString(*str);
+#include "base/i18n/internal/canonical_language_tags.inc"
+#undef IMPL_LANGUAGECODE_TAG_NAME
+
+  cached_locales_ =
+      base::flat_map<std::string, icu::Locale>(std::move(locales));
+}
+
+IcuLocaleConverter::~IcuLocaleConverter() = default;
+
+// static
+const IcuLocaleConverter& IcuLocaleConverter::GetInstance() {
+  static base::NoDestructor<IcuLocaleConverter> instance;
+  return *instance;
+}
+
+icu::Locale IcuLocaleConverter::FromLanguageTag(
+    const LanguageTag& language_tag) const {
+  auto it = cached_locales_.find(language_tag.tag_string());
+  if (it != cached_locales_.end()) {
+    return it->second;
+  }
+  UErrorCode status = U_ZERO_ERROR;
+  return icu::Locale::forLanguageTag(language_tag.tag_string(), status);
 }
 
 }  // namespace base::i18n

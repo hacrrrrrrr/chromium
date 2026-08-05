@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/views/frame/picture_in_picture_browser_frame_view.h"
+
 #include <optional>
 
 #include "base/i18n/rtl.h"
@@ -22,8 +24,8 @@
 #include "chrome/browser/preloading/scoped_prewarm_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/picture_in_picture_browser_frame_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/permissions/chip/permission_dashboard_controller.h"
 #include "chrome/browser/ui/views/permissions/chip/permission_dashboard_view.h"
@@ -46,6 +48,7 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/animation/animation_test_api.h"
 #include "ui/views/animation/widget_fade_animator.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/widget/widget_utils.h"
 
@@ -111,7 +114,8 @@ const base::FilePath::CharType kCameraPage[] =
 
 class AnimationWaiter {
  public:
-  explicit AnimationWaiter(std::vector<gfx::Animation*> animations)
+  explicit AnimationWaiter(
+      const std::vector<raw_ptr<gfx::Animation>>& animations)
       : animations_(animations) {}
 
   AnimationWaiter() = delete;
@@ -120,7 +124,7 @@ class AnimationWaiter {
   AnimationWaiter& operator=(const AnimationWaiter&) = delete;
 
   void WaitForAnimationInterval(base::TimeDelta animation_interval) {
-    for (auto* animation : animations_) {
+    for (gfx::Animation* animation : animations_) {
       auto animation_api = std::make_unique<gfx::AnimationTestApi>(animation);
       animation_api->SetStartTime(waiter_creation_time_);
       animation_api->Step(waiter_creation_time_ + animation_interval);
@@ -129,7 +133,7 @@ class AnimationWaiter {
 
  private:
   const base::TimeTicks waiter_creation_time_ = base::TimeTicks::Now();
-  std::vector<gfx::Animation*> animations_;
+  std::vector<raw_ptr<gfx::Animation>> animations_;
 };
 
 class ModalWidgetDelegate : public views::WidgetDelegate {
@@ -290,10 +294,13 @@ class PictureInPictureBrowserFrameViewTest : public WebRtcTestBase,
   }
 
   void SetUp() override {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove the two omnibox features.
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{blink::features::kDocumentPictureInPictureAPI,
                               media::kPictureInPictureOcclusionTracking},
-        /*disabled_features=*/{});
+        /*disabled_features=*/{omnibox::internal::kWebUIOmniboxPopup,
+                               omnibox::internal::kWebUIOmniboxAimPopup});
     InProcessBrowserTest::SetUp();
   }
 
@@ -367,7 +374,8 @@ class PictureInPictureBrowserFrameViewTest : public WebRtcTestBase,
     auto* browser_view = static_cast<BrowserView*>(
         BrowserWindow::FindBrowserWindowWithWebContents(child_web_contents));
     ASSERT_TRUE(browser_view);
-    ASSERT_TRUE(browser_view->browser()->is_type_picture_in_picture());
+    ASSERT_EQ(browser_view->browser()->GetType(),
+              BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE);
 
     pip_frame_view_ = static_cast<PictureInPictureBrowserFrameView*>(
         browser_view->browser_widget()->GetFrameView());
@@ -377,9 +385,10 @@ class PictureInPictureBrowserFrameViewTest : public WebRtcTestBase,
         views::GetRootWindow(pip_frame_view_->GetWidget()));
   }
 
-  void WaitForTopBarAnimations(std::vector<gfx::Animation*> animations) {
+  void WaitForTopBarAnimations(
+      const std::vector<raw_ptr<gfx::Animation>>& animations) {
     base::TimeTicks now = base::TimeTicks::Now();
-    for (auto* animation : animations) {
+    for (auto& animation : animations) {
       gfx::AnimationTestApi animation_api(animation);
       animation_api.SetStartTime(now);
       animation_api.Step(now + kAnimationDuration);
@@ -504,6 +513,35 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,
   ASSERT_TRUE(
       IsButtonVisible(pip_frame_view()->GetBackToTabButtonForTesting()));
   ASSERT_TRUE(IsButtonVisible(pip_frame_view()->GetCloseButtonForTesting()));
+}
+
+// Verifies that PipTopBarAnimationController::Delegate is wired up correctly:
+// activating/deactivating the top bar via UpdateTopBarView() should drive
+// ApplyTopBarForegroundColor() through to the window title, changing its
+// enabled color between the active and inactive steady states.
+IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,
+                       TopBarForegroundColorChangesWithActivation) {
+  ASSERT_NO_FATAL_FAILURE(SetUpDocumentPIP());
+
+  pip_frame_view()->UpdateTopBarView(/*render_active=*/false);
+  WaitForTopBarAnimations(
+      pip_frame_view()->GetRenderInactiveAnimationsForTesting());
+  const SkColor inactive_color =
+      pip_frame_view()->GetWindowTitleForTesting()->GetEnabledColor();
+
+  pip_frame_view()->UpdateTopBarView(/*render_active=*/true);
+  WaitForTopBarAnimations(
+      pip_frame_view()->GetRenderActiveAnimationsForTesting());
+  const SkColor active_color =
+      pip_frame_view()->GetWindowTitleForTesting()->GetEnabledColor();
+
+  EXPECT_NE(inactive_color, active_color);
+
+  pip_frame_view()->UpdateTopBarView(/*render_active=*/false);
+  WaitForTopBarAnimations(
+      pip_frame_view()->GetRenderInactiveAnimationsForTesting());
+  EXPECT_EQ(inactive_color,
+            pip_frame_view()->GetWindowTitleForTesting()->GetEnabledColor());
 }
 
 IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,

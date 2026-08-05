@@ -115,16 +115,6 @@ public class SigninButtonCoordinator extends ToolbarChildButton implements UrlFo
     }
 
     /**
-     * Sets whether the button should always show an avatar button when signed out. If false, a text
-     * signin button can be shown instead.
-     *
-     * @param showAvatarWhenSignedOut Whether to show the avatar button when signed out.
-     */
-    public void showAvatarWhenSignedOut(boolean showAvatarWhenSignedOut) {
-        mMediator.showAvatarWhenSignedOut(showAvatarWhenSignedOut);
-    }
-
-    /**
      * Sets whether the SigninButton has space to show and inflates SigninButton view if needed.
      *
      * @param hasSpaceToShow Whether the button has space to show.
@@ -194,7 +184,12 @@ public class SigninButtonCoordinator extends ToolbarChildButton implements UrlFo
 
         // Only update signin button if it does not match the intended state.
         if (showSigninButton != isShown()) {
-            mTransitionTrigger.run();
+            View view = (mView != null) ? mView : mViewStub;
+            // Only animate the transition if the view is already fully laid out.
+            // Skipping this during cold starts prevents layout overhead and ANRs.
+            if (view != null && view.isLaidOut()) {
+                mTransitionTrigger.run();
+            }
             mMediator.updateButtonVisibility(showSigninButton);
             maybeInflateView();
         }

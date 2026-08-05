@@ -8,19 +8,23 @@
 #include <limits>
 #include <utility>
 
+#include "base/check.h"
 #include "base/check_op.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/location.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/types/expected_macros.h"
 #include "components/sqlite_vfs/client.h"
 #include "components/sqlite_vfs/sqlite_sandboxed_vfs.h"
 #include "components/sqlite_vfs/vfs_utils.h"
 #include "net/base/features.h"
 #include "net/disk_cache/sql/sql_backend_constants.h"
+#include "net/disk_cache/sql/sql_read_cache_memory_monitor.h"
 #include "net/disk_cache/sql/sql_shared_cache_isolated_database_queries.h"
 #include "sql/database.h"
 #include "sql/meta_table.h"
@@ -101,12 +105,28 @@ SqlSharedCacheIsolatedDatabase::DatabaseAssets::ShareConnection() {
       vfs_file_set_, /*read_write=*/false);
 }
 
+void SqlSharedCacheIsolatedDatabase::DatabaseAssets::AbandonAndDeleteFiles() {
+  db_.Close();
+  vfs_file_set_.Abandon();
+  base::FilePath base_name = base::FilePath::FromASCII(
+      base::StrCat({kSqlBackendSharedCacheIsolatedFileNamePrefix,
+                    base::NumberToString(shared_cache_db_id_.value())}));
+  sqlite_vfs::DeleteFiles(sqlite_vfs::Client::kSharedCacheIsolated, directory_,
+                          base_name);
+}
+
 SqlSharedCacheIsolatedDatabase::SqlSharedCacheIsolatedDatabase(
     std::string nik_string,
     const base::FilePath& directory,
-    SqlSharedCacheDbId shared_cache_db_id)
+    SqlSharedCacheDbId shared_cache_db_id,
+    scoped_refptr<base::SequencedTaskRunner> task_runner,
+    scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor)
     : nik_string_(std::move(nik_string)),
-      db_assets_(DatabaseAssets::MaybeCreate(directory, shared_cache_db_id)) {}
+      db_assets_(DatabaseAssets::MaybeCreate(directory, shared_cache_db_id)),
+      task_runner_(std::move(task_runner)),
+      read_cache_memory_monitor_(std::move(read_cache_memory_monitor)) {
+  CHECK(task_runner_);
+}
 
 SqlSharedCacheIsolatedDatabase::~SqlSharedCacheIsolatedDatabase() = default;
 
@@ -123,13 +143,20 @@ SqlSharedCacheIsolatedDatabase::GetSharedReadOnlyConnection() {
   return std::move(*pending_file_set);
 }
 
-void SqlSharedCacheIsolatedDatabase::SetSimulateDbFailureForTesting(bool fail) {
-  simulate_db_failure_ = fail;
+void SqlSharedCacheIsolatedDatabase::
+    SetSimulateDbFailureCallbackForTesting(  // IN-TEST
+        SimFailedCallback callback) {
+  simulate_db_failure_callback_ = std::move(callback);
+}
+
+bool SqlSharedCacheIsolatedDatabase::ShouldSimulateFailure(
+    OperationForTesting op) const {
+  return simulate_db_failure_callback_ && simulate_db_failure_callback_.Run(op);
 }
 
 base::expected<void, SqlSharedCacheIsolatedDatabase::Error>
 SqlSharedCacheIsolatedDatabase::Init() {
-  if (simulate_db_failure_) {
+  if (ShouldSimulateFailure(OperationForTesting::kInit)) {
     return base::unexpected(Error::kFailedForTesting);
   }
   if (!db_assets_) {
@@ -204,6 +231,9 @@ SqlSharedCacheIsolatedDatabase::Insert(const CacheEntryKey& entry_key,
                                        scoped_refptr<net::IOBuffer> headers,
                                        uint32_t total_body_size,
                                        scoped_refptr<net::IOBuffer> body) {
+  if (ShouldSimulateFailure(OperationForTesting::kInsert)) {
+    return base::unexpected(Error::kFailedForTesting);
+  }
   if (!db_assets_ || !db_assets_->db().is_open()) {
     return base::unexpected(Error::kDatabaseNotOpen);
   }
@@ -284,6 +314,9 @@ SqlSharedCacheIsolatedDatabase::WriteBodyInternal(
     scoped_refptr<net::IOBuffer> buffer,
     bool set_ready,
     bool in_transaction) {
+  if (ShouldSimulateFailure(OperationForTesting::kWriteBody)) {
+    return base::unexpected(Error::kFailedForTesting);
+  }
   if (!db_assets_ || !db_assets_->db().is_open()) {
     return base::unexpected(Error::kDatabaseNotOpen);
   }
@@ -330,21 +363,94 @@ SqlSharedCacheIsolatedDatabase::WriteBodyInternal(
   return base::ok();
 }
 
-SqlSharedCacheIsolatedDatabase::ReadResultOrError
-SqlSharedCacheIsolatedDatabase::Read(const CacheEntryKey& entry_key,
-                                     SqlSharedCacheRowId shared_cache_row_id,
-                                     int offset,
-                                     scoped_refptr<net::IOBuffer> buffer) {
+SqlSharedCacheIsolatedDatabase::SqlSharedCacheBlobHandleImpl::
+    SqlSharedCacheBlobHandleImpl(
+        base::OnceClosure decrement_closure,
+        scoped_refptr<base::SequencedTaskRunner> task_runner)
+    : decrement_closure_(std::move(decrement_closure)),
+      task_runner_(std::move(task_runner)) {}
+
+SqlSharedCacheIsolatedDatabase::SqlSharedCacheBlobHandleImpl::
+    ~SqlSharedCacheBlobHandleImpl() {
+  task_runner_->PostTask(FROM_HERE, std::move(decrement_closure_));
+}
+
+SqlSharedCacheIsolatedDatabase::BlobHandleHolder::BlobHandleHolder(
+    sql::StreamingBlobHandle blob_handle,
+    const CacheEntryKey& entry_key,
+    int body_size)
+    : blob_handle_(std::move(blob_handle)),
+      entry_key_(entry_key),
+      body_size_(body_size) {}
+
+SqlSharedCacheIsolatedDatabase::BlobHandleHolder::~BlobHandleHolder() = default;
+
+base::expected<scoped_refptr<SqlSharedCacheBlobHandle>,
+               SqlSharedCacheIsolatedDatabase::Error>
+SqlSharedCacheIsolatedDatabase::GetBlobHandle(
+    const CacheEntryKey& entry_key,
+    SqlSharedCacheRowId shared_cache_row_id,
+    int body_size) {
+  if (ShouldSimulateFailure(OperationForTesting::kRead)) {
+    return base::unexpected(Error::kFailedForTesting);
+  }
   if (!db_assets_ || !db_assets_->db().is_open()) {
     return base::unexpected(Error::kDatabaseNotOpen);
   }
-  CHECK(buffer);
-  const int buf_len = buffer->size();
-  CHECK_GE(buf_len, 0);
-  if (offset < 0 || buf_len > std::numeric_limits<int32_t>::max() - offset) {
-    return base::unexpected(Error::kInvalidReadRange);
+  ASSIGN_OR_RETURN(
+      auto* blob_handle_holder,
+      GetCachedBlobHandleHolder(entry_key, shared_cache_row_id, body_size));
+  if (blob_handle_holder) {
+    blob_handle_holder->IncrementRefCount();
+    return base::MakeRefCounted<SqlSharedCacheBlobHandleImpl>(
+        base::BindOnce(
+            &SqlSharedCacheIsolatedDatabase::DecrementBlobHandleRefCount,
+            weak_factory_.GetWeakPtr(), shared_cache_row_id),
+        task_runner_);
   }
 
+  ASSIGN_OR_RETURN(
+      auto streaming_blob_handle,
+      GetStreamingBlobHandle(entry_key, shared_cache_row_id, body_size));
+  blob_handle_holders_.try_emplace(
+      shared_cache_row_id,
+      std::make_unique<BlobHandleHolder>(std::move(streaming_blob_handle),
+                                         entry_key, body_size));
+
+  return base::MakeRefCounted<SqlSharedCacheBlobHandleImpl>(
+      base::BindOnce(
+          &SqlSharedCacheIsolatedDatabase::DecrementBlobHandleRefCount,
+          weak_factory_.GetWeakPtr(), shared_cache_row_id),
+      task_runner_);
+}
+
+base::expected<SqlSharedCacheIsolatedDatabase::BlobHandleHolder*,
+               SqlSharedCacheIsolatedDatabase::Error>
+SqlSharedCacheIsolatedDatabase::GetCachedBlobHandleHolder(
+    const CacheEntryKey& entry_key,
+    SqlSharedCacheRowId shared_cache_row_id,
+    int body_size) {
+  auto it = blob_handle_holders_.find(shared_cache_row_id);
+  if (it == blob_handle_holders_.end()) {
+    return nullptr;
+  }
+  if (it->second->resource_url() != entry_key.resource_url()) {
+    return base::unexpected(Error::kEntryNotFound);
+  }
+  if (it->second->body_size() != body_size) {
+    return base::unexpected(Error::kBodySizeMismatch);
+  }
+  return it->second.get();
+}
+
+base::expected<sql::StreamingBlobHandle, SqlSharedCacheIsolatedDatabase::Error>
+SqlSharedCacheIsolatedDatabase::GetStreamingBlobHandle(
+    const CacheEntryKey& entry_key,
+    SqlSharedCacheRowId shared_cache_row_id,
+    int body_size) {
+  if (!db_assets_ || !db_assets_->db().is_open()) {
+    return base::unexpected(Error::kDatabaseNotOpen);
+  }
   {
     sql::Statement statement(db_assets_->db().GetCachedStatement(
         SQL_FROM_HERE,
@@ -362,18 +468,173 @@ SqlSharedCacheIsolatedDatabase::Read(const CacheEntryKey& entry_key,
                        "resources", "body", shared_cache_row_id.value(),
                        /*readonly=*/true),
                    [] { return Error::kFailedToGetBlob; });
+  if (blob_handle.GetSize() != body_size) {
+    return base::unexpected(Error::kBodySizeMismatch);
+  }
+  return blob_handle;
+}
 
-  if (!blob_handle.Read(offset, buffer->span())) {
+void SqlSharedCacheIsolatedDatabase::DecrementBlobHandleRefCount(
+    SqlSharedCacheRowId shared_cache_row_id) {
+  auto it = blob_handle_holders_.find(shared_cache_row_id);
+  if (it == blob_handle_holders_.end()) {
+    return;
+  }
+  CHECK(it->second);
+  it->second->DecrementRefCount();
+  if (it->second->ref_count() == 0) {
+    blob_handle_holders_.erase(it);
+  }
+}
+
+SqlSharedCacheIsolatedDatabase::ReadResultOrError
+SqlSharedCacheIsolatedDatabase::Read(const CacheEntryKey& entry_key,
+                                     SqlSharedCacheRowId shared_cache_row_id,
+                                     int body_size,
+                                     int offset,
+                                     scoped_refptr<net::IOBuffer> buffer) {
+  if (ShouldSimulateFailure(OperationForTesting::kRead)) {
+    return base::unexpected(Error::kFailedForTesting);
+  }
+  if (!db_assets_ || !db_assets_->db().is_open()) {
+    return base::unexpected(Error::kDatabaseNotOpen);
+  }
+  CHECK(buffer);
+  const int buf_len = buffer->size();
+  CHECK_GE(buf_len, 0);
+  CHECK_GE(body_size, 0);
+  if (offset < 0 || buf_len > std::numeric_limits<int32_t>::max() - offset ||
+      offset + buf_len > body_size) {
+    return base::unexpected(Error::kInvalidReadRange);
+  }
+
+  std::optional<sql::StreamingBlobHandle> new_blob_handle;
+  sql::StreamingBlobHandle* blob_handle_ptr = nullptr;
+
+  ASSIGN_OR_RETURN(
+      auto* blob_handle_holder,
+      GetCachedBlobHandleHolder(entry_key, shared_cache_row_id, body_size));
+  if (blob_handle_holder) {
+    blob_handle_ptr = &blob_handle_holder->blob_handle();
+  }
+
+  if (!blob_handle_ptr) {
+    ASSIGN_OR_RETURN(
+        new_blob_handle,
+        GetStreamingBlobHandle(entry_key, shared_cache_row_id, body_size));
+    if (new_blob_handle.has_value()) {
+      blob_handle_ptr = &new_blob_handle.value();
+    }
+  }
+  if (!blob_handle_ptr) {
+    return base::unexpected(Error::kFailedToGetBlob);
+  }
+
+  if (!blob_handle_ptr->Read(offset, buffer->span())) {
     return base::unexpected(Error::kFailedToReadBlob);
   }
 
   ReadResult read_result;
   read_result.read_bytes = buf_len;
+
+  int64_t read_end = static_cast<int64_t>(offset) + buf_len;
+  if (read_end < static_cast<int64_t>(body_size) &&
+      read_cache_memory_monitor_) {
+    const int64_t remaining_bytes = static_cast<int64_t>(body_size) - read_end;
+    const int cache_size = base::saturated_cast<int>(remaining_bytes);
+    if (read_cache_memory_monitor_->Allocate(cache_size)) {
+      auto cache_buffer = base::MakeRefCounted<MonitoredVectorIOBuffer>(
+          cache_size, read_cache_memory_monitor_);
+      if (blob_handle_ptr->Read(read_end, cache_buffer->span())) {
+        read_result.cache_buffer = std::move(cache_buffer);
+        read_result.cache_buffer_offset = read_end;
+      }
+    }
+  }
+
   return read_result;
 }
 
+void SqlSharedCacheIsolatedDatabase::DeleteEntry(
+    SqlSharedCacheRowId shared_cache_row_id) {
+  if (ShouldSimulateFailure(OperationForTesting::kDeleteEntry)) {
+    return;
+  }
+  if (!db_assets_ || !db_assets_->db().is_open()) {
+    return;
+  }
+  sql::Statement statement(db_assets_->db().GetCachedStatement(
+      SQL_FROM_HERE,
+      GetSharedCacheIsolatedDatabaseQuery(
+          SharedCacheIsolatedDatabaseQuery::kDeleteResourceByRowId)));
+  statement.BindInt64(0, shared_cache_row_id.value());
+  statement.Run();
+}
+
+base::expected<void, SqlSharedCacheIsolatedDatabase::Error>
+SqlSharedCacheIsolatedDatabase::DeleteEntries(
+    const std::vector<SqlSharedCacheRowId>& shared_cache_row_ids) {
+  CHECK(!shared_cache_row_ids.empty());
+  if (ShouldSimulateFailure(OperationForTesting::kDeleteEntries)) {
+    return base::unexpected(Error::kFailedForTesting);
+  }
+  if (!db_assets_ || !db_assets_->db().is_open()) {
+    return base::unexpected(Error::kDatabaseNotOpen);
+  }
+  sql::Database& db = db_assets_->db();
+  sql::Transaction transaction(&db);
+  if (!transaction.Begin()) {
+    return base::unexpected(Error::kFailedToStartTransaction);
+  }
+
+  for (auto row_id : shared_cache_row_ids) {
+    sql::Statement statement(db.GetCachedStatement(
+        SQL_FROM_HERE,
+        GetSharedCacheIsolatedDatabaseQuery(
+            SharedCacheIsolatedDatabaseQuery::kDeleteResourceByRowId)));
+    statement.BindInt64(0, row_id.value());
+    statement.Run();
+  }
+
+  if (!transaction.Commit()) {
+    return base::unexpected(Error::kFailedToCommitTransaction);
+  }
+
+  // TODO(crbug.com/473666511): Autovacuum is disabled on Desktop, so we need
+  // to run VACUUM manually at some point. However, running it here might
+  // cause performance issues. Figure out a better timing/strategy to run it.
+
+  return base::ok();
+}
+
 void SqlSharedCacheIsolatedDatabase::Cleanup() {
+  if (db_assets_ && db_assets_->db().is_open()) {
+    bool has_entries = false;
+    {
+      sql::Statement count_statement(db_assets_->db().GetCachedStatement(
+          SQL_FROM_HERE,
+          GetSharedCacheIsolatedDatabaseQuery(
+              SharedCacheIsolatedDatabaseQuery::kSelectRowidLimit1)));
+      has_entries = count_statement.Step();
+    }
+    if (!has_entries) {
+      db_assets_->AbandonAndDeleteFiles();
+    }
+  }
   db_assets_.reset();
+}
+
+bool SqlSharedCacheIsolatedDatabase::HasRowForTesting(  // IN-TEST
+    SqlSharedCacheRowId shared_cache_row_id) {
+  if (!db_assets_ || !db_assets_->db().is_open()) {
+    return false;
+  }
+  sql::Statement statement(db_assets_->db().GetCachedStatement(
+      SQL_FROM_HERE,
+      GetSharedCacheIsolatedDatabaseQuery(
+          SharedCacheIsolatedDatabaseQuery::kSelectUrlAndReadyByRowId)));
+  statement.BindInt64(0, shared_cache_row_id.value());
+  return statement.Step();
 }
 
 }  // namespace disk_cache

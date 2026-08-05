@@ -22,16 +22,13 @@ class CobrowseBrowserAgent : public BrowserUserData<CobrowseBrowserAgent>,
    public:
     virtual ~UIStateProvider() = default;
 
-    virtual bool IsTabGridVisible() = 0;
+    virtual bool IsAssistantHiddenByUIState(web::WebState* web_state) = 0;
   };
 
   ~CobrowseBrowserAgent() override;
 
   // Sets the provider for UI state information.
   void SetUIStateProvider(UIStateProvider* provider);
-
-  // Sets the context for the Cobrowse flow.
-  void SetCobrowseContext(CobrowseContext* context);
 
   // Returns the current Cobrowse context.
   CobrowseContext* GetCobrowseContext();
@@ -41,7 +38,11 @@ class CobrowseBrowserAgent : public BrowserUserData<CobrowseBrowserAgent>,
   void ConfigureAssistantContextForWebState(web::WebState* web_state) override;
   bool IsSessionActive() override;
   void SetSessionActive(bool active) override;
-  bool IsTabGridVisible() override;
+  bool ShouldHideAssistantForWebState(web::WebState* web_state) override;
+  void SetCobrowseContext(CobrowseContext* context) override;
+
+  // Terminates the cobrowse session and hides the assistant.
+  void TerminateSession();
 
   // TabsDependencyInstaller:
   void OnWebStateInserted(web::WebState* web_state) override;

@@ -29,6 +29,10 @@ struct FloatingEmbedderKey {
   auto operator<=>(const FloatingEmbedderKey&) const = default;
 };
 
+struct TabEmbedderKey {
+  auto operator<=>(const TabEmbedderKey&) const = default;
+};
+
 struct SidePanelEmbedderKey {
   explicit SidePanelEmbedderKey(tabs::TabInterface& tab) : tab(tab) {}
   explicit SidePanelEmbedderKey(tabs::TabInterface* tab)
@@ -41,7 +45,8 @@ struct SidePanelEmbedderKey {
 };
 
 // A key representing a unique embedder.
-using EmbedderKey = std::variant<SidePanelEmbedderKey, FloatingEmbedderKey>;
+using EmbedderKey =
+    std::variant<TabEmbedderKey, SidePanelEmbedderKey, FloatingEmbedderKey>;
 std::string DescribeEmbedderKeyForTesting(const EmbedderKey& key);
 
 enum class EmbedderCloseReason {
@@ -71,7 +76,20 @@ struct FloatingShowOptions {
   mojom::WebClientMode initial_mode = mojom::WebClientMode::kUnknown;
 };
 
-using EmbedderOptions = std::variant<SidePanelShowOptions, FloatingShowOptions>;
+struct TabShowOptions {
+  TabShowOptions();
+  explicit TabShowOptions(tabs::TabInterface& bound_tab);
+  explicit TabShowOptions(tabs::TabHandle bound_tab_handle);
+  TabShowOptions(const TabShowOptions&);
+  TabShowOptions(TabShowOptions&&);
+  TabShowOptions& operator=(const TabShowOptions&);
+  ~TabShowOptions();
+
+  tabs::TabHandle tab_handle = tabs::TabHandle::Null();
+};
+
+using EmbedderOptions =
+    std::variant<SidePanelShowOptions, FloatingShowOptions, TabShowOptions>;
 struct ShowOptions {
   explicit ShowOptions(EmbedderOptions panel_options);
   explicit ShowOptions(EmbedderOptions panel_options, bool focus);
@@ -96,6 +114,7 @@ struct ShowOptions {
   static ShowOptions ForSidePanel(tabs::TabInterface& bound_tab,
                                   GlicPinTrigger pin_trigger,
                                   mojom::InvocationSource invocation_source);
+  static ShowOptions ForTab(tabs::TabInterface& bound_tab);
 
   // Shared show options
   bool focus_on_show = false;
@@ -104,6 +123,7 @@ struct ShowOptions {
   mojom::InvocationSource invocation_source =
       mojom::InvocationSource::kUnsupported;
   mojom::FreOverride fre_override = mojom::FreOverride::kUnspecified;
+  bool propagate_to_group = true;
 
   // Container for options that are different between side panel and floaty.
   EmbedderOptions embedder_options;
@@ -116,20 +136,24 @@ inline EmbedderKey GetEmbedderKey(const ShowOptions& options) {
                      },
                      [](const FloatingShowOptions& opts) -> EmbedderKey {
                        return FloatingEmbedderKey();
+                     },
+                     [](const TabShowOptions& opts) -> EmbedderKey {
+                       return TabEmbedderKey{};
                      }},
       options.embedder_options);
 }
-
 inline tabs::TabInterface* GetTabFromEmbedderKey(const EmbedderKey& key) {
   return std::visit(
-      absl::Overload{[](const SidePanelEmbedderKey& key)
-                         -> tabs::TabInterface* { return &key.tab.get(); },
-                     [](const FloatingEmbedderKey&) -> tabs::TabInterface* {
-                       return nullptr;
-                     }},
+      absl::Overload{
+          [](const SidePanelEmbedderKey& key) -> tabs::TabInterface* {
+            return &key.tab.get();
+          },
+          [](const FloatingEmbedderKey&) -> tabs::TabInterface* {
+            return nullptr;
+          },
+          [](const TabEmbedderKey&) -> tabs::TabInterface* { return nullptr; }},
       key);
 }
-
 }  // namespace glic
 
 #endif  // CHROME_BROWSER_GLIC_SERVICE_GLIC_UI_TYPES_H_

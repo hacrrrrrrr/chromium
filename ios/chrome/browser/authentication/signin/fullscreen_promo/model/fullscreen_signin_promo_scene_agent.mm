@@ -18,15 +18,15 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/promos_manager/model/constants.h"
 #import "ios/chrome/browser/promos_manager/model/promos_manager.h"
+#import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider_interface.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
 
-@interface FullscreenSigninPromoSceneAgent () <
-    IdentityManagerObserverBridgeDelegate,
-    ProfileStateObserver>
+@interface FullscreenSigninPromoSceneAgent () <IdentityManagerObserving,
+                                               ProfileStateObserver>
 @end
 
 @implementation FullscreenSigninPromoSceneAgent {
@@ -129,9 +129,9 @@
   _promosManager->DeregisterPromo(promos_manager::Promo::FullscreenSignin);
 }
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
-- (void)onPrimaryAccountChanged:
+- (void)primaryAccountDidChange:
     (const signin::PrimaryAccountChangeEvent&)event {
   if (_authService->HasPrimaryIdentity()) {
     history_sync::HistorySyncSkipReason skipReason =
@@ -145,8 +145,8 @@
   }
 }
 
-- (void)onIdentityManagerShutdown:(signin::IdentityManager*)identityManager {
-  NOTREACHED(base::NotFatalUntil::M142);
+- (void)identityManagerDidShutdown:(signin::IdentityManager*)identityManager {
+  NOTREACHED();
 }
 
 @end

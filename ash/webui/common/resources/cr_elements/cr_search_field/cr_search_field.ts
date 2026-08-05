@@ -53,13 +53,13 @@ export class CrSearchFieldElement extends CrSearchFieldElementBase {
     };
   }
 
-  override autofocus: boolean;
+  declare autofocus: boolean;
 
   override getSearchInput(): CrInputElement {
     return this.$.searchInput;
   }
 
-  private onTapClear_() {
+  protected onTapClear_() {
     this.setValue('');
     setTimeout(() => {
       this.$.searchInput.focus();

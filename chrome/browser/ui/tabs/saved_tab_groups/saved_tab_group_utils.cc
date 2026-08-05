@@ -57,6 +57,7 @@
 #include "components/sync/service/sync_service.h"
 #include "components/sync/service/sync_user_settings.h"
 #include "components/tab_groups/tab_group_id.h"
+#include "components/tabs/public/tab_interface.h"
 #include "components/user_education/common/help_bubble/help_bubble_params.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/base_window.h"
@@ -74,7 +75,7 @@ GetSharedTabGroupRecallTypeMetric(
           SharedTabGroupRecallTypeDesktop::kOpenedFromSubmenuFromBookmarksBar;
     case tab_groups::TabGroupMenuContext::SAVED_TAB_GROUP_EVERYTHING_MENU:
       return tab_groups::saved_tab_groups::metrics::
-          SharedTabGroupRecallTypeDesktop::kOpenedFromSubmenuFromEverythingMenu;
+          SharedTabGroupRecallTypeDesktop::kOpenedFromEverythingMenu;
     case tab_groups::TabGroupMenuContext::APP_MENU:
       return tab_groups::saved_tab_groups::metrics::
           SharedTabGroupRecallTypeDesktop::kOpenedFromSubmenuFromAppMenu;
@@ -483,16 +484,6 @@ SavedTabGroupUtils::OpenSavedTabGroup(BrowserWindowInterface* browser,
           saved_group_guid, std::make_unique<TabGroupActionContextDesktop>(
                                 browser_ptr, opening_source));
 
-  if (opened_group_id.has_value() &&
-      base::FeatureList::IsEnabled(features::kTabGroupsFocusing) &&
-      features::kTabGroupsFocusingDefaultToFocused.Get()) {
-    if (browser) {
-      if (auto* model = browser->GetTabStripModel()) {
-        model->SetFocusedGroup(opened_group_id.value());
-      }
-    }
-  }
-
   return opened_group_id;
 }
 
@@ -558,24 +549,6 @@ TabGroup* SavedTabGroupUtils::GetTabGroupWithId(
 }
 
 // static
-std::vector<content::WebContents*> SavedTabGroupUtils::GetWebContentsesInGroup(
-    tab_groups::TabGroupId group_id) {
-  Browser* browser = GetBrowserWithTabGroupId(group_id);
-  if (!browser) {
-    return {};
-  }
-
-  const gfx::Range local_tab_group_indices =
-      SavedTabGroupUtils::GetTabGroupWithId(group_id)->ListTabs();
-  std::vector<content::WebContents*> contentses;
-  for (size_t index = local_tab_group_indices.start();
-       index < local_tab_group_indices.end(); index++) {
-    contentses.push_back(browser->tab_strip_model()->GetWebContentsAt(index));
-  }
-  return contentses;
-}
-
-// static
 std::vector<tabs::TabInterface*> SavedTabGroupUtils::GetTabsInGroup(
     tab_groups::TabGroupId group_id) {
   Browser* browser = GetBrowserWithTabGroupId(group_id);
@@ -608,12 +581,12 @@ SavedTabGroup SavedTabGroupUtils::CreateSavedTabGroupFromLocalId(
       tab_groups::SavedTabGroupUtils::ShouldAutoPinNewTabGroups(
           browser->GetProfile()));
 
-  const std::vector<content::WebContents*>& web_contentses =
-      tab_groups::SavedTabGroupUtils::GetWebContentsesInGroup(local_id);
-  for (content::WebContents* web_contents : web_contentses) {
+  const std::vector<tabs::TabInterface*>& tabs =
+      tab_groups::SavedTabGroupUtils::GetTabsInGroup(local_id);
+  for (tabs::TabInterface* tab : tabs) {
     tab_groups::SavedTabGroupTab saved_tab_group_tab =
         tab_groups::SavedTabGroupUtils::CreateSavedTabGroupTabFromWebContents(
-            web_contents, saved_tab_group.saved_guid());
+            tab->GetContents(), saved_tab_group.saved_guid());
     saved_tab_group.AddTabLocally(std::move(saved_tab_group_tab));
   }
 
@@ -645,8 +618,9 @@ void SavedTabGroupUtils::FocusFirstTabOrWindowInOpenGroup(
     return;
   }
 
-  browser_for_activation->ActivateContents(
-      tab_group->GetFirstTab()->GetContents());
+  if (auto* delegate = tab_group->GetFirstTab()->GetContents()->GetDelegate()) {
+    delegate->ActivateContents(tab_group->GetFirstTab()->GetContents());
+  }
 
   base::RecordAction(
       base::UserMetricsAction("TabGroups_SavedTabGroups_Focused"));
@@ -713,8 +687,6 @@ bool SavedTabGroupUtils::SupportsSharedTabGroups() {
 // static
 bool SavedTabGroupUtils::IsOwnerOfSharedTabGroup(Profile* profile,
                                                  const base::Uuid& sync_id) {
-  // TODO(380515575): Create a function to determine if the user is signed in or
-  // not instead of checking here.
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
 
@@ -912,12 +884,6 @@ void SavedTabGroupUtils::PerformTabGroupMenuAction(
       break;
     case TabGroupMenuAction::Type::LEAVE_GROUP:
       SavedTabGroupUtils::LeaveSharedGroup(browser, uuid);
-      break;
-    case TabGroupMenuAction::Type::CONVERT_TO_BOOKMARK:
-      if (std::optional<tab_groups::SavedTabGroup> group =
-              tab_group_service->GetGroup(uuid)) {
-        bookmarks::ShowBookmarkSavedTabGroupDialog(browser, group.value());
-      }
       break;
     case TabGroupMenuAction::Type::OPEN_URL:
     case TabGroupMenuAction::Type::DEFAULT:

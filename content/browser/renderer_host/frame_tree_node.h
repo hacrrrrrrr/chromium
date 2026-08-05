@@ -26,6 +26,7 @@
 #include "content/common/content_export.h"
 #include "content/public/browser/frame_type.h"
 #include "content/public/browser/navigation_discard_reason.h"
+#include "services/network/public/cpp/connection_allowlist.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "services/network/public/mojom/content_security_policy.mojom-forward.h"
 #include "services/network/public/mojom/referrer_policy.mojom-forward.h"
@@ -304,25 +305,14 @@ class CONTENT_EXPORT FrameTreeNode : public RenderFrameHostOwner {
   const network::mojom::ContentSecurityPolicy* csp_attribute() const {
     return attributes_->parsed_csp_attribute.get();
   }
-  // Tracks iframe's 'browsingtopics' attribute, indicating whether the
-  // navigation requests on this frame should calculate and send the
-  // `Sec-Browsing-Topics` header.
-  bool browsing_topics() const { return attributes_->browsing_topics; }
-
-  // Tracks iframe's 'adauctionheaders' attribute, indicating whether the
-  // navigation request on this frame should calculate and send the
-  // 'Sec-Ad-Auction-Fetch` header.
-  bool ad_auction_headers() const { return attributes_->ad_auction_headers; }
-
-  // Tracks iframe's 'sharedstoragewritable' attribute, indicating what value
-  // the the corresponding
-  // `network::ResourceRequest::shared_storage_writable_eligible` should take
-  // for the navigation(s) on this frame, pending a permissions policy check. If
-  // true, and if the permissions policy check returns "enabled", the network
-  // service will send the `Shared-Storage-Write` request header.
-  bool shared_storage_writable_opted_in() const {
-    return attributes_->shared_storage_writable_opted_in;
+  // Reflects the iframe's 'connectionallowlist' attribute, parsed (in the
+  // renderer) into a ConnectionAllowlist for Connection-Allowlist embedded
+  // enforcement. Null when the attribute is unset.
+  const std::optional<network::ConnectionAllowlist>&
+  connection_allowlist_attribute() const {
+    return attributes_->required_connection_allowlist;
   }
+
   const std::optional<std::string> html_id() const { return attributes_->id; }
   // This tracks iframe's 'name' attribute instead of window.name, which is
   // tracked in FrameReplicationState. See the comment for frame_name() for

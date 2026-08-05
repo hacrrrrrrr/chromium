@@ -134,8 +134,7 @@ class TestMediaRouter : public media_router::MockMediaRouter {
 class MediaDialogViewBrowserTest : public InProcessBrowserTest {
  public:
   MediaDialogViewBrowserTest() {
-    feature_list_.InitWithFeatures({feature_engagement::kIPHLiveCaptionFeature,
-                                    media::kFeatureManagementLiveTranslateCrOS},
+    feature_list_.InitWithFeatures({media::kFeatureManagementLiveTranslateCrOS},
                                    {});
   }
 
@@ -777,8 +776,8 @@ IN_PROC_BROWSER_TEST_F(MediaDialogViewBrowserTest, MAYBE_LiveCaption) {
   // Close dialog and enable live caption preference. Reopen dialog.
   ui_.ClickToolbarIcon();
   EXPECT_FALSE(ui_.IsDialogVisible());
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
-                                               true);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
+                                                  true);
   ui_.ClickToolbarIcon();
   EXPECT_TRUE(ui_.WaitForDialogOpened());
   EXPECT_TRUE(ui_.IsDialogVisible());
@@ -918,8 +917,8 @@ IN_PROC_BROWSER_TEST_F(MediaDialogViewBrowserTest,
   // Close dialog and change live caption language. Reopen dialog.
   ui_.ClickToolbarIcon();
   EXPECT_FALSE(ui_.IsDialogVisible());
-  browser()->profile()->GetPrefs()->SetString(prefs::kLiveCaptionLanguageCode,
-                                              "de-DE");
+  browser()->GetProfile()->GetPrefs()->SetString(
+      prefs::kLiveCaptionLanguageCode, "de-DE");
   ui_.ClickToolbarIcon();
   EXPECT_TRUE(ui_.WaitForDialogOpened());
   EXPECT_TRUE(ui_.IsDialogVisible());

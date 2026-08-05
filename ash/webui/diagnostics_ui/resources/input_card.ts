@@ -78,12 +78,12 @@ export class InputCardElement extends InputCardElementBase {
     };
   }
 
-  deviceType: InputCardType;
-  devices: KeyboardInfo[]|TouchDeviceInfo[];
-  hostDeviceStatus: HostDeviceStatus;
+  declare deviceType: InputCardType;
+  declare devices: KeyboardInfo[]|TouchDeviceInfo[];
+  declare hostDeviceStatus: HostDeviceStatus;
 
-  private deviceIcon: string;
-  private inputDataProvider: InputDataProviderInterface =
+  declare private deviceIcon: string;
+  private readonly inputDataProvider: InputDataProviderInterface =
       getInputDataProvider();
 
   private computeDeviceIcon(deviceType: InputCardType): string {

@@ -24,7 +24,7 @@
 #include "chrome/browser/actor/execution_engine.h"
 #include "chrome/browser/actor/tab_observation_strategy.h"
 #include "chrome/browser/actor/ui/event_dispatcher.h"
-#include "chrome/browser/glic/public/glic_actuation_tracker.h"
+#include "chrome/browser/glic/public/glic_perf_traits_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/actor.mojom-forward.h"
 #include "chrome/common/actor/action_result.h"
@@ -139,14 +139,16 @@ void ActorTask::ActorControlledTabState::OnVisibilityChanged(
   task->RecomputeHasVisibleTab();
 }
 
-ActorTask::ActorTask(base::PassKey<ActorKeyedService, ActorTask>,
-                     ActorKeyedService& service,
-                     TaskId id,
-                     std::unique_ptr<ui::UiEventDispatcher> ui_event_dispatcher,
-                     webui::mojom::TaskOptionsPtr options,
-                     const TaskSourceInfo& source_info,
-                     const EnterprisePolicyChecker* policy_checker,
-                     base::WeakPtr<ActorTaskDelegate> delegate)
+ActorTask::ActorTask(
+    base::PassKey<ActorKeyedService, ActorTask>,
+    ActorKeyedService& service,
+    TaskId id,
+    std::unique_ptr<ui::UiEventDispatcher> ui_event_dispatcher,
+    webui::mojom::TaskOptionsPtr options,
+    const TaskSourceInfo& source_info,
+    const EnterprisePolicyChecker* policy_checker,
+    base::WeakPtr<ActorTaskDelegate> delegate,
+    std::optional<glic::mojom::InvocationSource> initial_invocation_source)
     : service_(service),
       id_(id),
       source_info_(source_info),
@@ -164,6 +166,7 @@ ActorTask::ActorTask(base::PassKey<ActorKeyedService, ActorTask>,
       feature_mode_(options && options->feature_mode.has_value()
                         ? options->feature_mode.value()
                         : glic::mojom::FeatureMode::kUnspecified),
+      initial_invocation_source_(initial_invocation_source),
       policy_checker_(*policy_checker),
       delegate_(std::move(delegate)),
       ui_weak_ptr_factory_(ui_event_dispatcher_.get()) {
@@ -186,10 +189,12 @@ std::unique_ptr<ActorTask> ActorTask::CreateForTesting(
     webui::mojom::TaskOptionsPtr options,
     const TaskSourceInfo& source_info,
     const EnterprisePolicyChecker* policy_checker,
-    base::WeakPtr<ActorTaskDelegate> delegate) {
+    base::WeakPtr<ActorTaskDelegate> delegate,
+    std::optional<glic::mojom::InvocationSource> initial_invocation_source) {
   return std::make_unique<ActorTask>(
       base::PassKey<ActorTask>(), service, id, std::move(ui_event_dispatcher),
-      std::move(options), source_info, policy_checker, std::move(delegate));
+      std::move(options), source_info, policy_checker, std::move(delegate),
+      initial_invocation_source);
 }
 
 ExecutionEngine& ActorTask::GetExecutionEngine() const {
@@ -312,7 +317,7 @@ void ActorTask::SetState(State new_state) {
     RecordActorTaskCompletion(
         stopped_reason_.value(), base::TimeTicks::Now() - create_time_,
         total_actor_controlled_active_time_, total_number_of_interruptions_,
-        total_number_of_actions_);
+        total_number_of_actions_, initial_invocation_source_);
   }
 }
 
@@ -885,7 +890,7 @@ void ActorTask::DidContentsEnterActorControl(
   // prioritization of the renderer process. This will prevent the priority of
   // the tab from dropping to BestEffort when it's not visible. When it is
   // visible, the tab's priority is already boosted.
-  glic::GlicActuationTracker::GetInstance()->NotifyActuatingChanged(
+  glic::GlicPerfTraitsTracker::GetInstance()->NotifyActuationStateChanged(
       contents, glic::GlicActuationState::kActuatingOnBackgroundTab);
 #if BUILDFLAG(IS_MAC) && BUILDFLAG(USE_EXTERNAL_POPUP_MENU)
   if (base::FeatureList::IsEnabled(features::kGlicActorInternalPopups)) {
@@ -919,7 +924,7 @@ void ActorTask::DidTabExitActorControl(tabs::TabHandle handle) {
 void ActorTask::DidContentsExitActorControl(
     ActorTask::ActorControlledTabState* state,
     content::WebContents* contents) {
-  glic::GlicActuationTracker::GetInstance()->NotifyActuatingChanged(
+  glic::GlicPerfTraitsTracker::GetInstance()->NotifyActuationStateChanged(
       contents, glic::GlicActuationState::kNone);
   SetFocusState(contents, std::nullopt);
   state->SetContents(nullptr);

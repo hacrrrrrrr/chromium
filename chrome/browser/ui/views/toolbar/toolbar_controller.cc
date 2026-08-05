@@ -273,14 +273,15 @@ ToolbarController::GetDefaultResponsiveElements(Browser* browser) {
   };
 
   // Support actions items.
-  const auto* const browser_actions = browser->browser_actions();
+  const auto* const browser_actions = BrowserActions::From(browser);
   if (browser_actions) {
     auto* root_item = browser_actions->root_action_item();
     if (root_item) {
       PinnedToolbarActionsModel* const pinned_actions_model =
           PinnedToolbarActionsModel::Get(browser->GetProfile());
       for (const auto& item : root_item->GetChildren().children()) {
-        auto id = item->GetActionId();
+        auto* action_item = item->GetActionItem();
+        auto id = action_item->GetActionId();
         // Add an item if it is pinnable and/or pinned. The tab search item may
         // be pinned but not pinnable in the event of a race condition after
         // action item initialization but before the bubble host has been
@@ -833,11 +834,8 @@ void ToolbarController::ExecuteCommand(int command_id, int event_flags) {
           [&, this](actions::ActionId id) {
             pinned_actions_delegate_->GetActionItemFor(id)->InvokeAction(
                 actions::ActionInvocationContext::Builder()
-                    .SetProperty(
-                        kSidePanelOpenTriggerKey,
-                        static_cast<
-                            std::underlying_type_t<SidePanelOpenTrigger>>(
-                            SidePanelOpenTrigger::kOverflowMenu))
+                    .SetProperty(kSidePanelOpenTriggerKey,
+                                 SidePanelOpenTrigger::kOverflowMenu)
                     .Build());
             action_key.emplace<actions::ActionId>(id);
           },

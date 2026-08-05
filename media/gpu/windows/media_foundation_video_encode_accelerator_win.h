@@ -269,6 +269,9 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   std::unique_ptr<MediaLog> media_log_;
 
+  // Helper for accessing shared textures
+  scoped_refptr<CommandBufferHelper> command_buffer_helper_;
+
   // Bitstream buffers ready to be used to return encoded output as a FIFO.
   base::circular_deque<std::unique_ptr<BitstreamBufferRef>>
       bitstream_buffer_queue_;
@@ -354,8 +357,8 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
   // Variables used by video processing for scaling.
   ComD3D11VideoProcessor video_processor_;
   ComD3D11VideoProcessorEnumerator video_processor_enumerator_;
-  ComD3D11VideoDevice video_device_;
-  ComD3D11VideoContext video_context_;
+  ComD3D11VideoDevice1 video_device_;
+  ComD3D11VideoContext1 video_context_;
   D3D11_VIDEO_PROCESSOR_CONTENT_DESC vp_desc_ = {};
   ComD3D11Texture2D scaled_d3d11_texture_;
   D3D11_TEXTURE2D_DESC scaled_d3d11_texture_desc_ = {};
@@ -377,9 +380,6 @@ class MEDIA_GPU_EXPORT MediaFoundationVideoEncodeAccelerator
 
   // Preferred adapter for DXGIDeviceManager.
   const CHROME_LUID luid_;
-
-  // Helper for accessing shared textures
-  scoped_refptr<CommandBufferHelper> command_buffer_helper_;
 
   // Used for frame format conversion.
   VideoFrameConverter frame_converter_;

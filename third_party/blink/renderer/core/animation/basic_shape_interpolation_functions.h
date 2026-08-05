@@ -11,28 +11,23 @@
 
 namespace blink {
 
-class BasicShape;
 class CSSProperty;
-class CSSValue;
 class CSSToLengthConversionData;
 
 namespace basic_shape_interpolation_functions {
 
-InterpolationValue MaybeConvertCSSValue(const CSSValue&,
-                                        const CSSProperty& property,
-                                        ShapeReferenceBox box);
+InterpolationValue MaybeConvertCSSValue(const BasicShapeCssInfo&,
+                                        const CSSProperty& property);
 CORE_EXPORT InterpolationValue
-MaybeConvertBasicShape(const BasicShape*,
+MaybeConvertBasicShape(const BasicShapeInfo&,
                        const CSSProperty& property,
-                       double zoom,
-                       ShapeReferenceBox box);
+                       double zoom);
 InterpolableValue* CreateNeutralValue(const NonInterpolableValue&);
 CORE_EXPORT bool ShapesAreCompatible(const NonInterpolableValue&,
                                      const NonInterpolableValue&);
-CORE_EXPORT BasicShape* CreateBasicShape(const InterpolableValue&,
-                                         const NonInterpolableValue&,
-                                         const CSSToLengthConversionData&);
-CORE_EXPORT ShapeReferenceBox GetBox(const NonInterpolableValue&);
+CORE_EXPORT BasicShapeInfo CreateBasicShape(const InterpolableValue&,
+                                            const NonInterpolableValue&,
+                                            const CSSToLengthConversionData&);
 
 }  // namespace basic_shape_interpolation_functions
 

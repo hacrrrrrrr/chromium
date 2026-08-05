@@ -72,8 +72,13 @@ class MockToolbarUIServiceDelegate
   MOCK_METHOD(void,
               ShowContentSettingsBubble,
               (::toolbar_ui_api::mojom::ContentSettingImageType type,
+               bool is_pointer_interaction,
                ::toolbar_ui_api::mojom::ToolbarUIService::
                    ShowContentSettingsBubbleCallback callback),
+              (override));
+  MOCK_METHOD(void,
+              OnContentSettingImagePointerDown,
+              (::toolbar_ui_api::mojom::ContentSettingImageType type),
               (override));
   MOCK_METHOD(
       void,
@@ -104,6 +109,14 @@ class MockToolbarUIServiceDelegate
               MovePinnedToolbarActionBy,
               (toolbar_ui_api::mojom::PinnedToolbarAction action_id,
                int32_t delta),
+              (override));
+  MOCK_METHOD(void,
+              MoveExtensionAction,
+              (const std::string& extension_id, int32_t target_index),
+              (override));
+  MOCK_METHOD(void,
+              MoveExtensionActionBy,
+              (const std::string& extension_id, int32_t delta),
               (override));
   MOCK_METHOD(void,
               OnLhsChipMousePressed,
@@ -158,6 +171,14 @@ class MockToolbarUIServiceDelegate
       AdjustOmniboxTextForCopy,
       (const std::u16string&, int32_t),
       (override));
+  MOCK_METHOD(void,
+              OnPerformanceInterventionButtonClicked,
+              (bool is_mouse_interaction),
+              (override));
+  MOCK_METHOD(void,
+              OnPerformanceInterventionButtonMousePressed,
+              (),
+              (override));
 };
 
 class MockBrowserControlsServiceDelegate

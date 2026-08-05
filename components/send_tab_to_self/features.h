@@ -40,6 +40,12 @@ BASE_DECLARE_FEATURE(kSendTabToSelfPropagateNavigationHistory);
 // in the foreground if Chrome is currently being used.
 BASE_DECLARE_FEATURE(kSendTabToSelfAutoOpen);
 
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
+// If this feature is enabled along with kSendTabToSelfAutoOpen, received tabs
+// will be automatically opened in the background even while in the Tab Grid.
+BASE_DECLARE_FEATURE(kSendTabToSelfSupportAutoOpenInTabGrid);
+#endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
+
 // If this feature is enabled, several UIs on desktop are enhanced, like showing
 // a list of devices directly in the context menu, the new Desktop device picker
 // flow, and the visually enhanced STTS target device picker bubble.
@@ -61,6 +67,10 @@ BASE_DECLARE_FEATURE(kSendTabToSelfEnhancedDesktopUIv2);
 // If this feature is enabled, physical double-tap gestures will be detected
 // and used to trigger sending tabs to self on Android devices.
 BASE_DECLARE_FEATURE(kSendTabToSelfGesture);
+
+// If this feature is enabled, a Sent Tab To Self notification will open
+// the appropriate native app if it is available.
+BASE_DECLARE_FEATURE(kSendTabToSelfOpenNativeApp);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
@@ -96,6 +106,12 @@ extern const char kReminderNotificationsDefaultTimeOffset[];
 // controlled by the `kReminderNotificationsDefaultTimeOffset` Finch parameter.
 const base::TimeDelta GetReminderNotificationsDefaultTimeOffset();
 #endif  // BUILDFLAG(IS_IOS)
+
+#if BUILDFLAG(IS_ANDROID)
+// If this feature is enabled, dynamic shortcuts will be registered for other
+// syncing devices.
+BASE_DECLARE_FEATURE(kSendTabToSelfDynamicShortcuts);
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace send_tab_to_self
 

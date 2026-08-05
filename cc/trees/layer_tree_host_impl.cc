@@ -368,7 +368,7 @@ gfx::Rect CalculateVisibleBounds(
     int inner_scroll_id,
     int outer_scroll_id,
     base::flat_map<int, int>& sticky_or_viewport_scroll_cache) {
-  gfx::Rect visible_layer_rect = layer->draw_properties().visible_layer_rect;
+  gfx::Rect visible_layer_rect = layer->VisibleLayerRect();
   visible_layer_rect.Intersect(rect_data_in_layer_space.visible_bounds);
 
   // Map tracked element visible bounds to screen space first.
@@ -1050,6 +1050,11 @@ bool LayerTreeHostImpl::HasDamage() const {
   // If we have a new LocalSurfaceId, we must always submit a CompositorFrame
   // because the parent is blocking on us.
   if (last_draw_local_surface_id_ != GetCurrentLocalSurfaceId()) {
+    return true;
+  }
+
+  if (unbounded_frame_sink_handler_ &&
+      unbounded_frame_sink_handler_->HasUnsubmittedLocalSurfaceId()) {
     return true;
   }
 
@@ -2388,9 +2393,6 @@ viz::TrackedElementRects LayerTreeHostImpl::CollectTrackedElementRects(
 
           viz::TrackedElementRect transformed_rect = rect_data;
 
-          // TODO(http://crbug.com/441532128): Elements that are being added to
-          // the compositor frame metadata should be transformed to the
-          // coordinate space of the compositor frame.
           transformed_rect.visible_bounds = CalculateVisibleBounds(
               layer, rect_data, front_occluders, transform_tree,
               inner_scroll_id, outer_scroll_id,
@@ -3750,7 +3752,7 @@ static void PopulateHitTestRegion(viz::HitTestRegion* hit_test_region,
                                   const LayerImpl* layer,
                                   uint32_t flags,
                                   uint32_t async_hit_test_reasons,
-                                  const gfx::Rect& rect,
+                                  const gfx::RRectF& rect,
                                   const viz::SurfaceId& surface_id,
                                   float device_scale_factor) {
   hit_test_region->frame_sink_id = surface_id.frame_sink_id();
@@ -3819,6 +3821,8 @@ std::optional<viz::HitTestRegionList> LayerTreeHostImpl::BuildHitTestData() {
         continue;
       }
 
+      // Using the enclosing rect to ensure antialised boundary pixels cause
+      // pointer input to be routed to this layer.
       gfx::Rect content_rect(gfx::ScaleToEnclosingRect(
           gfx::Rect(surface_layer->bounds()), device_scale_factor));
 
@@ -3861,8 +3865,8 @@ std::optional<viz::HitTestRegionList> LayerTreeHostImpl::BuildHitTestData() {
       const auto& surface_id = surface_layer->range().end();
       hit_test_region_list->regions.emplace_back();
       PopulateHitTestRegion(&hit_test_region_list->regions.back(), layer, flag,
-                            async_hit_test_reasons, content_rect, surface_id,
-                            device_scale_factor);
+                            async_hit_test_reasons, gfx::RRectF(content_rect),
+                            surface_id, device_scale_factor);
       continue;
     }
 
@@ -4714,6 +4718,10 @@ float LayerTreeHostImpl::CurrentBottomControlsShownRatio() const {
 
 gfx::PointF LayerTreeHostImpl::ViewportScrollOffset() const {
   return viewport_->TotalScrollOffset();
+}
+
+float LayerTreeHostImpl::MaxViewportScrollOffsetY() const {
+  return viewport_->MaxUserReachableTotalScrollOffsetY();
 }
 
 void LayerTreeHostImpl::AutoScrollAnimationCreate(
@@ -5574,9 +5582,6 @@ void LayerTreeHostImpl::CreateUIResource(UIResourceId uid,
   switch (bitmap.GetFormat()) {
     case UIResourceBitmap::RGBA8:
       format = raster_caps_.ui_rgba_format;
-      break;
-    case UIResourceBitmap::ALPHA_8:
-      format = viz::SinglePlaneFormat::kALPHA_8;
       break;
     case UIResourceBitmap::ETC1:
       format = viz::SinglePlaneFormat::kETC1;

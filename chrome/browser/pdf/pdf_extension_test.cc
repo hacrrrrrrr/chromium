@@ -11,6 +11,7 @@
 #include <variant>
 #include <vector>
 
+#include "base/base64.h"
 #include "base/feature_list.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
@@ -990,6 +991,27 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTestWithoutOopifOverride,
   ASSERT_TRUE(extension_host);
 
   TestGetSelectedTextReply(extension_host, true);
+}
+
+// Ensure that the PDF viewer is loaded for the text/pdf MIME type.
+IN_PROC_BROWSER_TEST_P(PDFExtensionTest, EnsureTextPdfExtensionLoaded) {
+  GURL test_pdf_url;
+  {
+    base::ScopedAllowBlockingForTesting allow_blocking;
+    base::FilePath test_data_file =
+        base::PathService::CheckedGet(chrome::DIR_TEST_DATA)
+            .AppendASCII("pdf")
+            .AppendASCII("test.pdf");
+    ASSERT_TRUE(base::PathExists(test_data_file));
+
+    std::optional<std::vector<uint8_t>> contents =
+        base::ReadFileToBytes(test_data_file);
+    ASSERT_TRUE(contents.has_value());
+    test_pdf_url =
+        GURL("data:text/pdf;base64," + base::Base64Encode(contents.value()));
+  }
+
+  ASSERT_TRUE(LoadPdf(test_pdf_url));
 }
 
 // TODO(crbug.com/40647731): Should be allowed?
@@ -3840,7 +3862,7 @@ class PDFExtensionZoomTest : public PDFExtensionTest {
 };
 
 IN_PROC_BROWSER_TEST_P(PDFExtensionZoomTest, DefaultZoomFullPage) {
-  browser()->profile()->GetZoomLevelPrefs()->SetDefaultZoomLevelPref(0.5);
+  browser()->GetProfile()->GetZoomLevelPrefs()->SetDefaultZoomLevelPref(0.5);
 
   content::RenderFrameHost* extension_host =
       LoadPdfGetExtensionHost(embedded_test_server()->GetURL("/pdf/test.pdf"));
@@ -3850,7 +3872,7 @@ IN_PROC_BROWSER_TEST_P(PDFExtensionZoomTest, DefaultZoomFullPage) {
 }
 
 IN_PROC_BROWSER_TEST_P(PDFExtensionZoomTest, DefaultZoomEmbed) {
-  browser()->profile()->GetZoomLevelPrefs()->SetDefaultZoomLevelPref(0.5);
+  browser()->GetProfile()->GetZoomLevelPrefs()->SetDefaultZoomLevelPref(0.5);
 
   content::RenderFrameHost* extension_host =
       LoadPdfInFirstChildGetExtensionHost(

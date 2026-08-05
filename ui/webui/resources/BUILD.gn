@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//components/signin/features.gni")
 import("//crypto/features.gni")
 import("//tools/grit/grit_rule.gni")
 import("//ui/webui/resources/tools/generate_grd.gni")
@@ -64,7 +65,6 @@ generate_grd("build_grd") {
       "cr_components/most_visited:build_grdp",
       "cr_components/page_image_service:build_grdp",
       "cr_components/searchbox:build_grdp",
-      "cr_components/searchbox/icons:build_grdp",
       "cr_components/theme_color_picker:build_grdp",
       "//third_party/d3:build_grdp",
       "//third_party/lottie:build_grdp",
@@ -85,16 +85,9 @@ generate_grd("build_grd") {
       "$target_gen_dir/cr_components/managed_dialog/resources.grdp",
       "$target_gen_dir/cr_components/managed_footnote/resources.grdp",
       "$target_gen_dir/cr_components/most_visited/resources.grdp",
-      "$target_gen_dir/cr_components/searchbox/icons/resources.grdp",
       "$target_gen_dir/cr_components/searchbox/resources.grdp",
       "$target_gen_dir/cr_components/theme_color_picker/resources.grdp",
     ]
-
-    if (is_chrome_branded) {
-      public_deps +=
-          [ "cr_components/searchbox/icons:chrome_branded_build_grdp" ]
-      grdp_files += [ "$target_gen_dir/cr_components/searchbox/icons/chrome_branded_resources.grdp" ]
-    }
   }
 
   if (!is_ios) {
@@ -105,13 +98,20 @@ generate_grd("build_grd") {
       "cr_components/help_bubble:build_grdp",
       "cr_components/localized_link:build_grdp",
       "cr_components/search:build_grdp",
+      "cr_components/searchbox/icons:build_grdp",
     ]
     grdp_files += [
       "$target_gen_dir/cr_components/composebox/resources.grdp",
       "$target_gen_dir/cr_components/help_bubble/resources.grdp",
       "$target_gen_dir/cr_components/localized_link/resources.grdp",
       "$target_gen_dir/cr_components/search/resources.grdp",
+      "$target_gen_dir/cr_components/searchbox/icons/resources.grdp",
     ]
+    if (is_chrome_branded) {
+      public_deps +=
+          [ "cr_components/searchbox/icons:chrome_branded_build_grdp" ]
+      grdp_files += [ "$target_gen_dir/cr_components/searchbox/icons/chrome_branded_resources.grdp" ]
+    }
   }
 
   if (is_chromeos) {
@@ -120,6 +120,11 @@ generate_grd("build_grd") {
     # ash/webui/common/resources:build_grd
     public_deps += [ ":build_cros_styles_grdp" ]
     grdp_files += [ "$target_gen_dir/cros_styles_resources.grdp" ]
+  }
+
+  if (enable_dice_support) {
+    public_deps += [ "cr_components/signin:build_grdp" ]
+    grdp_files += [ "$target_gen_dir/cr_components/signin/resources.grdp" ]
   }
 }
 

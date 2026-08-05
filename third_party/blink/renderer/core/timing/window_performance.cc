@@ -1463,8 +1463,8 @@ void WindowPerformance::AddContainerTiming(
   }
 
   PerformanceContainerTiming* entry = PerformanceContainerTiming::Create(
-      AtomicString("container-paints"), paint_timing_info.presentation_time,
-      rect, size, root_element, identifier, last_painted_element,
+      g_empty_atom, paint_timing_info.presentation_time, rect, size,
+      root_element, identifier, last_painted_element,
       first_paint_timing_info.presentation_time, DomWindow(), NavigationId());
   TRACE_EVENT2("loading", "PerformanceContainerTiming", "data",
                entry->ToTracedValue(), "frame",
@@ -1502,8 +1502,6 @@ void WindowPerformance::AddScrollTiming(base::TimeTicks start_time,
                                         base::TimeTicks end_time,
                                         ui::ScrollInputType input_type,
                                         Node* target) {
-  // The only production caller already CHECKs the feature, so catch any
-  // unguarded caller early rather than silently no-op'ing.
   CHECK(RuntimeEnabledFeatures::ScrollPerformanceTimingEnabled(
       GetExecutionContext()));
   if (!DomWindow()) {
@@ -1517,8 +1515,6 @@ void WindowPerformance::AddScrollTiming(base::TimeTicks start_time,
 
   const DOMHighResTimeStamp start_dom_time =
       MonotonicTimeToDOMHighResTimeStamp(start_time);
-  // `cc::ScrollTimingController` guarantees both timestamps are non-null and
-  // `end_time >= start_time`.
   CHECK(!start_time.is_null());
   CHECK(!end_time.is_null());
   CHECK_GE(end_time, start_time);
@@ -1682,7 +1678,17 @@ SpeculationData* WindowPerformance::getSpeculations() {
   HeapVector<Member<SpeculationNavigationData>> navigations;
   if (DocumentSpeculationRules* spec_rules =
           DocumentSpeculationRules::FromIfExists(*document)) {
-    const auto& candidates = spec_rules->sent_candidates();
+    // With renderer-side heuristics, the renderer knows exactly which
+    // candidates were activated (immediate ones plus those enacted by the
+    // pointerdown/hover/viewport heuristics), so report that enacted set
+    // instead of every proposed candidate. Otherwise (browser-driven
+    // heuristics) the renderer can't tell which were enacted, so fall back to
+    // the proposed set.
+    const auto& candidates =
+        base::FeatureList::IsEnabled(
+            features::kSpeculationRulesRendererSideHeuristics)
+            ? spec_rules->activated_candidates()
+            : spec_rules->sent_candidates();
     for (const SpeculationCandidate* candidate : candidates) {
       std::optional<Vector<String>> tags;
       // When no tag is specified, the candidate has tags=[""]

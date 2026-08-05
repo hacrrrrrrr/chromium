@@ -17,8 +17,8 @@
 #include "components/viz/common/surfaces/frame_sink_id.h"
 #include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
-#include "mojo/public/cpp/bindings/receiver.h"
-#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/associated_receiver.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/web/web_plugin.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -64,6 +64,9 @@ class SurfaceEmbedWebPlugin : public blink::WebPlugin,
                       bool is_visible) override;
   void UpdateFocus(bool focused, blink::mojom::FocusType focus_type) override;
   void UpdateVisibility(bool visible) override;
+  void UpdateRenderThrottlingStatus(bool is_throttled,
+                                    bool subtree_throttled,
+                                    bool display_locked) override;
   blink::WebInputEventResult HandleInputEvent(
       const blink::WebCoalescedInputEvent& event,
       ui::Cursor* cursor) override;
@@ -71,6 +74,7 @@ class SurfaceEmbedWebPlugin : public blink::WebPlugin,
   void DidReceiveData(base::span<const char> data) override;
   void DidFinishLoading() override;
   void DidFailLoading(const blink::WebURLError& error) override;
+  bool SupportsKeyboardFocus() const override;
 
  private:
   // Destroy via ->Destroy().
@@ -94,7 +98,8 @@ class SurfaceEmbedWebPlugin : public blink::WebPlugin,
   void UpdateLocalSurfaceIdFromChild(
       const ::viz::LocalSurfaceId& local_surface_id) override;
   void ChildProcessGone() override;
-  void RequestFocus() override;
+  void RequestFocusOnEmbedElement(
+      RequestFocusOnEmbedElementCallback callback) override;
 
   // cc::ContentLayerClient, used only if we're painting a sad plugin.
   scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList() override;
@@ -118,6 +123,9 @@ class SurfaceEmbedWebPlugin : public blink::WebPlugin,
   gfx::Rect last_clip_rect_;
   gfx::Rect last_unobscured_rect_;
   bool last_is_visible_ = false;
+  bool last_is_throttled_ = false;
+  bool last_subtree_throttled_ = false;
+  bool last_display_locked_ = false;
   bool frame_sink_id_changed_ = false;
 
   viz::FrameSinkId frame_sink_id_;
@@ -125,8 +133,8 @@ class SurfaceEmbedWebPlugin : public blink::WebPlugin,
       parent_local_surface_id_allocator_;
   SurfaceEmbedPaintHoldingHelper paint_holding_helper_;
 
-  mojo::Remote<mojom::SurfaceEmbedHost> host_;
-  mojo::Receiver<mojom::SurfaceEmbed> receiver_{this};
+  mojo::AssociatedRemote<mojom::SurfaceEmbedHost> host_;
+  mojo::AssociatedReceiver<mojom::SurfaceEmbed> receiver_{this};
 };
 
 }  // namespace surface_embed

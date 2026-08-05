@@ -79,6 +79,10 @@ public class OmniboxCapabilities {
             return sHasDesktopExperienceForTesting;
         }
 
+        if (isDesktopPlatform()) {
+            return true;
+        }
+
         return DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)
                 && DeviceInput.supportsAlphabeticKeyboard()
                 && DeviceInput.supportsPrecisionPointer();
@@ -88,6 +92,20 @@ public class OmniboxCapabilities {
     public static void setHasDesktopExperienceForTesting(Boolean hasDesktopExperience) {
         sHasDesktopExperienceForTesting = hasDesktopExperience;
         ResettersForTesting.register(() -> sHasDesktopExperienceForTesting = null);
+    }
+
+    /**
+     * Return whether the device is in a desktop platform or is a tablet with a precision pointer.
+     *
+     * @param context the context to use to determine device form factor
+     */
+    public static boolean hasPrecisionPointerExperience(Context context) {
+        if (isDesktopPlatform()) {
+            return true;
+        }
+
+        return DeviceFormFactor.isNonMultiDisplayContextOnTablet(context)
+                && DeviceInput.supportsPrecisionPointer();
     }
 
     /**
@@ -101,6 +119,11 @@ public class OmniboxCapabilities {
             return sIsDesktopPlatformForTesting;
         }
         return DeviceInfo.isDesktop();
+    }
+
+    /** Returns whether animations are enabled for Omnibox (disabled on desktop platforms). */
+    public static boolean areAnimationsEnabled() {
+        return !isDesktopPlatform();
     }
 
     /** Modifies the output of {@link #isDesktopPlatform()} for testing. */

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,7 +26,7 @@
 #include "base/containers/to_vector.h"
 #include "base/feature_list.h"
 #include "base/functional/callback.h"
-#include "base/functional/function_ref.h"
+#include "base/i18n/case_conversion.h"
 #include "base/memory/raw_ref.h"
 #include "base/notimplemented.h"
 #include "base/notreached.h"
@@ -34,7 +35,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/types/optional_ref.h"
-#include "base/types/zip.h"
 #include "build/buildflag.h"
 #include "components/affiliations/core/browser/affiliation_utils.h"
 #include "components/autofill/core/browser/autofill_field.h"
@@ -55,11 +55,14 @@
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/suggestions/suggestion_util.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/autofill/core/common/dense_set.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/personal_context/core/personal_context_features.h"
+#include "components/personal_context/first_run/personal_context_first_run_service.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
@@ -69,6 +72,23 @@
 
 namespace autofill {
 namespace {
+
+int GetRecordTypePriority(EntityInstance::RecordType record_type) {
+  switch (record_type) {
+    case EntityInstance::RecordType::kServerWallet:
+      return 2;
+    case EntityInstance::RecordType::kLocal:
+      return 1;
+    case EntityInstance::RecordType::kPersonalContext:
+      return 0;
+  }
+  NOTREACHED();
+}
+
+// In order to avoid showing too many notices to users, we add a cool off
+// period for the private inference notice to be shown after Ambient Autofill
+// notice is shown.
+constexpr base::TimeDelta kPrivateInferenceNoticeCoolOff = base::Days(7);
 
 // Represents all the different UI sections for autofill ai data in Chrome
 // Settings.
@@ -199,29 +219,30 @@ std::vector<Suggestion> GetFooterSuggestions(
   if (trigger_field.is_autofilled_according_to_renderer()) {
     suggestions.emplace_back(CreateUndoSuggestion());
   }
-  if (base::FeatureList::IsEnabled(
-          features::kSuggestionManageButtonSplitForEnhancedAutofill) &&
-      base::FeatureList::IsEnabled(features::kYourSavedInfoSettingsPage)) {
-    CHECK(!ui_sections.empty());
 
-    if (ui_sections.size() > 1) {
-      suggestions.emplace_back(CreateManageAutofillAiSuggestion());
-    } else {
+  if (base::FeatureList::IsEnabled(
+          features::kSuggestionManageButtonSplitForEnhancedAutofill)) {
+    CHECK(!ui_sections.empty());
+    if (ui_sections.size() == 1) {
       switch (*ui_sections.begin()) {
         case AutofillAiUiSection::kTravel:
           suggestions.emplace_back(CreateManageTravelSuggestion());
-          break;
+          return suggestions;
         case AutofillAiUiSection::kIdentityDocs:
           suggestions.emplace_back(CreateManageIdentityDocsSuggestion());
-          break;
+          return suggestions;
         case AutofillAiUiSection::kShopping:
           suggestions.emplace_back(CreateManageShoppingSuggestion());
-          break;
+          return suggestions;
       }
     }
-  } else {
-    suggestions.emplace_back(CreateManageAutofillAiSuggestion());
   }
+
+  // Graceful fallback for everything else:
+  // - Features disabled
+  // - ui_sections has multiple items
+  // - Unhandled AutofillAiUiSection enums
+  suggestions.emplace_back(CreateManageAutofillAiSuggestion());
   return suggestions;
 }
 
@@ -262,7 +283,7 @@ std::vector<std::u16string> GetLabelsForSuggestions(
   }
 
   // Prepend the entity type's name to each label.
-  for (auto [entity, label] : base::zip(entities, labels)) {
+  for (auto [entity, label] : std::views::zip(entities, labels)) {
     label.insert(label.begin(),
                  std::u16string(entity->type().GetNameForI18n()));
   }
@@ -324,7 +345,8 @@ std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
 
   std::vector<std::vector<std::pair<FieldGlobalId, std::u16string>>>
       fields_to_values(entities.size());
-  for (auto [entity, field_to_values] : base::zip(entities, fields_to_values)) {
+  for (auto [entity, field_to_values] :
+       std::views::zip(entities, fields_to_values)) {
     for (const auto& [field, attribute_type] :
          type_assignment.Find(entity->type())) {
       base::optional_ref<const AttributeInstance> attribute =
@@ -345,17 +367,6 @@ std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
     }
   }
 
-  auto get_record_type_priority = [](EntityInstance::RecordType record_type) {
-    switch (record_type) {
-      case EntityInstance::RecordType::kServerWallet:
-        return 2;
-      case EntityInstance::RecordType::kLocal:
-        return 1;
-      case EntityInstance::RecordType::kPersonalContext:
-        return 0;
-    }
-    NOTREACHED();
-  };
   std::vector<const EntityInstance*> deduped_entities;
   for (size_t i = 0; i < entities.size(); ++i) {
     bool erase_i = false;
@@ -373,10 +384,8 @@ std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
       // - `i` is equal to `j` and they have the same priority, but `j`
       //   appears earlier in the list (higher frecency).
       const bool i_is_proper_subset_of_j = j_includes_i && !j_equals_i;
-      const int i_priority =
-          get_record_type_priority(entities[i]->record_type());
-      const int j_priority =
-          get_record_type_priority(entities[j]->record_type());
+      const int i_priority = GetRecordTypePriority(entities[i]->record_type());
+      const int j_priority = GetRecordTypePriority(entities[j]->record_type());
       if (i_is_proper_subset_of_j ||
           (j_equals_i &&
            (j_priority > i_priority || (j_priority == i_priority && i > j)))) {
@@ -530,6 +539,7 @@ Suggestion GetSuggestionForEntity(
 
   Suggestion suggestion =
       Suggestion(main_text, SuggestionType::kFillAutofillAi);
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   if (entity.record_type() == EntityInstance::RecordType::kPersonalContext) {
     suggestion.labels = {{Suggestion::Text(std::move(label))},
                          {Suggestion::Text(l10n_util::GetStringUTF16(
@@ -537,6 +547,9 @@ Suggestion GetSuggestionForEntity(
   } else {
     suggestion.labels = {{Suggestion::Text(std::move(label))}};
   }
+#else
+  suggestion.labels = {{Suggestion::Text(std::move(label))}};
+#endif
 
   const bool requires_server_fetch = WillRequireServerFetch(
       entity, form, trigger_field.field->section(), app_locale);
@@ -550,42 +563,127 @@ Suggestion GetSuggestionForEntity(
   return suggestion;
 }
 
-// The desired ordering criteria are the following:
-// - Entities of the same type should appear together.
-// - Entities of type A should appear before entities of type B if the most
-//   "frecent" entity of type A is more frecent than the most frecent entity
-//   of type B.
+// Compares two entities of the same type and record type.
 //
-// In other terms, entities are grouped so that the most “frecent” suggestion
-// will be shown first, then all suggestions of the same type, then the next
-// most “frecent” suggestion, and so on.
-std::vector<const EntityInstance*> OrderedEntitiesForSuggestion(
-    std::vector<const EntityInstance*> entities) {
-  // Sort entities based on their frecency.
-  std::ranges::sort(entities,
-                    [comp = EntityInstance::FrecencyOrder(base::Time::Now())](
-                        const EntityInstance* lhs, const EntityInstance* rhs) {
-                      return comp(*lhs, *rhs);
-                    });
-  // Group entities based on their entity type. Note that by doing so after the
-  // first sorting step, it is guaranteed that each individual vector in the map
-  // is also sorted accordingly.
-  std::map<EntityType, std::vector<const EntityInstance*>>
-      sorted_entities_by_type;
-  for (const EntityInstance* entity : entities) {
-    sorted_entities_by_type[entity->type()].push_back(entity);
+// Personal Context entities are sorted by entity-type-specific
+// attributes, preferring entities that have the attribute.
+// Other record types are sorted by `FrecencyOrder`.
+bool CompareSameTypeEntities(const EntityInstance& lhs,
+                             const EntityInstance& rhs) {
+  const EntityInstance::FrecencyOrder frecency_order(base::Time::Now());
+
+  if (lhs.record_type() != EntityInstance::RecordType::kPersonalContext) {
+    return frecency_order(lhs, rhs);
   }
 
-  std::vector<const EntityInstance*> sorted_entities;
-  sorted_entities.reserve(entities.size());
-  // By iterating over `entities`, sorted by frecency, the desired ordering is
-  // achieved.
-  for (const EntityInstance* entity : entities) {
-    base::Extend(sorted_entities,
-                 std::move(sorted_entities_by_type[entity->type()]));
-    sorted_entities_by_type[entity->type()].clear();
+  auto get_attr_value =
+      [](const EntityInstance& entity,
+         AttributeTypeName attr) -> std::optional<std::u16string> {
+    if (base::optional_ref<const AttributeInstance> attr_inst =
+            entity.attribute(AttributeType(attr))) {
+      return attr_inst->GetRawInfo(attr_inst->type().field_type());
+    }
+    return std::nullopt;
+  };
+
+  auto compare_by_attribute = [&frecency_order, &lhs, &rhs, &get_attr_value](
+                                  AttributeTypeName attr_name,
+                                  auto string_comp) -> bool {
+    const std::optional<std::u16string> lhs_val =
+        get_attr_value(lhs, attr_name);
+    const std::optional<std::u16string> rhs_val =
+        get_attr_value(rhs, attr_name);
+    if (lhs_val.has_value() != rhs_val.has_value()) {
+      return lhs_val.has_value();
+    }
+    if (lhs_val.has_value() && *lhs_val != *rhs_val) {
+      return string_comp(*lhs_val, *rhs_val);
+    }
+    return frecency_order(lhs, rhs);
+  };
+
+  auto compare_greater = [&compare_by_attribute](AttributeTypeName attr_name) {
+    return compare_by_attribute(attr_name, std::greater<std::u16string>());
+  };
+
+  auto compare_less_case_insensitive =
+      [&compare_by_attribute](AttributeTypeName attr_name) {
+        return compare_by_attribute(
+            attr_name, [](const std::u16string& a, const std::u16string& b) {
+              return base::i18n::FoldCase(a) < base::i18n::FoldCase(b);
+            });
+      };
+
+  switch (lhs.type().name()) {
+    case EntityTypeName::kPassport:
+      return compare_greater(AttributeTypeName::kPassportExpirationDate);
+    case EntityTypeName::kDriversLicense:
+      return compare_greater(AttributeTypeName::kDriversLicenseExpirationDate);
+    case EntityTypeName::kNationalIdCard:
+      return compare_greater(AttributeTypeName::kNationalIdCardExpirationDate);
+    case EntityTypeName::kFlightReservation:
+      return compare_greater(
+          AttributeTypeName::kFlightReservationDepartureDate);
+    case EntityTypeName::kVehicle:
+      return compare_less_case_insensitive(
+          AttributeTypeName::kVehiclePlateNumber);
+    case EntityTypeName::kOrder:
+      return compare_greater(AttributeTypeName::kOrderDate);
+    case EntityTypeName::kShipment:
+      return compare_greater(AttributeTypeName::kShipmentShippedDate);
+    case EntityTypeName::kKnownTravelerNumber:
+    case EntityTypeName::kRedressNumber:
+      return frecency_order(lhs, rhs);
   }
-  return sorted_entities;
+}
+// The desired ordering criteria are the following:
+// - Entities are first partitioned into groups sorted by their record type
+//   priority.
+// - Within each partition, entities of the same type appear together.
+// - Within each partition, entities of type A appear before entities of type B
+//   if the most "frecent" entity of type A is more frecent than the most
+//   frecent entity of type B.
+//
+// In other terms, entities are grouped by record type priority and then entity
+// type so that the most “frecent” suggestion in each partition is shown first,
+// followed by all suggestions of the same type, then the next most “frecent”
+// suggestion, and so on.
+std::vector<const EntityInstance*> OrderedEntitiesForSuggestion(
+    std::vector<const EntityInstance*> entities) {
+  if (entities.empty()) {
+    return entities;
+  }
+
+  const EntityInstance::FrecencyOrder frecency_order(base::Time::Now());
+  using EntityGroup = std::pair<EntityInstance::RecordType, EntityType>;
+  std::map<EntityGroup, const EntityInstance*> most_frecent_per_group;
+  for (const EntityInstance* entity : entities) {
+    const EntityGroup key = {entity->record_type(), entity->type()};
+    const EntityInstance* best = most_frecent_per_group[key];
+    if (!best || frecency_order(*entity, *best)) {
+      most_frecent_per_group[key] = entity;
+    }
+  }
+  std::ranges::sort(
+      entities, [&frecency_order, &most_frecent_per_group](
+                    const EntityInstance* lhs, const EntityInstance* rhs) {
+        if (lhs->record_type() != rhs->record_type()) {
+          return GetRecordTypePriority(lhs->record_type()) >
+                 GetRecordTypePriority(rhs->record_type());
+        }
+
+        if (lhs->type() != rhs->type()) {
+          const EntityInstance* lhs_best =
+              most_frecent_per_group.at({lhs->record_type(), lhs->type()});
+          const EntityInstance* rhs_best =
+              most_frecent_per_group.at({rhs->record_type(), rhs->type()});
+          return frecency_order(*lhs_best, *rhs_best);
+        }
+
+        return CompareSameTypeEntities(*lhs, *rhs);
+      });
+
+  return entities;
 }
 
 // Returns a valid GURL parsed from a domain string. If no scheme is present in
@@ -663,29 +761,6 @@ std::vector<const EntityInstance*> GetEntitiesForSuggestion(
       app_locale);
 }
 
-// Returns true if the `field` is of an entity type that is currently being
-// prefetched. This is used to decide if pre-fetching suggestion should be
-// shown for a specific field.
-bool IsFetchingFillableEntity(const AutofillField& field,
-                              AutofillClient& client) {
-  AutofillAiPersonalContextAccessManager* access_manager =
-      client.GetAutofillAiPersonalContextAccessManager();
-  if (!access_manager) {
-    return false;
-  }
-  using RequestStatus = AutofillAiPersonalContextAccessManager::RequestStatus;
-  for (EntityType entity_type : DenseSet<EntityType>::all()) {
-    if (field.Type().GetAutofillAiType(entity_type) != UNKNOWN_TYPE) {
-      if (access_manager->ServerHasDataAvailable(entity_type) &&
-          access_manager->GetPrefetchStatusByEntityType(entity_type) ==
-              RequestStatus::kPending) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 std::vector<Suggestion> CreateFetchingAmbientSuggestions() {
   Suggestion suggestion(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_FETCHING_AMBIENT_DATA),
@@ -740,7 +815,7 @@ std::vector<Suggestion> CreateSuggestionsForEntities(
   std::vector<Suggestion> suggestions;
   suggestions.reserve(entities_to_suggest.size());
   CHECK_EQ(entities_to_suggest.size(), labels.size());
-  for (auto [entity, label] : base::zip(entities_to_suggest, labels)) {
+  for (auto [entity, label] : std::views::zip(entities_to_suggest, labels)) {
     base::span<const AutofillFieldWithAttributeType> fields_with_types =
         assignment.Find(entity.type());
     base::optional_ref<const AutofillFieldWithAttributeType>
@@ -790,21 +865,28 @@ bool HasPersonalContextSuggestion(
 // Returns the parent `Suggestion` for a fallback menu which displays entities
 // that do not match the current domain.
 Suggestion CreateParentFallbackSuggestion(EntityType entity_type,
+                                          bool has_primary_suggestions,
                                           std::vector<Suggestion> children) {
   switch (entity_type.name()) {
     case EntityTypeName::kOrder: {
       Suggestion suggestion(
-          l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_OTHER_ORDERS),
+          l10n_util::GetStringUTF16(has_primary_suggestions
+                                        ? IDS_AUTOFILL_AI_OTHER_ORDERS
+                                        : IDS_AUTOFILL_AI_ALL_ORDERS),
           SuggestionType::kAutofillAiOtherOrders);
-      suggestion.acceptability = Suggestion::Acceptability::kUnacceptable;
+      suggestion.acceptability =
+          Suggestion::Acceptability::kSelectableButUnacceptable;
       suggestion.children = std::move(children);
       return suggestion;
     }
     case EntityTypeName::kShipment: {
       Suggestion suggestion(
-          l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_OTHER_SHIPMENTS),
+          l10n_util::GetStringUTF16(has_primary_suggestions
+                                        ? IDS_AUTOFILL_AI_OTHER_SHIPMENTS
+                                        : IDS_AUTOFILL_AI_ALL_SHIPMENTS),
           SuggestionType::kAutofillAiOtherShipments);
-      suggestion.acceptability = Suggestion::Acceptability::kUnacceptable;
+      suggestion.acceptability =
+          Suggestion::Acceptability::kSelectableButUnacceptable;
       suggestion.children = std::move(children);
       return suggestion;
     }
@@ -831,6 +913,7 @@ std::optional<Suggestion> CreateDomainFallbackSuggestion(
     const FormStructure& form,
     const AutofillField& trigger_field,
     EntityType entity_type,
+    bool has_primary_suggestions,
     base::span<const EntityInstance> all_entities,
     const AttributeTypeAssignment& assignment,
     const GURL& page_url,
@@ -841,7 +924,7 @@ std::optional<Suggestion> CreateDomainFallbackSuggestion(
     return std::nullopt;
   }
 
-  std::vector<EntityInstance> fallback_entities;
+  std::vector<const EntityInstance*> fallback_entities;
   for (const EntityInstance& entity : all_entities) {
     if (entity.type() != entity_type || IsAllowedForPageUrl(entity, page_url)) {
       continue;
@@ -867,31 +950,40 @@ std::optional<Suggestion> CreateDomainFallbackSuggestion(
         std::string(client.GetAppLocale()),
         trigger_field_with_type->field->format_string());
     if (!trigger_value.empty()) {
-      fallback_entities.push_back(entity);
+      fallback_entities.push_back(&entity);
     }
   }
+
+  fallback_entities = DedupedEntitiesForSuggestions(
+      OrderedEntitiesForSuggestion(std::move(fallback_entities)), assignment,
+      std::string(client.GetAppLocale()));
 
   if (fallback_entities.empty()) {
     return std::nullopt;
   }
 
   std::vector<Suggestion> children = CreateSuggestionsForEntities(
-      form, trigger_field, fallback_entities, all_entities, assignment, client);
+      form, trigger_field,
+      base::ToVector(fallback_entities,
+                     [](const EntityInstance* entity) { return *entity; }),
+      all_entities, assignment, client);
   if (children.empty()) {
     return std::nullopt;
   }
 
-  for (const EntityInstance& entity : fallback_entities) {
-    ui_sections->insert(GetAutofillAiUiSection(entity.type()));
+  for (const EntityInstance* entity : fallback_entities) {
+    ui_sections->insert(GetAutofillAiUiSection(entity->type()));
   }
 
-  return CreateParentFallbackSuggestion(entity_type, std::move(children));
+  return CreateParentFallbackSuggestion(entity_type, has_primary_suggestions,
+                                        std::move(children));
 }
 
 void AppendDomainFallbackSuggestions(
     std::vector<Suggestion>& suggestions,
     const FormStructure& form,
     const AutofillField& trigger_field,
+    base::span<const EntityInstance> entities_to_suggest,
     base::span<const EntityInstance> all_entities,
     const AttributeTypeAssignment& assignment,
     AutofillClient& client,
@@ -899,15 +991,21 @@ void AppendDomainFallbackSuggestions(
   for (EntityType entity_type : DenseSet<EntityType>::all()) {
     switch (entity_type.name()) {
       case EntityTypeName::kOrder:
-      case EntityTypeName::kShipment:
+      case EntityTypeName::kShipment: {
+        const bool has_primary_suggestions = std::ranges::any_of(
+            entities_to_suggest, [&](const EntityInstance& entity) {
+              return entity.type() == entity_type;
+            });
         if (std::optional<Suggestion> fallback_suggestion =
                 CreateDomainFallbackSuggestion(
-                    form, trigger_field, entity_type, all_entities, assignment,
+                    form, trigger_field, entity_type, has_primary_suggestions,
+                    all_entities, assignment,
                     client.GetLastCommittedPrimaryMainFrameURL(), client,
                     &ui_sections)) {
           suggestions.push_back(std::move(*fallback_suggestion));
         }
         break;
+      }
       case EntityTypeName::kPassport:
       case EntityTypeName::kDriversLicense:
       case EntityTypeName::kVehicle:
@@ -920,6 +1018,37 @@ void AppendDomainFallbackSuggestions(
   }
 }
 
+bool ShouldShowPrivateInferenceNotice(const AutofillField& trigger_field,
+                                      const PrefService* prefs) {
+  const base::Time private_inference_notice_first_shown =
+      prefs ? prefs->GetTime(
+                  prefs::kAutofillAiPrivateInferenceNoticeFirstShownTimestamp)
+            : base::Time();
+  const base::Time ambient_autofill_notice_acked =
+      prefs ? prefs->GetTime(prefs::kAmbientAutofillNoticeAcknowledgedTimestamp)
+            : base::Time();
+
+  const bool private_inference_notice_never_shown =
+      private_inference_notice_first_shown.is_null();
+  const bool ambient_autofill_notice_acked_enough_time_ago =
+      !ambient_autofill_notice_acked.is_null() &&
+      (base::Time::Now() - ambient_autofill_notice_acked) >=
+          kPrivateInferenceNoticeCoolOff;
+
+  const bool private_inference_notice_never_acked =
+      !prefs ||
+      prefs
+          ->GetTime(
+              prefs::kAutofillAiPrivateInferenceNoticeAcknowledgedTimestamp)
+          .is_null();
+
+  return !trigger_field.Type().GetAutofillAiTypes().empty() &&
+         private_inference_notice_never_acked &&
+         (private_inference_notice_never_shown ||
+          ambient_autofill_notice_acked_enough_time_ago) &&
+         base::FeatureList::IsEnabled(features::kAutofillAiUsePrivateAi);
+}
+
 std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
     const FormStructure& form,
     const AutofillField& trigger_field,
@@ -927,8 +1056,13 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
     base::span<const EntityInstance> all_entities,
     const AttributeTypeAssignment& assignment,
     AutofillClient& client) {
-  bool should_show_fetching_suggestions =
-      IsFetchingFillableEntity(trigger_field, client);
+  const DenseSet<EntityType> entity_types_being_fetched =
+      GetEntityTypesBeingFetched(trigger_field, client);
+  const bool should_show_fetching_suggestions =
+      !entity_types_being_fetched.empty();
+
+  const bool should_show_private_inference_notice =
+      ShouldShowPrivateInferenceNotice(trigger_field, client.GetPrefs());
 
   std::vector<Suggestion> suggestions;
   DenseSet<AutofillAiUiSection> ui_sections;
@@ -944,26 +1078,39 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
   }
 
   AppendDomainFallbackSuggestions(suggestions, form, trigger_field,
-                                  all_entities, assignment, client,
-                                  ui_sections);
+                                  entities_to_suggest, all_entities, assignment,
+                                  client, ui_sections);
 
-  if (suggestions.empty() && !should_show_fetching_suggestions) {
+  if (suggestions.empty() && !should_show_fetching_suggestions &&
+      !should_show_private_inference_notice) {
     return {};
   }
 
   if (IsPersonalContextNoticeSuggestionSupported() &&
-      HasPersonalContextSuggestion(suggestions, all_entities) &&
-      client.ShouldShowPersonalContextAmbientAutofillNotice()) {
-    Suggestion& suggestion =
-        suggestions.emplace_back(SuggestionType::kPersonalContextNotice);
-    suggestion.filtration_policy = Suggestion::FiltrationPolicy::kStatic;
+      HasPersonalContextSuggestion(suggestions, all_entities)) {
+    personal_context::PersonalContextFirstRunService* service =
+        client.GetPersonalContextFirstRunService();
+    if (service && service->ShouldShowPersonalContextAmbientAutofillNotice()) {
+      Suggestion& suggestion =
+          suggestions.emplace_back(SuggestionType::kPersonalContextNotice);
+      suggestion.filtration_policy = Suggestion::FiltrationPolicy::kStatic;
+    }
   }
 
   if (should_show_fetching_suggestions) {
     base::Extend(suggestions, CreateFetchingAmbientSuggestions());
+    for (EntityType entity_type : entity_types_being_fetched) {
+      ui_sections.insert(GetAutofillAiUiSection(entity_type));
+    }
   }
 
-  base::Extend(suggestions, GetFooterSuggestions(trigger_field, ui_sections));
+  if (should_show_private_inference_notice) {
+    suggestions.emplace_back(SuggestionType::kAutofillAiPrivateInferenceNotice);
+  }
+
+  if (!ui_sections.empty()) {
+    base::Extend(suggestions, GetFooterSuggestions(trigger_field, ui_sections));
+  }
   return suggestions;
 }
 
@@ -1003,9 +1150,13 @@ void AutofillAiSuggestionGenerator::GenerateSuggestions(
       GetFieldsFillableByAutofillAi(*form_structure, client)
           .contains(trigger_field.global_id());
   const bool is_fetching_data_for_field =
-      IsFetchingFillableEntity(*trigger_autofill_field, client);
+      !GetEntityTypesBeingFetched(*trigger_autofill_field, client).empty();
+  const bool should_show_private_inference_notice =
+      ShouldShowPrivateInferenceNotice(*trigger_autofill_field,
+                                       client.GetPrefs());
 
-  if ((!is_fillable && !is_fetching_data_for_field) ||
+  if ((!is_fillable && !is_fetching_data_for_field &&
+       !should_show_private_inference_notice) ||
       SuppressSuggestionsForAutocompleteUnrecognizedField(
           *trigger_autofill_field, GetAcUnrecognizedBehavior(client))) {
     callback({SuggestionDataSource::kAutofillAi, {}});

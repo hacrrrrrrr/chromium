@@ -102,15 +102,11 @@ BASE_DECLARE_FEATURE(kDevToolsSharedProcessInfobar);
 
 BASE_DECLARE_FEATURE(kDevToolsAnimationStylesInStylesTab);
 
-BASE_DECLARE_FEATURE(kDevToolsWellKnown);
-
 BASE_DECLARE_FEATURE(kDevToolsAiGeneratedTimelineLabels);
 
 BASE_DECLARE_FEATURE(kDevToolsNewPermissionDialog);
 
 BASE_DECLARE_FEATURE(kDevToolsVerticalDrawer);
-
-BASE_DECLARE_FEATURE(kDevToolsGreenDevUi);
 
 BASE_DECLARE_FEATURE(kDevToolsGlobalAiButton);
 extern const base::FeatureParam<bool> kDevToolsGlobalAiButtonPromotionEnabled;
@@ -131,8 +127,6 @@ BASE_DECLARE_FEATURE(kDevToolsConsoleInsightsTeasers);
 extern const base::FeatureParam<bool>
     kDevToolsConsoleInsightsTeasersAllowWithoutGpu;
 
-BASE_DECLARE_FEATURE(kDevToolsAiAssistanceV2);
-
 BASE_DECLARE_FEATURE(kDevToolsAiV2Architecture);
 
 BASE_DECLARE_FEATURE(kDevToolsProtocolMonitor);
@@ -144,6 +138,10 @@ BASE_DECLARE_FEATURE(kDevToolsAiOriginTrialsApis);
 BASE_DECLARE_FEATURE(kDevToolsUseGcaApi);
 
 BASE_DECLARE_FEATURE(kDevToolsPlusButton);
+
+BASE_DECLARE_FEATURE(kDevToolsInstrumentationBreakpoints);
+
+BASE_DECLARE_FEATURE(kDevToolsSourceMapScopesInSourcesPanel);
 }  // namespace features
 
 #endif  // CHROME_BROWSER_DEVTOOLS_FEATURES_H_

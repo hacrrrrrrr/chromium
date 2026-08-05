@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 
 #include "base/base64url.h"
+#include "base/containers/flat_set.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
@@ -44,6 +46,8 @@ void RecordGetHashResult(safe_browsing::V4OperationResult result) {
 // Record a backoff error count
 void RecordBackoffErrorCountResult(size_t count) {
   base::UmaHistogramCounts100("SafeBrowsing.V4GetHash.Result.BackoffErrorCount",
+                              count);
+  base::UmaHistogramCounts100("SafeBrowsing.SBGetHash.Result.BackoffErrorCount",
                               count);
 }
 
@@ -264,12 +268,29 @@ void V4GetHashProtocolManager::GetFullHashes(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!full_hash_to_store_and_hash_prefixes.empty());
 
+  base::flat_set<SBThreatType> unique_attempt_threat_types;
+  for (const auto& [full_hash, store_and_prefixes] :
+       full_hash_to_store_and_hash_prefixes) {
+    for (const auto& store_and_prefix : store_and_prefixes) {
+      unique_attempt_threat_types.insert(
+          GetSBThreatTypeForList(store_and_prefix.list_id));
+    }
+  }
+  for (SBThreatType threat_type : unique_attempt_threat_types) {
+    base::UmaHistogramEnumeration("SafeBrowsing.V4GetHash.AttemptThreatType",
+                                  threat_type);
+    base::UmaHistogramEnumeration("SafeBrowsing.SBGetHash.AttemptThreatType",
+                                  threat_type);
+  }
+
   std::vector<HashPrefixStr> prefixes_to_request;
   std::vector<FullHashInfo> cached_full_hash_infos;
   GetFullHashCachedResults(full_hash_to_store_and_hash_prefixes, Time::Now(),
                            &prefixes_to_request, &cached_full_hash_infos);
 
   base::UmaHistogramBoolean("SafeBrowsing.V4GetHash.CacheFullyHit",
+                            prefixes_to_request.empty());
+  base::UmaHistogramBoolean("SafeBrowsing.SBGetHash.CacheHitAllPrefixes",
                             prefixes_to_request.empty());
   if (prefixes_to_request.empty()) {
     // 100% cache hits (positive or negative) so we can call the callback right
@@ -292,6 +313,24 @@ void V4GetHashProtocolManager::GetFullHashes(
     }
     std::move(callback).Run(cached_full_hash_infos);
     return;
+  }
+
+  base::flat_set<HashPrefixStr> requested_prefixes(prefixes_to_request);
+  base::flat_set<SBThreatType> unique_network_threat_types;
+  for (const auto& [full_hash, store_and_prefixes] :
+       full_hash_to_store_and_hash_prefixes) {
+    for (const auto& store_and_prefix : store_and_prefixes) {
+      if (requested_prefixes.contains(store_and_prefix.hash_prefix)) {
+        unique_network_threat_types.insert(
+            GetSBThreatTypeForList(store_and_prefix.list_id));
+      }
+    }
+  }
+  for (SBThreatType threat_type : unique_network_threat_types) {
+    base::UmaHistogramEnumeration(
+        "SafeBrowsing.V4GetHash.Network.RequestThreatType", threat_type);
+    base::UmaHistogramEnumeration(
+        "SafeBrowsing.SBGetHash.Network.RequestThreatType", threat_type);
   }
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -348,6 +387,8 @@ void V4GetHashProtocolManager::GetFullHashes(
       full_hash_to_store_and_hash_prefixes, std::move(callback), clock_->Now());
   UMA_HISTOGRAM_COUNTS_100("SafeBrowsing.V4GetHash.CountOfPrefixes",
                            prefixes_to_request.size());
+  base::UmaHistogramCounts100("SafeBrowsing.SBGetHash.Request.CountOfPrefixes",
+                              prefixes_to_request.size());
 }
 
 void V4GetHashProtocolManager::GetFullHashesForNotificationAbuse(
@@ -752,6 +793,8 @@ void V4GetHashProtocolManager::OnURLLoaderCompleteInternal(
   CHECK(it != pending_hash_requests_.end()) << "Request not found";
   RecordHttpResponseOrErrorCode("SafeBrowsing.V4GetHash.Network.Result",
                                 net_error, response_code);
+  RecordHttpResponseOrErrorCode("SafeBrowsing.SBGetHash.Network.Result",
+                                net_error, response_code);
 
   std::vector<FullHashInfo> full_hash_infos;
   Time negative_cache_expire;
@@ -788,6 +831,8 @@ void V4GetHashProtocolManager::OnURLLoaderCompleteInternal(
   const std::unique_ptr<FullHashCallbackInfo>& fhci = it->second;
   UMA_HISTOGRAM_LONG_TIMES("SafeBrowsing.V4GetHash.Network.Time",
                            clock_->Now() - fhci->network_start_time);
+  base::UmaHistogramLongTimes("SafeBrowsing.SBGetHash.Network.Time",
+                              clock_->Now() - fhci->network_start_time);
   UpdateCache(fhci->prefixes_requested, full_hash_infos, negative_cache_expire);
   MergeResults(fhci->full_hash_to_store_and_hash_prefixes, full_hash_infos,
                &fhci->cached_full_hash_infos);

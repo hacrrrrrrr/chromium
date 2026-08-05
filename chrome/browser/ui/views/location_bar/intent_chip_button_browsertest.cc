@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/location_bar/intent_chip_button.h"
 
 #include <memory>
 #include <utility>
@@ -63,25 +62,18 @@
 class IntentChipButtonBrowserTest
     : public web_app::WebAppNavigationBrowserTest,
       public testing::WithParamInterface<
-          std::tuple<apps::test::LinkCapturingFeatureVersion, bool>>,
+          apps::test::LinkCapturingFeatureVersion>,
       public IntentChipButtonTestBase {
  public:
   IntentChipButtonBrowserTest() {
     std::vector<base::test::FeatureRefAndParams> features_to_enable =
-        apps::test::GetFeaturesToEnableLinkCapturingUX(
-            std::get<apps::test::LinkCapturingFeatureVersion>(GetParam()));
-
-    features_to_enable.push_back(
-        {::features::kPageActionsMigration,
-         {{::features::kPageActionsMigrationIntentPicker.name,
-           IsMigrationEnabled() ? "true" : "false"}}});
+        apps::test::GetFeaturesToEnableLinkCapturingUX(GetParam());
 
     scoped_feature_list_.InitWithFeaturesAndParameters(features_to_enable, {});
   }
 
   bool LinkCapturingEnabledByDefault() const {
-    return std::get<0>(GetParam()) ==
-           apps::test::LinkCapturingFeatureVersion::kV2DefaultOn;
+    return GetParam() == apps::test::LinkCapturingFeatureVersion::kV2DefaultOn;
   }
 
   void SetUpOnMainThread() override {
@@ -133,7 +125,6 @@ class IntentChipButtonBrowserTest
     NavigateAndWaitForIconUpdate(url);
   }
 
-  bool IsMigrationEnabled() const { return std::get<bool>(GetParam()); }
   // Clicks the intent chip, and optionally waits for a browser app window to
   // appear if `wait_for_browser` is true. If waiting is specified, the new
   // browser window is returned; if waiting is not specified, null is returned.
@@ -204,7 +195,7 @@ IN_PROC_BROWSER_TEST_P(IntentChipButtonBrowserTest,
   Browser* app_browser = ClickIntentChip(/*wait_for_browser=*/true);
   ASSERT_EQ(1, user_action_tester.GetActionCount("IntentPickerIconClicked"));
   ASSERT_TRUE(app_browser);
-  ASSERT_TRUE(app_browser->is_type_app());
+  ASSERT_EQ(app_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
 }
 
 IN_PROC_BROWSER_TEST_P(IntentChipButtonBrowserTest,
@@ -273,10 +264,8 @@ IN_PROC_BROWSER_TEST_P(IntentChipButtonBrowserTest, OpensAppForPreferredApp) {
 INSTANTIATE_TEST_SUITE_P(
     ,
     IntentChipButtonBrowserTest,
-    testing::Combine(
-        testing::Values(apps::test::LinkCapturingFeatureVersion::kV2DefaultOff,
-                        apps::test::LinkCapturingFeatureVersion::kV2DefaultOn),
-        testing::Bool()),
+    testing::Values(apps::test::LinkCapturingFeatureVersion::kV2DefaultOff,
+                    apps::test::LinkCapturingFeatureVersion::kV2DefaultOn),
     [](const auto& param_info) {
       return IntentChipButtonTestBase::GenerateIntentChipTestName(param_info);
     });
@@ -284,18 +273,12 @@ INSTANTIATE_TEST_SUITE_P(
 class IntentChipButtonBrowserUiTest
     : public UiBrowserTest,
       public testing::WithParamInterface<
-          std::tuple<apps::test::LinkCapturingFeatureVersion, bool>>,
+          apps::test::LinkCapturingFeatureVersion>,
       public IntentChipButtonTestBase {
  public:
   IntentChipButtonBrowserUiTest() {
     std::vector<base::test::FeatureRefAndParams> features_to_enable =
-        apps::test::GetFeaturesToEnableLinkCapturingUX(
-            std::get<apps::test::LinkCapturingFeatureVersion>(GetParam()));
-
-    features_to_enable.push_back(
-        {::features::kPageActionsMigration,
-         {{::features::kPageActionsMigrationIntentPicker.name,
-           IsMigrationEnabled() ? "true" : "false"}}});
+        apps::test::GetFeaturesToEnableLinkCapturingUX(GetParam());
 
     scoped_feature_list_.InitWithFeaturesAndParameters(features_to_enable, {});
   }
@@ -342,7 +325,6 @@ class IntentChipButtonBrowserUiTest
   }
 
   void WaitForUserDismissal() override {}
-  bool IsMigrationEnabled() const { return std::get<bool>(GetParam()); }
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -359,9 +341,7 @@ IN_PROC_BROWSER_TEST_P(IntentChipButtonBrowserUiTest, InvokeUi_default) {
 INSTANTIATE_TEST_SUITE_P(
     ,
     IntentChipButtonBrowserUiTest,
-    testing::Combine(
-        testing::Values(apps::test::LinkCapturingFeatureVersion::kV2DefaultOn),
-        testing::Bool()),
+    testing::Values(apps::test::LinkCapturingFeatureVersion::kV2DefaultOn),
     [](const auto& param_info) {
       return IntentChipButtonTestBase::GenerateIntentChipTestName(param_info);
     });

@@ -492,6 +492,10 @@ config("compiler") {
       ]
     }
 
+    if (current_os == "aix") {
+      defines += [ "__LIBC_NO_CPP_MATH_OVERLOADS__" ]
+    }
+
     if (exclude_unwind_tables) {
       cflags += [
         "-fno-unwind-tables",
@@ -557,7 +561,9 @@ config("compiler") {
 
     # Enable std::vector []-operator bounds checking.
     cflags_cc += [ "-D__google_stl_debug_vector=1" ]
+  }
 
+  if (is_chromeos || is_fuchsia) {
     # Use -fdebug-types-section to avoid out-of-range relocations
     # (crbug.com/1050819). When using ThinLTO, pass the equivalent
     # to the code generator.
@@ -1762,6 +1768,15 @@ config("treat_warnings_as_errors") {
   } else {
     cflags = [ "-Werror" ]
 
+    if (is_clang) {
+      # gcc doesn't support this flag.
+      cflags += [
+        # Treat #pragma message warnings (-W#pragma-messages) as fatal errors
+        # so that #pragma message does not bypass -Werror.
+        "-Werror=#pragma-messages",
+      ]
+    }
+
     # The compiler driver can sometimes (rarely) emit warnings before calling
     # the actual linker.  Make sure these warnings are treated as errors as
     # well.
@@ -1795,8 +1810,8 @@ config("tot_warnings") {
   # but may have additional constraints as well (e.g. only some OSes)
   if (is_clang && llvm_force_head_revision) {
     cflags += [
-      # TODO(crbug.com/533040708): Figure out what to do about this.
-      "-Wno-deprecated-attributes",
+      # TODO(crbug.com/526996813): Figure out what to do about this.
+      "-Wno-stringop-overread",
     ]
   }
 }
@@ -2035,19 +2050,18 @@ config("default_clippy_lints") {
     # `config("rustc_revision")` - a custom `--cfg` flag is used to force
     # rebuilding of all `.rs` files (which as a side-effect should also trigger
     # a Clippy check if `enable_rust_clippy = true`).
-    "--cfg=cr_clippy_revision=\"2026-03-17\"",
+    "--cfg=cr_clippy_revision=\"2026-07-20\"",
 
     # Treat all default Clippy lints as warnings.
     # See also `config("treat_warnings_as_errors")`.
     "-Wclippy::all",
 
+    # Additional lints that we enable beyond the defaults
+    "-Wclippy::undocumented_unsafe_blocks",
+
     # Lints disabled during the initial rollout period (when any objection
     # coming from a Chromium engineer would get a lint disabled):
     "-Aclippy::needless_return",
-
-    # TODO(crbug.com/514692100): Fix or otherwise handle these.
-    "-Aclippy::manual-filter",
-    "-Aclippy::useless-borrows-in-formatting",
   ]
 }
 

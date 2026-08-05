@@ -11,6 +11,7 @@ import org.chromium.base.ResettersForTesting;
 import org.chromium.base.ServiceLoaderUtil;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 
 import java.util.Set;
 
@@ -28,9 +29,9 @@ public interface ActorForegroundServiceController {
     /**
      * Starts the service.
      *
-     * @param contextId The context ID associated with the request.
+     * @param glicTriggerMessageId The GLIC trigger message ID associated with the request.
      */
-    void startService(String contextId);
+    void startService(String glicTriggerMessageId);
 
     /**
      * Starts the service and binds to it.
@@ -63,6 +64,16 @@ public interface ActorForegroundServiceController {
     void stopActorForegroundService(int flags);
 
     /**
+     * Transitions active tasks from foreground activity to background rendering.
+     *
+     * @param selector The TabModelSelector of the stopping activity.
+     */
+    default void transitionActiveTasksToBackground(TabModelSelector selector) {}
+
+    /** Destroys the background actuation manager and cleans up its resources. */
+    default void destroyBackgroundActuationManager() {}
+
+    /**
      * Creates an Intent that tells Chrome to bring an Activity for a particular Tab back to the
      * foreground and show the actor control bottom sheet.
      *
@@ -77,13 +88,20 @@ public interface ActorForegroundServiceController {
      */
     boolean isActivityVisibleForTabs(Set<Integer> tabIds);
 
+    /** Returns true if a tabbed activity is currently visible. */
+    boolean isTabbedActivityVisible();
+
     /** Returns the singleton instance. */
     static ActorForegroundServiceController get() {
         if (Holder.sInstanceForTesting != null) return Holder.sInstanceForTesting;
+        if (Holder.sInstance != null) return Holder.sInstance;
         ActorForegroundServiceController ret =
                 ServiceLoaderUtil.maybeCreate(ActorForegroundServiceController.class);
-        if (ret != null) return ret;
-        return NoOpActorForegroundServiceController.getInstance();
+        if (ret == null) {
+            ret = NoOpActorForegroundServiceController.getInstance();
+        }
+        Holder.sInstance = ret;
+        return ret;
     }
 
     static void setInstanceForTesting(ActorForegroundServiceController controller) {
@@ -92,6 +110,7 @@ public interface ActorForegroundServiceController {
     }
 
     class Holder {
+        static @Nullable ActorForegroundServiceController sInstance;
         static @Nullable ActorForegroundServiceController sInstanceForTesting;
     }
 }

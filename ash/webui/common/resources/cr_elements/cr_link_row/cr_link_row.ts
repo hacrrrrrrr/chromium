@@ -98,31 +98,31 @@ export class CrLinkRowElement extends PolymerElement {
     };
   }
 
-  ariaShowLabel: boolean;
-  ariaShowSublabel: boolean;
-  startIcon: string;
-  label: string;
-  subLabel: string;
-  disabled: boolean;
-  external: boolean;
-  usingSlottedLabel: boolean;
-  roleDescription: string;
-  buttonAriaDescription: string;
-  private hideLabelWrapper_: boolean;
+  declare ariaShowLabel: boolean;
+  declare ariaShowSublabel: boolean;
+  declare startIcon: string;
+  declare label: string;
+  declare subLabel: string;
+  declare disabled: boolean;
+  declare external: boolean;
+  declare usingSlottedLabel: boolean;
+  declare roleDescription: string;
+  declare buttonAriaDescription: string;
+  declare private hideLabelWrapper_: boolean;
 
   override focus() {
     this.$.icon.focus();
   }
 
-  private computeHideLabelWrapper_(): boolean {
+  protected computeHideLabelWrapper_(): boolean {
     return !(this.label || this.usingSlottedLabel);
   }
 
-  private getIcon_(): string {
+  protected getIcon_(): string {
     return this.external ? 'cr:open-in-new' : 'cr:arrow-right';
   }
 
-  private computeButtonAriaDescription_(
+  protected computeButtonAriaDescription_(
       external: boolean, buttonAriaDescription?: string): string {
     return buttonAriaDescription ??
         (external ? loadTimeData.getString('opensInNewTab') : '');

@@ -233,6 +233,16 @@ struct Conv2dParams {
   Conv2dActivationKind activation_kind;
 };
 
+struct CumulativeSumParams {
+  OperandDataType data_type;
+  uint32_t rank;
+  std::array<uint32_t, 8> input_dims;
+  uint32_t axis;
+  bool exclusive;
+  bool reversed;
+  bool is_input_constant;
+};
+
 struct DequantizeLinearParams {
   OperandDataType input_data_type;
   OperandDataType scale_data_type;
@@ -292,6 +302,19 @@ struct GatherParams {
   bool is_indices_constant;
 };
 
+struct GatherElementsParams {
+  OperandDataType input_data_type;
+  OperandDataType indices_data_type;
+  uint32_t rank;
+  uint32_t axis;
+  std::array<uint32_t, 8> input_dims;
+  // Dimension size of the indices tensor along `axis`.
+  uint32_t indices_axis_dim_size;
+  int64_t indices_fill_value;
+  bool is_input_constant;
+  bool is_indices_constant;
+};
+
 struct GatherNDParams {
   OperandDataType input_data_type;
   OperandDataType indices_data_type;
@@ -318,6 +341,41 @@ struct GemmParams {
   bool is_a_constant;
   bool is_b_constant;
   bool is_c_constant;
+};
+
+struct GruParams {
+  OperandDataType data_type;
+  uint32_t steps;
+  uint32_t batch_size;
+  uint32_t input_size;
+  uint32_t hidden_size;
+  mojom::RecurrentNetworkDirection direction;
+  mojom::GruWeightLayout layout;
+  OptionalOperandKind bias_kind;
+  OptionalOperandKind recurrent_bias_kind;
+  OptionalOperandKind initial_hidden_state_kind;
+  bool reset_after;
+  bool return_sequence;
+  bool is_input_constant;
+  bool is_weight_constant;
+  bool is_recurrent_weight_constant;
+  std::array<mojom::RecurrentNetworkActivation, 2> activations;
+};
+
+struct GruCellParams {
+  OperandDataType data_type;
+  uint32_t batch_size;
+  uint32_t input_size;
+  uint32_t hidden_size;
+  mojom::GruWeightLayout layout;
+  OptionalOperandKind bias_kind;
+  OptionalOperandKind recurrent_bias_kind;
+  bool reset_after;
+  bool is_input_constant;
+  bool is_weight_constant;
+  bool is_recurrent_weight_constant;
+  bool is_hidden_state_constant;
+  std::array<mojom::RecurrentNetworkActivation, 2> activations;
 };
 
 struct HardSigmoidParams {
@@ -503,6 +561,24 @@ struct Resample2dParams {
   bool is_input_constant;
 };
 
+struct ReshapeParams {
+  OperandDataType data_type;
+  uint32_t input_rank;
+  std::array<uint32_t, 8> input_dims;
+  uint32_t output_rank;
+  std::array<uint32_t, 8> output_dim_seeds;
+  bool is_input_constant;
+};
+
+struct ReverseParams {
+  OperandDataType data_type;
+  uint32_t rank;
+  std::array<uint32_t, 8> input_dims;
+  uint32_t num_axes;
+  std::array<uint32_t, 8> axes;
+  bool is_input_constant;
+};
+
 struct ScatterElementsParams {
   OperandDataType input_data_type;
   OperandDataType indices_data_type;
@@ -511,6 +587,19 @@ struct ScatterElementsParams {
   std::array<uint32_t, 8> input_dims;
   // Dimension size of the indices tensor along `axis`.
   uint32_t indices_axis_dim_size;
+  int64_t indices_fill_value;
+  bool is_input_constant;
+  bool is_indices_constant;
+  bool is_updates_constant;
+};
+
+struct ScatterNDParams {
+  OperandDataType input_data_type;
+  OperandDataType indices_data_type;
+  uint32_t input_rank;
+  std::array<uint32_t, 8> input_dims;
+  uint32_t indices_rank;
+  std::array<uint32_t, 8> indices_dims;
   int64_t indices_fill_value;
   bool is_input_constant;
   bool is_indices_constant;
@@ -551,6 +640,14 @@ struct SplitParams {
   bool is_input_constant;
 };
 
+struct TileParams {
+  OperandDataType data_type;
+  uint32_t rank;
+  std::array<uint32_t, 8> input_dims;
+  std::array<uint32_t, 8> repetitions;
+  bool is_input_constant;
+};
+
 struct TransposeParams {
   OperandDataType data_type;
   uint32_t rank;
@@ -566,6 +663,20 @@ struct TriangularParams {
   bool upper;
   int32_t diagonal;
   bool is_input_constant;
+};
+
+struct WhereParams {
+  OperandDataType condition_data_type;
+  OperandDataType value_data_type;
+  uint32_t condition_rank;
+  uint32_t true_value_rank;
+  uint32_t false_value_rank;
+  std::array<uint32_t, 8> condition_dims;
+  std::array<uint32_t, 8> true_value_dims;
+  std::array<uint32_t, 8> false_value_dims;
+  bool is_condition_constant;
+  bool is_true_value_constant;
+  bool is_false_value_constant;
 };
 
 SupportedDataTypes GetActivationDataTypes(ActivationKind kind) {
@@ -789,7 +900,7 @@ auto AnyRecurrentNetworkActivation() {
        mojom::RecurrentNetworkActivation::kTanh});
 }
 
-auto AnyLstmDirection() {
+auto AnyRecurrentNetworkDirection() {
   return fuzztest::ElementOf<mojom::RecurrentNetworkDirection>(
       {mojom::RecurrentNetworkDirection::kForward,
        mojom::RecurrentNetworkDirection::kBackward,
@@ -799,6 +910,11 @@ auto AnyLstmDirection() {
 auto AnyLstmWeightLayout() {
   return fuzztest::ElementOf<mojom::LstmWeightLayout>(
       {mojom::LstmWeightLayout::kIofg, mojom::LstmWeightLayout::kIfgo});
+}
+
+auto AnyGruWeightLayout() {
+  return fuzztest::ElementOf<mojom::GruWeightLayout>(
+      {mojom::GruWeightLayout::kZrn, mojom::GruWeightLayout::kRzn});
 }
 
 // Generates values in [min_val, max_val] with log-uniform distribution,
@@ -1053,6 +1169,19 @@ auto AnyConv2dParams() {
   );
 }
 
+auto AnyCumulativeSumParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<CumulativeSumParams>(
+      AnyOperandDataTypeFor(limits.cumulative_sum_input.data_types),
+      AnyTensorRank(),                     // rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
+      fuzztest::InRange<uint32_t>(0, 7),   // axis
+      fuzztest::Arbitrary<bool>(),         // exclusive
+      fuzztest::Arbitrary<bool>(),         // reversed
+      fuzztest::Arbitrary<bool>()          // is_input_constant
+  );
+}
+
 auto AnyDequantizeLinearParams() {
   const auto& limits = GetContextPropertiesForTesting().data_type_limits;
   return fuzztest::StructOf<DequantizeLinearParams>(
@@ -1142,6 +1271,22 @@ auto AnyGatherParams() {
   );
 }
 
+auto AnyGatherElementsParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<GatherElementsParams>(
+      AnyOperandDataTypeFor(limits.gather_elements_input.data_types),
+      AnyOperandDataTypeFor(limits.gather_elements_indices.data_types),
+      AnyTensorRank(),                     // input_rank
+      fuzztest::InRange<uint32_t>(0, 7),   // axis
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
+      AnyDimSize(),                        // indices_axis_dim_size
+      fuzztest::OneOf(fuzztest::InRange<int64_t>(-10, 10),
+                      fuzztest::Arbitrary<int64_t>()),  // indices_fill_value
+      fuzztest::Arbitrary<bool>(),                      // is_input_constant
+      fuzztest::Arbitrary<bool>()                       // is_indices_constant
+  );
+}
+
 auto AnyGatherNDParams() {
   const auto& limits = GetContextPropertiesForTesting().data_type_limits;
   return fuzztest::StructOf<GatherNDParams>(
@@ -1182,6 +1327,47 @@ auto AnyGemmParams() {
       fuzztest::Arbitrary<bool>(),                              // is_a_constant
       fuzztest::Arbitrary<bool>(),                              // is_b_constant
       fuzztest::Arbitrary<bool>()                               // is_c_constant
+  );
+}
+
+auto AnyGruParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<GruParams>(
+      AnyOperandDataTypeFor(limits.gru_input.data_types),
+      AnyDimSize(),                    // steps
+      AnyDimSize(),                    // batch_size
+      AnyDimSize(),                    // input_size
+      AnyDimSize(),                    // hidden_size
+      AnyRecurrentNetworkDirection(),  // direction
+      AnyGruWeightLayout(),            // layout
+      AnyOptionalOperandKind(),        // bias_kind
+      AnyOptionalOperandKind(),        // recurrent_bias_kind
+      AnyOptionalOperandKind(),        // initial_hidden_state_kind
+      fuzztest::Arbitrary<bool>(),     // reset_after
+      fuzztest::Arbitrary<bool>(),     // return_sequence
+      fuzztest::Arbitrary<bool>(),     // is_input_constant
+      fuzztest::Arbitrary<bool>(),     // is_weight_constant
+      fuzztest::Arbitrary<bool>(),     // is_recurrent_weight_constant
+      fuzztest::ArrayOf<2>(AnyRecurrentNetworkActivation())  // activations
+  );
+}
+
+auto AnyGruCellParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<GruCellParams>(
+      AnyOperandDataTypeFor(limits.gru_cell_input.data_types),
+      AnyDimSize(),                 // batch_size
+      AnyDimSize(),                 // input_size
+      AnyDimSize(),                 // hidden_size
+      AnyGruWeightLayout(),         // layout
+      AnyOptionalOperandKind(),     // bias_kind
+      AnyOptionalOperandKind(),     // recurrent_bias_kind
+      fuzztest::Arbitrary<bool>(),  // reset_after
+      fuzztest::Arbitrary<bool>(),  // is_input_constant
+      fuzztest::Arbitrary<bool>(),  // is_weight_constant
+      fuzztest::Arbitrary<bool>(),  // is_recurrent_weight_constant
+      fuzztest::Arbitrary<bool>(),  // is_hidden_state_constant
+      fuzztest::ArrayOf<2>(AnyRecurrentNetworkActivation())  // activations
   );
 }
 
@@ -1257,21 +1443,21 @@ auto AnyLstmParams() {
   const auto& limits = GetContextPropertiesForTesting().data_type_limits;
   return fuzztest::StructOf<LstmParams>(
       AnyOperandDataTypeFor(limits.lstm_input.data_types),
-      AnyDimSize(),                 // steps
-      AnyDimSize(),                 // batch_size
-      AnyDimSize(),                 // input_size
-      AnyDimSize(),                 // hidden_size
-      AnyLstmDirection(),           // direction
-      AnyLstmWeightLayout(),        // layout
-      AnyOptionalOperandKind(),     // bias_kind
-      AnyOptionalOperandKind(),     // recurrent_bias_kind
-      AnyOptionalOperandKind(),     // peephole_weight_kind
-      AnyOptionalOperandKind(),     // initial_hidden_state_kind
-      AnyOptionalOperandKind(),     // initial_cell_state_kind
-      fuzztest::Arbitrary<bool>(),  // return_sequence
-      fuzztest::Arbitrary<bool>(),  // is_input_constant
-      fuzztest::Arbitrary<bool>(),  // is_weight_constant
-      fuzztest::Arbitrary<bool>(),  // is_recurrent_weight_constant
+      AnyDimSize(),                    // steps
+      AnyDimSize(),                    // batch_size
+      AnyDimSize(),                    // input_size
+      AnyDimSize(),                    // hidden_size
+      AnyRecurrentNetworkDirection(),  // direction
+      AnyLstmWeightLayout(),           // layout
+      AnyOptionalOperandKind(),        // bias_kind
+      AnyOptionalOperandKind(),        // recurrent_bias_kind
+      AnyOptionalOperandKind(),        // peephole_weight_kind
+      AnyOptionalOperandKind(),        // initial_hidden_state_kind
+      AnyOptionalOperandKind(),        // initial_cell_state_kind
+      fuzztest::Arbitrary<bool>(),     // return_sequence
+      fuzztest::Arbitrary<bool>(),     // is_input_constant
+      fuzztest::Arbitrary<bool>(),     // is_weight_constant
+      fuzztest::Arbitrary<bool>(),     // is_recurrent_weight_constant
       fuzztest::ArrayOf<3>(AnyRecurrentNetworkActivation())  // activations
   );
 }
@@ -1431,6 +1617,31 @@ auto AnyResample2dParams() {
   );
 }
 
+auto AnyReshapeParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<ReshapeParams>(
+      AnyOperandDataTypeFor(limits.reshape_input.data_types),
+      AnyTensorRankIncludeZero(),          // input_rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
+      AnyTensorRankIncludeZero(),          // output_rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // output_dim_seeds
+      fuzztest::Arbitrary<bool>()          // is_input_constant
+  );
+}
+
+auto AnyReverseParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<ReverseParams>(
+      AnyOperandDataTypeFor(limits.reverse_input.data_types),
+      AnyTensorRankIncludeZero(),          // rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
+      fuzztest::InRange<uint32_t>(0, 8),   // num_axes
+      fuzztest::ArrayOf<8>(                // axes
+          fuzztest::InRange<uint32_t>(0, 7)),
+      fuzztest::Arbitrary<bool>()  // is_input_constant
+  );
+}
+
 auto AnyScatterElementsParams() {
   const auto& limits = GetContextPropertiesForTesting().data_type_limits;
   return fuzztest::StructOf<ScatterElementsParams>(
@@ -1440,6 +1651,23 @@ auto AnyScatterElementsParams() {
       fuzztest::InRange<uint32_t>(0, 7),   // axis
       fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
       AnyDimSize(),                        // indices_axis_dim_size
+      fuzztest::OneOf(fuzztest::InRange<int64_t>(-10, 10),
+                      fuzztest::Arbitrary<int64_t>()),  // indices_fill_value
+      fuzztest::Arbitrary<bool>(),                      // is_input_constant
+      fuzztest::Arbitrary<bool>(),                      // is_indices_constant
+      fuzztest::Arbitrary<bool>()                       // is_updates_constant
+  );
+}
+
+auto AnyScatterNDParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  return fuzztest::StructOf<ScatterNDParams>(
+      AnyOperandDataTypeFor(limits.scatter_nd_input.data_types),
+      AnyOperandDataTypeFor(limits.scatter_nd_indices.data_types),
+      AnyTensorRank(),                     // input_rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // input_dims
+      AnyTensorRank(),                     // indices_rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),  // indices_dims
       fuzztest::OneOf(fuzztest::InRange<int64_t>(-10, 10),
                       fuzztest::Arbitrary<int64_t>()),  // indices_fill_value
       fuzztest::Arbitrary<bool>(),                      // is_input_constant
@@ -1488,6 +1716,21 @@ auto AnySplitParams() {
   );
 }
 
+auto AnyTileParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  // Bias repetitions toward small values to avoid creating excessively large
+  // output tensors.
+  auto any_repetition =
+      fuzztest::OneOf(fuzztest::InRange<uint32_t>(1, 4), AnyDimSize());
+  return fuzztest::StructOf<TileParams>(
+      AnyOperandDataTypeFor(limits.tile_input.data_types),
+      AnyTensorRankIncludeZero(),            // rank
+      fuzztest::ArrayOf<8>(AnyDimSize()),    // input_dims
+      fuzztest::ArrayOf<8>(any_repetition),  // repetitions
+      fuzztest::Arbitrary<bool>()            // is_input_constant
+  );
+}
+
 auto AnyTransposeParams() {
   const auto& limits = GetContextPropertiesForTesting().data_type_limits;
   return fuzztest::StructOf<TransposeParams>(
@@ -1513,6 +1756,25 @@ auto AnyTriangularParams() {
       fuzztest::OneOf(fuzztest::InRange<int32_t>(-10, 10),
                       fuzztest::Arbitrary<int32_t>()),  // diagonal
       fuzztest::Arbitrary<bool>()                       // is_input_constant
+  );
+}
+
+auto AnyWhereParams() {
+  const auto& limits = GetContextPropertiesForTesting().data_type_limits;
+  // Bias input dims toward 1 which is broadcastable.
+  auto any_input_dim = fuzztest::OneOf(fuzztest::Just(1u), AnyDimSize());
+  return fuzztest::StructOf<WhereParams>(
+      AnyOperandDataTypeFor(limits.where_condition.data_types),
+      AnyOperandDataTypeFor(limits.where_value.data_types),
+      AnyTensorRankIncludeZero(),           // condition_rank
+      AnyTensorRankIncludeZero(),           // true_value_rank
+      AnyTensorRankIncludeZero(),           // false_value_rank
+      fuzztest::ArrayOf<8>(any_input_dim),  // condition_dims
+      fuzztest::ArrayOf<8>(any_input_dim),  // true_value_dims
+      fuzztest::ArrayOf<8>(any_input_dim),  // false_value_dims
+      fuzztest::Arbitrary<bool>(),          // is_condition_constant
+      fuzztest::Arbitrary<bool>(),          // is_true_value_constant
+      fuzztest::Arbitrary<bool>()           // is_false_value_constant
   );
 }
 
@@ -2433,6 +2695,66 @@ std::optional<Resample2dDescriptors> SetUpResample2dDescriptors(
   };
 }
 
+struct ReshapeDescriptors {
+  OperandDescriptor input_desc;
+  OperandDescriptor output_desc;
+};
+
+// Helper to set up ReshapeDescriptors. Builds an output shape with `rank` equal
+// to `output_rank` that preserves the total number of elements of the input, by
+// greedily factoring the element count using the fuzzed `output_dim_seeds`.
+// Returns nullopt if any validation fails.
+std::optional<ReshapeDescriptors> SetUpReshapeDescriptors(
+    const ContextProperties& context_properties,
+    const ReshapeParams& params) {
+  std::vector<uint32_t> input_dims(
+      params.input_dims.begin(), params.input_dims.begin() + params.input_rank);
+
+  ASSIGN_OR_RETURN_NULLOPT(
+      auto input_desc,
+      OperandDescriptor::Create(context_properties, params.data_type,
+                                input_dims, ""));
+
+  // Compute the remaining total number of elements to distribute among the
+  // output dimensions.
+  uint64_t remaining = 1;
+  for (uint32_t dim : input_dims) {
+    remaining *= dim;
+  }
+
+  // Greedily assign each output dimension (except the last) a divisor of the
+  // remaining element count, chosen from the fuzzed seed. The final dimension
+  // takes whatever is left so the total element count is preserved exactly.
+  std::vector<uint32_t> output_dims(params.output_rank);
+  if (params.output_rank == 0) {
+    if (remaining != 1) {
+      return std::nullopt;
+    }
+  } else {
+    for (uint32_t i = 0; i < params.output_rank - 1; ++i) {
+      uint32_t divisor = static_cast<uint32_t>(std::gcd(
+          static_cast<uint64_t>(params.output_dim_seeds[i]), remaining));
+      output_dims[i] = divisor;
+      remaining /= divisor;
+    }
+
+    if (remaining > std::numeric_limits<uint32_t>::max()) {
+      return std::nullopt;
+    }
+    output_dims[params.output_rank - 1] = static_cast<uint32_t>(remaining);
+  }
+
+  ASSIGN_OR_RETURN_NULLOPT(
+      auto output_desc,
+      OperandDescriptor::Create(context_properties, params.data_type,
+                                output_dims, ""));
+
+  return ReshapeDescriptors{
+      .input_desc = std::move(input_desc),
+      .output_desc = std::move(output_desc),
+  };
+}
+
 struct SliceDescriptors {
   OperandDescriptor input_desc;
   OperandDescriptor output_desc;
@@ -2893,6 +3215,7 @@ class WebNNGraphImplFuzzerImpl
   void Clamp(ClampParams params, uint8_t seed_for_data);
   void Concat(ConcatParams params, uint8_t seed_for_data);
   void Conv2d(Conv2dParams params, uint8_t seed_for_data);
+  void CumulativeSum(CumulativeSumParams params, uint8_t seed_for_data);
   void DequantizeLinear(DequantizeLinearParams params,
                         uint8_t seed_for_input,
                         float seed_for_scale,
@@ -2901,8 +3224,11 @@ class WebNNGraphImplFuzzerImpl
   void Elu(EluParams params, uint8_t seed_for_data);
   void Expand(ExpandParams params, uint8_t seed_for_data);
   void Gather(GatherParams params, uint8_t seed_for_data);
+  void GatherElements(GatherElementsParams params, uint8_t seed_for_data);
   void GatherND(GatherNDParams params, uint8_t seed_for_data);
   void Gemm(GemmParams params, uint8_t seed_for_data);
+  void Gru(GruParams params, uint8_t seed_for_data);
+  void GruCell(GruCellParams params, uint8_t seed_for_data);
   void HardSigmoid(HardSigmoidParams params, uint8_t seed_for_data);
   void InstanceNormalization(InstanceNormalizationParams params,
                              uint8_t seed_for_data);
@@ -2922,12 +3248,20 @@ class WebNNGraphImplFuzzerImpl
                       uint8_t seed_for_zero_point);
   void Reduce(ReduceParams params, uint8_t seed_for_data);
   void Resample2d(Resample2dParams params, uint8_t seed_for_data);
+  void Reshape(ReshapeParams params, uint8_t seed_for_data);
+  void Reverse(ReverseParams params, uint8_t seed_for_data);
   void ScatterElements(ScatterElementsParams params, uint8_t seed_for_data);
+  void ScatterND(ScatterNDParams params, uint8_t seed_for_data);
   void Slice(SliceParams params, uint8_t seed_for_data);
   void Softmax(SoftmaxParams params, uint8_t seed_for_data);
   void Split(SplitParams params, uint8_t seed_for_data);
+  void Tile(TileParams params, uint8_t seed_for_data);
   void Transpose(TransposeParams params, uint8_t seed_for_data);
   void Triangular(TriangularParams params, uint8_t seed_for_data);
+  void Where(WhereParams params,
+             uint8_t seed_for_condition,
+             uint8_t seed_for_true_value,
+             uint8_t seed_for_false_value);
   void DQActivationQ(ActivationParams activation_params,
                      OperandDataType quantized_type,
                      uint8_t seed_for_input,
@@ -2994,6 +3328,11 @@ class WebNNGraphImplFuzzerImpl
                      uint8_t seed_for_input,
                      float seed_for_scale,
                      uint8_t seed_for_zero_point);
+  void DQReshapeQ(ReshapeParams reshape_params,
+                  OperandDataType quantized_type,
+                  uint8_t seed_for_input,
+                  float seed_for_scale,
+                  uint8_t seed_for_zero_point);
   void DQSliceQ(SliceParams slice_params,
                 OperandDataType quantized_type,
                 uint8_t seed_for_input,
@@ -3354,6 +3693,47 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Conv2d(Conv2dParams params,
 }
 
 template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::CumulativeSum(
+    CumulativeSumParams params,
+    uint8_t seed_for_data) {
+  std::vector<uint32_t> input_dims(params.input_dims.begin(),
+                                   params.input_dims.begin() + params.rank);
+
+  params.axis = params.axis % params.rank;
+
+  ASSIGN_OR_RETURN_VOID(auto input_desc, OperandDescriptor::Create(
+                                             this->context_properties(),
+                                             params.data_type, input_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(auto output_desc, ValidateCumulativeSumAndInferOutput(
+                                              this->context_properties(),
+                                              input_desc, params.axis, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildCumulativeSum(input_id, output_id, params.axis, params.exclusive,
+                             params.reversed);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::DequantizeLinear(
     DequantizeLinearParams params,
     uint8_t seed_for_input,
@@ -3587,6 +3967,61 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Gather(GatherParams params,
 }
 
 template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::GatherElements(
+    GatherElementsParams params,
+    uint8_t seed_for_data) {
+  std::vector<uint32_t> input_dims(params.input_dims.begin(),
+                                   params.input_dims.begin() + params.rank);
+
+  params.axis %= params.rank;
+  std::vector<uint32_t> indices_dims = input_dims;
+  indices_dims[params.axis] = params.indices_axis_dim_size;
+
+  ASSIGN_OR_RETURN_VOID(
+      auto input_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.input_data_type, input_dims, ""));
+  ASSIGN_OR_RETURN_VOID(
+      auto indices_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.indices_data_type, indices_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(auto output_desc,
+                        ValidateGatherElementsAndInferOutput(
+                            this->context_properties(), input_desc,
+                            indices_desc, params.axis, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+  OperandId indices_id = BuildInputOrConstant(
+      builder, params.is_indices_constant, "indices", indices_desc,
+      CreateBufferAsIndicesType(indices_desc.PackedByteLength(),
+                                params.indices_data_type,
+                                params.indices_fill_value),
+      data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildGatherElements(input_id, indices_id, output_id, params.axis);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::GatherND(GatherNDParams params,
                                                      uint8_t seed_for_data) {
   std::vector<uint32_t> input_dims(
@@ -3677,6 +4112,266 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Gemm(GemmParams params,
                           gemm_descs.output_desc.data_type());
 
   builder.BuildGemm(a_id, b_id, output_id, gemm_attr);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::Gru(GruParams params,
+                                                uint8_t seed_for_data) {
+  CHECK_LE(params.hidden_size, std::numeric_limits<uint32_t>::max() / 3);
+  const uint32_t three_hidden_size = params.hidden_size * 3;
+  const uint32_t direction_count =
+      params.direction == mojom::RecurrentNetworkDirection::kBoth ? 2 : 1;
+
+  // input: [steps, batch_size, input_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto input_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{params.steps, params.batch_size,
+                                params.input_size},
+          ""));
+
+  // weight: [direction_count, 3 * hidden_size, input_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto weight_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{direction_count, three_hidden_size,
+                                params.input_size},
+          ""));
+
+  // recurrent_weight: [direction_count, 3 * hidden_size, hidden_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto recurrent_weight_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{direction_count, three_hidden_size,
+                                params.hidden_size},
+          ""));
+
+  GruAttributes attributes;
+  attributes.return_sequence = params.return_sequence;
+  attributes.direction =
+      params.direction == mojom::RecurrentNetworkDirection::kForward
+          ? RecurrentNetworkDirection::kForward
+      : params.direction == mojom::RecurrentNetworkDirection::kBackward
+          ? RecurrentNetworkDirection::kBackward
+          : RecurrentNetworkDirection::kBoth;
+  attributes.activation_count = 2;
+
+  // Optional: bias [direction_count, 3 * hidden_size]
+  std::optional<OperandDescriptor> bias_desc;
+  if (params.bias_kind != OptionalOperandKind::kNone) {
+    ASSIGN_OR_RETURN_VOID(
+        bias_desc,
+        OperandDescriptor::Create(
+            this->context_properties(), params.data_type,
+            std::vector<uint32_t>{direction_count, three_hidden_size}, ""));
+    attributes.bias = bias_desc;
+  }
+
+  // Optional: recurrent_bias [direction_count, 3 * hidden_size]
+  std::optional<OperandDescriptor> recurrent_bias_desc;
+  if (params.recurrent_bias_kind != OptionalOperandKind::kNone) {
+    ASSIGN_OR_RETURN_VOID(
+        recurrent_bias_desc,
+        OperandDescriptor::Create(
+            this->context_properties(), params.data_type,
+            std::vector<uint32_t>{direction_count, three_hidden_size}, ""));
+    attributes.recurrent_bias = recurrent_bias_desc;
+  }
+
+  // Optional: initial_hidden_state [direction_count, batch_size, hidden_size]
+  std::optional<OperandDescriptor> initial_hidden_state_desc;
+  if (params.initial_hidden_state_kind != OptionalOperandKind::kNone) {
+    ASSIGN_OR_RETURN_VOID(
+        initial_hidden_state_desc,
+        OperandDescriptor::Create(
+            this->context_properties(), params.data_type,
+            std::vector<uint32_t>{direction_count, params.batch_size,
+                                  params.hidden_size},
+            ""));
+    attributes.initial_hidden_state = initial_hidden_state_desc;
+  }
+
+  ASSIGN_OR_RETURN_VOID(
+      auto output_descs,
+      ValidateGruAndInferOutput(this->context_properties(), input_desc,
+                                weight_desc, recurrent_weight_desc,
+                                params.steps, params.hidden_size, attributes));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  data_buffers.reserve(6);
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+  OperandId weight_id = BuildInputOrConstant(
+      builder, params.is_weight_constant, "weight", weight_desc, seed_for_data,
+      data_buffers, named_inputs);
+  OperandId recurrent_weight_id = BuildInputOrConstant(
+      builder, params.is_recurrent_weight_constant, "recurrent_weight",
+      recurrent_weight_desc, seed_for_data, data_buffers, named_inputs);
+
+  BuildGruAttributes gru_attr;
+  gru_attr.reset_after = params.reset_after;
+  gru_attr.return_sequence = params.return_sequence;
+  gru_attr.direction = params.direction;
+  gru_attr.layout = params.layout;
+  gru_attr.activations.assign(params.activations.begin(),
+                              params.activations.end());
+
+  gru_attr.bias_operand_id =
+      BuildOptionalOperand(builder, bias_desc, params.bias_kind, "bias",
+                           seed_for_data, data_buffers, named_inputs);
+  gru_attr.recurrent_bias_operand_id = BuildOptionalOperand(
+      builder, recurrent_bias_desc, params.recurrent_bias_kind,
+      "recurrent_bias", seed_for_data, data_buffers, named_inputs);
+  gru_attr.initial_hidden_state_operand_id = BuildOptionalOperand(
+      builder, initial_hidden_state_desc, params.initial_hidden_state_kind,
+      "initial_hidden_state", seed_for_data, data_buffers, named_inputs);
+
+  std::vector<OperandId> output_operand_ids;
+  OperandId output_hidden_state_id =
+      builder.BuildOutput("output_hidden_state", output_descs[0].shape(),
+                          output_descs[0].data_type());
+  output_operand_ids.push_back(output_hidden_state_id);
+
+  if (params.return_sequence) {
+    ASSERT_EQ(output_descs.size(), 2u);
+    OperandId output_sequence_id =
+        builder.BuildOutput("output_sequence", output_descs[1].shape(),
+                            output_descs[1].data_type());
+    output_operand_ids.push_back(output_sequence_id);
+  }
+
+  builder.BuildGru(input_id, weight_id, recurrent_weight_id,
+                   std::move(output_operand_ids), params.steps,
+                   params.hidden_size, gru_attr);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::GruCell(GruCellParams params,
+                                                    uint8_t seed_for_data) {
+  CHECK_LE(params.hidden_size, std::numeric_limits<uint32_t>::max() / 3);
+  const uint32_t three_hidden_size = params.hidden_size * 3;
+
+  // input: [batch_size, input_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto input_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{params.batch_size, params.input_size}, ""));
+
+  // weight: [3 * hidden_size, input_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto weight_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{three_hidden_size, params.input_size}, ""));
+
+  // recurrent_weight: [3 * hidden_size, hidden_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto recurrent_weight_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{three_hidden_size, params.hidden_size}, ""));
+
+  // hidden_state: [batch_size, hidden_size]
+  ASSIGN_OR_RETURN_VOID(
+      auto hidden_state_desc,
+      OperandDescriptor::Create(
+          this->context_properties(), params.data_type,
+          std::vector<uint32_t>{params.batch_size, params.hidden_size}, ""));
+
+  GruCellAttributes attributes;
+  attributes.activation_count = 2;
+
+  // Optional: bias [3 * hidden_size]
+  std::optional<OperandDescriptor> bias_desc;
+  if (params.bias_kind != OptionalOperandKind::kNone) {
+    ASSIGN_OR_RETURN_VOID(bias_desc,
+                          OperandDescriptor::Create(
+                              this->context_properties(), params.data_type,
+                              std::vector<uint32_t>{three_hidden_size}, ""));
+    attributes.bias = bias_desc;
+  }
+
+  // Optional: recurrent_bias [3 * hidden_size]
+  std::optional<OperandDescriptor> recurrent_bias_desc;
+  if (params.recurrent_bias_kind != OptionalOperandKind::kNone) {
+    ASSIGN_OR_RETURN_VOID(recurrent_bias_desc,
+                          OperandDescriptor::Create(
+                              this->context_properties(), params.data_type,
+                              std::vector<uint32_t>{three_hidden_size}, ""));
+    attributes.recurrent_bias = recurrent_bias_desc;
+  }
+
+  ASSIGN_OR_RETURN_VOID(auto output_desc,
+                        ValidateGruCellAndInferOutput(
+                            this->context_properties(), input_desc, weight_desc,
+                            recurrent_weight_desc, hidden_state_desc,
+                            params.hidden_size, attributes));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  data_buffers.reserve(6);
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+  OperandId weight_id = BuildInputOrConstant(
+      builder, params.is_weight_constant, "weight", weight_desc, seed_for_data,
+      data_buffers, named_inputs);
+  OperandId recurrent_weight_id = BuildInputOrConstant(
+      builder, params.is_recurrent_weight_constant, "recurrent_weight",
+      recurrent_weight_desc, seed_for_data, data_buffers, named_inputs);
+  OperandId hidden_state_id = BuildInputOrConstant(
+      builder, params.is_hidden_state_constant, "hidden_state",
+      hidden_state_desc, seed_for_data, data_buffers, named_inputs);
+
+  BuildGruCellAttributes gru_cell_attr;
+  gru_cell_attr.reset_after = params.reset_after;
+  gru_cell_attr.layout = params.layout;
+  gru_cell_attr.activations.assign(params.activations.begin(),
+                                   params.activations.end());
+
+  gru_cell_attr.bias_operand_id =
+      BuildOptionalOperand(builder, bias_desc, params.bias_kind, "bias",
+                           seed_for_data, data_buffers, named_inputs);
+  gru_cell_attr.recurrent_bias_operand_id = BuildOptionalOperand(
+      builder, recurrent_bias_desc, params.recurrent_bias_kind,
+      "recurrent_bias", seed_for_data, data_buffers, named_inputs);
+
+  OperandId output_hidden_state_id = builder.BuildOutput(
+      "output_hidden_state", output_desc.shape(), output_desc.data_type());
+
+  builder.BuildGruCell(input_id, weight_id, recurrent_weight_id,
+                       hidden_state_id, output_hidden_state_id,
+                       params.hidden_size, gru_cell_attr);
 
   if (!builder.IsValidGraphForTesting(this->context_properties())) {
     return;
@@ -3989,9 +4684,7 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Linear(LinearParams params,
 template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::Lstm(LstmParams params,
                                                  uint8_t seed_for_data) {
-  if (params.hidden_size > std::numeric_limits<uint32_t>::max() / 4) {
-    return;
-  }
+  CHECK_LE(params.hidden_size, std::numeric_limits<uint32_t>::max() / 4);
   const uint32_t four_hidden_size = params.hidden_size * 4;
   const uint32_t direction_count =
       params.direction == mojom::RecurrentNetworkDirection::kBoth ? 2 : 1;
@@ -4174,9 +4867,7 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Lstm(LstmParams params,
 template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::LstmCell(LstmCellParams params,
                                                      uint8_t seed_for_data) {
-  if (params.hidden_size > std::numeric_limits<uint32_t>::max() / 4) {
-    return;
-  }
+  CHECK_LE(params.hidden_size, std::numeric_limits<uint32_t>::max() / 4);
   const uint32_t four_hidden_size = params.hidden_size * 4;
 
   // input: [batch_size, input_size]
@@ -4623,6 +5314,38 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Reduce(ReduceParams params,
 }
 
 template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::Reshape(ReshapeParams params,
+                                                    uint8_t seed_for_data) {
+  ASSIGN_OR_RETURN_VOID(
+      auto reshape_descs,
+      SetUpReshapeDescriptors(this->context_properties(), params));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(
+      builder, params.is_input_constant, "input", reshape_descs.input_desc,
+      seed_for_data, data_buffers, named_inputs);
+
+  OperandId output_id =
+      builder.BuildOutput("output", reshape_descs.output_desc.shape(),
+                          reshape_descs.output_desc.data_type());
+
+  builder.BuildReshape(input_id, output_id);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::Resample2d(Resample2dParams params,
                                                        uint8_t seed_for_data) {
   ASSIGN_OR_RETURN_VOID(
@@ -4648,6 +5371,54 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Resample2d(Resample2dParams params,
   resample2d_attr.scales = resample2d_descs.scales;
   resample2d_attr.axes = resample2d_descs.axes;
   builder.BuildResample2d(input_id, output_id, resample2d_attr);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::Reverse(ReverseParams params,
+                                                    uint8_t seed_for_data) {
+  std::vector<uint32_t> input_dims(params.input_dims.begin(),
+                                   params.input_dims.begin() + params.rank);
+
+  // Limit `num_axes` and remove duplicate values, mapping each into the range
+  // [0, rank).
+  params.num_axes = std::min(params.num_axes, params.rank);
+  std::vector<uint32_t> axes;
+  for (uint32_t i = 0; i < params.num_axes; ++i) {
+    uint32_t axis = params.axes[i] % params.rank;
+    if (!std::ranges::contains(axes, axis)) {
+      axes.push_back(axis);
+    }
+  }
+
+  ASSIGN_OR_RETURN_VOID(auto input_desc, OperandDescriptor::Create(
+                                             this->context_properties(),
+                                             params.data_type, input_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(auto output_desc,
+                        ValidateReverseAndInferOutput(
+                            this->context_properties(), input_desc, axes, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildReverse(input_id, output_id, std::move(axes));
 
   if (!builder.IsValidGraphForTesting(this->context_properties())) {
     return;
@@ -4712,6 +5483,77 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::ScatterElements(
 
   builder.BuildScatterElements(input_id, indices_id, updates_id, output_id,
                                params.axis);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::ScatterND(ScatterNDParams params,
+                                                      uint8_t seed_for_data) {
+  std::vector<uint32_t> input_dims(
+      params.input_dims.begin(), params.input_dims.begin() + params.input_rank);
+
+  std::vector<uint32_t> indices_dims(
+      params.indices_dims.begin(),
+      params.indices_dims.begin() + params.indices_rank);
+  // The last dimension of indices must be in [1, input_rank].
+  indices_dims.back() = indices_dims.back() % params.input_rank + 1;
+
+  // Derive the updates shape required by scatterND:
+  // `updates.shape` = `indices.shape[:-1]` + `input.shape[indices.shape[-1]:]`.
+  std::vector<uint32_t> updates_dims(indices_dims.begin(),
+                                     indices_dims.end() - 1);
+  updates_dims.insert(updates_dims.end(),
+                      input_dims.begin() + indices_dims.back(),
+                      input_dims.end());
+
+  ASSIGN_OR_RETURN_VOID(
+      auto input_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.input_data_type, input_dims, ""));
+  ASSIGN_OR_RETURN_VOID(
+      auto indices_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.indices_data_type, indices_dims, ""));
+  ASSIGN_OR_RETURN_VOID(
+      auto updates_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.input_data_type, updates_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(
+      auto output_desc,
+      ValidateScatterNDAndInferOutput(this->context_properties(), input_desc,
+                                      indices_desc, updates_desc, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+  OperandId indices_id = BuildInputOrConstant(
+      builder, params.is_indices_constant, "indices", indices_desc,
+      CreateBufferAsIndicesType(indices_desc.PackedByteLength(),
+                                params.indices_data_type,
+                                params.indices_fill_value),
+      data_buffers, named_inputs);
+  OperandId updates_id = BuildInputOrConstant(
+      builder, params.is_updates_constant, "updates", updates_desc,
+      seed_for_data, data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildScatterND(input_id, indices_id, updates_id, output_id);
 
   if (!builder.IsValidGraphForTesting(this->context_properties())) {
     return;
@@ -4827,6 +5669,45 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Split(SplitParams params,
 }
 
 template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::Tile(TileParams params,
+                                                 uint8_t seed_for_data) {
+  std::vector<uint32_t> input_dims(params.input_dims.begin(),
+                                   params.input_dims.begin() + params.rank);
+  std::vector<uint32_t> repetitions(params.repetitions.begin(),
+                                    params.repetitions.begin() + params.rank);
+
+  ASSIGN_OR_RETURN_VOID(auto input_desc, OperandDescriptor::Create(
+                                             this->context_properties(),
+                                             params.data_type, input_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(auto output_desc, ValidateTileAndInferOutput(
+                                              this->context_properties(),
+                                              input_desc, repetitions, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  OperandId input_id = BuildInputOrConstant(builder, params.is_input_constant,
+                                            "input", input_desc, seed_for_data,
+                                            data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildTile(input_id, output_id, std::move(repetitions));
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::Transpose(TransposeParams params,
                                                       uint8_t seed_for_data) {
   ASSIGN_OR_RETURN_VOID(
@@ -4887,6 +5768,97 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::Triangular(TriangularParams params,
                                             output_desc.data_type());
 
   builder.BuildTriangular(input_id, output_id, params.upper, params.diagonal);
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::Where(
+    WhereParams params,
+    uint8_t seed_for_condition,
+    uint8_t seed_for_true_value,
+    uint8_t seed_for_false_value) {
+  std::vector<uint32_t> condition_dims(
+      params.condition_dims.begin(),
+      params.condition_dims.begin() + params.condition_rank);
+  std::vector<uint32_t> true_value_dims(
+      params.true_value_dims.begin(),
+      params.true_value_dims.begin() + params.true_value_rank);
+  std::vector<uint32_t> false_value_dims(
+      params.false_value_dims.begin(),
+      params.false_value_dims.begin() + params.false_value_rank);
+
+  // Fix up the three shapes to be bidirectionally broadcastable. For each
+  // aligned dimension (from the right), pick the first non-1 value as the
+  // target and rewrite any other non-1 value that differs from it.
+  std::array<std::vector<uint32_t>*, 3> all_dims = {
+      &condition_dims, &true_value_dims, &false_value_dims};
+  size_t max_rank = std::max(
+      {condition_dims.size(), true_value_dims.size(), false_value_dims.size()});
+  for (size_t i = 0; i < max_rank; ++i) {
+    uint32_t target = 1;
+    for (std::vector<uint32_t>* dims : all_dims) {
+      if (i >= dims->size()) {
+        continue;
+      }
+      uint32_t& dim = (*dims)[dims->size() - 1 - i];
+      if (dim != 1) {
+        // The first non-1 value becomes the target. Subsequent non-1 values are
+        // aligned to it.
+        if (target == 1) {
+          target = dim;
+        } else {
+          dim = target;
+        }
+      }
+    }
+  }
+
+  ASSIGN_OR_RETURN_VOID(auto condition_desc,
+                        OperandDescriptor::Create(this->context_properties(),
+                                                  params.condition_data_type,
+                                                  condition_dims, ""));
+  ASSIGN_OR_RETURN_VOID(
+      auto true_value_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.value_data_type, true_value_dims, ""));
+  ASSIGN_OR_RETURN_VOID(
+      auto false_value_desc,
+      OperandDescriptor::Create(this->context_properties(),
+                                params.value_data_type, false_value_dims, ""));
+
+  ASSIGN_OR_RETURN_VOID(
+      auto output_desc,
+      ValidateWhereAndInferOutput(this->context_properties(), condition_desc,
+                                  true_value_desc, false_value_desc, ""));
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  data_buffers.reserve(3);
+  OperandId condition_id = BuildInputOrConstant(
+      builder, params.is_condition_constant, "condition", condition_desc,
+      seed_for_condition, data_buffers, named_inputs);
+  OperandId true_value_id = BuildInputOrConstant(
+      builder, params.is_true_value_constant, "true_value", true_value_desc,
+      seed_for_true_value, data_buffers, named_inputs);
+  OperandId false_value_id = BuildInputOrConstant(
+      builder, params.is_false_value_constant, "false_value", false_value_desc,
+      seed_for_false_value, data_buffers, named_inputs);
+
+  OperandId output_id = builder.BuildOutput("output", output_desc.shape(),
+                                            output_desc.data_type());
+
+  builder.BuildWhere(condition_id, true_value_id, false_value_id, output_id);
 
   if (!builder.IsValidGraphForTesting(this->context_properties())) {
     return;
@@ -5869,6 +6841,64 @@ void WebNNGraphImplFuzzerImpl<BaseFixture>::DQReduceQ(
 }
 
 template <typename BaseFixture>
+void WebNNGraphImplFuzzerImpl<BaseFixture>::DQReshapeQ(
+    ReshapeParams reshape_params,
+    OperandDataType quantized_type,
+    uint8_t seed_for_input,
+    float seed_for_scale,
+    uint8_t seed_for_zero_point) {
+  ASSIGN_OR_RETURN_VOID(
+      auto reshape_descs,
+      SetUpReshapeDescriptors(this->context_properties(), reshape_params));
+
+  // kPerTensor quantization is used to exercise the fusiable path for TFLite
+  // backend:
+  // https://source.chromium.org/chromium/chromium/src/+/main:services/webnn/tflite/graph_builder_tflite.cc;l=2374;drc=ec4ff4bae24916aaad3186ce4bc1339313b6fb5a
+  // TODO(crbug.com/498987226): Remove this restriction to increase test
+  // coverage
+  QuantizationParams per_tensor_quantization_params{
+      .quantized_type = quantized_type,
+      .quantization_kind = QuantizationKind::kPerTensor,
+      .channel_block_size = 1};
+
+  mojo::Remote<mojom::WebNNGraphBuilder> remote =
+      this->BindNewGraphBuilderRemote();
+  GraphInfoBuilder builder(remote);
+
+  base::flat_map<std::string, base::span<const uint8_t>> named_inputs;
+  std::vector<std::vector<uint8_t>> data_buffers;
+  ASSIGN_OPTIONAL_OR_RETURN_VOID(
+      auto reshape_input_id,
+      BuildDequantizeInput(
+          builder, this->context_properties(), reshape_params.is_input_constant,
+          "input", reshape_descs.input_desc, per_tensor_quantization_params,
+          /*channel_axis=*/std::nullopt, seed_for_input, seed_for_scale,
+          seed_for_zero_point, data_buffers, named_inputs));
+
+  OperandId reshape_output_id = builder.BuildIntermediateOperand(
+      reshape_descs.output_desc.shape(), reshape_descs.output_desc.data_type());
+
+  builder.BuildReshape(reshape_input_id, reshape_output_id);
+
+  if (!BuildQuantizeOutput(builder, this->context_properties(), "output",
+                           reshape_descs.output_desc,
+                           per_tensor_quantization_params,
+                           /*channel_axis=*/std::nullopt, reshape_output_id,
+                           seed_for_scale, seed_for_zero_point)) {
+    return;
+  }
+
+  if (!builder.IsValidGraphForTesting(this->context_properties())) {
+    return;
+  }
+
+  BuildAndCompute(this->context_, std::move(remote), builder.TakeGraphInfo(),
+                  std::move(named_inputs));
+
+  GetGlobalFuzzEnvironment().GetWebNNTestEnvironment().RunUntilIdle();
+}
+
+template <typename BaseFixture>
 void WebNNGraphImplFuzzerImpl<BaseFixture>::DQResample2dQ(
     Resample2dParams resample2d_params,
     OperandDataType quantized_type,
@@ -6302,6 +7332,20 @@ WEBNN_FUZZ_TEST_F(Conv2d,
                                    },
                                    /*seed_for_data=*/1}}));
 
+WEBNN_FUZZ_TEST_F(CumulativeSum,
+                  .WithDomains(AnyCumulativeSumParams(),
+                               fuzztest::Arbitrary<uint8_t>())
+                      .WithSeeds({{CumulativeSumParams{
+                                       /*data_type=*/OperandDataType::kFloat32,
+                                       /*rank=*/4,
+                                       /*input_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                                       /*axis=*/2,
+                                       /*exclusive=*/false,
+                                       /*reversed=*/true,
+                                       /*is_input_constant=*/false,
+                                   },
+                                   /*seed_for_data=*/1}}));
+
 WEBNN_FUZZ_TEST_F(
     DequantizeLinear,
     .WithDomains(AnyDequantizeLinearParams(),
@@ -6383,6 +7427,22 @@ WEBNN_FUZZ_TEST_F(
                      /*seed_for_data=*/5}}));
 
 WEBNN_FUZZ_TEST_F(
+    GatherElements,
+    .WithDomains(AnyGatherElementsParams(), fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{GatherElementsParams{
+                         /*input_data_type=*/OperandDataType::kFloat32,
+                         /*indices_data_type=*/OperandDataType::kInt32,
+                         /*rank=*/2,
+                         /*axis=*/1,
+                         /*input_dims=*/{6, 5, 1, 1, 1, 1, 1, 1},
+                         /*indices_axis_dim_size=*/2,
+                         /*indices_fill_value=*/0,
+                         /*is_input_constant=*/false,
+                         /*is_indices_constant=*/true,
+                     },
+                     /*seed_for_data=*/4}}));
+
+WEBNN_FUZZ_TEST_F(
     GatherND,
     .WithDomains(AnyGatherNDParams(), fuzztest::Arbitrary<uint8_t>())
         .WithSeeds({{GatherNDParams{
@@ -6416,6 +7476,54 @@ WEBNN_FUZZ_TEST_F(Gemm,
                                        /*is_c_constant=*/true,
                                    },
                                    /*seed_for_data=*/3}}));
+
+WEBNN_FUZZ_TEST_F(
+    Gru,
+    .WithDomains(AnyGruParams(), fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds(
+            {{GruParams{
+                  /*data_type=*/OperandDataType::kFloat32,
+                  /*steps=*/2,
+                  /*batch_size=*/1,
+                  /*input_size=*/3,
+                  /*hidden_size=*/4,
+                  /*direction=*/mojom::RecurrentNetworkDirection::kForward,
+                  /*layout=*/mojom::GruWeightLayout::kZrn,
+                  /*bias_kind=*/OptionalOperandKind::kConstant,
+                  /*recurrent_bias_kind=*/OptionalOperandKind::kConstant,
+                  /*initial_hidden_state_kind=*/OptionalOperandKind::kInput,
+                  /*reset_after=*/true,
+                  /*return_sequence=*/false,
+                  /*is_input_constant=*/false,
+                  /*is_weight_constant=*/true,
+                  /*is_recurrent_weight_constant=*/true,
+                  /*activations=*/
+                  {mojom::RecurrentNetworkActivation::kSigmoid,
+                   mojom::RecurrentNetworkActivation::kTanh},
+              },
+              /*seed_for_data=*/1}}));
+
+WEBNN_FUZZ_TEST_F(
+    GruCell,
+    .WithDomains(AnyGruCellParams(), fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{GruCellParams{
+                         /*data_type=*/OperandDataType::kFloat32,
+                         /*batch_size=*/1,
+                         /*input_size=*/3,
+                         /*hidden_size=*/4,
+                         /*layout=*/mojom::GruWeightLayout::kZrn,
+                         /*bias_kind=*/OptionalOperandKind::kInput,
+                         /*recurrent_bias_kind=*/OptionalOperandKind::kConstant,
+                         /*reset_after=*/true,
+                         /*is_input_constant=*/false,
+                         /*is_weight_constant=*/true,
+                         /*is_recurrent_weight_constant=*/true,
+                         /*is_hidden_state_constant=*/false,
+                         /*activations=*/
+                         {mojom::RecurrentNetworkActivation::kSigmoid,
+                          mojom::RecurrentNetworkActivation::kTanh},
+                     },
+                     /*seed_for_data=*/1}}));
 
 WEBNN_FUZZ_TEST_F(HardSigmoid,
                   .WithDomains(AnyHardSigmoidParams(),
@@ -6639,6 +7747,19 @@ WEBNN_FUZZ_TEST_F(
                      /*seed_for_data=*/2}}));
 
 WEBNN_FUZZ_TEST_F(
+    Reshape,
+    .WithDomains(AnyReshapeParams(), fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{ReshapeParams{
+                         /*data_type=*/OperandDataType::kFloat32,
+                         /*input_rank=*/4,
+                         /*input_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                         /*output_rank=*/2,
+                         /*output_dim_seeds=*/{6, 8, 1, 1, 1, 1, 1, 1},
+                         /*is_input_constant=*/false,
+                     },
+                     /*seed_for_data=*/1}}));
+
+WEBNN_FUZZ_TEST_F(
     Resample2d,
     .WithDomains(AnyResample2dParams(), fuzztest::Arbitrary<uint8_t>())
         .WithSeeds({{Resample2dParams{
@@ -6657,6 +7778,19 @@ WEBNN_FUZZ_TEST_F(
                      },
                      /*seed_for_data=*/1}}));
 
+WEBNN_FUZZ_TEST_F(Reverse,
+                  .WithDomains(AnyReverseParams(),
+                               fuzztest::Arbitrary<uint8_t>())
+                      .WithSeeds({{ReverseParams{
+                                       /*data_type=*/OperandDataType::kFloat32,
+                                       /*rank=*/4,
+                                       /*input_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                                       /*num_axes=*/2,
+                                       /*axes=*/{2, 3, 0, 0, 0, 0, 0, 0},
+                                       /*is_input_constant=*/false,
+                                   },
+                                   /*seed_for_data=*/1}}));
+
 WEBNN_FUZZ_TEST_F(
     ScatterElements,
     .WithDomains(AnyScatterElementsParams(), fuzztest::Arbitrary<uint8_t>())
@@ -6671,6 +7805,23 @@ WEBNN_FUZZ_TEST_F(
                          /*is_input_constant=*/false,
                          /*is_indices_constant=*/false,
                          /*is_updates_constant=*/false,
+                     },
+                     /*seed_for_data=*/4}}));
+
+WEBNN_FUZZ_TEST_F(
+    ScatterND,
+    .WithDomains(AnyScatterNDParams(), fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{ScatterNDParams{
+                         /*input_data_type=*/OperandDataType::kFloat32,
+                         /*indices_data_type=*/OperandDataType::kInt32,
+                         /*input_rank=*/3,
+                         /*input_dims=*/{6, 5, 4, 1, 1, 1, 1, 1},
+                         /*indices_rank=*/2,
+                         /*indices_dims=*/{3, 1, 1, 1, 1, 1, 1, 1},
+                         /*indices_fill_value=*/0,
+                         /*is_input_constant=*/false,
+                         /*is_indices_constant=*/false,
+                         /*is_updates_constant=*/true,
                      },
                      /*seed_for_data=*/4}}));
 
@@ -6713,6 +7864,17 @@ WEBNN_FUZZ_TEST_F(Split,
                                    },
                                    /*seed_for_data=*/1}}));
 
+WEBNN_FUZZ_TEST_F(Tile,
+                  .WithDomains(AnyTileParams(), fuzztest::Arbitrary<uint8_t>())
+                      .WithSeeds({{TileParams{
+                                       /*data_type=*/OperandDataType::kFloat32,
+                                       /*rank=*/4,
+                                       /*input_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                                       /*repetitions=*/{2, 1, 2, 1, 1, 1, 1, 1},
+                                       /*is_input_constant=*/false,
+                                   },
+                                   /*seed_for_data=*/1}}));
+
 WEBNN_FUZZ_TEST_F(Transpose,
                   .WithDomains(AnyTransposeParams(),
                                fuzztest::Arbitrary<uint8_t>())
@@ -6737,6 +7899,29 @@ WEBNN_FUZZ_TEST_F(Triangular,
                                        /*is_input_constant=*/false,
                                    },
                                    /*seed_for_data=*/5}}));
+
+WEBNN_FUZZ_TEST_F(
+    Where,
+    .WithDomains(AnyWhereParams(),
+                 /*seed_for_condition=*/fuzztest::Arbitrary<uint8_t>(),
+                 /*seed_for_true_value=*/fuzztest::Arbitrary<uint8_t>(),
+                 /*seed_for_false_value=*/fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{WhereParams{
+                         /*condition_data_type=*/OperandDataType::kUint8,
+                         /*value_data_type=*/OperandDataType::kFloat32,
+                         /*condition_rank=*/4,
+                         /*true_value_rank=*/3,
+                         /*false_value_rank=*/2,
+                         /*condition_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                         /*true_value_dims=*/{3, 4, 4, 1, 1, 1, 1, 1},
+                         /*false_value_dims=*/{4, 4, 1, 1, 1, 1, 1, 1},
+                         /*is_condition_constant=*/false,
+                         /*is_true_value_constant=*/true,
+                         /*is_false_value_constant=*/false,
+                     },
+                     /*seed_for_condition=*/1,
+                     /*seed_for_true_value=*/2,
+                     /*seed_for_false_value=*/3}}));
 
 WEBNN_FUZZ_TEST_F(
     DQActivationQ,
@@ -7052,6 +8237,27 @@ WEBNN_FUZZ_TEST_F(
                          // This is unused for per tensor quantization.
                          /*channel_block_size=*/1},
                      /*channel_axis=*/1,
+                     /*seed_for_input=*/2,
+                     /*seed_for_scale=*/0.25f,
+                     /*seed_for_zero_point=*/0}}));
+
+WEBNN_FUZZ_TEST_F(
+    DQReshapeQ,
+    .WithDomains(AnyReshapeParams(),
+                 AnyQuantizedDataType(),
+                 /*seed_for_input=*/fuzztest::Arbitrary<uint8_t>(),
+                 /*seed_for_scale=*/
+                 fuzztest::ElementOf({0.125f, 0.25f, 0.5f, 1.0f, 2.0f}),
+                 /*seed_for_zero_point=*/fuzztest::Arbitrary<uint8_t>())
+        .WithSeeds({{ReshapeParams{
+                         /*data_type=*/OperandDataType::kFloat32,
+                         /*input_rank=*/4,
+                         /*input_dims=*/{1, 3, 4, 4, 1, 1, 1, 1},
+                         /*output_rank=*/2,
+                         /*output_dim_seeds=*/{6, 8, 1, 1, 1, 1, 1, 1},
+                         /*is_input_constant=*/false,
+                     },
+                     /*quantized_type=*/OperandDataType::kUint8,
                      /*seed_for_input=*/2,
                      /*seed_for_scale=*/0.25f,
                      /*seed_for_zero_point=*/0}}));

@@ -101,12 +101,12 @@ import org.chromium.components.embedder_support.util.WebResourceResponseInfo;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.origin_matcher.OriginMatcher;
 import org.chromium.components.sensitive_content.SensitiveContentFeatures;
-import org.chromium.components.stylus_handwriting.StylusHandwritingFeatureMap;
 import org.chromium.components.stylus_handwriting.StylusWritingController;
 import org.chromium.components.stylus_handwriting.StylusWritingSettingsState;
 import org.chromium.components.url_formatter.UrlFormatter;
 import org.chromium.components.zoom.ZoomConstants;
 import org.chromium.content_public.browser.ChildProcessImportance;
+import org.chromium.content_public.browser.ContentFeatureList;
 import org.chromium.content_public.browser.ContentViewStatics;
 import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
@@ -1132,10 +1132,7 @@ public class AwContents implements SmartClipProvider {
             setScrollBarStyle(mInternalAccessAdapter.super_getScrollBarStyle());
 
             mAwDarkMode = new AwDarkMode(this);
-            mStylusWritingController =
-                    new StylusWritingController(
-                            context.getApplicationContext(),
-                            /* lazyFetchHandWritingIconFeatureEnabled= */ true);
+            mStylusWritingController = new StylusWritingController(context.getApplicationContext());
 
             setNewAwContents(
                     AwContentsJni.get().init(mBrowserContext.getNativeBrowserContextPointer()));
@@ -2753,6 +2750,8 @@ public class AwContents implements SmartClipProvider {
         // "fixing".  See also https://crbug.com/1145717.
         params.setUrl(UrlFormatter.fixupUrl(params.getUrl()).getPossiblyInvalidSpec());
 
+        AwLoadUrlMetricsObserver.setPendingLoadUrlTimestamp(
+                SystemClock.uptimeMillis(), mWebContents);
         NavigationHandle result = mNavigationController.loadUrl(params);
         RecordHistogram.recordBooleanHistogram("Android.WebView.LoadUrl.Success", result != null);
 
@@ -2908,11 +2907,33 @@ public class AwContents implements SmartClipProvider {
      */
     public boolean requestChildRectangleOnScreen(View child, Rect rect, boolean immediate) {
         if (isDestroyed(WARN)) return false;
+
+        // The contract of `ViewGroup.requestChildRectangleOnScreen()` states that `child` must be
+        // a direct child of the receiver in the view hierarchy, yet crbug.com/523153630
+        // demonstrates embedding apps passing the same WebView instance as both the receiver and
+        // `child`, and Android CTS test `WebViewTest.testRequestChildRectangleOnScreen()` has the
+        // same behaviour, so we support identical child and parent but make sure that the offset
+        // from child to parent coordinates passed to the scroll offset manager is zero. These
+        // checks are gated behind AccessibilityMagnificationFollowsFocus so they can be disabled
+        // if incorrect.
+        boolean flagEnabled = ContentFeatureList.isAccessibilityMagnificationFollowsFocusEnabled();
+        if ((child == null || (child != mContainerView && child.getParent() != mContainerView))
+                && flagEnabled) {
+            return false;
+        }
+
+        int childOffsetX;
+        int childOffsetY;
+        if (child == mContainerView && flagEnabled) {
+            childOffsetX = 0;
+            childOffsetY = 0;
+        } else {
+            childOffsetX = child.getLeft() - child.getScrollX();
+            childOffsetY = child.getTop() - child.getScrollY();
+        }
+
         return mScrollOffsetManager.requestChildRectangleOnScreen(
-                child.getLeft() - child.getScrollX(),
-                child.getTop() - child.getScrollY(),
-                rect,
-                immediate);
+                childOffsetX, childOffsetY, rect, immediate);
     }
 
     /**
@@ -3416,7 +3437,18 @@ public class AwContents implements SmartClipProvider {
         if (isDestroyed(WARN)) return;
         mWebContents
                 .getEventForwarder()
-                .startFling(SystemClock.uptimeMillis(), -velocityX, -velocityY, false, true, false);
+                .startFling(
+                        SystemClock.uptimeMillis(),
+                        /* x= */ 0f,
+                        /* y= */ 0f,
+                        /* rawX= */ 0f,
+                        /* rawY= */ 0f,
+                        -velocityX,
+                        -velocityY,
+                        /* syntheticScroll= */ false,
+                        /* preventBoosting= */ true,
+                        /* isTouchpadEvent= */ false,
+                        /* targetViewport= */ true);
     }
 
     /**
@@ -4744,9 +4776,6 @@ public class AwContents implements SmartClipProvider {
             if (isDestroyed(NO_WARN)) return false;
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 mSettings.setSpatialNavigationEnabled(false);
-                RecordHistogram.recordBooleanHistogram(
-                        "Android.WebView.NestedScrollingEnabled",
-                        mContainerView.isNestedScrollingEnabled());
             }
 
             AwContentsJni.get().onInputEvent(mNativeAwContents);
@@ -4833,10 +4862,7 @@ public class AwContents implements SmartClipProvider {
             if (mComponentCallbacks != null) return;
             mComponentCallbacks = new AwComponentCallbacks();
             mContext.registerComponentCallbacks(mComponentCallbacks);
-            if (StylusHandwritingFeatureMap.isEnabled(
-                    StylusHandwritingFeatureMap.CACHE_STYLUS_SETTINGS)) {
-                StylusWritingSettingsState.getInstance().registerObserver(mStylusWritingController);
-            }
+            StylusWritingSettingsState.getInstance().registerObserver(mStylusWritingController);
 
             if (mDisplayCutoutController != null) mDisplayCutoutController.onAttachedToWindow();
 
@@ -4877,11 +4903,7 @@ public class AwContents implements SmartClipProvider {
                 mComponentCallbacks = null;
             }
 
-            if (StylusHandwritingFeatureMap.isEnabled(
-                    StylusHandwritingFeatureMap.CACHE_STYLUS_SETTINGS)) {
-                StylusWritingSettingsState.getInstance()
-                        .unregisterObserver(mStylusWritingController);
-            }
+            StylusWritingSettingsState.getInstance().unregisterObserver(mStylusWritingController);
 
             mScrollAccessibilityHelper.removePostedCallbacks();
             mZoomControls.dismissZoomPicker();

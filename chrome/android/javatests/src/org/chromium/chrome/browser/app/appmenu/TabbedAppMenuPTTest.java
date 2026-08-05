@@ -15,6 +15,8 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -28,6 +30,7 @@ import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
 import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.transit.ChromeTriggers;
 import org.chromium.chrome.test.transit.bookmarks.BookmarksPhoneStation;
+import org.chromium.chrome.test.transit.bookmarks.BookmarksTabletStation;
 import org.chromium.chrome.test.transit.hub.RegularTabSwitcherStation;
 import org.chromium.chrome.test.transit.ntp.IncognitoNewTabPageAppMenuFacility;
 import org.chromium.chrome.test.transit.ntp.IncognitoNewTabPageStation;
@@ -52,7 +55,7 @@ import java.io.IOException;
 public class TabbedAppMenuPTTest {
     @Rule
     public AutoResetCtaTransitTestRule mCtaTestRule =
-            ChromeTransitTestRules.autoResetCtaActivityRule();
+            ChromeTransitTestRules.fastAutoResetCtaActivityRule();
 
     @Rule
     public final ChromeRenderTestRule mRenderTestRule =
@@ -92,10 +95,15 @@ public class TabbedAppMenuPTTest {
     @Test
     @LargeTest
     @Restriction(DeviceFormFactor.TABLET_OR_DESKTOP)
+    @DisabledTest(message = "https://crbug.com/539895864")
     public void testOpenBookmarksTablet() {
         WebPageStation pageStation = mCtaTestRule.startOnBlankPage();
 
-        pageStation.openRegularTabAppMenu().openBookmarksTablet();
+        BookmarksTabletStation bookmarks =
+                pageStation.openRegularTabAppMenu().openBookmarksTablet();
+
+        // Exit bookmarks for the initial state rule to be able to reset state.
+        bookmarks.pressBackTo().arriveAt(WebPageStation.newBuilder().initFrom(pageStation).build());
     }
 
     /** Tests that "Bookmarks" opens the Bookmarks page. */
@@ -114,6 +122,7 @@ public class TabbedAppMenuPTTest {
     /** Tests that "Settings" opens the SettingsActivity. */
     @Test
     @LargeTest
+    @DisableFeatures(ChromeFeatureList.SETTINGS_IN_TAB) // crbug.com/521895796
     public void testOpenSettings() {
         WebPageStation pageStation = mCtaTestRule.startOnBlankPage();
         Tab tab = pageStation.loadedTabElement.value();
@@ -204,6 +213,7 @@ public class TabbedAppMenuPTTest {
     @LargeTest
     @Feature({"RenderTest"})
     @DisableFeatures(ChromeFeatureList.HOME_BUTTON_REMOVAL)
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // TODO(crbug.com/536994608): Re-enable once passing
     public void testWebPageIncognitoAppMenuItems() throws IOException {
         String appMenuGoldenId =
                 IncognitoUtils.shouldOpenIncognitoAsWindow()
@@ -220,6 +230,7 @@ public class TabbedAppMenuPTTest {
     @LargeTest
     @Feature({"RenderTest"})
     @EnableFeatures({ChromeFeatureList.HOME_BUTTON_REMOVAL + ":keep_home_button_on_ntp/true"})
+    @DisabledTest(message = "https://crbug.com/540904292")
     public void testWebPageIncognitoAppMenuItems_withHomeButtonRemovalKeepOnNtp()
             throws IOException {
         String appMenuGoldenId =

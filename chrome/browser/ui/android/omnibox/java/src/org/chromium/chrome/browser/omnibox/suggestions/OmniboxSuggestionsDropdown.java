@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.omnibox.suggestions;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.content.Context;
-import android.content.res.Resources;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.AttributeSet;
@@ -17,6 +16,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
 
+import androidx.annotation.Px;
 import androidx.annotation.StringRes;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
@@ -32,6 +32,8 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.omnibox.OmniboxMetrics;
 import org.chromium.chrome.browser.omnibox.R;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.base.KeyNavigationUtil;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
@@ -71,11 +73,13 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     private @Nullable OmniboxSuggestionsDropdownAdapter mAdapter;
     private @Nullable GestureObserver mGestureObserver;
     private @Nullable NavigationListener mNavigationListener;
+    private @Nullable OmniboxResourceProvider mResourceProvider;
     private float mChildVerticalTranslation;
     private float mChildAlpha = 1.0f;
 
-    private final int mBaseBottomPadding;
-    private final int mBaseTopPadding;
+    private @Px int mBaseBottomPadding;
+    private @Px int mBaseTopPadding;
+    private final HeaderDecoration mHeaderDecoration;
     private @SelectionController.Mode int mSelectionMode;
 
     /**
@@ -129,9 +133,7 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             super.onInitializeAccessibilityNodeInfoForItem(recycler, state, host, info);
             // Suppress the default "X of Y" announcement for the entire list for TalkBack to
             // avoid verbosity. Announcement of position within its group is already provided.
-            if (OmniboxFeatures.sOmniboxItemDecoration.isEnabled()) {
-                info.setCollectionItemInfo(null);
-            }
+            info.setCollectionItemInfo(null);
         }
 
         @Override
@@ -302,10 +304,8 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             SuggestionLayoutScrollListener suggestionLayoutScrollListener) {
         super(context, attrs, android.R.attr.dropDownListViewStyle);
 
-        try (TimingMetric metric =
-                        OmniboxMetrics.recordSuggestionsDropdownAsyncInflationThreadTime();
-                TimingMetric metric2 =
-                        OmniboxMetrics.recordSuggestionsDropdownAsyncInflationWallTime();
+        try (TimingMetric metric = OmniboxMetrics.recordSuggestionsDropdownInflationThreadTime();
+                TimingMetric metric2 = OmniboxMetrics.recordSuggestionsDropdownInflationWallTime();
                 TraceEvent tracing = TraceEvent.scoped("OmniboxSuggestionsDropdown.Constructor")) {
             boolean runsOnExpectedThread =
                     OmniboxFeatures.sAsyncViewInflation.isEnabled()
@@ -323,10 +323,9 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             setItemAnimator(null);
             addItemDecoration(new SuggestionHorizontalDivider(context));
 
-            if (OmniboxFeatures.sOmniboxItemDecoration.isEnabled()) {
-                addItemDecoration(new GroupSeparatorDecoration(context));
-                addItemDecoration(new HeaderDecoration(context));
-            }
+            addItemDecoration(new GroupSeparatorDecoration(context));
+            mHeaderDecoration = new HeaderDecoration(context);
+            addItemDecoration(mHeaderDecoration);
 
             mLayoutScrollListener = suggestionLayoutScrollListener;
             setLayoutManager(mLayoutScrollListener);
@@ -335,14 +334,6 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             mSelectionController =
                     new RecyclerViewSelectionController(mLayoutScrollListener, mSelectionMode);
             addOnChildAttachStateChangeListener(mSelectionController);
-
-            final Resources resources = context.getResources();
-            mBaseBottomPadding =
-                    resources.getDimensionPixelOffset(
-                            R.dimen.omnibox_suggestion_list_padding_bottom);
-            mBaseTopPadding =
-                    resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_top);
-            this.setPaddingRelative(0, mBaseTopPadding, 0, mBaseBottomPadding);
 
             // Disable the scrollbar since it causes the hover events happening near the
             // scrollbar not dispatched to the underlying views.
@@ -353,6 +344,33 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
                 mRecycledViewPool = new PreWarmingRecycledViewPool(mViewHolderFactory, context);
             }
         }
+    }
+
+    /**
+     * Sets the resource provider. This is primarily called during binding which occurs on the UI
+     * thread post inflation.
+     *
+     * @param resourceProvider Provider for omnibox resources.
+     */
+    public void setResourceProvider(OmniboxResourceProvider resourceProvider) {
+        if (mResourceProvider == resourceProvider || resourceProvider == null) return;
+        mResourceProvider = resourceProvider;
+
+        setVerticalPadding(
+                mResourceProvider.getDropdownTopPadding(),
+                mResourceProvider.getDropdownBottomPadding());
+        mHeaderDecoration.setHeaderStartPadding(mResourceProvider.getHeaderStartPadding());
+    }
+
+    /**
+     * Sets the branded color scheme for the dropdown.
+     *
+     * @param scheme The {@link BrandedColorScheme} to use.
+     */
+    public void setBrandedColorScheme(@BrandedColorScheme int scheme) {
+        assert mResourceProvider != null;
+        mResourceProvider.setBrandedColorScheme(scheme);
+        mHeaderDecoration.setIsIncognito(scheme == BrandedColorScheme.INCOGNITO);
     }
 
     /**
@@ -430,16 +448,22 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         mSelectionController.reset();
     }
 
-    /** Keyboard select the first item in the suggestions list. */
-    public void selectFirstItem() {
-        if (mSelectionController.getItemCount() == 0) return;
-        mSelectionController.setPosition(0);
+    /**
+     * Keyboard select the first item in the suggestions list. Returns true if this selected an
+     * item, false if no item was selected.
+     */
+    public boolean selectFirstItem() {
+        if (mSelectionController.getItemCount() == 0) return false;
+        return mSelectionController.setPosition(0);
     }
 
-    /** Keyboard select the last item in the suggestions list. */
-    public void selectLastItem() {
-        if (mSelectionController.getItemCount() == 0) return;
-        mSelectionController.setPosition(mSelectionController.getItemCount() - 1);
+    /**
+     * Keyboard select the last item in the suggestions list. Returns true if this selected an item,
+     * false if no item was selected.
+     */
+    public boolean selectLastItem() {
+        if (mSelectionController.getItemCount() == 0) return false;
+        return mSelectionController.setPosition(mSelectionController.getItemCount() - 1);
     }
 
     /**
@@ -580,7 +604,11 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
             handleSelectionChange();
             return true;
         } else if (KeyNavigationUtil.isEnter(event)) {
-            if (selectedView != null && !hasAdditionalModifiers) {
+            if (selectedView != null) {
+                if (selectedView instanceof ActivatableSuggestionView) {
+                    return ((ActivatableSuggestionView) selectedView)
+                            .activate(event.getMetaState());
+                }
                 return selectedView.performClick();
             }
         }
@@ -662,6 +690,18 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     @VisibleForTesting
     int getBaseTopPadding() {
         return mBaseTopPadding;
+    }
+
+    /**
+     * Sets the top and bottom padding for the dropdown list.
+     *
+     * @param topPadding Top padding in pixels.
+     * @param bottomPadding Bottom padding in pixels.
+     */
+    public void setVerticalPadding(int topPadding, int bottomPadding) {
+        mBaseTopPadding = topPadding;
+        mBaseBottomPadding = bottomPadding;
+        this.setPaddingRelative(0, mBaseTopPadding, 0, mBaseBottomPadding);
     }
 
     @VisibleForTesting

@@ -94,6 +94,7 @@ class SearchBoxMediator implements DestroyObserver {
         mModel.set(SearchBoxProperties.PLUS_BUTTON_CLICK_CALLBACK, this::onPlusButtonClick);
         mModel.set(SearchBoxProperties.LENS_CLICK_CALLBACK, this::onLensClick);
         mModel.set(SearchBoxProperties.AI_CHIP_CLICK_CALLBACK, this::onAiChipClick);
+        mModel.set(SearchBoxProperties.APPLY_ELEVATION, OmniboxCapabilities.isDesktopPlatform());
 
         updateAiChip();
         updateStartIcon();
@@ -184,7 +185,7 @@ class SearchBoxMediator implements DestroyObserver {
 
     private @Nullable ColorStateList getIconTint() {
         return ComposeplateUtils.getSearchBoxIconColorTint(
-                mContext, mModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND));
+                mContext, mModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND_AND_SHADOW));
     }
 
     private boolean isGoogleDseOnDesktop() {
@@ -252,7 +253,7 @@ class SearchBoxMediator implements DestroyObserver {
                 ComposeplateUtils.getSearchBoxIconColorTint(mContext, apply);
         mModel.set(SearchBoxProperties.VOICE_SEARCH_COLOR_STATE_LIST, colorStateList);
 
-        mModel.set(SearchBoxProperties.APPLY_WHITE_BACKGROUND, apply);
+        mModel.set(SearchBoxProperties.APPLY_WHITE_BACKGROUND_AND_SHADOW, apply);
 
         @StyleRes
         int resId =

@@ -19,6 +19,7 @@
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
+#include "base/i18n/break_iterator.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -30,6 +31,7 @@
 #include "base/strings/escape.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
+#include "base/strings/string_tokenizer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "build/branding_buildflags.h"
@@ -51,7 +53,6 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/features.h"
-#include "chrome/browser/devtools/views/devtools_floaty.h"
 #include "chrome/browser/dictation/features.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_stats.h"
@@ -579,8 +580,8 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE_ONCE, 100},
        {kAccessibilityLabelsMenuId, 101},
        {IDC_SEND_TAB_TO_SELF, 102},
-       {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_SINGLE_DEVICE, 108},
-       {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_MULTIPLE_DEVICES, 109},
+       // Removed: {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_SINGLE_DEVICE, 108},
+       // Removed: {IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_MULTIPLE_DEVICES, 109},
        {IDC_CONTENT_CONTEXT_GENERATE_QR_CODE, 110},
        // Removed: {IDC_CONTENT_CLIPBOARD_HISTORY_MENU, 111},
        {IDC_CONTENT_CONTEXT_COPYLINKTOTEXT, 112},
@@ -614,7 +615,7 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_SAVEVIDEOFRAMEAS, 141},
        {IDC_CONTENT_CONTEXT_SEARCHLENSFORVIDEOFRAME, 142},
        {IDC_CONTENT_CONTEXT_SEARCHWEBFORVIDEOFRAME, 143},
-       {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS, 145},
+       // Removed: {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS, 145},
        // Removed: {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS, 146},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD, 147},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_IMPORT_PASSWORDS, 148},
@@ -631,7 +632,7 @@ const std::map<int, int>& GetIdcToUmaMap(UmaEnumIdLookupType type) {
        {IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 156},
        {IDC_CONTENT_CONTEXT_GLICSHAREIMAGE, 157},
        {IDC_CONTENT_CONTEXT_ARCHIVE_GLIC, 158},
-       {IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI, 159},
+       // Removed: {IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI, 159},
        {IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS, 160},
        {IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY, 161},
        {IDC_CONTENT_CONTEXT_GLIC, 162},
@@ -1603,6 +1604,18 @@ void RenderViewContextMenu::RecordUsedItem(int id) {
   if (id == IDC_CONTENT_CONTEXT_SEARCHWEBFOR) {
     base::RecordAction(base::UserMetricsAction(
         "RenderViewContextMenu.Used.IDC_CONTENT_CONTEXT_SEARCHWEBFOR"));
+    base::i18n::BreakIterator break_iter(params_.selection_text,
+                                         base::i18n::BreakIterator::BREAK_WORD);
+    if (break_iter.Init()) {
+      int word_count = 0;
+      while (break_iter.Advance()) {
+        if (break_iter.IsWord()) {
+          word_count++;
+        }
+      }
+      base::UmaHistogramCounts1000(
+          "RenderViewContextMenu.SelectedTextWordCount.SearchWeb", word_count);
+    }
   }
 
   // Log other situations.
@@ -1808,20 +1821,8 @@ void RenderViewContextMenu::AppendDeveloperItems() {
     }
   }
 
-  if (base::FeatureList::IsEnabled(features::kDevToolsGreenDevUi)) {
-    inspect_submenu_model_.AddItemWithStringId(
-        IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI,
-        IDS_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI);
-    inspect_submenu_model_.AddItemWithStringId(
-        IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS,
-        IDS_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS);
-    menu_model_.AddSubMenuWithStringId(IDC_CONTENT_CONTEXT_INSPECTELEMENT,
-                                       IDS_CONTENT_CONTEXT_INSPECTELEMENT,
-                                       &inspect_submenu_model_);
-  } else {
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_INSPECTELEMENT,
-                                    IDS_CONTENT_CONTEXT_INSPECTELEMENT);
-  }
+  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_INSPECTELEMENT,
+                                  IDS_CONTENT_CONTEXT_INSPECTELEMENT);
 }
 
 void RenderViewContextMenu::AppendDevtoolsForUnpackedExtensions() {
@@ -2078,13 +2079,18 @@ void RenderViewContextMenu::AppendLinkItems() {
 
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 
+    // Send-Tab-To-Self (user's other devices), link level.
+    if (GetBrowser() && send_tab_to_self::ShouldDisplayEntryPoint(
+                            embedder_web_contents_, params_.link_url)) {
+      AppendSendTabToSelfItem(/*add_separator=*/false);
+    }
+
     // Place QR Generator close to send-tab-to-self feature for link images.
     if (params_.has_image_contents) {
       AppendQRCodeGeneratorItem(/*for_image=*/true, /*draw_icon=*/true,
-                                /*add_separator*/ false);
+                                /*add_separator=*/false);
     }
 
-    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
                                     IDS_CONTENT_CONTEXT_SAVELINKAS);
   }
@@ -2267,9 +2273,7 @@ void RenderViewContextMenu::AppendSearchWebForImageItems() {
       return;
     }
     menu_model_.AddItemWithStringIdAndIcon(
-        search_for_image_idc,
-        lens::GetLensOverlayImageEntrypointLabelAltIds(
-            IDS_CONTENT_CONTEXT_LENS_OVERLAY),
+        search_for_image_idc, IDS_LENS_OVERLAY_IMAGE_ENTRYPOINT_LABEL_ALT3,
         icon);
   } else {
     menu_model_.AddItemWithIcon(
@@ -2401,9 +2405,7 @@ void RenderViewContextMenu::AppendVideoItems() {
       if (entry_point_controller->AreVisible()) {
         target_model->AddItemWithStringIdAndIcon(
             search_for_video_frame_idc,
-            lens::GetLensOverlayVideoEntrypointLabelAltIds(
-                IDS_CONTENT_CONTEXT_LENS_OVERLAY),
-            icon);
+            IDS_LENS_OVERLAY_VIDEO_ENTRYPOINT_LABEL_ALT3, icon);
         item_added = true;
       }
     } else {
@@ -2717,11 +2719,15 @@ void RenderViewContextMenu::AppendPartialTranslateItem() {
   const std::u16string printable_selection_text = PrintableSelectionText();
   std::u16string label;
 
-  if (is_menu_simplification_enabled && !printable_selection_text.empty()) {
-    label = l10n_util::GetStringFUTF16(
-        IDS_CONTENT_CONTEXT_PARTIAL_TRANSLATE_SELECTION,
-        printable_selection_text,
-        GetTargetLanguageDisplayName(/*is_full_page_translation=*/false));
+  if (is_menu_simplification_enabled) {
+    if (printable_selection_text.empty()) {
+      label =
+          l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_PARTIAL_TRANSLATE_V2);
+    } else {
+      label = l10n_util::GetStringFUTF16(
+          IDS_CONTENT_CONTEXT_PARTIAL_TRANSLATE_SELECTION_V2,
+          printable_selection_text);
+    }
   } else {
     label = l10n_util::GetStringFUTF16(
         IDS_CONTENT_CONTEXT_PARTIAL_TRANSLATE,
@@ -2770,16 +2776,8 @@ void RenderViewContextMenu::AppendReadAnythingItem() {
 
   // Show Read Anything option if it's not already open in the side panel.
   if (IsNormalBrowser() && !IsReadAnythingEntryShowing(GetBrowser())) {
-    std::u16string label;
-    const std::u16string printable_selection_text = PrintableSelectionText();
-    if (is_menu_simplification_enabled && !printable_selection_text.empty()) {
-      label = l10n_util::GetStringFUTF16(
-          IDS_CONTENT_CONTEXT_READING_MODE_SELECTION, printable_selection_text);
-    } else {
-      label = l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_READING_MODE);
-    }
-
-    menu_model_.AddItem(IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE, label);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE,
+                                    IDS_CONTENT_CONTEXT_READING_MODE);
 
     if (is_menu_simplification_enabled) {
       menu_model_.SetIconForCommandId(
@@ -2790,7 +2788,7 @@ void RenderViewContextMenu::AppendReadAnythingItem() {
                                          ui::kColorMenuIcon, kTabMenuIconSize));
     }
 
-    if (features::IsImprovedReadAloudEnabled()) {
+    if (features::IsReadAnythingImprovedUiEnabled()) {
       menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE,
                                       IDS_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE);
       if (is_menu_simplification_enabled) {
@@ -3183,9 +3181,7 @@ void RenderViewContextMenu::AppendRegionSearchItem() {
     }
     menu_model_.AddItemWithStringIdAndIcon(
         IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH,
-        lens::GetLensOverlayEntrypointLabelAltIds(
-            IDS_CONTENT_CONTEXT_LENS_OVERLAY),
-        icon);
+        lens::GetLensOverlayEntrypointLabelAltIds(), icon);
     const int command_index =
         menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH)
             .value();
@@ -3234,6 +3230,7 @@ void RenderViewContextMenu::AppendLiveCaptionItem() {
 // Menu delegate functions -----------------------------------------------------
 
 bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
+#if BUILDFLAG(IS_CHROMEOS)
   // Disable context menu in locked fullscreen mode to prevent users from
   // exiting this mode (the menu is not really disabled as the user can still
   // open it, but all the individual context menu entries are disabled / greyed
@@ -3245,13 +3242,12 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
   // NOTE: If new commands are being added, please disable them by default and
   // notify the ChromeOS team by filing a bug under this component --
   // b/?q=componentid:1389107.
-  BrowserWindowInterface* const browser_window = GetBrowser();
   bool should_disable_command_for_locked_fullscreen_or_on_task = false;
+  BrowserWindowInterface* const browser_window = GetBrowser();
   if (browser_window &&
       platform_util::IsBrowserLockedFullscreen(browser_window)) {
     should_disable_command_for_locked_fullscreen_or_on_task = true;
   }
-#if BUILDFLAG(IS_CHROMEOS)
   if (browser_window && ash::boca::OnTaskLockedController::From(browser_window)
                             ->is_locked_for_on_task()) {
     bool is_page_nav_command =
@@ -3263,10 +3259,10 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
         !is_page_nav_command && !is_allowed_content_context_command &&
         !ContextMenuMatcher::IsExtensionsCustomCommandId(id);
   }
-#endif
   if (should_disable_command_for_locked_fullscreen_or_on_task) {
     return false;
   }
+#endif
 
   bool enabled = false;
   if (RenderViewContextMenuBase::IsCommandIdKnown(id, &enabled)) {
@@ -3340,7 +3336,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
 
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
     case IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE:
-    case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI:
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS:
     case IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP:
     case IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP:
@@ -3988,10 +3983,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       ExecInspectBackgroundPage();
       break;
 
-    case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_GEMINI:
-      ExecInspectElementWithGemini();
-      break;
-
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT_WITH_DEVTOOLS:
       ExecInspectElement();
       break;
@@ -4592,25 +4583,56 @@ bool RenderViewContextMenu::AppendQRCodeGeneratorItem(
 }
 
 void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {
+  if (!embedder_web_contents_) {
+    return;
+  }
+
+  // Determine the target URL to share based on what element was right-clicked:
+  // if the context menu was triggered on a valid link, offer to share the
+  // link destination URL; otherwise, offer to share the active page URL.
+  const bool is_link = params_.link_url.is_valid();
+  if (is_link && !base::FeatureList::IsEnabled(
+                     send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2)) {
+    return;
+  }
+  const GURL target_url = is_link
+                              ? params_.link_url
+                              : embedder_web_contents_->GetLastCommittedURL();
+
+  // Only returns nullopt when unshareable (e.g., incognito, invalid scheme,
+  // policy disabled). Signed-out or zero-device states still return a valid
+  // display reason (`kOfferSignIn` or `kInformNoTargetDevice`) to show promos.
+  std::optional<send_tab_to_self::EntryPointDisplayReason> display_reason =
+      send_tab_to_self::GetEntryPointDisplayReason(embedder_web_contents_,
+                                                   target_url);
+  if (!display_reason.has_value()) {
+    return;
+  }
+
   if (add_separator) {
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
 
-  std::optional<send_tab_to_self::EntryPointDisplayReason> reason =
-      send_tab_to_self::GetEntryPointDisplayReason(embedder_web_contents_);
-  if (!reason) {
-    return;
-  }
+  const bool should_offer_submenu =
+      (base::FeatureList::IsEnabled(
+           send_tab_to_self::kSendTabToSelfEnhancedDesktopUI) ||
+       base::FeatureList::IsEnabled(
+           send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2)) &&
+      (*display_reason ==
+       send_tab_to_self::EntryPointDisplayReason::kOfferFeature);
 
-  if (base::FeatureList::IsEnabled(
-          send_tab_to_self::kSendTabToSelfEnhancedDesktopUI) &&
-      *reason == send_tab_to_self::EntryPointDisplayReason::kOfferFeature) {
+  if (should_offer_submenu) {
+    // TODO(crbug.com/530097533): Investigate improved title handling when the
+    // user interacts with the right-click flow on a hyperlink (e.g., fetching
+    // the destination page title or using a domain fallback if anchor text is
+    // empty).
     send_tab_to_self_submenu_delegate_ =
         std::make_unique<send_tab_to_self::SendTabToSelfContextMenuDelegate>(
             embedder_web_contents_,
-            params_.link_url.is_valid()
-                ? send_tab_to_self::ShareEntryPoint::kLinkMenu
-                : send_tab_to_self::ShareEntryPoint::kContentMenu);
+            is_link ? send_tab_to_self::ShareEntryPoint::kLinkMenu
+                    : send_tab_to_self::ShareEntryPoint::kContentMenu,
+            target_url,
+            is_link ? base::UTF16ToUTF8(params_.link_text) : std::string());
     send_tab_to_self_submenu_ = std::make_unique<ui::SimpleMenuModel>(
         send_tab_to_self_submenu_delegate_.get());
     send_tab_to_self_submenu_delegate_->PopulateSubmenu(
@@ -4639,12 +4661,17 @@ void RenderViewContextMenu::AppendSendTabToSelfItem(bool add_separator) {
                                            : kDevicesOldIcon));
 #endif
 
+    const base::Feature& stts_feature =
+        (is_link || base::FeatureList::IsEnabled(
+                        send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2))
+            ? send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2
+            : send_tab_to_self::kSendTabToSelfEnhancedDesktopUI;
+
     // TODO(crbug.com/516708776): Remove new feature tag when no longer new.
     menu_model_.SetIsNewFeatureAt(
         menu_model_.GetItemCount() - 1,
-        UserEducationService::MaybeShowNewBadge(
-            GetBrowserContext(),
-            send_tab_to_self::kSendTabToSelfEnhancedDesktopUI));
+        UserEducationService::MaybeShowNewBadge(GetBrowserContext(),
+                                                stts_feature));
     return;
   }
 
@@ -4854,16 +4881,6 @@ void RenderViewContextMenu::ExecInspectBackgroundPage() {
 
   extensions::devtools_util::InspectBackgroundPage(
       platform_app, GetProfile(), DevToolsOpenedByAction::kContextMenuInspect);
-}
-
-void RenderViewContextMenu::ExecInspectElementWithGemini() {
-  LOG(ERROR) << "ExecInspectElementWithGemini called at " << params_.x << ", "
-             << params_.y;
-  // TOOD(crbug.com/466071312): Send the actual node id.
-  DevToolsFloaty::Show(Profile::FromBrowserContext(browser_context_),
-                       render_process_id_, render_frame_id_,
-                       gfx::Point(params_.x, params_.y),
-                       /* *backend_node_id*/ 1);
 }
 
 void RenderViewContextMenu::CheckSupervisedUserURLFilterAndSaveLinkAs() {
@@ -5429,9 +5446,18 @@ void RenderViewContextMenu::MaybeAppendOpenGlicItem(bool add_separator) {
                        u" ", &params_.selection_text);
     base::TrimWhitespace(params_.selection_text, base::TRIM_ALL,
                          &params_.selection_text);
+    tabs::TabInterface* tab_interface =
+        tabs::TabInterface::MaybeGetFromContents(source_web_contents_);
+    tabs::PageContextEligibilityHelper* helper =
+        tab_interface ? tabs::PageContextEligibilityHelper::From(tab_interface)
+                      : nullptr;
+    const bool is_page_eligible =
+        helper &&
+        helper->IsPageContextEligible() ==
+            optimization_guide::PageContextEligibilityStatus::kEligible;
     const bool show_text_selection_menu_item =
         base::FeatureList::IsEnabled(features::kGlicTextSelectionContextMenu) &&
-        !params_.selection_text.empty();
+        !params_.selection_text.empty() && is_page_eligible;
 
     const std::string arm = features::kGlicContextMenuArm.Get();
     const bool show_summarize_page = (arm == "arm2");

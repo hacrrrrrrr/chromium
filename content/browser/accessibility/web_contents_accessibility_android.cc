@@ -596,6 +596,21 @@ std::optional<ExtendedSelectionOffsetType> AsExtendedSelectionOffsetType(
   return std::nullopt;
 }
 
+BrowserAccessibilityAndroid* GetDialogAncestor(
+    BrowserAccessibilityAndroid* node) {
+  ui::BrowserAccessibility* current = node;
+  while (current) {
+    BrowserAccessibilityAndroid* android_current =
+        static_cast<BrowserAccessibilityAndroid*>(current);
+    if (android_current->GetRole() == ax::mojom::Role::kDialog ||
+        android_current->GetRole() == ax::mojom::Role::kAlertDialog) {
+      return android_current;
+    }
+    current = current->PlatformGetParent();
+  }
+  return nullptr;
+}
+
 }  // anonymous namespace
 
 class WebContentsAccessibilityAndroid::Connector
@@ -1004,6 +1019,16 @@ void WebContentsAccessibilityAndroid::HandlePaneOpened(int32_t unique_id) {
   Java_WebContentsAccessibilityImpl_handlePaneOpened(env, obj, unique_id);
 }
 
+void WebContentsAccessibilityAndroid::HandlePaneClosed(int32_t unique_id) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = GetJavaObject(env);
+  if (obj.is_null()) {
+    return;
+  }
+
+  Java_WebContentsAccessibilityImpl_handlePaneClosed(env, obj, unique_id);
+}
+
 void WebContentsAccessibilityAndroid::HandleAtomicLiveRegionChanged(
     int32_t unique_id) {
   BrowserAccessibilityAndroid* android_root_node = GetAXFromUniqueID(unique_id);
@@ -1141,6 +1166,14 @@ void WebContentsAccessibilityAndroid::HandleEditableTextChanged(
   }
   Java_WebContentsAccessibilityImpl_handleEditableTextChanged(
       env, obj, unique_id, subType);
+}
+
+void WebContentsAccessibilityAndroid::HandleSpinButtonStepIntent(
+    int32_t unique_id) {
+  should_announce_full_text_ = true;
+  HandleEditableTextChanged(
+      unique_id, ANDROID_ACCESSIBILITY_EVENT_TEXT_CHANGE_TYPE_UNDEFINED);
+  should_announce_full_text_ = false;
 }
 
 void WebContentsAccessibilityAndroid::HandleActiveDescendantChanged(
@@ -2039,9 +2072,30 @@ bool WebContentsAccessibilityAndroid::PopulateAccessibilityEvent(
     case ANDROID_ACCESSIBILITY_EVENT_TEXT_CHANGED: {
       std::u16string before_text = node->GetTextChangeBeforeText();
       std::u16string text = node->GetTextContentUTF16();
+      int from_index = node->GetTextChangeFromIndex();
+      int added_count = node->GetTextChangeAddedCount();
+      int removed_count = node->GetTextChangeRemovedCount();
+
+      // Bypass text diff logic for custom spinbuttons, or for native
+      // spinbuttons when explicitly triggered by an increment/decrement intent
+      // (e.g. arrow keys). This forces TalkBack to announce the full string.
+      bool is_spin_button = node->GetRole() == ax::mojom::Role::kSpinButton;
+      bool is_native_spinbutton =
+          node->GetStringAttribute(ax::mojom::StringAttribute::kInputType) ==
+          "number";
+      bool is_custom_spinbutton = is_spin_button && !is_native_spinbutton;
+
+      if ((is_custom_spinbutton ||
+           (is_native_spinbutton && should_announce_full_text_)) &&
+          !text.empty()) {
+        before_text = std::u16string();
+        from_index = 0;
+        added_count = text.length();
+        removed_count = 0;
+      }
+
       Java_WebContentsAccessibilityImpl_setAccessibilityEventTextChangedAttrs(
-          env, obj, event, node->GetTextChangeFromIndex(),
-          node->GetTextChangeAddedCount(), node->GetTextChangeRemovedCount(),
+          env, obj, event, from_index, added_count, removed_count,
           base::android::ConvertUTF16ToJavaString(env, before_text),
           base::android::ConvertUTF16ToJavaString(env, text));
       break;
@@ -2075,10 +2129,10 @@ bool WebContentsAccessibilityAndroid::PopulateAccessibilityEvent(
   return true;
 }
 
-void WebContentsAccessibilityAndroid::Click(JNIEnv* env, int32_t unique_id) {
+bool WebContentsAccessibilityAndroid::Click(JNIEnv* env, int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
   if (!node) {
-    return;
+    return false;
   }
 
   // If it's a heading consisting of only a link or a heading nested in a link,
@@ -2097,37 +2151,45 @@ void WebContentsAccessibilityAndroid::Click(JNIEnv* env, int32_t unique_id) {
   // ensure that parents/ancestry chain is enabled as well.
   if (node->IsEnabled() && !node->IsDisabledDescendant()) {
     node->manager()->DoDefaultAction(*node);
+    return true;
   }
+  return false;
 }
 
-void WebContentsAccessibilityAndroid::Expand(JNIEnv* env, int32_t id) {
+bool WebContentsAccessibilityAndroid::Expand(JNIEnv* env, int32_t id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(id);
   if (!node) {
-    return;
+    return false;
   }
   node->manager()->Expand(*node);
+  return true;
 }
 
-void WebContentsAccessibilityAndroid::Collapse(JNIEnv* env, int32_t id) {
+bool WebContentsAccessibilityAndroid::Collapse(JNIEnv* env, int32_t id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(id);
   if (!node) {
-    return;
+    return false;
   }
   node->manager()->Collapse(*node);
+  return true;
 }
 
-void WebContentsAccessibilityAndroid::Focus(JNIEnv* env, int32_t unique_id) {
+bool WebContentsAccessibilityAndroid::Focus(JNIEnv* env, int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node) {
-    node->manager()->SetFocus(*node);
+  if (!node) {
+    return false;
   }
+  node->manager()->SetFocus(*node);
+  return true;
 }
 
-void WebContentsAccessibilityAndroid::Blur(JNIEnv* env) {
+bool WebContentsAccessibilityAndroid::Blur(JNIEnv* env) {
   if (BrowserAccessibilityManagerAndroid* root_manager =
           GetRootBrowserAccessibilityManager()) {
     root_manager->SetFocus(*root_manager->GetBrowserAccessibilityRoot());
+    return true;
   }
+  return false;
 }
 
 int32_t WebContentsAccessibilityAndroid::GetFocus(JNIEnv* env) {
@@ -2145,41 +2207,48 @@ int32_t WebContentsAccessibilityAndroid::GetFocus(JNIEnv* env) {
       ->GetUniqueId();
 }
 
-void WebContentsAccessibilityAndroid::ScrollToMakeNodeVisible(
+bool WebContentsAccessibilityAndroid::ScrollToMakeNodeVisible(
     JNIEnv* env,
     int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node) {
-    // Passing an empty gfx::Rect() signals to Blink to scroll the element's
-    // natural layout bounds into view. Explicitly deriving and passing
-    // absolute-sized target rects can miscalculate scroll destinations for
-    // elements nested inside positioned layers or web components, leading to
-    // unexpected page over-scrolling.
-    node->manager()->ScrollToMakeVisible(*node, gfx::Rect());
+  if (!node) {
+    return false;
   }
+  // Passing an empty gfx::Rect() signals to Blink to scroll the element's
+  // natural layout bounds into view. Explicitly deriving and passing
+  // absolute-sized target rects can miscalculate scroll destinations for
+  // elements nested inside positioned layers or web components, leading to
+  // unexpected page over-scrolling.
+  node->manager()->ScrollToMakeVisible(*node, gfx::Rect());
+  return true;
 }
 
-void WebContentsAccessibilityAndroid::SetTextFieldValue(
+bool WebContentsAccessibilityAndroid::SetTextFieldValue(
     JNIEnv* env,
     int32_t unique_id,
     const JavaRef<jstring>& value) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node) {
-    node->manager()->SetValue(
-        *node, base::android::ConvertJavaStringToUTF8(env, value));
+  if (!node) {
+    return false;
   }
+  node->manager()->SetValue(*node,
+                            base::android::ConvertJavaStringToUTF8(env, value));
+  return true;
 }
 
-void WebContentsAccessibilityAndroid::SetSelection(JNIEnv* env,
+bool WebContentsAccessibilityAndroid::SetSelection(JNIEnv* env,
                                                    int32_t unique_id,
                                                    int32_t start,
                                                    int32_t end) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node) {
-    node->manager()->SetSelection(ui::BrowserAccessibility::AXRange(
-        node->CreatePositionForSelectionAt(start),
-        node->CreatePositionForSelectionAt(end)));
+  if (!node) {
+    return false;
   }
+
+  node->manager()->SetSelection(ui::BrowserAccessibility::AXRange(
+      node->CreatePositionForSelectionAt(start),
+      node->CreatePositionForSelectionAt(end)));
+  return true;
 }
 
 bool WebContentsAccessibilityAndroid::SetExtendedSelection(
@@ -2245,14 +2314,14 @@ bool WebContentsAccessibilityAndroid::SetExtendedSelection(
   return true;
 }
 
-void WebContentsAccessibilityAndroid::ClearExtendedSelection(JNIEnv* env,
+bool WebContentsAccessibilityAndroid::ClearExtendedSelection(JNIEnv* env,
                                                              int32_t id) {
   CHECK(
       base::FeatureList::IsEnabled(features::kAccessibilityExtendedSelection));
 
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(id);
   if (!node) {
-    return;
+    return false;
   }
 
   ui::BrowserAccessibility::AXPosition start_position =
@@ -2262,6 +2331,7 @@ void WebContentsAccessibilityAndroid::ClearExtendedSelection(JNIEnv* env,
 
   node->manager()->SetSelection(ui::BrowserAccessibility::AXRange(
       std::move(start_position), std::move(end_position)));
+  return true;
 }
 
 bool WebContentsAccessibilityAndroid::AdjustSlider(JNIEnv* env,
@@ -2287,12 +2357,14 @@ bool WebContentsAccessibilityAndroid::AdjustSlider(JNIEnv* env,
   return true;
 }
 
-void WebContentsAccessibilityAndroid::ShowContextMenu(JNIEnv* env,
+bool WebContentsAccessibilityAndroid::ShowContextMenu(JNIEnv* env,
                                                       int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node) {
-    node->manager()->ShowContextMenu(*node);
+  if (!node) {
+    return false;
   }
+  node->manager()->ShowContextMenu(*node);
+  return true;
 }
 
 bool WebContentsAccessibilityAndroid::ShowTooltip(JNIEnv* env,
@@ -2581,6 +2653,26 @@ void WebContentsAccessibilityAndroid::MoveAccessibilityFocus(
   }
 
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(new_unique_id);
+
+  int32_t new_dialog_id = ui::kAXAndroidInvalidViewId;
+  if (node) {
+    BrowserAccessibilityAndroid* dialog_ancestor = GetDialogAncestor(node);
+    if (dialog_ancestor) {
+      new_dialog_id = dialog_ancestor->GetUniqueId();
+    }
+  }
+  // TODO: Follow up with TalkBack to verify if TalkBack should announce
+  // pane closed when transitioning directly from one dialog to another.
+  if (new_dialog_id != active_dialog_unique_id_) {
+    if (active_dialog_unique_id_ != ui::kAXAndroidInvalidViewId) {
+      HandlePaneClosed(active_dialog_unique_id_);
+    }
+    if (new_dialog_id != ui::kAXAndroidInvalidViewId) {
+      HandlePaneOpened(node->GetUniqueId());
+    }
+    active_dialog_unique_id_ = new_dialog_id;
+  }
+
   if (!node) {
     return;
   }
@@ -2596,14 +2688,15 @@ void WebContentsAccessibilityAndroid::MoveAccessibilityFocus(
   }
 }
 
-void WebContentsAccessibilityAndroid::SetSequentialFocusStartingPoint(
+bool WebContentsAccessibilityAndroid::SetSequentialFocusStartingPoint(
     JNIEnv* env,
     int32_t unique_id) {
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
   if (!node) {
-    return;
+    return false;
   }
   node->manager()->SetSequentialFocusNavigationStartingPoint(*node);
+  return true;
 }
 
 bool WebContentsAccessibilityAndroid::IsSlider(JNIEnv* env, int32_t unique_id) {

@@ -326,6 +326,14 @@ void HTMLSelectElement::SelectOptionByValue(const String& value,
 void HTMLSelectElement::SelectOptionByElement(HTMLOptionElement* option,
                                               bool send_events,
                                               WebAutofillState autofill_state) {
+  // Callers from outside of blink, such as autofill, may pass in an option
+  // which script has since removed from this select. Selecting it would
+  // corrupt this select's selection state, e.g. by marking a detached option
+  // as selected while SelectedOption() returns nullptr. See
+  // crbug.com/535975677.
+  if (option && option->OwnerSelectElement() != this) {
+    return;
+  }
   HTMLOptionElement* previous_selected_option = SelectedOption();
   SetSuggestedOption(nullptr);
   SelectOptionFlags flags = kDeselectOtherOptionsFlag | kMakeOptionDirtyFlag;
@@ -372,8 +380,12 @@ void HTMLSelectElement::SetSuggestedValue(const String& value) {
 }
 
 void HTMLSelectElement::SetSuggestedOption(HTMLOptionElement* option) {
+  // See the equivalent check in SelectOptionByElement().
+  if (option && option->OwnerSelectElement() != this) {
+    return;
+  }
   if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(GetExecutionContext()) &&
-      IsInCanvasSubtree()) {
+      IsCanvasOrInCanvasSubtree()) {
     // Hide suggested values when under canvas, to prevent leaking this
     // information to javascript.
     option = nullptr;
@@ -887,10 +899,10 @@ int HTMLSelectElement::SelectedListIndex() const {
   return -1;
 }
 
-void HTMLSelectElement::DidChangeIsCanvasOrInCanvasSubtree() {
-  HTMLFormControlElementWithState::DidChangeIsCanvasOrInCanvasSubtree();
-  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled(GetExecutionContext()) &&
-      IsInCanvasSubtree()) {
+void HTMLSelectElement::DidChangeIsInCanvasSubtree() {
+  HTMLFormControlElementWithState::DidChangeIsInCanvasSubtree();
+  if (IsInCanvasSubtree() &&
+      RuntimeEnabledFeatures::CanvasDrawElementEnabled(GetExecutionContext())) {
     // Hide suggested values when under canvas, to prevent leaking this
     // information to javascript.
     SetSuggestedOption(nullptr);
@@ -1369,9 +1381,14 @@ void HTMLSelectElement::DefaultEventHandler(Event& event) {
   if (!GetLayoutObject())
     return;
 
+  auto* keyboard_event = DynamicTo<KeyboardEvent>(event);
+  const bool is_repeat_keyboard_event =
+      keyboard_event && keyboard_event->repeat();
+
   if (event.type() == event_type_names::kClick ||
       event.type() == event_type_names::kChange ||
-      event.type() == event_type_names::kKeydown) {
+      (event.type() == event_type_names::kKeydown &&
+       !is_repeat_keyboard_event)) {
     SetUserHasEditedTheField();
   }
 
@@ -1380,18 +1397,21 @@ void HTMLSelectElement::DefaultEventHandler(Event& event) {
     return;
   }
 
-  if (select_type_->DefaultEventHandler(event)) {
-    event.SetDefaultHandled();
-    return;
-  }
-
-  if (auto* keyboard_event = DynamicTo<KeyboardEvent>(event)) {
-    if (TypeAhead::ShouldHandleKeyboardEvent(*keyboard_event)) {
-      TypeAheadFind(*keyboard_event);
+  if (!is_repeat_keyboard_event) {
+    if (select_type_->DefaultEventHandler(event)) {
       event.SetDefaultHandled();
       return;
     }
+
+    if (keyboard_event) {
+      if (TypeAhead::ShouldHandleKeyboardEvent(*keyboard_event)) {
+        TypeAheadFind(*keyboard_event);
+        event.SetDefaultHandled();
+        return;
+      }
+    }
   }
+
   HTMLFormControlElementWithState::DefaultEventHandler(event);
 }
 
@@ -1611,8 +1631,8 @@ String HTMLSelectElement::ItemText(const Element& element) const {
   else if (auto* option = DynamicTo<HTMLOptionElement>(element))
     item_string = option->TextIndentedToRespectGroupLabel();
 
-  if (GetLayoutObject() && GetLayoutObject()->Style()) {
-    return GetLayoutObject()->StyleRef().ApplyTextTransform(item_string);
+  if (const auto* layout_object = GetLayoutObject()) {
+    return layout_object->StyleRef().ApplyTextTransform(item_string);
   }
   return item_string;
 }

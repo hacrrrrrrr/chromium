@@ -14,6 +14,7 @@
 #include "components/commerce/core/commerce_constants.h"
 #include "components/history_clusters/history_clusters_internals/webui/url_constants.h"
 #include "components/optimization_guide/optimization_guide_internals/webui/url_constants.h"
+#include "components/private_ai/private_ai_internals/webui/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/common/buildflags.h"
@@ -37,7 +38,6 @@ bool IsWebUiHostInDevUiDfm(const std::string& host) {
          host == chrome::kChromeUIActorInternalsHost ||
          host == chrome::kChromeUIAutofillInternalsHost ||
          host == chrome::kChromeUIBluetoothInternalsHost ||
-         host == chrome::kChromeUIBrowsingTopicsInternalsHost ||
          host == chrome::kChromeUIChromeFindsInternalsHost ||
          host == chrome::kChromeUIComponentsHost ||
          host == chrome::kChromeUICrashesHost ||
@@ -57,13 +57,13 @@ bool IsWebUiHostInDevUiDfm(const std::string& host) {
          host == chrome::kChromeUINetInternalsHost ||
          host == chrome::kChromeUIOmniboxHost ||
          host == chrome::kChromeUIPasswordManagerInternalsHost ||
-         host == chrome::kChromeUIPersonalContextInternalsHost ||
          host == chrome::kChromeUIPolicyHost ||
          host == chrome::kChromeUIPredictorsHost ||
          host == chrome::kChromeUISandboxHost ||
          host == chrome::kChromeUISignInInternalsHost ||
          host == chrome::kChromeUISiteEngagementHost ||
          host == chrome::kChromeUISnippetsInternalsHost ||
+         host == chrome::kChromeUISubresourceFilterInternalsHost ||
          host == chrome::kChromeUISyncInternalsHost ||
          host == chrome::kChromeUITranslateInternalsHost ||
          host == chrome::kChromeUIUsbInternalsHost ||
@@ -71,7 +71,6 @@ bool IsWebUiHostInDevUiDfm(const std::string& host) {
          host == chrome::kChromeUIWebApksHost ||
          host == chrome::kChromeUIWebRtcLogsHost ||
          host == commerce::kChromeUICommerceInternalsHost ||
-         host == content::kChromeUIPrivateAggregationInternalsHost ||
          host == content::kChromeUIBlobInternalsHost ||
          host == content::kChromeUIGpuHost ||
          host == content::kChromeUIHistogramHost ||
@@ -89,7 +88,8 @@ bool IsWebUiHostInDevUiDfm(const std::string& host) {
          host == history_clusters_internals::
                      kChromeUIHistoryClustersInternalsHost ||
          host == optimization_guide_internals::
-                     kChromeUIOptimizationGuideInternalsHost;
+                     kChromeUIOptimizationGuideInternalsHost ||
+         host == private_ai_internals::kChromeUIPrivateAiInternalsHost;
 }
 
 }  // namespace

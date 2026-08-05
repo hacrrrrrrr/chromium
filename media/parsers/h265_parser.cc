@@ -193,14 +193,20 @@ uint8_t H265ScalingListData::GetScalingList32x32EntryInRasterOrder(
 }
 
 H265SPS::H265SPS() = default;
-
+H265SPS::H265SPS(const H265SPS&) = default;
+H265SPS& H265SPS::operator=(const H265SPS&) = default;
 H265SPS::H265SPS(H265SPS&&) noexcept = default;
+H265SPS& H265SPS::operator=(H265SPS&&) noexcept = default;
 
 H265ProfileTierLevel::H265ProfileTierLevel() = default;
 
 H265VUIParameters::H265VUIParameters() = default;
-
+H265VUIParameters::H265VUIParameters(const H265VUIParameters&) = default;
+H265VUIParameters& H265VUIParameters::operator=(const H265VUIParameters&) =
+    default;
 H265VUIParameters::H265VUIParameters(H265VUIParameters&&) noexcept = default;
+H265VUIParameters& H265VUIParameters::operator=(H265VUIParameters&&) noexcept =
+    default;
 
 H265PPS::H265PPS() = default;
 
@@ -1156,6 +1162,11 @@ H265Parser::Result H265Parser::ParseSliceHeader(const H265NALU& nalu,
       std::min(shdr->temporal_id, sps->sps_max_sub_layers_minus1);
 
   if (!shdr->first_slice_segment_in_pic_flag) {
+    if (validate_extended_bitstream_ && !prior_shdr) {
+      DVLOG(1) << "First slice segment in picture must have "
+               << "first_slice_segment_in_pic_flag equal to 1";
+      return kInvalidStream;
+    }
     if (pps->dependent_slice_segments_enabled_flag)
       READ_BOOL_OR_RETURN(&shdr->dependent_slice_segment_flag);
     READ_BITS_OR_RETURN(base::bits::Log2Ceiling(sps->pic_size_in_ctbs_y),
@@ -1471,11 +1482,18 @@ H265Parser::Result H265Parser::ParseSliceHeader(const H265NALU& nalu,
   if (prior_shdr && !shdr->first_slice_segment_in_pic_flag) {
     // Validate the fields that must match between slice headers for the same
     // picture.
+    // 7.4.2.2: All coded slice segment NAL units of an access unit shall have
+    // the same value of nal_unit_type.
+    EQ_OR_RETURN(shdr, prior_shdr, nal_unit_type);
     EQ_OR_RETURN(shdr, prior_shdr, slice_pic_parameter_set_id);
     EQ_OR_RETURN(shdr, prior_shdr, pic_output_flag);
     EQ_OR_RETURN(shdr, prior_shdr, no_output_of_prior_pics_flag);
     EQ_OR_RETURN(shdr, prior_shdr, slice_pic_order_cnt_lsb);
     EQ_OR_RETURN(shdr, prior_shdr, short_term_ref_pic_set_sps_flag);
+    // 7.4.7.1: all syntax elements for short-term reference picture set
+    // derivation shall have the same values for all coded slice segment
+    // NAL units of a codec picture.
+    EQ_OR_RETURN(shdr, prior_shdr, st_ref_pic_set);
 
     // All the other fields we need to compare are contiguous, so compare them
     // as one memory range.

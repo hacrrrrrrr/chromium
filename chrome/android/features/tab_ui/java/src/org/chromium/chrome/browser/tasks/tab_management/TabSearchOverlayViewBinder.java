@@ -23,32 +23,43 @@ public class TabSearchOverlayViewBinder {
     /** Helper class that holds references to the underlying Android views. */
     public static class ViewHolder {
         public final View panelContainer;
-        public final View scrim;
         public final View panel;
+        public final View emptyStateView;
 
         /**
          * Constructs a new ViewHolder holding the inflated views.
          *
          * @param panelContainer The root container layout for the search overlay.
-         * @param scrim The background scrim view used to dismiss the overlay.
          * @param panel The background overlay panel itself.
+         * @param emptyStateView The empty state view.
          */
-        public ViewHolder(View panelContainer, View scrim, View panel) {
+        public ViewHolder(View panelContainer, View panel, View emptyStateView) {
             this.panelContainer = panelContainer;
-            this.scrim = scrim;
             this.panel = panel;
+            this.emptyStateView = emptyStateView;
         }
     }
 
     /** Binds properties from the PropertyModel to the ViewHolder. */
     public static void bind(PropertyModel model, ViewHolder view, PropertyKey propertyKey) {
-        if (TabSearchOverlayProperties.VISIBLE == propertyKey) {
+        if (TabSearchOverlayProperties.EMPTY_STATE_VISIBLE == propertyKey) {
+            boolean visible = model.get(TabSearchOverlayProperties.EMPTY_STATE_VISIBLE);
+            view.emptyStateView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        } else if (TabSearchOverlayProperties.ON_CLOSE_CLICK == propertyKey) {
+            view.panel
+                    .findViewById(R.id.tab_search_close_button)
+                    .setOnClickListener(model.get(TabSearchOverlayProperties.ON_CLOSE_CLICK));
+        } else if (TabSearchOverlayProperties.ON_SCRIM_CLICK == propertyKey) {
+            view.panelContainer
+                    .findViewById(R.id.tab_search_overlay_scrim)
+                    .setOnClickListener(model.get(TabSearchOverlayProperties.ON_SCRIM_CLICK));
+        } else if (TabSearchOverlayProperties.VISIBLE == propertyKey) {
             boolean visible = model.get(TabSearchOverlayProperties.VISIBLE);
             if (visible) {
                 runShowAnimation(view);
             } else {
                 if (view.panelContainer.getVisibility() == View.VISIBLE) {
-                    runHideAnimation(view);
+                    runHideAnimation(model, view);
                 } else {
                     // If the overlay is already hidden (e.g. during startup or redundant hide
                     // calls), immediately set visibility to GONE instead of running the hide
@@ -56,8 +67,6 @@ public class TabSearchOverlayViewBinder {
                     view.panelContainer.setVisibility(View.GONE);
                 }
             }
-        } else if (TabSearchOverlayProperties.ON_SCRIM_CLICK == propertyKey) {
-            view.scrim.setOnClickListener(model.get(TabSearchOverlayProperties.ON_SCRIM_CLICK));
         }
     }
 
@@ -79,7 +88,7 @@ public class TabSearchOverlayViewBinder {
                 .start();
     }
 
-    private static void runHideAnimation(ViewHolder view) {
+    private static void runHideAnimation(PropertyModel model, ViewHolder view) {
         // Cancel any active animation (e.g. an ongoing show transition) to prevent conflicts.
         view.panel.animate().cancel();
 
@@ -103,6 +112,11 @@ public class TabSearchOverlayViewBinder {
                             public void onAnimationEnd(Animator animation) {
                                 if (!mCancelled) {
                                     view.panelContainer.setVisibility(View.GONE);
+                                    Runnable onHideFinished =
+                                            model.get(TabSearchOverlayProperties.ON_HIDE_FINISHED);
+                                    if (onHideFinished != null) {
+                                        onHideFinished.run();
+                                    }
                                 }
                             }
                         })

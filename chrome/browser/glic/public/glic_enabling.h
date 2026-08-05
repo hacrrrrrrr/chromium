@@ -33,6 +33,7 @@ class Profile;
 class ProfileAttributesStorage;
 
 namespace glic {
+class GlicKeyedService;
 namespace prefs {
 enum class FreStatus;
 }  // namespace prefs
@@ -70,30 +71,58 @@ inline constexpr char
     kGlicEligibilitySeparateAccountCapabilitySyntheticTrialName[] =
         "GlicEligibilitySeparateAccountCapabilityAffectedUsers";
 
+// Delegate for GlicGlobalEnabling and GlicEnabling.
+class GlicEnablingDelegate {
+ public:
+  GlicEnablingDelegate() = default;
+  GlicEnablingDelegate(const GlicEnablingDelegate&) = delete;
+  GlicEnablingDelegate& operator=(const GlicEnablingDelegate&) = delete;
+  virtual ~GlicEnablingDelegate() = default;
+
+  // Returns the permanent country code from the variations service.
+  virtual std::string GetPermanentCountryCode() const;
+  // Returns the session country code from the variations service.
+  virtual std::string GetSessionCountryCode() const;
+  // Returns the locale applied to the Chrome app.
+  virtual std::string GetLocale() const;
+
+ protected:
+  friend class GlicGlobalEnabling;
+  friend class GlicEnabling;
+  static bool GetCountryEnablement(std::string_view permanent_country,
+                                   std::string_view session_country);
+};
+
+struct LastCheckedCountries {
+  std::string permanent_country;
+  std::string session_country;
+
+  bool operator==(const LastCheckedCountries&) const = default;
+};
+
 // Global state used by GlicEnabling.
 class GlicGlobalEnabling {
  public:
-  class Delegate {
-   public:
-    Delegate() = default;
-    Delegate(const Delegate&) = delete;
-    Delegate& operator=(const Delegate&) = delete;
-
-    virtual std::string GetPermanentCountryCode();
-    virtual std::string GetSessionCountryCode();
-    virtual std::string GetLocale();
-  };
-  explicit GlicGlobalEnabling(Delegate& delegate);
+  explicit GlicGlobalEnabling(std::unique_ptr<GlicEnablingDelegate> delegate =
+                                  std::make_unique<GlicEnablingDelegate>());
   ~GlicGlobalEnabling();
-  bool IsEnabledByGlobalCriteria();
+
+  bool IsEnabledByGlobalCriteria() const;
   bool IsSystemRequirementMet() const;
   static bool IsOsVersionSupported();
   bool IsLocaleEnabled() const { return locale_enablement_.value_or(true); }
-  bool IsCountryEnabled() const { return country_enablement_.value_or(true); }
+  // Note that country checks are executed along profile-level checks because
+  // country information may not be ready at startup and can change.
+  bool IsCountryEnabled();
+
+  void UpdateStateForTesting(
+      std::unique_ptr<GlicEnablingDelegate> new_delegate);
 
  private:
+  std::unique_ptr<GlicEnablingDelegate> delegate_;
   std::optional<bool> locale_enablement_;
-  std::optional<bool> country_enablement_;
+  bool is_country_enabled_ = false;
+  std::optional<LastCheckedCountries> last_checked_countries_;
 };
 
 // LINT.IfChange(RequiredExperimentalOptIn)
@@ -112,9 +141,10 @@ enum class RequiredExperimentalOptIn {
 //
 // There are multiple notions of "enabled". The highest level is
 // IsEnabledByGlobalCriteria which controls whether any global-Glic
-// infrastructure is created. It checks the feature flag, country, locale, and
-// system requirements. If these criteria are not met, nothing Glic-related
-// should be created.
+// infrastructure is created. It checks the feature flag, locale, and
+// system requirements (country checks are executed later, along profile-level
+// checks). If these criteria are not met, nothing Glic-related should be
+// created.
 //
 // If the above checks pass, various global objects are created as well as a
 // GlicKeyedService for each "eligible" profile. Eligible profiles exclude
@@ -125,11 +155,9 @@ enum class RequiredExperimentalOptIn {
 // inert.  The GlicKeyedService is created for all eligible profiles so it can
 // listen for changes to prefs which control the per-profile Glic-Enabled state.
 //
-// Finally, an eligible profile may be Glic-Enabled. In this state, Glic UI is
-// visible and usable by the user. This state can change at runtime so Glic
-// entry points should depend on this state.
-class GlicKeyedService;
-
+// Finally, an eligible profile may be Glic-Enabled, in which case the Glic UI
+// is visible and usable by the user. A profile's enablement state can change at
+// runtime, so Glic entry points should depend on this state.
 class GlicEnabling final : public signin::IdentityManager::Observer,
                            public subscription_eligibility::
                                SubscriptionEligibilityService::Observer {
@@ -148,11 +176,13 @@ class GlicEnabling final : public signin::IdentityManager::Observer,
 
   // Returns whether the account capability permits using Glic features that are
   // available only to adult users.
-  static bool CanUseAdultFeatures(
-      const AccountCapabilities& capabilities);
+  static bool CanUseAdultFeatures(const AccountCapabilities& capabilities);
 
   // Returns whether the OS version is supported.
   static bool IsOsVersionSupported();
+  // Returns whether system requirements (like RAM and Chromebook hardware) are
+  // met.
+  static bool IsSystemRequirementMet();
   // Checks whether this client is likely a dogfooder, taking the ignore dogfood
   // feature into account.
   static bool IsLikelyDogfoodClient();
@@ -182,6 +212,16 @@ class GlicEnabling final : public signin::IdentityManager::Observer,
   // This is a convenience method for code outside of //chrome/browser/glic.
   // Code inside should use instance method IsAllowed() instead.
   static bool IsEnabledForProfile(Profile* profile);
+
+  // Evaluates whether the GiC opt-in should be shown during the First Run
+  // Experience. Unlike `IsEnabledForProfile`, this method does not rely on
+  // the standard country determination methods, nor does it query
+  // `IdentityManager` directly. The caller is responsible for resolving the
+  // country data and account capabilities and providing them as arguments.
+  static bool IsEnabledForFirstRunProfile(Profile* profile,
+                                          std::string_view permanent_country,
+                                          std::string_view session_country,
+                                          const AccountInfo& account_info);
 
   // Returns true if the user was previously determined to be ineligible for
   // Glic.
@@ -499,6 +539,9 @@ class GlicEnabling final : public signin::IdentityManager::Observer,
 
   // Test-only method to bypass enablement checks.
   static void SetBypassEnablementChecksForTesting(bool bypass);
+
+  // Test-only method to bypass system requirement checks.
+  static void SetSystemRequirementMetForTesting(std::optional<bool> met);
 
   // This is called anytime IsAllowed() might return a different value.
   using EnableChangedCallback = base::RepeatingClosure;

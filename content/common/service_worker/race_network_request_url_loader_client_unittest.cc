@@ -15,9 +15,14 @@
 #include "content/common/service_worker/race_network_request_write_buffer_manager.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
+#include "net/base/load_timing_internal_info.h"
 #include "net/base/net_errors.h"
+#include "net/ssl/ssl_info.h"
+#include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/loading_params.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/mojom/load_timing_internal_info.mojom.h"
+#include "services/network/public/mojom/ssl_info.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -69,7 +74,11 @@ class MockServiceWorkerResourceLoader : public ServiceWorkerResourceLoader {
       const network::mojom::URLResponseHeadPtr& response_head,
       mojo::ScopedDataPipeConsumerHandle response_body,
       std::optional<mojo_base::BigBuffer> cached_metadata) override {
-    std::move(on_commit_response_).Run(response_head, std::move(response_body));
+    committed_response_head_ = response_head->Clone();
+    if (on_commit_response_) {
+      std::move(on_commit_response_)
+          .Run(response_head, std::move(response_body));
+    }
   }
   void CommitEmptyResponseAndComplete() override {}
   void CommitCompleted(int error_code, const char* reason) override {
@@ -77,7 +86,17 @@ class MockServiceWorkerResourceLoader : public ServiceWorkerResourceLoader {
   }
   void HandleRedirect(
       const net::RedirectInfo& redirect_info,
-      const network::mojom::URLResponseHeadPtr& response_head) override {}
+      const network::mojom::URLResponseHeadPtr& response_head) override {
+    received_redirect_info_ = redirect_info;
+  }
+
+  const std::optional<net::RedirectInfo>& received_redirect_info() const {
+    return received_redirect_info_;
+  }
+
+  const network::mojom::URLResponseHeadPtr& committed_response_head() const {
+    return committed_response_head_;
+  }
 
   base::WeakPtr<MockServiceWorkerResourceLoader> GetWeakPtr() {
     return weak_factory_.GetWeakPtr();
@@ -92,8 +111,10 @@ class MockServiceWorkerResourceLoader : public ServiceWorkerResourceLoader {
   }
 
  private:
+  network::mojom::URLResponseHeadPtr committed_response_head_;
   OnCommitResponseCallback on_commit_response_;
   OnCompletedCallback on_commit_completed_;
+  std::optional<net::RedirectInfo> received_redirect_info_;
   base::WeakPtrFactory<MockServiceWorkerResourceLoader> weak_factory_{this};
 };
 
@@ -201,18 +222,53 @@ class URLLoaderClientForFetchHandler : public network::mojom::URLLoaderClient,
       network::mojom::URLResponseHeadPtr head,
       mojo::ScopedDataPipeConsumerHandle body,
       std::optional<mojo_base::BigBuffer> cached_metadata) override {
+    received_response_head_ = head->Clone();
+    if (on_receive_response_callback_) {
+      std::move(on_receive_response_callback_).Run();
+    }
     WatchResponseBody(head, std::move(body));
   }
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
-                         network::mojom::URLResponseHeadPtr head) override {}
+                         network::mojom::URLResponseHeadPtr head) override {
+    received_redirect_info_ = redirect_info;
+    received_redirect_head_ = head->Clone();
+    if (on_receive_redirect_callback_) {
+      std::move(on_receive_redirect_callback_).Run();
+    }
+  }
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         base::OnceCallback<void()> callback) override {}
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override {}
   void OnComplete(const network::URLLoaderCompletionStatus& status) override {}
 
+  void SetOnReceiveResponseCallback(base::OnceClosure callback) {
+    on_receive_response_callback_ = std::move(callback);
+  }
+
+  void SetOnReceiveRedirectCallback(base::OnceClosure callback) {
+    on_receive_redirect_callback_ = std::move(callback);
+  }
+
+  const std::optional<net::RedirectInfo>& received_redirect_info() const {
+    return received_redirect_info_;
+  }
+
+  const network::mojom::URLResponseHeadPtr& received_response_head() const {
+    return received_response_head_;
+  }
+
+  const network::mojom::URLResponseHeadPtr& received_redirect_head() const {
+    return received_redirect_head_;
+  }
+
  private:
   mojo::Receiver<network::mojom::URLLoaderClient> receiver_{this};
+  std::optional<net::RedirectInfo> received_redirect_info_;
+  network::mojom::URLResponseHeadPtr received_response_head_;
+  network::mojom::URLResponseHeadPtr received_redirect_head_;
+  base::OnceClosure on_receive_response_callback_;
+  base::OnceClosure on_receive_redirect_callback_;
 };
 
 class ServiceWorkerRaceNetworkRequestURLLoaderClientTest
@@ -252,6 +308,14 @@ class ServiceWorkerRaceNetworkRequestURLLoaderClientTest
 
   URLLoaderClientForFetchHandler* client_for_fetch_handler() {
     return client_for_fetch_handler_.get();
+  }
+
+  ServiceWorkerRaceNetworkRequestURLLoaderClient* client() {
+    return client_.get();
+  }
+
+  mojo::ScopedDataPipeConsumerHandle ReleaseConsumerHandle() {
+    return std::move(consumer_);
   }
 
  protected:
@@ -560,5 +624,139 @@ TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
   CompleteResponse(net::ERR_FAILED);
   EXPECT_EQ(client_state(),
             ServiceWorkerRaceNetworkRequestURLLoaderClient::State::kCompleted);
+}
+
+TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
+       RedirectForwardedToFetchHandlerForNonHttpScheme) {
+  const uint32_t data_pipe_capacity_num_bytes = 8;
+  SetUpURLLoaderClient(data_pipe_capacity_num_bytes);
+
+  base::RunLoop run_loop;
+  client_for_fetch_handler()->SetOnReceiveRedirectCallback(
+      run_loop.QuitClosure());
+
+  net::RedirectInfo redirect_info;
+  redirect_info.new_url = GURL("filesystem:http://example.com/temporary/test");
+  redirect_info.status_code = 302;
+  redirect_info.new_method = "GET";
+
+  network::mojom::URLResponseHeadPtr head(
+      network::CreateURLResponseHead(net::HTTP_FOUND));
+
+  client()->OnReceiveRedirect(redirect_info, std::move(head));
+  run_loop.Run();
+
+  ASSERT_TRUE(client_for_fetch_handler()->received_redirect_info().has_value());
+  EXPECT_EQ(client_for_fetch_handler()->received_redirect_info()->new_url,
+            GURL("data:,"));
+}
+
+TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
+       RedirectForwardedToFetchHandlerForHttpScheme) {
+  const uint32_t data_pipe_capacity_num_bytes = 8;
+  SetUpURLLoaderClient(data_pipe_capacity_num_bytes);
+
+  base::RunLoop run_loop;
+  client_for_fetch_handler()->SetOnReceiveRedirectCallback(
+      run_loop.QuitClosure());
+
+  net::RedirectInfo redirect_info;
+  redirect_info.new_url = GURL("https://example.com/redirected");
+  redirect_info.status_code = 302;
+  redirect_info.new_method = "GET";
+
+  network::mojom::URLResponseHeadPtr head(
+      network::CreateURLResponseHead(net::HTTP_FOUND));
+
+  client()->OnReceiveRedirect(redirect_info, std::move(head));
+  run_loop.Run();
+
+  ASSERT_TRUE(client_for_fetch_handler()->received_redirect_info().has_value());
+  EXPECT_EQ(client_for_fetch_handler()->received_redirect_info()->new_url,
+            GURL("https://example.com/redirected"));
+}
+
+TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
+       RedirectHandledByOwnerForNonHttpScheme) {
+  const uint32_t data_pipe_capacity_num_bytes = 8;
+  SetUpURLLoaderClient(data_pipe_capacity_num_bytes);
+
+  owner()->SetCommitResponsibility(
+      ServiceWorkerResourceLoader::FetchResponseFrom::kWithoutServiceWorker);
+
+  net::RedirectInfo redirect_info;
+  redirect_info.new_url = GURL("filesystem:http://example.com/temporary/test");
+  redirect_info.status_code = 302;
+  redirect_info.new_method = "GET";
+
+  network::mojom::URLResponseHeadPtr head(
+      network::CreateURLResponseHead(net::HTTP_FOUND));
+
+  client()->OnReceiveRedirect(redirect_info, std::move(head));
+
+  ASSERT_TRUE(owner()->received_redirect_info().has_value());
+  EXPECT_EQ(owner()->received_redirect_info()->new_url,
+            GURL("filesystem:http://example.com/temporary/test"));
+}
+TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
+       ForwardedResponseHeadOmitsNavigationOnlyFields) {
+  SetUpURLLoaderClient(network::GetDataPipeDefaultAllocationSize());
+
+  network::mojom::URLResponseHeadPtr head(
+      network::CreateURLResponseHead(net::HTTP_OK));
+  head->load_timing_internal_info.emplace();
+  head->ssl_info.emplace();
+
+  base::RunLoop run_loop;
+  client_for_fetch_handler()->SetOnReceiveResponseCallback(
+      run_loop.QuitClosure());
+
+  client()->OnReceiveResponse(std::move(head), ReleaseConsumerHandle(),
+                              std::nullopt);
+  CloseConnection();
+  run_loop.Run();
+
+  ASSERT_TRUE(owner()->committed_response_head());
+  EXPECT_TRUE(owner()
+                  ->committed_response_head()
+                  ->load_timing_internal_info.has_value());
+  EXPECT_TRUE(owner()->committed_response_head()->ssl_info.has_value());
+
+  ASSERT_TRUE(client_for_fetch_handler()->received_response_head());
+  EXPECT_FALSE(client_for_fetch_handler()
+                   ->received_response_head()
+                   ->load_timing_internal_info.has_value());
+  EXPECT_FALSE(client_for_fetch_handler()
+                   ->received_response_head()
+                   ->ssl_info.has_value());
+}
+
+TEST_F(ServiceWorkerRaceNetworkRequestURLLoaderClientTest,
+       ForwardedRedirectHeadOmitsNavigationOnlyFields) {
+  SetUpURLLoaderClient(network::GetDataPipeDefaultAllocationSize());
+
+  net::RedirectInfo redirect_info;
+  redirect_info.new_url = GURL("https://example.com/redirected");
+  redirect_info.new_method = "GET";
+
+  network::mojom::URLResponseHeadPtr head(
+      network::CreateURLResponseHead(net::HTTP_MOVED_PERMANENTLY));
+  head->load_timing_internal_info.emplace();
+  head->ssl_info.emplace();
+
+  base::RunLoop run_loop;
+  client_for_fetch_handler()->SetOnReceiveRedirectCallback(
+      run_loop.QuitClosure());
+
+  client()->OnReceiveRedirect(redirect_info, std::move(head));
+  run_loop.Run();
+
+  ASSERT_TRUE(client_for_fetch_handler()->received_redirect_head());
+  EXPECT_FALSE(client_for_fetch_handler()
+                   ->received_redirect_head()
+                   ->load_timing_internal_info.has_value());
+  EXPECT_FALSE(client_for_fetch_handler()
+                   ->received_redirect_head()
+                   ->ssl_info.has_value());
 }
 }  // namespace content

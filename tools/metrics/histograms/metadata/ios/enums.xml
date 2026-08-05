@@ -398,6 +398,7 @@ chromium-metrics-reviews@google.com.
   <int value="3" label="Autofill Used"/>
   <int value="4" label="Set Up List"/>
   <int value="5" label="Tips Notification"/>
+  <int value="6" label="Passkey Created"/>
 </enum>
 
 <!-- LINT.IfChange(IOSCrossPlatformPromoType) -->
@@ -899,6 +900,7 @@ chromium-metrics-reviews@google.com.
   <int value="24" label="Edit Menu Prompt"/>
   <int value="25" label="Onboarding: No I Am Done"/>
   <int value="26" label="Onboarding: Keep Learning"/>
+  <int value="27" label="App Switcher Summarize"/>
 </enum>
 
 <!-- LINT.ThenChange(
@@ -1013,6 +1015,18 @@ chromium-metrics-reviews@google.com.
 </enum>
 
 <!-- LINT.ThenChange(/ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h:IOSGeminiInvocationPageType) -->
+
+<!-- LINT.IfChange(IOSGeminiLiveFREOutcome) -->
+
+<enum name="IOSGeminiLiveFREOutcome">
+  <summary>Onboarding final outcomes for Gemini Live FRE.</summary>
+  <int value="0" label="Success"/>
+  <int value="1" label="Dismissed on Consent Screen"/>
+  <int value="2" label="Denied OS Mic Permission"/>
+  <int value="3" label="Denied Chrome Mic Permission"/>
+</enum>
+
+<!-- LINT.ThenChange(/ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h:IOSGeminiLiveFREOutcome) -->
 
 <!-- LINT.IfChange(IOSGeminiOSCameraAuthorizationInitialStatus) -->
 

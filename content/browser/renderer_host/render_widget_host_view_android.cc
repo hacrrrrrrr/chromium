@@ -131,6 +131,9 @@ namespace content {
 
 namespace {
 
+BASE_FEATURE(kEvictSurfaceViaDelegatedFrameHost,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 static const base::TimeDelta kClickCountInterval = base::Seconds(0.5);
 static const float kClickCountRadiusSquaredDIP = 25;
 static const base::TimeDelta kThrottleTimeout = base::Milliseconds(200);
@@ -1000,8 +1003,9 @@ void RenderWidgetHostViewAndroid::OnRenderFrameMetadataChangedBeforeActivation(
 
   if (overscroll_controller_) {
     overscroll_controller_->OnFrameMetadataUpdated(
-        metadata.page_scale_factor, metadata.device_scale_factor,
-        metadata.scrollable_viewport_size, metadata.root_layer_size,
+        view_.GetSizeDevicePx().width(), metadata.page_scale_factor,
+        metadata.device_scale_factor, metadata.scrollable_viewport_size,
+        metadata.root_layer_size,
         metadata.root_scroll_offset.value_or(gfx::PointF()),
         metadata.root_overflow_y_hidden);
   }
@@ -1479,6 +1483,10 @@ viz::FrameSinkId RenderWidgetHostViewAndroid::GetRootFrameSinkId() {
 }
 
 viz::SurfaceId RenderWidgetHostViewAndroid::GetCurrentSurfaceId() const {
+  if (base::FeatureList::IsEnabled(kEvictSurfaceViaDelegatedFrameHost)) {
+    return delegated_frame_host_ ? delegated_frame_host_->SurfaceId()
+                                 : viz::SurfaceId();
+  }
   if (sync_compositor_)
     return sync_compositor_->GetSurfaceId();
   return delegated_frame_host_ ? delegated_frame_host_->SurfaceId()
@@ -1837,6 +1845,7 @@ void RenderWidgetHostViewAndroid::RenderProcessGone() {
 }
 
 void RenderWidgetHostViewAndroid::Destroy() {
+  in_destroy_ = true;
   host()->render_frame_metadata_provider()->RemoveObserver(this);
   host()->ViewDestroyed();
   host()->RemoveInputEventObserver(
@@ -2423,8 +2432,13 @@ bool RenderWidgetHostViewAndroid::VisibilityNeedsDrawing() const {
 }
 
 void RenderWidgetHostViewAndroid::UpdateVisibility() {
-  bool should_be_showing = VisibilityNeedsDrawing() &&
-                           is_window_activity_started_ && is_window_visible_;
+  if (in_destroy_) {
+    return;
+  }
+  bool should_be_showing =
+      VisibilityNeedsDrawing() &&
+      ((is_window_activity_started_ && is_window_visible_) ||
+       !view_.GetWindowAndroid());
   if (should_be_showing) {
     ShowInternal();
   } else {
@@ -3257,6 +3271,7 @@ void RenderWidgetHostViewAndroid::OnAttachedToWindow() {
   CHECK(view_.GetWindowAndroid(), base::NotFatalUntil::M152);
   if (view_.GetWindowAndroid()->GetCompositor())
     OnAttachCompositor();
+  UpdateVisibility();
 }
 
 void RenderWidgetHostViewAndroid::OnDetachedFromWindow() {

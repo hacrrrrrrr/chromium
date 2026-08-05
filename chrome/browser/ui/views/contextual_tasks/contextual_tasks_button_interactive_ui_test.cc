@@ -226,7 +226,7 @@ class ContextualTasksButtonInteractiveTestBase : public InteractiveBrowserTest {
     return identity_test_env_adaptor_->identity_test_env();
   }
 
-  PrefService* GetPrefService() { return browser()->profile()->GetPrefs(); }
+  PrefService* GetPrefService() { return browser()->GetProfile()->GetPrefs(); }
 
   TestingContextualTasksUiService* GetTestingService() {
     return static_cast<TestingContextualTasksUiService*>(
@@ -303,10 +303,7 @@ class ContextualTasksEphemeralButtonInteractiveTest
     ContextualTasksButtonInteractiveTestBase::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->Start());
-    browser()
-        ->browser_window_features()
-        ->side_panel_ui()
-        ->DisableAnimationsForTesting();
+    browser()->GetFeatures().side_panel_ui()->DisableAnimationsForTesting();
   }
 
   GURL GetTestURL() {
@@ -327,6 +324,9 @@ class ContextualTasksEphemeralButtonInteractiveTest
       SessionID session_id = sessions::SessionTabHelper::IdForTab(web_contents);
       GetContextualTasksService()->AssociateTabWithTask(task.GetTaskId(),
                                                         session_id);
+      GetContextualTasksService()->UpdateThreadForTask(
+          task.GetTaskId(), contextual_tasks::ThreadType::kAiMode,
+          "test_server_id", std::nullopt, "Test Title");
     });
   }
 
@@ -349,6 +349,13 @@ class ContextualTasksEphemeralButtonInteractiveTest
   auto SimulateOpeningContextualTaskSidePanel() {
     return Do([&] {
       contextual_tasks::ContextualTasksPanelController::From(browser())->Show();
+      content::WebContents* side_panel_contents =
+          contextual_tasks::ContextualTasksPanelController::From(browser())
+              ->GetActiveWebContents();
+      if (side_panel_contents) {
+        contextual_tasks::GetWebUiInterface(side_panel_contents)
+            ->SetIsAiPage(true);
+      }
     });
   }
 
@@ -533,22 +540,23 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
 
 IN_PROC_BROWSER_TEST_F(ContextualTasksEphemeralButtonInteractiveTest,
                        PinnedButtonVisibilityUpdatesOnEligibilityChange) {
-  RunTestSequence(SignIntoEligibleAccount(), Do([&]() {
-                    actions::ActionItem* action_item =
-                        actions::ActionManager::Get().FindAction(
-                            kActionSidePanelShowContextualTasks,
-                            browser()->browser_actions()->root_action_item());
-                    ASSERT_NE(action_item, nullptr);
-                    EXPECT_TRUE(action_item->GetVisible());
-                  }),
-                  ClearPrimaryAccount(), Do([&]() {
-                    actions::ActionItem* action_item =
-                        actions::ActionManager::Get().FindAction(
-                            kActionSidePanelShowContextualTasks,
-                            browser()->browser_actions()->root_action_item());
-                    ASSERT_NE(action_item, nullptr);
-                    EXPECT_FALSE(action_item->GetVisible());
-                  }));
+  RunTestSequence(
+      SignIntoEligibleAccount(), Do([&]() {
+        actions::ActionItem* action_item =
+            actions::ActionManager::Get().FindAction(
+                kActionSidePanelShowContextualTasks,
+                BrowserActions::From(browser())->root_action_item());
+        ASSERT_NE(action_item, nullptr);
+        EXPECT_TRUE(action_item->GetVisible());
+      }),
+      ClearPrimaryAccount(), Do([&]() {
+        actions::ActionItem* action_item =
+            actions::ActionManager::Get().FindAction(
+                kActionSidePanelShowContextualTasks,
+                BrowserActions::From(browser())->root_action_item());
+        ASSERT_NE(action_item, nullptr);
+        EXPECT_FALSE(action_item->GetVisible());
+      }));
 }
 
 class ContextualTasksEphemeralBrandedButtonInteractiveTest

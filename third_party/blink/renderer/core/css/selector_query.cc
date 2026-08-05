@@ -133,6 +133,21 @@ Element* SelectorQuery::Closest(Element& target_element) const {
     return nullptr;
   }
 
+  // Single-compound fast path, mirroring Matches(): test each ancestor with
+  // MatchCompound() instead of running the full SelectorChecker.
+  if (compounds_.size() == 1 && !need_full_check_ && !compounds_[0].nth_child) {
+    FillMissingData(target_element);
+    const bool is_html_doc = IsA<HTMLDocument>(target_element.GetDocument());
+    for (Element* current_element = &target_element; current_element;
+         current_element = current_element->parentElement()) {
+      if (MatchCompound(*current_element, compounds_[0], kUnknownSiblingIndex,
+                        is_html_doc)) {
+        return current_element;
+      }
+    }
+    return nullptr;
+  }
+
   for (Element* current_element = &target_element; current_element;
        current_element = current_element->parentElement()) {
     if (SelectorListMatches(target_element, *current_element)) {
@@ -805,7 +820,9 @@ void SelectorQuery::BuildCompounds(const CSSSelector* first_selector) {
       case CSSSelector::kPseudoClass:
         if (current->GetPseudoType() == CSSSelector::kPseudoNthChild &&
             !current->SelectorList() && current->NthAValue() == 0 &&
-            !current_compound.nth_child) {
+            current->NthBValue() > 0 && !current_compound.nth_child) {
+          // b == 0 collides with the "no :nth-child()" sentinel (see
+          // Compound::nth_child); only b > 0 is safe on the fast path.
           // TODO(sesse): Consider supporting aN + b, not just b.
           current_compound.nth_child = current->NthBValue();
         } else if (current->GetPseudoType() == CSSSelector::kPseudoFirstChild &&

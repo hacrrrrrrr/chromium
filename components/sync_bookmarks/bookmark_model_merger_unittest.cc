@@ -408,52 +408,19 @@ TEST(BookmarkModelMergerTest, ShouldMergeLocalAndRemoteModels) {
 
   std::unique_ptr<SyncedBookmarkTracker> tracker =
       Merge(std::move(updates), &bookmark_model);
-  ASSERT_THAT(bookmark_bar_node->children().size(), Eq(3u));
-
-  // Verify Folder 1.
-  EXPECT_THAT(bookmark_bar_node->children()[0]->GetTitle(), Eq(kFolder1Title));
-  ASSERT_THAT(bookmark_bar_node->children()[0]->children().size(), Eq(3u));
-
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[0]->GetTitle(),
-              Eq(kUrl1Title));
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[0]->url(),
-              Eq(GURL(kUrl1)));
-
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[1]->GetTitle(),
-              Eq(kUrl2Title));
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[1]->url(),
-              Eq(GURL(kAnotherUrl2)));
-
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[2]->GetTitle(),
-              Eq(kUrl2Title));
-  EXPECT_THAT(bookmark_bar_node->children()[0]->children()[2]->url(),
-              Eq(GURL(kUrl2)));
-
-  // Verify Folder 3.
-  EXPECT_THAT(bookmark_bar_node->children()[1]->GetTitle(), Eq(kFolder3Title));
-  ASSERT_THAT(bookmark_bar_node->children()[1]->children().size(), Eq(2u));
-
-  EXPECT_THAT(bookmark_bar_node->children()[1]->children()[0]->GetTitle(),
-              Eq(kUrl3Title));
-  EXPECT_THAT(bookmark_bar_node->children()[1]->children()[0]->url(),
-              Eq(GURL(kUrl3)));
-  EXPECT_THAT(bookmark_bar_node->children()[1]->children()[1]->GetTitle(),
-              Eq(kUrl4Title));
-  EXPECT_THAT(bookmark_bar_node->children()[1]->children()[1]->url(),
-              Eq(GURL(kUrl4)));
-
-  // Verify Folder 2.
-  EXPECT_THAT(bookmark_bar_node->children()[2]->GetTitle(), Eq(kFolder2Title));
-  ASSERT_THAT(bookmark_bar_node->children()[2]->children().size(), Eq(2u));
-
-  EXPECT_THAT(bookmark_bar_node->children()[2]->children()[0]->GetTitle(),
-              Eq(kUrl3Title));
-  EXPECT_THAT(bookmark_bar_node->children()[2]->children()[0]->url(),
-              Eq(GURL(kUrl3)));
-  EXPECT_THAT(bookmark_bar_node->children()[2]->children()[1]->GetTitle(),
-              Eq(kUrl4Title));
-  EXPECT_THAT(bookmark_bar_node->children()[2]->children()[1]->url(),
-              Eq(GURL(kUrl4)));
+  EXPECT_THAT(
+      bookmark_bar_node->children(),
+      ElementsAre(
+          IsFolder(kFolder1Title,
+                   ElementsAre(IsUrlBookmark(kUrl1Title, GURL(kUrl1)),
+                               IsUrlBookmark(kUrl2Title, GURL(kAnotherUrl2)),
+                               IsUrlBookmark(kUrl2Title, GURL(kUrl2)))),
+          IsFolder(kFolder3Title,
+                   ElementsAre(IsUrlBookmark(kUrl3Title, GURL(kUrl3)),
+                               IsUrlBookmark(kUrl4Title, GURL(kUrl4)))),
+          IsFolder(kFolder2Title,
+                   ElementsAre(IsUrlBookmark(kUrl3Title, GURL(kUrl3)),
+                               IsUrlBookmark(kUrl4Title, GURL(kUrl4))))));
 
   EXPECT_THAT(histogram_tester.GetTotalSum(
                   "Sync.BookmarkModelMerger.UnsyncedEntitiesUponCompletion"),
@@ -2071,8 +2038,8 @@ TEST(BookmarkModelMergerTest, ShouldRemoveMatchingFolderDuplicatesByUuid) {
       "Sync.BookmarksGUIDDuplicates",
       /*sample=*/ExpectedBookmarksUuidDuplicates::kMatchingFolders,
       /*expected_count=*/1);
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id1"), IsNull());
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id2"), NotNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id1"), IsNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id2"), NotNull());
 }
 
 TEST(BookmarkModelMergerTest, ShouldRemoveDifferentFolderDuplicatesByUuid) {
@@ -2128,8 +2095,8 @@ TEST(BookmarkModelMergerTest, ShouldRemoveDifferentFolderDuplicatesByUuid) {
       "Sync.BookmarksGUIDDuplicates",
       /*sample=*/ExpectedBookmarksUuidDuplicates::kDifferentFolders,
       /*expected_count=*/1);
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id1"), NotNull());
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id2"), IsNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id1"), NotNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id2"), IsNull());
   EXPECT_EQ(bookmark_bar_node->children().front()->GetTitle(), kTitle1);
   EXPECT_EQ(bookmark_bar_node->children().front()->children().size(), 2u);
 }
@@ -2284,8 +2251,8 @@ TEST(BookmarkModelMergerTest, ShouldRemoveDifferentTypeDuplicatesByUuid) {
       "Sync.BookmarksGUIDDuplicates",
       /*sample=*/ExpectedBookmarksUuidDuplicates::kDifferentTypes,
       /*expected_bucket_count=*/1);
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id1"), NotNull());
-  EXPECT_THAT(tracker->GetEntityForSyncId("Id2"), IsNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id1"), NotNull());
+  EXPECT_THAT(tracker->GetEntityForSyncIdExhaustively("Id2"), IsNull());
   EXPECT_EQ(bookmark_bar_node->children().front()->children().size(), 1u);
 }
 

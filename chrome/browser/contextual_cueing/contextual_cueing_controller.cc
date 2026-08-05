@@ -10,13 +10,13 @@
 #include <vector>
 
 #include "base/i18n/message_formatter.h"
-#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros_local.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/notimplemented.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/uuid.h"
 #include "chrome/browser/browser_process.h"
@@ -77,6 +77,7 @@
 #include "ui/menus/simple_menu_model.h"
 
 #if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/contextual_cueing/internals/contextual_cueing_internals.mojom.h"
 #include "chrome/browser/ui/page_action/page_action_controller.h"
 #include "chrome/browser/ui/page_action/page_action_observer.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
@@ -994,7 +995,8 @@ void ContextualCueingController::ShowCue(
   action->SetImage(target.GetOmniboxChipIcon());
   action->SetInvokeActionCallback(base::BindRepeating(
       &ContextualCueingController::OnCueClicked, weak_ptr_factory_.GetWeakPtr(),
-      cue_type, cue.suggested_cuj(), action_data, cue_id));
+      cue_type, cue, tabs_to_show, background_tabs, cue.suggested_cuj(),
+      action_data, cue_id));
 
   page_actions::PageActionController* page_action_controller =
       tab_->GetTabFeatures()->page_action_controller();
@@ -1017,10 +1019,16 @@ void ContextualCueingController::ShowCue(
       kActionAnchoredContextualCue, base::UTF8ToUTF16(strings.action_text()));
   page_action_controller->OverrideImage(kActionAnchoredContextualCue,
                                         target.GetOmniboxChipIcon());
+  page_action_controller->OverrideAccessibleName(
+      kActionAnchoredContextualCue, base::UTF8ToUTF16(strings.action_text()));
+  page_action_controller->OverrideTooltip(
+      kActionAnchoredContextualCue,
+      base::UTF8ToUTF16(strings.action_text()));
 
   auto menu_model = std::make_unique<ContextualCueingMenuModel>(
-      tab_->GetProfile(), weak_ptr_factory_.GetWeakPtr(), cue_type,
-      cue.suggested_cuj(), std::move(action_data), cue_id);
+      tab_->GetProfile(), weak_ptr_factory_.GetWeakPtr(), cue_type, cue,
+      tabs_to_show, background_tabs, cue.suggested_cuj(),
+      std::move(action_data), cue_id);
   page_action_controller->SetAnchoredMessageAction(
       kActionAnchoredContextualCue,
       page_actions::AnchoredMessageActionIconType::kMenu,
@@ -1035,6 +1043,19 @@ void ContextualCueingController::ShowCue(
   CUEING_LOG(base::StringPrintf(
       "Showing cue for CUJ %s: %s [%s]", cue.suggested_cuj(),
       strings.anchored_message_text(), strings.action_text()));
+
+  auto cue_log = contextual_cueing_internals::mojom::CueLog::New();
+  cue_log->cuj = cue.suggested_cuj();
+  cue_log->anchored_message_text = strings.anchored_message_text();
+  cue_log->action_text = strings.action_text();
+  if (tab_ && tab_->GetContents()) {
+    cue_log->url = tab_->GetContents()->GetLastCommittedURL();
+  }
+  if (cue.has_gemini_in_chrome_surface() &&
+      cue.gemini_in_chrome_surface().has_prompt()) {
+    cue_log->prompt = cue.gemini_in_chrome_surface().prompt();
+  }
+  contextual_cueing_service_->LogCueShownMetadata(std::move(cue_log));
 
   contextual_cueing_service_->OnCueShown(
       tab_->GetContents()->GetLastCommittedURL(), cue_type);
@@ -1171,6 +1192,9 @@ void ContextualCueingController::OnSidePanelShown() {
 
 void ContextualCueingController::OnCueClicked(
     CueTargetType cue_type,
+    optimization_guide::proto::ContextualCue cue,
+    std::vector<tabs::TabHandle> tabs_to_show,
+    std::vector<optimization_guide::proto::Tab> background_tabs,
     std::string cuj,
     CueActionData action,
     std::string cue_id,
@@ -1202,13 +1226,17 @@ void ContextualCueingController::OnCueClicked(
   }
 #endif
 
-  OnCueInteraction(ContextualCueingInteraction::kCueClicked, cue_type, cuj,
-                   std::move(action), cue_id);
+  OnCueInteraction(ContextualCueingInteraction::kCueClicked, cue_type, cue,
+                   tabs_to_show, background_tabs, cuj, std::move(action),
+                   cue_id);
 }
 
 void ContextualCueingController::OnCueInteraction(
     ContextualCueingInteraction interaction_type,
     CueTargetType cue_type,
+    const optimization_guide::proto::ContextualCue& cue,
+    const std::vector<tabs::TabHandle>& tabs_to_show,
+    const std::vector<optimization_guide::proto::Tab>& background_tabs,
     const std::string& cuj,
     CueActionData action,
     std::string cue_id) {
@@ -1218,8 +1246,9 @@ void ContextualCueingController::OnCueInteraction(
   RecordContextualCueingInteraction(interaction_type, cuj, source_id,
                                     shown_duration);
 
-  RecordCueingInteractionToPrivateInsights(tab_->GetProfile(), cue_id,
-                                           interaction_type, cuj);
+  RecordCueingInteractionToPrivateInsights(
+      tab_->GetProfile(), cue_id, cue_type, cue, tab_, tabs_to_show,
+      background_tabs, interaction_type, cuj);
 
   HideCue();
 
@@ -1262,6 +1291,9 @@ void ContextualCueingController::HideCue() {
   if (!page_action_controller) {
     return;
   }
+  page_action_controller->ClearOverrideAccessibleName(
+      kActionAnchoredContextualCue);
+  page_action_controller->ClearOverrideTooltip(kActionAnchoredContextualCue);
   page_action_controller->HideAnchoredMessage(kActionAnchoredContextualCue);
   page_action_controller->Hide(kActionAnchoredContextualCue);
 #endif

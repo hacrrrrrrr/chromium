@@ -60,8 +60,11 @@ import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.actor.ui.ActorUiTabController.UiTabState;
 import org.chromium.chrome.browser.actor.ui.TabIndicatorStatus;
 import org.chromium.chrome.browser.collaboration.CollaborationServiceFactory;
+import org.chromium.chrome.browser.compositor.overlays.strip.StripTabUnderlineManager;
 import org.chromium.chrome.browser.data_sharing.DataSharingServiceFactory;
 import org.chromium.chrome.browser.data_sharing.DataSharingTabManager;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.glic.GlicEnabling;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.price_tracking.PriceTrackingFeatures;
@@ -108,6 +111,8 @@ import org.chromium.chrome.browser.tasks.tab_management.TabProperties.TabActionS
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.UiType;
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageType;
 import org.chromium.chrome.browser.tasks.tab_management.TabUiMetricsHelper.TabListEditorActionMetricGroups;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabHoverCardController.TabHoverCardListener;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabListProperties.RailCollapseState;
 import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.undo_tab_close_snackbar.UndoBarExplicitTrigger;
@@ -131,6 +136,7 @@ import org.chromium.components.tab_groups.TabGroupColorId;
 import org.chromium.components.tab_groups.TabGroupColorPickerUtils;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
@@ -288,6 +294,13 @@ public class TabListMediator implements TabListNotificationHandler {
 
         /** Returns whether the layout supports message card items. */
         boolean supportsMessageCards();
+
+        /** Returns a supplier for the rail collapsed state, if applicable. */
+        @Nullable NonNullObservableSupplier<@RailCollapseState Integer>
+                getRailCollapseStateSupplier();
+
+        /** Returns a listener for tab hover card events, if applicable. */
+        @Nullable TabHoverCardListener getTabHoverCardListener();
     }
 
     /** Interface for toggling whether item animations will run on the recycler view. */
@@ -397,13 +410,17 @@ public class TabListMediator implements TabListNotificationHandler {
     private final TabGridItemTouchHelperCallback mTabGridItemTouchHelperCallback;
     private final @Nullable UndoBarExplicitTrigger mUndoBarExplicitTrigger;
     private final @Nullable SnackbarManager mSnackbarManager;
+    private final @Nullable NonNullObservableSupplier<@RailCollapseState Integer>
+            mRailCollapseStateSupplier;
+    private final @Nullable Callback<@RailCollapseState Integer> mRailCollapseStateObserver;
     private final int mAllowedSelectionCount;
     private final boolean mIsSingleContextMode;
+    private final @TabListLayoutType int mLayoutType;
+    private final boolean mSupportsMessageCards;
+    private final @Nullable TabHoverCardListener mTabHoverCardListener;
 
     private int mNextTabId = Tab.INVALID_TAB_ID;
     private int mLastSelectedTabListModelIndex = TabList.INVALID_TAB_INDEX;
-    private final @TabListLayoutType int mLayoutType;
-    private final boolean mSupportsMessageCards;
     private @TabComponentId int mComponentId;
     private @TabActionState int mTabActionState;
     private @Nullable Profile mOriginalProfile;
@@ -424,6 +441,7 @@ public class TabListMediator implements TabListNotificationHandler {
     private View.AccessibilityDelegate mAccessibilityDelegate;
     private int mCurrentSpanCount;
     private @Nullable OnLongPressTabItemEventListener mOnLongPressTabItemEventListener;
+    private @Nullable StripTabUnderlineManager mGlicIndicatorManager;
 
     private final ActorUiTabController.Observer mActorObserver =
             new ActorUiTabController.Observer() {
@@ -449,6 +467,20 @@ public class TabListMediator implements TabListNotificationHandler {
                 }
             };
 
+    private final StripTabUnderlineManager.Observer mGlicObserver =
+            new StripTabUnderlineManager.Observer() {
+                @Override
+                public void onIndicatorStateChanged(int tabId, boolean isActive) {
+                    PropertyModel model = mModelList.getModelFromTabId(tabId);
+                    if (model != null) {
+                        model.set(TabProperties.IS_GLIC_ACTIVE, isActive);
+                    }
+                }
+
+                @Override
+                public void onResetAnimationCycle(int tabId) {}
+            };
+
     private final TabActionListener mTabSelectedListener =
             new TabActionListener() {
                 @Override
@@ -458,7 +490,8 @@ public class TabListMediator implements TabListNotificationHandler {
                     mNextTabId = tabId;
 
                     TabModel tabModel = getCurrentTabModelChecked();
-                    if (mLayoutType == TabListLayoutType.FLAT) {
+                    if (mLayoutType == TabListLayoutType.FLAT
+                            || mLayoutType == TabListLayoutType.NESTED) {
                         // We filtered the tab switching related metric for components that takes
                         // actions on all related tabs (e.g. GTS) because that component can
                         // switch to different TabModel before switching tabs, while this class
@@ -470,7 +503,7 @@ public class TabListMediator implements TabListNotificationHandler {
                         //     same tab as before entering the component, and we don't have this
                         // information
                         //     here.
-                        recordUserSwitchedTab();
+                        recordTabSelection(tabId);
                     }
                     if (mTabListItemOnClickListenerProvider != null) {
                         mTabListItemOnClickListenerProvider.onTabSelecting(
@@ -492,10 +525,18 @@ public class TabListMediator implements TabListNotificationHandler {
                  * Records MobileTabSwitched for the component. This method only records UMA for
                  * components other than TabSwitcher.
                  */
-                private void recordUserSwitchedTab() {
-                    RecordUserAction.record(
-                            "MobileTabSwitched."
-                                    + TabUiMetricsHelper.getComponentNameForMetrics(mComponentId));
+                private void recordTabSelection(int tabId) {
+                    Tab tab = getCurrentTabModelChecked().getTabById(tabId);
+                    if (tab != null
+                            && tab.getIsPinned()
+                            && mComponentId == TabComponentId.VERTICAL_TABS) {
+                        RecordUserAction.record("MobileTabSwitched.VerticalTabsPinned");
+                    } else {
+                        RecordUserAction.record(
+                                "MobileTabSwitched."
+                                        + TabUiMetricsHelper.getComponentNameForMetrics(
+                                                mComponentId));
+                    }
                 }
             };
 
@@ -910,6 +951,7 @@ public class TabListMediator implements TabListNotificationHandler {
         mTabListItemOnClickListenerProvider = tabListItemOnClickListenerProvider;
         mLayoutType = tabListConfigDelegate.getLayoutType();
         mSupportsMessageCards = tabListConfigDelegate.supportsMessageCards();
+        mTabHoverCardListener = tabListConfigDelegate.getTabHoverCardListener();
         mTabGridDialogHandler = dialogHandler;
         mPriceWelcomeMessageControllerSupplier = priceWelcomeMessageControllerSupplier;
         mComponentId = componentId;
@@ -1246,12 +1288,9 @@ public class TabListMediator implements TabListNotificationHandler {
                         }
 
                         onTabClosedFrom(tabId, mComponentId);
-                        Tab currentTab = TabModelUtils.getCurrentTab(tabModel);
-                        Tab nextTab = currentTab == closingTab ? getNextTab(tabId) : null;
                         boolean allowUndo = TabClosureParamsUtils.shouldAllowUndo(triggeringMotion);
                         TabClosureParams closureParams =
                                 TabClosureParams.closeTab(closingTab)
-                                        .recommendedNextTab(nextTab)
                                         .allowUndo(allowUndo)
                                         .tabClosingSource(tabClosingSource)
                                         .build();
@@ -1300,32 +1339,6 @@ public class TabListMediator implements TabListNotificationHandler {
                                         tabGroup.savedTabs.size());
                             }
                         }
-                    }
-
-                    private @Nullable Tab getNextTab(int closingTabId) {
-                        int closingTabIndex = mModelList.indexFromTabId(closingTabId);
-
-                        if (closingTabIndex == TabModel.INVALID_TAB_INDEX) {
-                            assert false;
-                            return null;
-                        }
-
-                        int nextTabId = Tab.INVALID_TAB_ID;
-                        if (mModelList.size() > 1) {
-                            int nextTabIndex =
-                                    closingTabIndex == 0
-                                            ? mModelList.getTabIndexAfter(closingTabIndex)
-                                            : mModelList.getTabIndexBefore(closingTabIndex);
-                            nextTabId =
-                                    nextTabIndex == TabModel.INVALID_TAB_INDEX
-                                            ? Tab.INVALID_TAB_ID
-                                            : mModelList
-                                                    .get(nextTabIndex)
-                                                    .model
-                                                    .get(TabProperties.TAB_ID);
-                        }
-
-                        return getCurrentTabModelChecked().getTabById(nextTabId);
                     }
                 };
 
@@ -1383,6 +1396,14 @@ public class TabListMediator implements TabListNotificationHandler {
                         TabUiMetricsHelper.getComponentNameForMetrics(componentId),
                         mLayoutType,
                         onDragStateChangedListener);
+
+        mRailCollapseStateSupplier = tabListConfigDelegate.getRailCollapseStateSupplier();
+        if (mRailCollapseStateSupplier != null) {
+            mRailCollapseStateObserver = this::onRailCollapseStateChanged;
+            mRailCollapseStateSupplier.addSyncObserverAndCallIfNonNull(mRailCollapseStateObserver);
+        } else {
+            mRailCollapseStateObserver = null;
+        }
     }
 
     TabModel getCurrentTabModelChecked() {
@@ -1734,6 +1755,11 @@ public class TabListMediator implements TabListNotificationHandler {
         boolean newCollapsedState = !isCollapsed;
 
         tabModel.setTabGroupCollapsed(tabGroupId, newCollapsedState, /* animate= */ false);
+
+        if (mComponentId == TabComponentId.VERTICAL_TABS) {
+            RecordHistogram.recordBooleanHistogram(
+                    "Android.VerticalTabs.TabGroupCollapsed", newCollapsedState);
+        }
     }
 
     void postHiding() {
@@ -2019,6 +2045,15 @@ public class TabListMediator implements TabListNotificationHandler {
         if (mComponentCallbacks != null) {
             mActivity.unregisterComponentCallbacks(mComponentCallbacks);
         }
+
+        if (mRailCollapseStateSupplier != null && mRailCollapseStateObserver != null) {
+            mRailCollapseStateSupplier.removeObserver(mRailCollapseStateObserver);
+        }
+
+        if (mGlicIndicatorManager != null) {
+            mGlicIndicatorManager.destroy();
+            mGlicIndicatorManager = null;
+        }
     }
 
     void setTabActionState(@TabActionState int tabActionState) {
@@ -2137,6 +2172,23 @@ public class TabListMediator implements TabListNotificationHandler {
                 : null;
     }
 
+    /** Gets or lazily initializes the Glic underline indicator manager. */
+    private @Nullable StripTabUnderlineManager getOrInitGlicIndicatorManager(Tab tab) {
+        boolean isGlicOrContextualTasksEnabled =
+                GlicEnabling.isEnabledByFlags() || ChromeFeatureList.sContextualTasks.isEnabled();
+        if (mMode != TabListMode.VERTICAL || tab.isIncognito() || !isGlicOrContextualTasksEnabled) {
+            return null;
+        }
+        if (mGlicIndicatorManager == null) {
+            WindowAndroid windowAndroid = tab.getWindowAndroid();
+            if (windowAndroid != null) {
+                mGlicIndicatorManager = new StripTabUnderlineManager(windowAndroid);
+                mGlicIndicatorManager.addObserver(mGlicObserver);
+            }
+        }
+        return mGlicIndicatorManager;
+    }
+
     @TabActionState
     int getTabActionState() {
         return mTabActionState;
@@ -2155,6 +2207,7 @@ public class TabListMediator implements TabListNotificationHandler {
         model.set(
                 TabProperties.TAB_CONTEXT_CLICK_LISTENER,
                 getTabContextClickListener(tabActionState));
+        model.set(TabProperties.TAB_HOVER_CARD_LISTENER, mTabHoverCardListener);
 
         if (mTabActionState != TabActionState.SELECTABLE) {
             updateDescriptionString(tab, model);
@@ -2268,6 +2321,7 @@ public class TabListMediator implements TabListNotificationHandler {
                         .with(CARD_TYPE, cardType)
                         .with(TabProperties.VISIBILITY, View.VISIBLE)
                         .with(TabProperties.ACTOR_UI_STATE, null)
+                        .with(TabProperties.IS_GLIC_ACTIVE, false)
                         .with(TabProperties.IS_PINNED, tab.getIsPinned())
                         .build();
 
@@ -2280,6 +2334,10 @@ public class TabListMediator implements TabListNotificationHandler {
         boolean isTabGroup = isTabInTabGroup(tab) && mLayoutType != TabListLayoutType.FLAT;
         if (isTabGroup) {
             tabInfo.set(TabProperties.IS_COLLAPSED, true);
+        }
+
+        if (mRailCollapseStateSupplier != null) {
+            tabInfo.set(TabProperties.RAIL_COLLAPSE_STATE, mRailCollapseStateSupplier.get());
         }
 
         @UiType int tabUiType = mMode == TabListMode.BOTTOM_STRIP ? UiType.STRIP : UiType.TAB;
@@ -3067,6 +3125,11 @@ public class TabListMediator implements TabListNotificationHandler {
                 updateActorUiState(model, controller.getUiTabState());
             }
         }
+
+        StripTabUnderlineManager glicIndicatorManager = getOrInitGlicIndicatorManager(tab);
+        if (glicIndicatorManager != null) {
+            glicIndicatorManager.registerTab(tab);
+        }
     }
 
     private void removeObserversForTab(Tab tab) {
@@ -3074,6 +3137,10 @@ public class TabListMediator implements TabListNotificationHandler {
 
         ActorUiTabController controller = ActorUiTabController.from(tab);
         if (controller != null) controller.removeObserver(mActorObserver);
+
+        if (mGlicIndicatorManager != null) {
+            mGlicIndicatorManager.unregisterTab(tab.getId());
+        }
     }
 
     private void addObservers(TabModel tabModel, List<Tab> tabs) {
@@ -3541,7 +3608,7 @@ public class TabListMediator implements TabListNotificationHandler {
     }
 
     void setThumbnailSpinnerVisibility(Tab tab, boolean isVisible) {
-        assert mLayoutType == TabListLayoutType.FLAT && !isTabInTabGroup(tab);
+        assert mLayoutType == TabListLayoutType.FLAT;
         int index = mModelList.indexFromTabId(tab.getId());
         if (index == TabModel.INVALID_TAB_INDEX) return;
 
@@ -3748,6 +3815,14 @@ public class TabListMediator implements TabListNotificationHandler {
         }
     }
 
+    private void onRailCollapseStateChanged(@RailCollapseState int railCollapseState) {
+        for (ListItem item : mModelList) {
+            if (TabProperties.isTabOrTabGroup(item.model)) {
+                item.model.set(TabProperties.RAIL_COLLAPSE_STATE, railCollapseState);
+            }
+        }
+    }
+
     View.AccessibilityDelegate getAccessibilityDelegateForTesting() {
         return mAccessibilityDelegate;
     }
@@ -3765,5 +3840,13 @@ public class TabListMediator implements TabListNotificationHandler {
         var oldValueId = mComponentId;
         mComponentId = componentId;
         ResettersForTesting.register(() -> mComponentId = oldValueId);
+    }
+
+    @Nullable StripTabUnderlineManager getOrInitGlicIndicatorManagerForTesting(Tab tab) {
+        return getOrInitGlicIndicatorManager(tab);
+    }
+
+    StripTabUnderlineManager.Observer getGlicObserverForTesting() {
+        return mGlicObserver;
     }
 }

@@ -19,6 +19,8 @@ import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetPropert
 import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties.ON_FLYOUT_CLICKED;
 import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties.ON_SUGGESTION_CLICKED;
 import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties.TITLE;
+import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties.TRAILING_ICON_ID;
+import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.TextWithClickableLinkProperties.TEXT;
 import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.VISIBLE;
 
 import android.os.Bundle;
@@ -41,7 +43,7 @@ import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsFragment;
-import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsFragment.AutofillOptionsReferrer;
+import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsReferrer;
 import org.chromium.chrome.browser.autofill.settings.personal_context.AutofillPersonalContextFragment;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.personal_context.first_run.PersonalContextFirstRunService;
@@ -50,12 +52,15 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.FlyoutProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.HomeProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.IllustrationCardItemProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.ScreenId;
 import org.chromium.chrome.browser.ui.autofill.internal.R;
 import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.components.autofill.SuggestionType;
 import org.chromium.components.browser_ui.settings.SettingsNavigation;
-import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
+import org.chromium.components.user_prefs.UserPrefsJni;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -69,9 +74,11 @@ public class AtMemoryBottomSheetMediatorTest {
 
     @Mock private AtMemoryBottomSheetCoordinator.Delegate mDelegate;
     @Mock private HomeProperties.SearchDelegate mSearchDelegate;
-    @Mock private Profile mProfile;
     @Mock private PersonalContextFirstRunService.Natives mFirstRunServiceJniMock;
     @Mock private SettingsNavigation mSettingsNavigation;
+    @Mock private UserPrefs.Natives mUserPrefsJniMock;
+    @Mock private PrefService mPrefService;
+    @Mock private Profile mProfile;
 
     private PropertyModel mModel;
     private PropertyModel mHomeModel;
@@ -82,12 +89,15 @@ public class AtMemoryBottomSheetMediatorTest {
     public void setUp() {
         PersonalContextFirstRunServiceJni.setInstanceForTesting(mFirstRunServiceJniMock);
         SettingsNavigationFactory.setInstanceForTesting(mSettingsNavigation);
+        UserPrefsJni.setInstanceForTesting(mUserPrefsJniMock);
+        when(mUserPrefsJniMock.get(mProfile)).thenReturn(mPrefService);
+
         mMediator =
                 new AtMemoryBottomSheetMediator(
                         ApplicationProvider.getApplicationContext(),
-                        mProfile,
                         mDelegate,
-                        mSearchDelegate);
+                        mSearchDelegate,
+                        mProfile);
         mModel = mMediator.getModel();
         mHomeModel = mMediator.getHomeModel();
         mModelList = mHomeModel.get(HomeProperties.SHEET_ITEMS);
@@ -161,6 +171,7 @@ public class AtMemoryBottomSheetMediatorTest {
                         new AutofillSuggestion.Builder()
                                 .setIconId(R.drawable.travel_trip)
                                 .setLabel("Hotel Booking")
+                                .setSecondaryLabel("Hotel Booking Type")
                                 .setSubLabel("Hilton ⋅ 16 May")
                                 .setChildren(List.of(childSuggestion))
                                 .build());
@@ -171,18 +182,24 @@ public class AtMemoryBottomSheetMediatorTest {
         itemModel2.get(ON_FLYOUT_CLICKED).run();
 
         PropertyModel flyoutModel = mMediator.getFlyoutModel();
-        assertEquals("Hotel Booking", flyoutModel.get(FlyoutProperties.TITLE));
+        assertEquals("Hotel Booking Type", flyoutModel.get(FlyoutProperties.TITLE));
         assertEquals(List.of(childSuggestion), flyoutModel.get(FlyoutProperties.SUGGESTIONS));
     }
 
     @Test
     public void testFlyoutVisible() {
+        AutofillSuggestion childSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Hilton Check-in")
+                        .setSubLabel("May 16")
+                        .build();
         AutofillSuggestion suggestion =
                 new AutofillSuggestion.Builder()
                         .setIconId(R.drawable.flight)
                         .setLabel("KLM204")
                         .setSubLabel("Flight ⋅ 15 May ⋅ SEA - MUC")
                         .setSuggestionType(SuggestionType.AT_MEMORY_SEARCH_RESULT)
+                        .setChildren(List.of(childSuggestion))
                         .build();
         List<AutofillSuggestion> suggestions = List.of(suggestion);
         mMediator.show(suggestions);
@@ -202,6 +219,22 @@ public class AtMemoryBottomSheetMediatorTest {
         List<AutofillSuggestion> suggestions = List.of(suggestion);
         mMediator.show(suggestions);
         assertFalse(mModelList.get(0).model.get(IS_FLYOUT_VISIBLE));
+        assertEquals(R.drawable.ic_north_west_24dp, mModelList.get(0).model.get(TRAILING_ICON_ID));
+    }
+
+    @Test
+    public void testTrailingIconForOpenGemini() {
+        AutofillSuggestion suggestion =
+                new AutofillSuggestion.Builder()
+                        .setIconId(R.drawable.ic_spark_24dp)
+                        .setLabel("Ask Gemini")
+                        .setSubLabel("Search with Gemini")
+                        .setSuggestionType(SuggestionType.OPEN_GEMINI)
+                        .build();
+        List<AutofillSuggestion> suggestions = List.of(suggestion);
+        mMediator.show(suggestions);
+        assertFalse(mModelList.get(0).model.get(IS_FLYOUT_VISIBLE));
+        assertEquals(R.drawable.open_in_new, mModelList.get(0).model.get(TRAILING_ICON_ID));
     }
 
     @Test
@@ -287,22 +320,23 @@ public class AtMemoryBottomSheetMediatorTest {
 
     @Test
     public void testOnQuerySubmitted() {
+        when(mDelegate.isSearching()).thenReturn(true);
         mMediator.onQuerySubmitted("flight");
         assertTrue(mHomeModel.get(HomeProperties.IS_LOADING));
         verify(mDelegate).onQuerySubmitted("flight");
 
-        when(mDelegate.isSearching()).thenReturn(true);
-        mMediator.show(List.of());
+        AutofillSuggestion suggestion =
+                new AutofillSuggestion.Builder().setLabel("Flight").setSubLabel("KLM").build();
+        mMediator.show(List.of(suggestion));
         assertTrue(mHomeModel.get(HomeProperties.IS_LOADING));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.SUGGESTION, mModelList.get(0).type);
 
         when(mDelegate.isSearching()).thenReturn(false);
-        mMediator.show(
-                List.of(
-                        new AutofillSuggestion.Builder()
-                                .setLabel("No data")
-                                .setSubLabel("")
-                                .build()));
+        mMediator.show(List.of(suggestion));
         assertFalse(mHomeModel.get(HomeProperties.IS_LOADING));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.SUGGESTION, mModelList.get(0).type);
     }
 
     @Test
@@ -312,9 +346,8 @@ public class AtMemoryBottomSheetMediatorTest {
 
         mMediator.show(List.of(createSearchAffordance("flight")));
         assertEquals(1, mModelList.size());
-        assertEquals(HomeProperties.ItemType.SUGGESTION, mModelList.get(0).type);
+        assertEquals(HomeProperties.ItemType.SUGGESTION_WITH_NO_BACKGROUND, mModelList.get(0).type);
         assertEquals("flight", mModelList.get(0).model.get(TITLE));
-        assertFalse(mHomeModel.get(HomeProperties.SHOW_SUGGESTIONS_BACKGROUND));
 
         mModelList.get(0).model.get(ON_SUGGESTION_CLICKED).run();
         verify(mSearchDelegate).hideKeyboardAndClearFocus();
@@ -325,13 +358,11 @@ public class AtMemoryBottomSheetMediatorTest {
     public void testOnQueryTextChanged_subsequentKeystrokes() {
         mMediator.show(List.of(createSearchAffordance("f")));
         assertEquals(1, mModelList.size());
-        ListItem firstItem = mModelList.get(0);
-        assertEquals("f", firstItem.model.get(TITLE));
+        assertEquals("f", mModelList.get(0).model.get(TITLE));
 
         mMediator.show(List.of(createSearchAffordance("fl")));
         assertEquals(1, mModelList.size());
-        assertTrue(firstItem == mModelList.get(0));
-        assertEquals("fl", firstItem.model.get(TITLE));
+        assertEquals("fl", mModelList.get(0).model.get(TITLE));
     }
 
     @Test
@@ -341,7 +372,23 @@ public class AtMemoryBottomSheetMediatorTest {
 
         mMediator.show(List.of());
         assertEquals(1, mModelList.size());
-        assertEquals(HomeProperties.ItemType.ZERO_STATE, mModelList.get(0).type);
+        assertEquals(HomeProperties.ItemType.ILLUSTRATION_CARD, mModelList.get(0).type);
+    }
+
+    @Test
+    public void testOnQueryTextChanged_resumeTypingAfterEmptyQuery() {
+        mMediator.show(List.of(createSearchAffordance("f")));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.SUGGESTION_WITH_NO_BACKGROUND, mModelList.get(0).type);
+
+        mMediator.show(List.of());
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.ILLUSTRATION_CARD, mModelList.get(0).type);
+
+        mMediator.show(List.of(createSearchAffordance("a")));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.SUGGESTION_WITH_NO_BACKGROUND, mModelList.get(0).type);
+        assertEquals("a", mModelList.get(0).model.get(TITLE));
     }
 
     private AutofillSuggestion createSearchAffordance(String query) {
@@ -359,29 +406,66 @@ public class AtMemoryBottomSheetMediatorTest {
         mMediator.show(List.of());
 
         assertEquals(1, mModelList.size());
-        assertEquals(HomeProperties.ItemType.ZERO_STATE, mModelList.get(0).type);
+        assertEquals(HomeProperties.ItemType.ILLUSTRATION_CARD, mModelList.get(0).type);
+    }
+
+    @Test
+    public void testShow_fetchingSuggestionShowsIllustrationCard() {
+        AutofillSuggestion fetchingSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Find and fill with Gemini")
+                        .setSubLabel("")
+                        .setSuggestionType(SuggestionType.AT_MEMORY_FETCHING)
+                        .setIsAcceptable(false)
+                        .build();
+
+        mMediator.show(List.of(fetchingSuggestion));
+
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.ILLUSTRATION_CARD, mModelList.get(0).type);
+        assertEquals(
+                "Find and fill with Gemini",
+                mModelList.get(0).model.get(IllustrationCardItemProperties.TITLE));
+        assertEquals("", mModelList.get(0).model.get(IllustrationCardItemProperties.SUBTITLE));
+    }
+
+    @Test
+    public void testShow_fetchingSuggestionWithNotice_skipsIllustrationCard() {
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+        AutofillSuggestion fetchingSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setLabel("Find and fill with Gemini")
+                        .setSubLabel("")
+                        .setSuggestionType(SuggestionType.AT_MEMORY_FETCHING)
+                        .setIsAcceptable(false)
+                        .build();
+
+        mMediator.show(List.of(noticeSuggestion, fetchingSuggestion));
+
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.NOTICE, mModelList.get(0).type);
     }
 
     @Test
     public void testNoticeShownAndDismissedAfterClick() {
-        when(mFirstRunServiceJniMock.shouldShowAtMemoryNotice(mProfile)).thenReturn(true);
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
 
         HistogramWatcher shownWatcher =
                 HistogramWatcher.newSingleRecordWatcher(
                         AtMemoryBottomSheetMediator.NOTICE_INTERACTIONS_HISTOGRAM,
                         AtMemoryBottomSheetMediator.NoticeInteraction.SHOWN);
 
-        AtMemoryBottomSheetMediator mediator =
-                new AtMemoryBottomSheetMediator(
-                        ApplicationProvider.getApplicationContext(),
-                        mProfile,
-                        mDelegate,
-                        mSearchDelegate);
-        PropertyModel homeModel = mediator.getHomeModel();
-
-        assertTrue(homeModel.get(HomeProperties.IS_NOTICE_VISIBLE));
-
-        mediator.show(List.of());
+        mMediator.show(List.of(noticeSuggestion));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.NOTICE, mModelList.get(0).type);
         shownWatcher.assertExpected();
 
         HistogramWatcher acknowledgedWatcher =
@@ -389,22 +473,36 @@ public class AtMemoryBottomSheetMediatorTest {
                         AtMemoryBottomSheetMediator.NOTICE_INTERACTIONS_HISTOGRAM,
                         AtMemoryBottomSheetMediator.NoticeInteraction.ACKNOWLEDGED);
 
-        Runnable okClickListener = homeModel.get(HomeProperties.NOTICE_OK_CLICK_LISTENER);
+        Runnable okClickListener =
+                mModelList
+                        .get(0)
+                        .model
+                        .get(AtMemoryBottomSheetProperties.NoticeItemProperties.ON_OK_CLICKED);
         assertNotNull(okClickListener);
         okClickListener.run();
 
-        assertFalse(homeModel.get(HomeProperties.IS_NOTICE_VISIBLE));
         acknowledgedWatcher.assertExpected();
-        verify(mFirstRunServiceJniMock).atMemoryNoticeAcknowledged(mProfile);
+        verify(mDelegate).onSuggestionDismissed(0);
     }
 
     @Test
     @EnableFeatures(ChromeFeatureList.YOUR_SAVED_INFO_SETTINGS_PAGE_ANDROID)
     public void testNoticeSettingsClicked_withYourSavedInfoEnabled() {
         UserActionTester userActionTester = new UserActionTester();
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+        mMediator.show(List.of(noticeSuggestion));
 
         Runnable settingsClickListener =
-                mHomeModel.get(HomeProperties.NOTICE_SETTINGS_CLICK_LISTENER);
+                mModelList
+                        .get(0)
+                        .model
+                        .get(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .ON_SETTINGS_CLICKED);
         assertNotNull(settingsClickListener);
         settingsClickListener.run();
 
@@ -424,9 +522,20 @@ public class AtMemoryBottomSheetMediatorTest {
     @DisableFeatures(ChromeFeatureList.YOUR_SAVED_INFO_SETTINGS_PAGE_ANDROID)
     public void testNoticeSettingsClicked_withYourSavedInfoDisabled() {
         UserActionTester userActionTester = new UserActionTester();
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+        mMediator.show(List.of(noticeSuggestion));
 
         Runnable settingsClickListener =
-                mHomeModel.get(HomeProperties.NOTICE_SETTINGS_CLICK_LISTENER);
+                mModelList
+                        .get(0)
+                        .model
+                        .get(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .ON_SETTINGS_CLICKED);
         assertNotNull(settingsClickListener);
         settingsClickListener.run();
 
@@ -449,21 +558,19 @@ public class AtMemoryBottomSheetMediatorTest {
 
     @Test
     public void testNoticeNotShown() {
-        when(mFirstRunServiceJniMock.shouldShowAtMemoryNotice(mProfile)).thenReturn(false);
+        mMediator.show(List.of());
 
-        AtMemoryBottomSheetMediator mediator =
-                new AtMemoryBottomSheetMediator(
-                        ApplicationProvider.getApplicationContext(),
-                        mProfile,
-                        mDelegate,
-                        mSearchDelegate);
-
-        assertFalse(mediator.getHomeModel().get(HomeProperties.IS_NOTICE_VISIBLE));
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.ILLUSTRATION_CARD, mModelList.get(0).type);
     }
 
     @Test
     public void testNoticeShownRecordedOnlyOnce() {
-        when(mFirstRunServiceJniMock.shouldShowAtMemoryNotice(mProfile)).thenReturn(true);
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
 
         HistogramWatcher shownWatcher =
                 HistogramWatcher.newBuilder()
@@ -472,15 +579,8 @@ public class AtMemoryBottomSheetMediatorTest {
                                 AtMemoryBottomSheetMediator.NoticeInteraction.SHOWN)
                         .build();
 
-        AtMemoryBottomSheetMediator mediator =
-                new AtMemoryBottomSheetMediator(
-                        ApplicationProvider.getApplicationContext(),
-                        mProfile,
-                        mDelegate,
-                        mSearchDelegate);
-
-        mediator.show(List.of());
-        mediator.show(List.of()); // Second call should not log again.
+        mMediator.show(List.of(noticeSuggestion));
+        mMediator.show(List.of(noticeSuggestion)); // Second call should not log again.
 
         shownWatcher.assertExpected();
     }
@@ -488,6 +588,120 @@ public class AtMemoryBottomSheetMediatorTest {
     @Test
     public void testOnSearchFocus() {
         mHomeModel.get(HomeProperties.SEARCH_BAR_DELEGATE).onSearchFocus(true);
-        verify(mDelegate).onSearchFocus(true);
+        verify(mDelegate).requestExpandSheet(/* expandInFullHeight= */ true);
+    }
+
+    @Test
+    public void testSeparatorSuggestionsSkipped() {
+        AutofillSuggestion searchAffordance = createSearchAffordance("query");
+        AutofillSuggestion separator =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.SEPARATOR)
+                        .setSubLabel("")
+                        .build();
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+
+        mMediator.show(List.of(searchAffordance, separator, noticeSuggestion));
+
+        assertEquals(2, mModelList.size());
+        assertEquals(HomeProperties.ItemType.SUGGESTION_WITH_NO_BACKGROUND, mModelList.get(0).type);
+        assertEquals(HomeProperties.ItemType.NOTICE, mModelList.get(1).type);
+
+        Runnable okClickListener =
+                mModelList
+                        .get(1)
+                        .model
+                        .get(AtMemoryBottomSheetProperties.NoticeItemProperties.ON_OK_CLICKED);
+        assertNotNull(okClickListener);
+        okClickListener.run();
+        verify(mDelegate).onSuggestionDismissed(2);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.YOUR_SAVED_INFO_SETTINGS_PAGE_ANDROID)
+    public void testAiDisclosureSuggestion() {
+        AutofillSuggestion disclosure =
+                new AutofillSuggestion.Builder()
+                        .setLabel("")
+                        .setSubLabel("")
+                        .setSuggestionType(SuggestionType.AT_MEMORY_AI_DISCLOSURE)
+                        .build();
+
+        mMediator.show(List.of(disclosure));
+
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.TEXT_WITH_CLICKABLE_LINK, mModelList.get(0).type);
+        assertEquals(
+                ApplicationProvider.getApplicationContext()
+                        .getString(R.string.at_memory_ai_disclosure),
+                mModelList.get(0).model.get(TEXT));
+
+        UserActionTester userActionTester = new UserActionTester();
+        Runnable linkClicked =
+                mModelList
+                        .get(0)
+                        .model
+                        .get(
+                                AtMemoryBottomSheetProperties.TextWithClickableLinkProperties
+                                        .ON_LINK_CLICKED);
+        linkClicked.run();
+        assertTrue(
+                userActionTester
+                        .getActions()
+                        .contains("PersonalContext.AtMemory.Notice.SettingsLinkClick"));
+    }
+
+    @Test
+    public void testNoticeIsLoggingDisallowed_whenPolicyIsAllowWithoutLogging() {
+        when(mPrefService.getInteger(
+                        AtMemoryBottomSheetMediator.FIND_AND_FILL_WITH_GEMINI_SETTINGS))
+                .thenReturn(1); // 1 = kAllowWithoutLogging
+
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+
+        mMediator.show(List.of(noticeSuggestion));
+
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.NOTICE, mModelList.get(0).type);
+        assertFalse(
+                mModelList
+                        .get(0)
+                        .model
+                        .get(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .IS_LOGGING_ALLOWED));
+    }
+
+    @Test
+    public void testNoticeIsLoggingAllowed_whenPolicyIsAllowed() {
+        when(mPrefService.getInteger(
+                        AtMemoryBottomSheetMediator.FIND_AND_FILL_WITH_GEMINI_SETTINGS))
+                .thenReturn(0); // 0 = kAllow
+
+        AutofillSuggestion noticeSuggestion =
+                new AutofillSuggestion.Builder()
+                        .setSuggestionType(SuggestionType.PERSONAL_CONTEXT_NOTICE)
+                        .setSubLabel("")
+                        .build();
+
+        mMediator.show(List.of(noticeSuggestion));
+
+        assertEquals(1, mModelList.size());
+        assertEquals(HomeProperties.ItemType.NOTICE, mModelList.get(0).type);
+        assertTrue(
+                mModelList
+                        .get(0)
+                        .model
+                        .get(
+                                AtMemoryBottomSheetProperties.NoticeItemProperties
+                                        .IS_LOGGING_ALLOWED));
     }
 }

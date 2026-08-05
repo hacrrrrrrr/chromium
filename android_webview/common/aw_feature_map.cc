@@ -79,6 +79,8 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kWebViewStaticMethodsNotTriggerStartup,
     &features::kWebViewTestFeature,
     &features::kWebViewUseMetricsUploadServiceOnlySdkRuntime,
+    &features::kWebViewUseWVLESForLayeredStudy,
+    &features::kWebViewWarmupNetworkService,
     // keep-sorted end
 };
 

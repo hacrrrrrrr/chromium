@@ -83,6 +83,7 @@ class GlicActorTaskManager {
   void MaybeShowDeactivationToastUi();
 
   void CancelTask();
+  void PauseTask();
   bool IsActuating() const;
 
   // Returns the last acted tabs for the current task.
@@ -213,6 +214,10 @@ class GlicActorClientSession : public GlicActorClientSessionInterface {
   void RequestToShowGmailOtpOptInDialog(
       actor::TaskId task_id,
       actor::ActorTaskDelegate::GmailOtpOptInCallback callback) override;
+  void RequestToShowGmailOtpConfirmationDialog(
+      actor::TaskId task_id,
+      const std::string& verification_code,
+      actor::ActorTaskDelegate::GmailOtpConfirmationCallback callback) override;
   void AutofillSuggestionDialogOnFormPresented(
       int32_t task_id,
       actor::webui::mojom::AutofillSuggestionDialogOnFormPresentedParamsPtr

@@ -77,6 +77,7 @@ import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaym
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.LoyaltyCardProperties.LOYALTY_CARD_ICON;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.LoyaltyCardProperties.NON_TRANSFORMING_LOYALTY_CARD_KEYS;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.LoyaltyCardProperties.ON_LOYALTY_CARD_CLICK_ACTION;
+import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.PaymentMethodTabId.PAY_LATER;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.PaymentMethodTabId.PAY_NOW;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.ProgressIconProperties.PROGRESS_CONTENT_DESCRIPTION_ID;
 import static org.chromium.chrome.browser.touch_to_fill.payments.TouchToFillPaymentMethodProperties.SELECTED_TAB_INDEX;
@@ -421,6 +422,9 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
 
     @VisibleForTesting static final String ERROR_SCREEN_DISMISSED = ".ErrorScreen.Dismissed";
 
+    @VisibleForTesting
+    static final String TABBED_HOME_SCREEN_DISMISSED = ".TabbedHomeScreen.Dismissed";
+
     @VisibleForTesting static final String AFFIRM_TOS_SCREEN = ".AffirmTosScreen";
 
     @VisibleForTesting static final String KLARNA_TOS_SCREEN = ".KlarnaTosScreen";
@@ -478,6 +482,7 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
     private PrefChangeRegistrar mPrefChangeRegistrar;
     private boolean mDidShowBoldedAiTerms;
     private boolean mWasDismissed;
+    private boolean mShowBnplLoadingInTab;
     private AutofillImageFetcher mImageFetcher;
 
     void initialize(
@@ -530,6 +535,9 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
         mAffiliatedLoyaltyCards = null;
         mAllLoyaltyCards = null;
         mBnplIssuerContexts = null;
+        mShowBnplLoadingInTab = false;
+        mBnplSuggestion = null;
+        mBnplSuggestionModel = null;
 
         mBottomSheetFocusHelper.registerForOneTimeUse();
 
@@ -579,6 +587,13 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
 
     public void onTabSelected(@PaymentMethodTabId int tabIndex) {
         mModel.set(SELECTED_TAB_INDEX, tabIndex);
+        if (tabIndex == PAY_NOW) {
+            mDelegate.onUserDecisionToUseSavedCards();
+            mShowBnplLoadingInTab = false;
+            mBnplIssuerContexts = null;
+        } else if (tabIndex == PAY_LATER && mBnplIssuerContexts == null && !mShowBnplLoadingInTab) {
+            mDelegate.bnplSuggestionSelected(null);
+        }
         mModel.set(SHEET_ITEMS, tabIndex == PAY_NOW ? getCreditCardTabItems() : getBnplTabItems());
     }
 
@@ -623,24 +638,32 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
 
     private ModelList getBnplTabItems() {
         ModelList sheetItems = new ModelList();
-        // TODO(b/526718267): Remove the BNPL suggestion from the Pay Later tab in the future.
-        // It is kept here for now as a fallback to ensure the tab has content and to avoid
-        // runtime exceptions until the direct issuer selection is complete.
-        List<AutofillSuggestion> bnplSuggestions = new ArrayList<>();
-        for (AutofillSuggestion suggestion : mSuggestions) {
-            if (suggestion.getSuggestionType() == SuggestionType.BNPL_ENTRY) {
-                bnplSuggestions.add(suggestion);
-            }
-        }
-        for (int i = 0; i < bnplSuggestions.size(); ++i) {
-            AutofillSuggestion suggestion = bnplSuggestions.get(i);
+        if (mShowBnplLoadingInTab) {
             sheetItems.add(
                     new ListItem(
-                            ItemType.BNPL,
-                            createBnplSuggestionModel(
-                                    suggestion,
-                                    new FillableItemCollectionInfo(
-                                            i + 1, bnplSuggestions.size()))));
+                            PROGRESS_ICON,
+                            createProgressIconModel(
+                                    R.string
+                                            .autofill_pending_dialog_loading_accessibility_description)));
+            sheetItems.add(
+                    buildTermsForBnplSelectionAndProgressUi(
+                            mContext,
+                            /* didShowBoldedAiTerms= */ mDidShowBoldedAiTerms,
+                            /* isProgressUi= */ true,
+                            this::showPaymentMethodSettings));
+        } else if (mBnplIssuerContexts != null && !mBnplIssuerContexts.isEmpty()) {
+            for (BnplIssuerContext issuerContext : mBnplIssuerContexts) {
+                sheetItems.add(
+                        new ListItem(BNPL_ISSUER, createBnplIssuerContextModel(issuerContext)));
+            }
+            mDidShowBoldedAiTerms =
+                    mPersonalDataManager.isAutofillAmountExtractionAiTermsSeenPrefEnabled();
+            sheetItems.add(
+                    buildTermsForBnplSelectionAndProgressUi(
+                            mContext,
+                            /* didShowBoldedAiTerms= */ mDidShowBoldedAiTerms,
+                            /* isProgressUi= */ false,
+                            this::showPaymentMethodSettings));
         }
         return sheetItems;
     }
@@ -884,6 +907,14 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
             List<BnplIssuerContext> bnplIssuerContexts,
             @Nullable Long extractedAmount,
             boolean isAmountSupportedByAnyIssuer) {
+        if (mModel.get(CURRENT_SCREEN) == TABBED_HOME_SCREEN) {
+            mShowBnplLoadingInTab = false;
+            mBnplIssuerContexts = bnplIssuerContexts;
+            if (mModel.get(SELECTED_TAB_INDEX) == PAY_LATER) {
+                onTabSelected(PAY_LATER); // Refresh Pay Later tab to show loaded issuers.
+            }
+            return;
+        }
         assert mBnplSuggestion != null;
         if (mModel.get(CURRENT_SCREEN) == PROGRESS_SCREEN) {
             if (extractedAmount != null) {
@@ -918,6 +949,11 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
     }
 
     public void showProgressScreen() {
+        if (mModel.get(CURRENT_SCREEN) == TABBED_HOME_SCREEN) {
+            mShowBnplLoadingInTab = true;
+            onTabSelected(PAY_LATER); // Refresh Pay Later tab to show spinner.
+            return;
+        }
         mModel.set(CURRENT_SCREEN, PROGRESS_SCREEN);
         ModelList progressScreenModel = new ModelList();
 
@@ -968,6 +1004,12 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
         mIbans = null;
         mAffiliatedLoyaltyCards = null;
         mAllLoyaltyCards = null;
+
+        if (mModel.get(CURRENT_SCREEN) == TABBED_HOME_SCREEN) {
+            mShowBnplLoadingInTab = false;
+            onTabSelected(PAY_LATER); // Refresh Pay Later tab to show loaded issuers.
+            return;
+        }
 
         mModel.set(CURRENT_SCREEN, BNPL_ISSUER_SELECTION_SCREEN);
         ModelList sheetItems = new ModelList();
@@ -1142,6 +1184,8 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
         // we allow showing the bottom sheet again. The ideal approach is to create a list of types
         // that can be shown again.
         mDelegate.onDismissed(dismissedByUser, shouldReshow(dismissedByUser));
+        mBnplIssuerContexts = null;
+        mShowBnplLoadingInTab = false;
         if (dismissedByUser) {
             if (mSuggestions != null) {
                 if (mModel.get(CURRENT_SCREEN) == BNPL_ISSUER_SELECTION_SCREEN) {
@@ -1153,6 +1197,8 @@ class TouchToFillPaymentMethodMediator implements AutofillImageFetcher.Observer 
                 } else if (mModel.get(CURRENT_SCREEN) == BNPL_ISSUER_TOS_SCREEN) {
                     recordTouchToFillBnplTosUserAction(
                             TouchToFillBnplTosScreenUserAction.DISMISSED);
+                } else if (mModel.get(CURRENT_SCREEN) == TABBED_HOME_SCREEN) {
+                    recordTouchToFillBnplUserAction(TABBED_HOME_SCREEN_DISMISSED);
                 }
                 RecordHistogram.recordEnumeratedHistogram(
                         TOUCH_TO_FILL_CREDIT_CARD_OUTCOME_HISTOGRAM,

@@ -57,6 +57,7 @@
 #include "chrome/browser/ui/sync/sync_passphrase_dialog.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/controls/hover_button.h"
+#include "chrome/browser/ui/views/profiles/avatar_badge_view.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/ui/webui/signin/signin_ui_error.h"
 #include "chrome/browser/ui/webui/signin/signin_utils_desktop.h"
@@ -92,6 +93,12 @@
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/widget/widget.h"
+
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+#include "chrome/browser/internal/profiles/profile_view_avatar_decoration_specs_branded.h"
+#else
+#include "chrome/browser/ui/profiles/profile_view_avatar_decoration_specs.h"
+#endif
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
 #include "chrome/browser/signin/cross_device_signin_promo_manager.h"
@@ -368,9 +375,12 @@ void ProfileMenuView::OnSyncErrorButtonClicked(
           &browser(),
           trusted_vault::TrustedVaultUserActionTriggerForUMA::kProfileMenu);
       break;
-    case syncer::SyncService::UserActionableError::kNeedsPassphrase:
-      ShowSyncPassphraseDialogAndDecryptData(browser());
+    case syncer::SyncService::UserActionableError::kNeedsPassphrase: {
+      Browser* browser_ptr = &browser();
+      GetWidget()->CloseWithReason(views::Widget::ClosedReason::kUnspecified);
+      ShowSyncPassphraseDialogAndDecryptData(*browser_ptr);
       break;
+    }
     case syncer::SyncService::UserActionableError::kNeedsSettingsConfirmation:
       chrome::ShowSettingsSubPage(&browser(), chrome::kSyncSetupSubPage);
       break;
@@ -504,17 +514,6 @@ void ProfileMenuView::OnEditProfileButtonClicked() {
   chrome::ShowSettingsSubPage(&browser(), chrome::kManageProfileSubPage);
 }
 
-void ProfileMenuView::OnAutofillSettingsButtonClicked() {
-  OnActionableItemClicked(ActionableItem::kAutofillSettingsButton);
-  if (!perform_menu_actions()) {
-    return;
-  }
-  base::UmaHistogramEnumeration(
-      "Autofill.AutofillAndPasswordsSettingsPage.VisitReferrer",
-      autofill::autofill_metrics::AutofillSettingsReferrer::kProfileMenu);
-  chrome::ShowSettingsSubPage(&browser(), chrome::kAutofillSubPage);
-}
-
 void ProfileMenuView::OnYourSavedInfoSettingsButtonClicked() {
   OnActionableItemClicked(ActionableItem::kAutofillSettingsButton);
   if (!perform_menu_actions()) {
@@ -606,6 +605,36 @@ void ProfileMenuView::SetMenuTitleForAccessibility() {
       break;
   }
 
+  if (ShouldShowAvatarGradientRing(&profile())) {
+    ProfileAttributesEntry* entry =
+        g_browser_process->profile_manager()
+            ->GetProfileAttributesStorage()
+            .GetProfileAttributesWithPath(profile().GetPath());
+    if (entry) {
+      switch (entry->GetAiSubscriptionTier()) {
+        case 1:
+          menu_title_ = l10n_util::GetStringFUTF16(
+              IDS_PROFILE_MENU_PROFILE_IDENTIFIER_WITH_TIER, menu_title_,
+              std::u16string(kAvatarFullMembershipTier1));
+          break;
+        case 2:
+          menu_title_ = l10n_util::GetStringFUTF16(
+              IDS_PROFILE_MENU_PROFILE_IDENTIFIER_WITH_TIER, menu_title_,
+              std::u16string(kAvatarFullMembershipTier2));
+          break;
+        case 3:
+          menu_title_ = l10n_util::GetStringFUTF16(
+              IDS_PROFILE_MENU_PROFILE_IDENTIFIER_WITH_TIER, menu_title_,
+              std::u16string(kAvatarFullMembershipTier3));
+          break;
+        default:
+          menu_title_ = l10n_util::GetStringFUTF16(
+              IDS_PROFILE_AVATAR_NAME_WITH_AI_MEMBERSHIP, menu_title_);
+          break;
+      }
+    }
+  }
+
   if (GetWidget()) {
     GetWidget()->UpdateAccessibleNameForRootView();
   }
@@ -636,16 +665,19 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
       identity_manager->FindExtendedAccountInfo(primary_account_info);
   CoreAccountInfo account_info_for_signin_action = primary_account_info;
 
-  const bool is_dasherless_profile = entry.IsDasherlessManagement();
 
   IdentitySectionParams params;
   params.title = GetProfileIdentifier(entry);
+
   profiles::PlaceholderAvatarIconParams icon_params = {.has_padding = true,
                                                        .has_background = false};
   params.profile_image = ui::ImageModel::FromImage(
       primary_extended_account_info.GetAvatarImage().value_or(
           entry.GetAvatarIcon(kIdentityInfoImageSize,
                               /*use_high_res_file=*/true, icon_params)));
+  if (ShouldShowAvatarGradientRing(&profile())) {
+    params.avatar_ring = AvatarRingType::kGradient;
+  }
 
   ui::ImageModel* custom_management_image = nullptr;
   if (enterprise_util::CanShowEnterpriseBadgingForMenu(&profile())) {
@@ -671,7 +703,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
   }
 
   // Clarify Dasherless profile with subtitle while not adding the button.
-  if (is_dasherless_profile) {
+  if (entry.IsDasherlessManagement()) {
     params.subtitle =
         l10n_util::GetStringUTF16(IDS_PROFILES_DASHER_FEATURE_DISABLED_TITLE);
     return params;
@@ -702,7 +734,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
       params.button_action =
           base::BindRepeating(&ProfileMenuView::OnSyncErrorButtonClicked,
                               base::Unretained(this), error);
-      params.has_dotted_ring = true;
+      params.avatar_ring = AvatarRingType::kDotted;
       return params;
     }
   }
@@ -721,7 +753,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
       params.button_action =
           base::BindRepeating(&ProfileMenuView::OnPasskeyUnlockButtonClicked,
                               base::Unretained(this));
-      params.has_dotted_ring = true;
+      params.avatar_ring = AvatarRingType::kDotted;
       return params;
     }
   }
@@ -897,7 +929,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
       params.button_text = l10n_util::GetStringUTF16(GetSyncErrorButtonStringId(
           syncer::SyncService::UserActionableError::kSignInNeedsUpdate,
           /*support_title_case=*/true));
-      params.has_dotted_ring = true;
+      params.avatar_ring = AvatarRingType::kDotted;
       signin_metrics::LogSigninPendingOffered(access_point);
       break;
   }
@@ -916,7 +948,8 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
       subscription_service = subscription_eligibility::
           SubscriptionEligibilityServiceFactory::GetForProfile(&profile());
   if (subscription_service) {
-    params.ai_subscription_tier = subscription_service->GetAiSubscriptionTier();
+    params.badge_label = AvatarBadgeView::GetAvatarBadgeLabel(
+        subscription_service->GetAiSubscriptionTier());
   }
 
   return params;
@@ -961,13 +994,12 @@ void ProfileMenuView::BuildAutofillSettingsButton() {
   const gfx::VectorIcon& icon = features::IsRoundedIconsEnabled()
                                     ? vector_icons::kPasswordManagerIcon
                                     : vector_icons::kPasswordManagerOldIcon;
-  auto action = base::FeatureList::IsEnabled(
-                    autofill::features::kYourSavedInfoSettingsPage)
-                    ? &ProfileMenuView::OnYourSavedInfoSettingsButtonClicked
-                    : &ProfileMenuView::OnAutofillSettingsButtonClicked;
 
   AddFeatureButton(l10n_util::GetStringUTF16(message_id),
-                   base::BindRepeating(action, base::Unretained(this)), icon);
+                   base::BindRepeating(
+                       &ProfileMenuView::OnYourSavedInfoSettingsButtonClicked,
+                       base::Unretained(this)),
+                   icon);
 }
 
 void ProfileMenuView::BuildCustomizeProfileButton() {
@@ -976,9 +1008,8 @@ void ProfileMenuView::BuildCustomizeProfileButton() {
       l10n_util::GetStringUTF16(IDS_PROFILE_MENU_CUSTOMIZE_PROFILE_BUTTON),
       base::BindRepeating(&ProfileMenuView::OnEditProfileButtonClicked,
                           base::Unretained(this)),
-      features::IsRoundedIconsEnabled() ? kEditIcon
-      : features::IsRoundedIconsEnabled()
-          ? vector_icons::kEditIcon
+      features::IsRoundedIconsEnabled()
+          ? kEditIcon
           : vector_icons::kEditChromeRefreshOldIcon);
 }
 
@@ -1042,9 +1073,8 @@ void ProfileMenuView::MaybeBuildChromeAccountSettingsButtonWithSync() {
       signin_util::SignedInState::kSyncing) {
     // Indicates clearly that Sync is ON.
     message_id = IDS_PROFILES_OPEN_SYNC_SETTINGS_BUTTON;
-    icon = &(features::IsRoundedIconsEnabled()   ? kSyncIcon
-             : features::IsRoundedIconsEnabled() ? vector_icons::kSyncIcon
-                                                 : kSyncChromeRefreshOldIcon);
+    icon = &(features::IsRoundedIconsEnabled() ? vector_icons::kSyncIcon
+                                               : kSyncChromeRefreshOldIcon);
   }
 
   AddFeatureButton(
@@ -1222,14 +1252,10 @@ void ProfileMenuView::MaybeBuildCrossDeviceSigninButton() {
   if (ShouldShowCrossDeviceSigninPromo(
           CrossDeviceSigninPromoEntryPoint::kProfileMenu, &profile())) {
     bool is_new = false;
-    auto* user_education_service =
-        UserEducationServiceFactory::GetForBrowserContext(&profile());
-    if (user_education_service &&
-        switches::kCrossDeviceSigninFromDesktopNewBadge.Get()) {
-      if (user_education_service->new_badge_controller()->MaybeShowNewBadge(
-              switches::kCrossDeviceSigninFromDesktop)) {
-        is_new = true;
-      }
+    if (switches::kCrossDeviceSigninFromDesktopNewBadge.Get() &&
+        UserEducationService::MaybeShowNewBadge(
+            &profile(), switches::kCrossDeviceSigninFromDesktop)) {
+      is_new = true;
     }
 
     AddFeatureButton(
@@ -1243,11 +1269,8 @@ void ProfileMenuView::MaybeBuildCrossDeviceSigninButton() {
 }
 
 void ProfileMenuView::OnCrossDeviceSigninButtonClicked() {
-  if (auto* user_education_service =
-          UserEducationServiceFactory::GetForBrowserContext(&profile())) {
-    user_education_service->new_badge_controller()->NotifyFeatureUsedIfValid(
-        switches::kCrossDeviceSigninFromDesktop);
-  }
+  UserEducationService::MaybeNotifyNewBadgeFeatureUsed(
+      &profile(), switches::kCrossDeviceSigninFromDesktop);
 
   OnActionableItemClicked(ActionableItem::kSigninOnPhoneButton);
   if (!perform_menu_actions()) {
@@ -1311,22 +1334,30 @@ void ProfileMenuView::BuildOtherProfilesSection(
                 BrowserWindow::FromBrowser(&browser())
                     ->GetColorProvider()
                     ->GetColor(ui::kColorMenuBackground))));
+    std::u16string name = profile_entry->GetName();
+    std::u16string extra_accessible_text;
     if (base::FeatureList::IsEnabled(
             switches::kEnableAiSubscriptionAvatarRing) &&
         profile_entry->GetAiSubscriptionTier() > 0) {
-      avatar_image = ui::ImageModel::FromImageSkia(AddAiRingToAvatar(
-          avatar_image,
-          *BrowserWindow::FromBrowser(&browser())->GetColorProvider(),
-          kOtherProfileImageSize));
+      avatar_image =
+          ui::ImageModel::FromImageSkia(AddLinearGradientRingToAvatar(
+              avatar_image,
+              *BrowserWindow::FromBrowser(&browser())->GetColorProvider(),
+              kOtherProfileImageSize));
+      if (!name.empty()) {
+        extra_accessible_text =
+            l10n_util::GetStringUTF16(IDS_PROFILE_AVATAR_AI_MEMBERSHIP);
+      }
     } else {
       avatar_image = ProfileMenuViewBase::GetCircularSizedImage(
           avatar_image, kOtherProfileImageSize);
     }
     AddAvailableProfile(
-        avatar_image, profile_entry->GetName(),
+        avatar_image, name,
         /*is_guest=*/false,
         base::BindRepeating(&ProfileMenuView::OnOtherProfileSelected,
-                            base::Unretained(this), profile_entry->GetPath()));
+                            base::Unretained(this), profile_entry->GetPath()),
+        extra_accessible_text);
   }
 }
 

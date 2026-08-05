@@ -38,15 +38,13 @@ namespace {
 class ConsistencyPromoSigninCoordinatorTest : public PlatformTest {
  public:
   ConsistencyPromoSigninCoordinatorTest() {
-    // The profile state will receive UI blocker request. They are not tested
-    // here, so it’s a non-strict mock.
-    profile_state_ = OCMClassMock([ProfileState class]);
-    scene_state_ = [[SceneState alloc] initWithAppState:nil];
+    profile_state_ = [[ProfileState alloc] initWithAppState:nil];
+    scene_state_ = [[SceneState alloc] init];
     scene_state_.profileState = profile_state_;
     TestProfileIOS::Builder builder = TestProfileIOS::Builder();
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
@@ -74,7 +72,7 @@ class ConsistencyPromoSigninCoordinatorTest : public PlatformTest {
     EXPECT_OCMOCK_VERIFY((id)base_view_controller_mock_);
     EXPECT_OCMOCK_VERIFY((id)consistency_default_account_coordinator_mock_);
     EXPECT_OCMOCK_VERIFY((id)consistency_sheet_navigation_controller_mock_);
-    EXPECT_OCMOCK_VERIFY((id)profile_state_);
+    [coordinator_ stop];
     PlatformTest::TearDown();
   }
 
@@ -155,6 +153,12 @@ class ConsistencyPromoSigninCoordinatorTest : public PlatformTest {
   }
 
  protected:
+  web::WebTaskEnvironment task_environment_;
+  IOSChromeScopedTestingLocalState scoped_testing_local_state_;
+  std::unique_ptr<TestProfileIOS> profile_;
+  ProfileState* profile_state_;
+  SceneState* scene_state_;
+  std::unique_ptr<TestBrowser> browser_;
   ConsistencyPromoSigninCoordinator* coordinator_ = nil;
   ConsistencyPromoSigninMediator* mediator_mock_ = nil;
   UIViewController* base_view_controller_mock_ = nil;
@@ -164,15 +168,6 @@ class ConsistencyPromoSigninCoordinatorTest : public PlatformTest {
       consistency_default_account_coordinator_mock_ = nil;
   ConsistencySheetNavigationController*
       consistency_sheet_navigation_controller_mock_ = nil;
-  SceneState* scene_state_;
-  std::unique_ptr<TestBrowser> browser_;
-
- private:
-  web::WebTaskEnvironment task_environment_;
-  std::unique_ptr<TestProfileIOS> profile_;
-  // Required for UI blocker.
-  ProfileState* profile_state_;
-  IOSChromeScopedTestingLocalState scoped_testing_local_state_;
 };
 
 // Tests that all coordinators are stopped and delegates are set to nil when
@@ -237,6 +232,7 @@ TEST_F(ConsistencyPromoSigninCoordinatorTest, NoAccountWebSigninEnabled) {
                        continuationProvider:NotReachedContinuationProvider()];
 
   EXPECT_NE(nil, web_signin_coordinator);
+  [web_signin_coordinator stop];
 }
 
 TEST_F(ConsistencyPromoSigninCoordinatorTest, NoAccountWebSigninDisabled) {
@@ -255,5 +251,7 @@ TEST_F(ConsistencyPromoSigninCoordinatorTest, NoAccountWebSigninDisabled) {
                        continuationProvider:NotReachedContinuationProvider()];
 
   EXPECT_EQ(nil, web_signin_coordinator);
+  [web_signin_coordinator stop];
 }
+
 }  // namespace

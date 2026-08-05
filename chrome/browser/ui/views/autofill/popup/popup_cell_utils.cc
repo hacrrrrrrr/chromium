@@ -21,6 +21,7 @@
 #include "build/branding_buildflags.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/ui/autofill/autofill_suggestion_controller_utils.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/views/autofill/payments/payments_view_util.h"
 #include "chrome/browser/ui/views/autofill/popup/popup_base_view.h"
@@ -96,6 +97,14 @@ constexpr int kAutofillPopupAdditionalTripleRowHeight = 24;
 
 // The additional padding of the row in case it has three lines of text.
 constexpr int kAutofillPopupAdditionalVerticalPadding = 16;
+
+// The additional padding of the row in case it is an Autofill AI suggestion
+// and has three lines of text.
+constexpr int kAutofillAiPopupAdditionalVerticalPadding = 8;
+
+// The additional right padding of the row in case it is an Autofill AI
+// suggestion and has three lines of text.
+constexpr int kAutofillAiPopupAdditionalRightPadding = 8;
 
 // Vertical spacing between labels in one row.
 constexpr int kAdjacentLabelsVerticalSpacing = 2;
@@ -354,11 +363,13 @@ bool IsPaymentMethodSuggestion(const Suggestion& suggestion) {
     case SuggestionType::kAllLoyaltyCardsEntry:
     case SuggestionType::kAllSavedPasswordsEntry:
     case SuggestionType::kAtMemoryAiDisclosure:
+    case SuggestionType::kAtMemoryFetching:
     case SuggestionType::kAtMemoryGenericError:
     case SuggestionType::kAtMemoryInactivityNudge:
     case SuggestionType::kAtMemoryNoConnection:
     case SuggestionType::kAtMemorySearchAffordance:
     case SuggestionType::kAtMemorySearchResult:
+    case SuggestionType::kAtMemorySourceAttribution:
     case SuggestionType::kAutocompleteAtMemoryButton:
     case SuggestionType::kAutocompleteEntry:
     case SuggestionType::kAutofillAiOtherOrders:
@@ -428,6 +439,7 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
                                           : vector_icons::kHomeOldIcon,
                                       kIconSize);
     case Suggestion::Icon::kSpark:
+      return ImageModelFromVectorIcon(omnibox::kSparkIcon, kIconSize);
     case Suggestion::Icon::kTextSpark:
       return ImageModelFromVectorIcon(kTextAnalysisIcon, kIconSize);
     case Suggestion::Icon::kWork:
@@ -438,8 +450,6 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
     case Suggestion::Icon::kAccount:
       return ImageModelFromVectorIcon(::features::IsRoundedIconsEnabled()
                                           ? kAccountCircleFilledIcon
-                                      : ::features::IsRoundedIconsEnabled()
-                                          ? vector_icons::kAccountCircleIcon
                                           : kAccountCircleOldIcon,
                                       kIconSize);
     case Suggestion::Icon::kCardGenericSpark:
@@ -467,9 +477,7 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
                                       kChromeRefreshIconSize);
     case Suggestion::Icon::kDevice:
       return ImageModelFromVectorIcon(
-          ::features::IsRoundedIconsEnabled()   ? kDevicesIcon
-          : ::features::IsRoundedIconsEnabled() ? vector_icons::kDevicesIcon
-                                                : kDevicesOldIcon,
+          ::features::IsRoundedIconsEnabled() ? kDevicesIcon : kDevicesOldIcon,
           kIconSize);
     case Suggestion::Icon::kVehicle:
       return ImageModelFromVectorIcon(::features::IsRoundedIconsEnabled()
@@ -481,9 +489,8 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
                                       kChromeRefreshIconSize);
     case Suggestion::Icon::kEdit:
       return ImageModelFromVectorIcon(
-          ::features::IsRoundedIconsEnabled() ? kEditIcon
-          : ::features::IsRoundedIconsEnabled()
-              ? vector_icons::kEditIcon
+          ::features::IsRoundedIconsEnabled()
+              ? kEditIcon
               : vector_icons::kEditChromeRefreshOldIcon,
           kChromeRefreshIconSize);
     case Suggestion::Icon::kEmail:
@@ -522,10 +529,9 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
                                                 : vector_icons::kErrorOldIcon,
                                             ui::kColorSysError, kIconSize);
     case Suggestion::Icon::kSadTab:
-      return ImageModelFromVectorIcon(::features::IsRoundedIconsEnabled()
-                                          ? kSadTabFilledIcon
-                                          : kSadTabOldIcon,
-                                      kIconSize);
+      return ImageModelFromVectorIcon(
+          ::features::IsRoundedIconsEnabled() ? kSadTabIcon : kSadTabOldIcon,
+          kIconSize);
     case Suggestion::Icon::kFlight:
       return ImageModelFromVectorIcon(::features::IsRoundedIconsEnabled()
                                           ? vector_icons::kFlightIcon
@@ -536,9 +542,7 @@ std::optional<ui::ImageModel> GetIconImageModelFromIcon(Suggestion::Icon icon) {
                                       kChromeRefreshIconSize);
     case Suggestion::Icon::kGlobe:
       return ImageModelFromVectorIcon(
-          ::features::IsRoundedIconsEnabled()   ? kGlobeIcon
-          : ::features::IsRoundedIconsEnabled() ? vector_icons::kGlobeIcon
-                                                : kGlobeOldIcon,
+          ::features::IsRoundedIconsEnabled() ? kGlobeIcon : kGlobeOldIcon,
           kIconSize);
     case Suggestion::Icon::kGoogle:
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -814,7 +818,7 @@ std::unique_ptr<views::ImageView> GetIconImageView(
     return ConvertModelToImageView(
         ImageModelFromImageSkia(
             gfx::Image::CreateFrom1xBitmap(bitmap).AsImageSkia()),
-        suggestion.HasDeactivatedStyle());
+        ShouldApplyDeactivatedStyle(suggestion));
   }
   if (auto* image = std::get_if<gfx::Image>(&suggestion.custom_icon);
       image && !image->IsEmpty()) {
@@ -825,11 +829,11 @@ std::unique_ptr<views::ImageView> GetIconImageView(
           image_skia, webid::kDesiredAvatarSizeInAutofillDropdown);
     }
     return ConvertModelToImageView(ImageModelFromImageSkia(image_skia),
-                                   suggestion.HasDeactivatedStyle());
+                                   ShouldApplyDeactivatedStyle(suggestion));
   }
   std::unique_ptr<views::ImageView> icon_image_view =
       ConvertModelToImageView(GetIconImageModelFromIcon(suggestion.icon),
-                              suggestion.HasDeactivatedStyle());
+                              ShouldApplyDeactivatedStyle(suggestion));
   base::UmaHistogramTimes(kHistogramGetImageViewByName,
                           base::TimeTicks::Now() - start_time);
 
@@ -853,8 +857,8 @@ std::unique_ptr<views::ImageView> GetTrailingIconImageView(
   base::TimeTicks start_time = base::TimeTicks::Now();
   std::optional<ui::ImageModel> image_model =
       GetIconImageModelFromIcon(suggestion.trailing_icon);
-  std::unique_ptr<views::ImageView> icon_image_view =
-      ConvertModelToImageView(image_model, suggestion.HasDeactivatedStyle());
+  std::unique_ptr<views::ImageView> icon_image_view = ConvertModelToImageView(
+      image_model, ShouldApplyDeactivatedStyle(suggestion));
   base::UmaHistogramTimes(kHistogramGetImageViewByName,
                           base::TimeTicks::Now() - start_time);
 
@@ -889,16 +893,27 @@ void AddSuggestionContentToView(
 
   // If there are three rows in total, add extra padding to avoid cramming.
   DCHECK_LE(subtext_views.size(), 2u);
+  int vertical_padding = 0;
+  const int left_padding = content_view.GetInsideBorderInsets().left();
+  int right_padding = left_padding;
   if (subtext_views.size() == 2u) {
     if (should_show_new_fop_format) {
       row_height += kAutofillPopupAdditionalTripleRowHeight;
     } else {
-      content_view.SetInsideBorderInsets(
-          gfx::Insets(content_view.GetInsideBorderInsets())
-              .set_top_bottom(kAutofillPopupAdditionalVerticalPadding,
-                              kAutofillPopupAdditionalVerticalPadding));
+      // TODO(crbug.com/535568421): Investigate if these spacing adjustments
+      // should be applied to all 3-row suggestions rather than special-casing
+      // Autofill AI.
+      vertical_padding = (suggestion.type == SuggestionType::kFillAutofillAi)
+                             ? kAutofillAiPopupAdditionalVerticalPadding
+                             : kAutofillPopupAdditionalVerticalPadding;
+    }
+    if (suggestion.type == SuggestionType::kFillAutofillAi) {
+      right_padding += kAutofillAiPopupAdditionalRightPadding;
     }
   }
+
+  content_view.SetInsideBorderInsets(gfx::Insets::TLBR(
+      vertical_padding, left_padding, vertical_padding, right_padding));
 
   content_view.SetMinimumCrossAxisSize(row_height);
 

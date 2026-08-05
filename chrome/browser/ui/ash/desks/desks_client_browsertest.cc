@@ -495,6 +495,10 @@ class DesksClientTest : public extensions::PlatformAppBrowserTest {
     std::vector<base::test::FeatureRef> disabled_features = {
         ash::features::kDeskTemplateSync};
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    webui_omnibox_feature_list_.InitFromCommandLine(
+        "", "WebUIOmniboxPopup,WebUIOmniboxAimPopup");
 
     // Suppress the multitask menu nudge as we'll be checking the stacking order
     // and the count of the active desk children.
@@ -581,6 +585,7 @@ class DesksClientTest : public extensions::PlatformAppBrowserTest {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+  base::test::ScopedFeatureList webui_omnibox_feature_list_;
 };
 
 // Tests that a browser's urls can be captured correctly in the desk template.
@@ -920,7 +925,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, LaunchTemplateWithSystemApp) {
 // existing instance of the system web app to the current desk.
 IN_PROC_BROWSER_TEST_F(DesksClientTest, LaunchTemplateWithSystemAppExisting) {
   ASSERT_TRUE(DesksClient::Get());
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // Create the settings app, which is a system web app.
   CreateSettingsSystemWebApp(profile);
@@ -1212,7 +1217,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, PreventBrowserSessionRestoreTest) {
 
   // Enable session service.
   SessionStartupPref pref(SessionStartupPref::LAST);
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   SessionStartupPref::SetStartupPref(profile, pref);
 
   const int expected_tab_count = 2;
@@ -1309,7 +1314,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, LaunchTemplateWithPWA) {
 
   Browser* pwa_browser = ash::test::InstallAndLaunchPWA(
       profile(), GURL(kExampleUrl1), /*launch_in_browser=*/false);
-  ASSERT_TRUE(pwa_browser->is_type_app());
+  ASSERT_EQ(pwa_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   aura::Window* pwa_window = pwa_browser->GetWindow()->GetNativeWindow();
   const gfx::Rect pwa_bounds(50, 50, 500, 500);
   pwa_window->SetBounds(pwa_bounds);
@@ -1358,7 +1363,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, LaunchTemplateWithMissingPWA) {
 
   Browser* pwa_browser = ash::test::InstallAndLaunchPWA(
       profile(), GURL(kExampleUrl1), /*launch_in_browser=*/false);
-  ASSERT_TRUE(pwa_browser->is_type_app());
+  ASSERT_EQ(pwa_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   aura::Window* pwa_window = pwa_browser->GetWindow()->GetNativeWindow();
   const gfx::Rect pwa_bounds(50, 50, 500, 500);
   pwa_window->SetBounds(pwa_bounds);
@@ -1405,7 +1410,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, LaunchTemplateWithOutOfScopeURL) {
 
   Browser* pwa_browser = ash::test::InstallAndLaunchPWA(
       profile(), GURL(kYoutubeUrl), /*launch_in_browser=*/false);
-  ASSERT_TRUE(pwa_browser->is_type_app());
+  ASSERT_EQ(pwa_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   aura::Window* pwa_window = pwa_browser->GetWindow()->GetNativeWindow();
   const std::string* app_name =
       pwa_window->GetProperty(app_restore::kBrowserAppNameKey);
@@ -1487,7 +1492,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, GetDeskTemplateJson) {
       CaptureActiveDeskAndSaveTemplate(ash::DeskTemplateType::kTemplate);
 
   std::string template_json =
-      GetTemplateJson(desk_template->uuid(), browser()->profile());
+      GetTemplateJson(desk_template->uuid(), browser()->GetProfile());
 
   // content of the conversion is tested in:
   // components/desks_storage/core/desk_template_conversion_unittest.cc in this
@@ -1858,7 +1863,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest,
 // Tests that launching a template that contains a system web app will move the
 // existing instance of the system web app to the current desk.
 IN_PROC_BROWSER_TEST_F(DesksClientTest, SystemUILaunchTemplateWithSWAExisting) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // Create the settings and help apps, which are system web apps.
   CreateSettingsSystemWebApp(profile);
@@ -2028,7 +2033,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest, SystemUIBrowserWindowRestorationTest) {
 IN_PROC_BROWSER_TEST_F(DesksClientTest, SystemUILaunchTemplateWithPWA) {
   Browser* pwa_browser = ash::test::InstallAndLaunchPWA(
       profile(), GURL(kExampleUrl1), /*launch_in_browser=*/false);
-  ASSERT_TRUE(pwa_browser->is_type_app());
+  ASSERT_EQ(pwa_browser->GetType(), BrowserWindowInterface::Type::TYPE_APP);
   aura::Window* pwa_window = pwa_browser->GetWindow()->GetNativeWindow();
   const gfx::Rect pwa_bounds(50, 50, 500, 500);
   pwa_window->SetBounds(pwa_bounds);
@@ -2348,7 +2353,7 @@ IN_PROC_BROWSER_TEST_F(DesksClientTest,
   // Do not exit from test or delete the Profile* when last browser is closed.
   ScopedKeepAlive keep_alive(KeepAliveOrigin::BROWSER,
                              KeepAliveRestartOption::DISABLED);
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ScopedProfileKeepAlive profile_keep_alive(
       profile, ProfileKeepAliveOrigin::kBrowserWindow);
 

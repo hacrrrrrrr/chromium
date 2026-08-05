@@ -16,9 +16,7 @@ class AppMenuControl;
 class AvatarToolbarButtonInterface;
 class BrowserWindowInterface;
 class PinnedToolbarActions;
-class ExtensionsToolbarDesktop;
-class IntentChipButton;
-class PageActionIconView;
+class ExtensionsContainerViews;
 class ReloadButton;
 class ReloadControl;
 class ToolbarButton;
@@ -45,8 +43,8 @@ class ToolbarButtonProvider {
 
   static ToolbarButtonProvider* From(BrowserWindowInterface* browser);
 
-  // Gets the ExtensionsToolbarDesktop.
-  virtual ExtensionsToolbarDesktop* GetExtensionsToolbarDesktop() = 0;
+  // Gets the ExtensionsContainerViews.
+  virtual ExtensionsContainerViews* GetExtensionsContainerViews() = 0;
 
   // Gets the PinnedToolbarActions.
   virtual PinnedToolbarActions* GetPinnedToolbarActions() = 0;
@@ -57,12 +55,6 @@ class ToolbarButtonProvider {
   // Gets the default anchor for extension dialogs if the
   // ToolbarActionView is not visible or available.
   virtual views::BubbleAnchor GetDefaultExtensionDialogAnchor() = 0;
-
-  // Gets the specified page action icon. This function should only be used
-  // if you need functionality for the legacy page action icon view. This
-  // method will be removed after the migration is complete.
-  virtual PageActionIconView* GetPageActionIconView(
-      PageActionIconType type) = 0;
 
   // Gets an interface representing the specified page action icon. This
   // function can be used to retrieve either the legacy page action icon view,
@@ -107,8 +99,6 @@ class ToolbarButtonProvider {
   // `WebUIToolbarWebView` depending on the enabled features.
   virtual ReloadControl* GetReloadButton() = 0;
 
-  // Returns the intent chip button, if present.
-  virtual IntentChipButton* GetIntentChipButton() = 0;
 
   // Returns the download button.
   virtual ToolbarButton* GetDownloadButton() = 0;

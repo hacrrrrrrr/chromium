@@ -140,14 +140,15 @@ class CONTENT_EXPORT BrowsingDataRemoverImpl
     kCodeCaches = 10,
     kNetworkErrorLogging = 11,
     kTrustTokens = 12,
-    kConversions = 13,
+    // Deprecated: kConversions = 13,
     // Deprecated: kDeferredCookies = 14,
     kSharedStorage = 15,
     kPreflightCache = 16,
     kSharedDictionary = 17,
     kPrefetchCache = 18,
     kPrerenderCache = 19,
-    kMaxValue = kPrerenderCache,
+    kDownloads = 20,
+    kMaxValue = kDownloads,
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/history/enums.xml:BrowsingDataRemoverTasks)
 

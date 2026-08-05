@@ -38,7 +38,7 @@
 #import "ui/base/l10n/l10n_util_mac.h"
 
 @interface ManageAccountsMediator () <AuthenticationServiceObserving,
-                                      IdentityManagerObserverBridgeDelegate>
+                                      IdentityManagerObserving>
 @end
 
 @implementation ManageAccountsMediator {
@@ -103,7 +103,7 @@
 
 - (IdentityViewItem*)primaryIdentityViewItem {
   id<SystemIdentity> identity = _authService->GetPrimaryIdentity();
-  CHECK(identity, base::NotFatalUntil::M147);
+  CHECK(identity);
   return [self identityViewItemForIdentity:identity];
 }
 
@@ -136,9 +136,9 @@
   [self.delegate signOutWithItemView:itemView];
 }
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
-- (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
+- (void)extendedAccountInfoDidUpdate:(const AccountInfo&)info {
   id<SystemIdentity> identity =
       _accountManagerService->GetIdentityOnDeviceWithGaiaID(info.gaia);
   if (!identity) {
@@ -150,7 +150,7 @@
   [self handleIdentityUpdated:identity];
 }
 
-- (void)onAccountsOnDeviceChanged {
+- (void)accountsOnDeviceDidChange {
   if (!_authService->HasPrimaryIdentity()) {
     // This accounts table view will be popped or dismissed when the user
     // is signed out. Avoid reloading it in that case as that would lead to an
@@ -164,7 +164,7 @@
   [self.consumer popView];
 }
 
-- (void)onEndBatchOfPrimaryAccountChanges {
+- (void)batchOfPrimaryAccountChangesDidEnd {
   if (!_authService->HasPrimaryIdentity()) {
     [self.delegate manageAccountsMediatorWantsToBeStopped:self];
   }
@@ -181,13 +181,13 @@
 #pragma mark - Private
 
 - (void)handleIdentityUpdated:(id<SystemIdentity>)identity {
-  CHECK(identity, base::NotFatalUntil::M147);
+  CHECK(identity);
   [self.consumer
       updateIdentityViewItem:[self identityViewItemForIdentity:identity]];
 }
 
 - (IdentityViewItem*)identityViewItemForIdentity:(id<SystemIdentity>)identity {
-  CHECK(identity, base::NotFatalUntil::M147);
+  CHECK(identity);
   IdentityViewItem* identityViewItem = [[IdentityViewItem alloc] init];
   identityViewItem.userEmail = identity.userEmail;
   identityViewItem.userFullName = identity.userFullName;
@@ -207,7 +207,7 @@
 // called asynchronously when the management status if retrieved and the
 // identity is managed.
 - (BOOL)isIdentityKnownToBeManaged:(id<SystemIdentity>)identity {
-  CHECK(identity, base::NotFatalUntil::M147);
+  CHECK(identity);
   if (std::optional<BOOL> managed = IsIdentityManaged(identity);
       managed.has_value()) {
     return managed.value();
@@ -216,7 +216,7 @@
   __weak __typeof(self) weakSelf = self;
   FetchManagedStatusForIdentity(identity, base::BindOnce(^(bool managed) {
                                   if (managed) {
-                                    CHECK(identity, base::NotFatalUntil::M147);
+                                    CHECK(identity);
                                     [weakSelf handleIdentityUpdated:identity];
                                   }
                                 }));

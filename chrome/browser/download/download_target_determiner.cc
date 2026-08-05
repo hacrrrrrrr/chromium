@@ -678,9 +678,11 @@ DownloadTargetDeterminer::DoRequestConfirmation() {
           Profile::FromBrowserContext(browser_context)->IsOffTheRecord();
       if (isOffTheRecord && (!download_->IsTransient() ||
                              !download_->AllowAutoOpenAfterCompletion())) {
-        delegate_->RequestIncognitoWarningConfirmation(base::BindOnce(
-            &DownloadTargetDeterminer::RequestIncognitoWarningConfirmationDone,
-            weak_ptr_factory_.GetWeakPtr()));
+        delegate_->RequestIncognitoWarningConfirmation(
+            content::DownloadItemUtils::GetWebContents(download_),
+            base::BindOnce(&DownloadTargetDeterminer::
+                               RequestIncognitoWarningConfirmationDone,
+                           weak_ptr_factory_.GetWeakPtr()));
         return QUIT_DOLOOP;
       }
 #endif
@@ -1216,7 +1218,8 @@ bool DownloadTargetDeterminer::IsDownloadDlpBlocked(
   if (!files_controller)
     return false;
   const GURL authority_url = download::BaseFile::GetEffectiveAuthorityURL(
-      download_->GetURL(), download_->GetReferrerUrl());
+      download_->GetURL(), download_->GetReferrerUrl(),
+      download_->GetRequestInitiator());
   if (!authority_url.is_valid()) {
     return true;
   }

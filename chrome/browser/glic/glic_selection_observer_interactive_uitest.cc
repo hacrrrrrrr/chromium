@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/glic/glic_selection_observer.h"
+
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,6 +19,7 @@
 namespace glic {
 namespace {
 
+// TODO(crbug.com/537847327): Migrate this test suite to GlicBrowserTest.
 class GlicSelectionObserverInteractiveUiTest
     : public test::InteractiveGlicTest {
  public:

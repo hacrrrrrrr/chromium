@@ -5,6 +5,7 @@
 
 #include "base/memory/values_equivalent.h"
 #include "third_party/blink/renderer/core/css/basic_shape_functions.h"
+#include "third_party/blink/renderer/core/css/counter_style.h"
 #include "third_party/blink/renderer/core/css/css_alternate_value.h"
 #include "third_party/blink/renderer/core/css/css_border_image.h"
 #include "third_party/blink/renderer/core/css/css_border_image_slice_value.h"
@@ -37,6 +38,7 @@
 #include "third_party/blink/renderer/core/css/css_shadow_value.h"
 #include "third_party/blink/renderer/core/css/css_string_value.h"
 #include "third_party/blink/renderer/core/css/css_superellipse_value.h"
+#include "third_party/blink/renderer/core/css/css_symbols_value.h"
 #include "third_party/blink/renderer/core/css/css_timing_function_value.h"
 #include "third_party/blink/renderer/core/css/css_uri_value.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
@@ -58,6 +60,7 @@
 #include "third_party/blink/renderer/core/css/properties/longhands.h"
 #include "third_party/blink/renderer/core/css/properties/shorthands.h"
 #include "third_party/blink/renderer/core/css/style_color.h"
+#include "third_party/blink/renderer/core/css/style_rule_counter_style.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/grid/layout_grid.h"
@@ -265,7 +268,11 @@ const CSSValue* ComputedStyleUtils::ValueForFillSize(
     return CSSIdentifierValue::Create(CSSValueID::kCover);
   }
 
-  if (fill_size.size.Height().IsAuto()) {
+  // Collapse to a single value only when both axes are `auto` (`auto auto` ->
+  // `auto`). Otherwise the pair must be preserved, so e.g. a width of `1px`
+  // with an implied `auto` height serializes as `1px auto`.
+  // https://github.com/w3c/csswg-drafts/issues/7802
+  if (fill_size.size.Width().IsAuto() && fill_size.size.Height().IsAuto()) {
     return ZoomAdjustedPixelValueForLength(fill_size.size.Width(), style);
   }
 
@@ -3064,24 +3071,6 @@ CSSValue* ComputedStyleUtils::ValueForBorderRadiusCorner(
 
 CSSValue* ComputedStyleUtils::ValueForCornerShape(
     const Superellipse& superellipse) {
-  if (superellipse == Superellipse::Bevel()) {
-    return CSSIdentifierValue::Create(CSSValueID::kBevel);
-  }
-  if (superellipse == Superellipse::Notch()) {
-    return CSSIdentifierValue::Create(CSSValueID::kNotch);
-  }
-  if (superellipse == Superellipse::Round()) {
-    return CSSIdentifierValue::Create(CSSValueID::kRound);
-  }
-  if (superellipse == Superellipse::Scoop()) {
-    return CSSIdentifierValue::Create(CSSValueID::kScoop);
-  }
-  if (superellipse == Superellipse::Square()) {
-    return CSSIdentifierValue::Create(CSSValueID::kSquare);
-  }
-  if (superellipse == Superellipse::Squircle()) {
-    return CSSIdentifierValue::Create(CSSValueID::kSquircle);
-  }
   return MakeGarbageCollected<cssvalue::CSSSuperellipseValue>(
       *CSSNumericLiteralValue::Create(superellipse.Parameter(),
                                       CSSPrimitiveValue::UnitType::kNumber));
@@ -3593,6 +3582,16 @@ CSSValue* ComputedStyleUtils::ValueForCounterDirectives(
         entry.is_reversed));
   }
   return result;
+}
+
+const CSSValue* ComputedStyleUtils::ValueForSymbolsFunction(
+    const CounterStyle& counter_style) {
+  const StyleRuleCounterStyle& rule = counter_style.GetStyleRule();
+  const CSSValue* system = rule.GetSystem();
+  CSSValueID system_id = system ? To<CSSIdentifierValue>(system)->GetValueID()
+                                : CSSValueID::kSymbolic;
+  return MakeGarbageCollected<cssvalue::CSSSymbolsValue>(
+      system_id, To<CSSValueList>(rule.GetSymbols()));
 }
 
 CSSValue* ComputedStyleUtils::ValueForShape(const ComputedStyle& style,

@@ -30,6 +30,50 @@
 #endif
 
 namespace glic {
+
+// This file defines Glic API test fixture GlicApiBrowserTest (and
+// GlicApiBrowserTestMixin).
+// These fixtures configure a Glic client that runs test code. Each .cc test
+// file corresponds to a .ts file. The .cc file runs browser-side code, and the
+// .ts file runs glic client code. Each gtest in the .cc file should correspond
+// to a test function in the .ts file.
+// Using these fixtures requires a little bit of setup. Example:
+//
+// class MyNewGlicTest : public GlicApiBrowserTest {
+//  public:
+//   MyNewGlicTest() :
+//     // Make a new .ts file in chrome/test/data/webui/glic/browser_tests
+//     // update build rules, and point to the generated .js file here.
+//     GlicApiBrowserTest("./my_new_glic_test_browsertest.js") {}
+// };
+//
+// // Always include this test in one fixture of your test file. It ensures
+// // the set of tests in the .ts file match the set of tests in the .cc file.
+// IN_PROC_BROWSER_TEST_F(MyNewGlicTest, testAllTestsAreRegistered) {
+//   // Include all test fixture names here.
+//   AssertAllTestsRegistered({
+//       "MyNewGlicTest",
+//   });
+// }
+// // Add test cases...
+//
+// Next, here's boilerplate for the my_new_glic_test_browsertest.ts file:
+//
+// import {ApiTestFixtureBase, testMain} from './browser_test_base.js';
+//
+// class MyNewGlicTest extends ApiTestFixtureBase {
+//   // Normally it's useful to wait until the client is shown to start the test
+//   // but is not necessary.
+//   override async setUpTest() {
+//     await this.client.waitForFirstOpen();
+//   }
+//   // Add test cases...
+// }
+// testMain([
+//   // All test fixtures need to be listed here.
+//   MyNewGlicTest,
+// ]);
+
 namespace internal {
 
 struct CloseTabCommand {
@@ -62,12 +106,22 @@ struct MakeNavigateActionCommand {
   int task_id;
 };
 
+struct MakeAttemptOtpFillingActionCommand {
+  tabs::TabHandle tab_handle;
+  int task_id;
+  int node_id;
+  std::string document_identifier;
+  bool for_signin;
+  int otp_type;
+};
+
 using Command = std::variant<CloseTabCommand,
                              ExecJsCommand,
                              NavigateTabCommand,
                              ParseActionsResultCommand,
                              MakeWaitActionCommand,
-                             MakeNavigateActionCommand>;
+                             MakeNavigateActionCommand,
+                             MakeAttemptOtpFillingActionCommand>;
 
 base::expected<Command, std::string> DeserializeCommand(
     const base::DictValue& dict);
@@ -408,24 +462,28 @@ class GlicApiBrowserTestMixin : public T {
   base::expected<base::Value, std::string> ProcessCommand(
       const internal::Command& command) {
     return std::visit(
-        absl::Overload{[this](const internal::CloseTabCommand& cmd) {
-                         return CommandCloseTab(cmd);
-                       },
-                       [this](const internal::ExecJsCommand& cmd) {
-                         return CommandExecJs(cmd);
-                       },
-                       [this](const internal::NavigateTabCommand& cmd) {
-                         return CommandNavigateTab(cmd);
-                       },
-                       [this](const internal::ParseActionsResultCommand& cmd) {
-                         return CommandParseActionsResult(cmd);
-                       },
-                       [this](const internal::MakeWaitActionCommand& cmd) {
-                         return CommandMakeWaitAction(cmd);
-                       },
-                       [this](const internal::MakeNavigateActionCommand& cmd) {
-                         return CommandMakeNavigateAction(cmd);
-                       }},
+        absl::Overload{
+            [this](const internal::CloseTabCommand& cmd) {
+              return CommandCloseTab(cmd);
+            },
+            [this](const internal::ExecJsCommand& cmd) {
+              return CommandExecJs(cmd);
+            },
+            [this](const internal::NavigateTabCommand& cmd) {
+              return CommandNavigateTab(cmd);
+            },
+            [this](const internal::ParseActionsResultCommand& cmd) {
+              return CommandParseActionsResult(cmd);
+            },
+            [this](const internal::MakeWaitActionCommand& cmd) {
+              return CommandMakeWaitAction(cmd);
+            },
+            [this](const internal::MakeNavigateActionCommand& cmd) {
+              return CommandMakeNavigateAction(cmd);
+            },
+            [this](const internal::MakeAttemptOtpFillingActionCommand& cmd) {
+              return CommandMakeAttemptOtpFillingAction(cmd);
+            }},
         command);
   }
 
@@ -497,6 +555,35 @@ class GlicApiBrowserTestMixin : public T {
     }
     optimization_guide::proto::Actions actions = ::actor::MakeNavigate(
         handle, command.url, ::actor::TaskId(command.task_id));
+    std::string serialized;
+    CHECK(actions.SerializeToString(&serialized));
+    return base::ok(base::Value(base::Base64Encode(serialized)));
+  }
+
+  base::expected<base::Value, std::string> CommandMakeAttemptOtpFillingAction(
+      const internal::MakeAttemptOtpFillingActionCommand& command) {
+    auto handle = command.tab_handle;
+    if (handle == tabs::TabHandle::Null()) {
+      if (!T::GetTabListInterface()->GetActiveTab()) {
+        return base::unexpected(
+            "MakeAttemptOtpFillingAction(): No active tab found");
+      }
+      handle = T::GetTabListInterface()->GetActiveTab()->GetHandle();
+    }
+    optimization_guide::proto::Actions actions;
+    actions.set_task_id(command.task_id);
+    auto* action = actions.add_actions();
+    auto* otp_action = action->mutable_attempt_otp_filling();
+    otp_action->set_tab_id(handle.raw_value());
+    auto* target = otp_action->add_target_fields();
+    target->set_content_node_id(command.node_id);
+    target->mutable_document_identifier()->set_serialized_token(
+        command.document_identifier);
+    otp_action->set_for_signin(command.for_signin);
+    otp_action->set_predicted_otp_type(
+        static_cast<
+            optimization_guide::proto::AttemptOtpFillingAction::OtpType>(
+            command.otp_type));
     std::string serialized;
     CHECK(actions.SerializeToString(&serialized));
     return base::ok(base::Value(base::Base64Encode(serialized)));

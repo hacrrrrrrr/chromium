@@ -180,7 +180,7 @@ class PaymentsAutofillClient : public RiskDataLoader {
     kScanCardSaveAndFill,
   };
 
-  // Used for options of upload prompt.
+  // Used for options of card and CVC save prompts.
   struct SaveCreditCardOptions {
     SaveCreditCardOptions& with_should_request_name_from_user(bool b) {
       should_request_name_from_user = b;
@@ -200,6 +200,11 @@ class PaymentsAutofillClient : public RiskDataLoader {
 
     SaveCreditCardOptions& with_has_multiple_legal_lines(bool b = true) {
       has_multiple_legal_lines = b;
+      return *this;
+    }
+
+    SaveCreditCardOptions& with_legal_lines_mention_personalization(bool b) {
+      legal_lines_mention_personalization = b;
       return *this;
     }
 
@@ -234,6 +239,7 @@ class PaymentsAutofillClient : public RiskDataLoader {
     bool should_request_expiration_date_from_user = false;
     bool show_prompt = false;
     bool has_multiple_legal_lines = false;
+    bool legal_lines_mention_personalization = false;
     bool has_same_last_four_as_server_card_but_different_expiration_date =
         false;
     std::optional<int> num_strikes;
@@ -658,7 +664,7 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // possible, and returns `true` on success. `delegate` will be notified of
   // events. `suggestions` are generated using the `cards_to_suggest` data and
   // include fields such as `main_text`, `minor_text`, and
-  // `HasDeactivatedStyle` member function. Should be called only if the feature
+  // `IsSelectable` member function. Should be called only if the feature
   // is supported by the platform. This function is implemented on all
   // platforms so this should be a pure virtual function to enforce the override
   // implementation.
@@ -819,10 +825,11 @@ class PaymentsAutofillClient : public RiskDataLoader {
   // Omnibox is the trigger point.
   virtual OmniboxAutofillDelegate* GetOmniboxAutofillDelegate() = 0;
 
-  // Shows the "Autofill payments" omnibox chip and initializes the bubble
-  // controller with the given suggestions and callbacks.
-  virtual void ShowOmniboxAutofillChip(
+  // Shows the expanded omnibox chip and initializes the bubble controller with
+  // the given suggestions and callbacks.
+  virtual void ShowExpandedOmniboxAutofillChip(
       std::vector<Suggestion> suggestions,
+      base::OnceClosure on_chip_shown,
       base::RepeatingCallback<void(base::span<const Suggestion>)>
           on_suggestions_shown,
       base::RepeatingCallback<void(SuggestionHidingReason)>
@@ -834,15 +841,17 @@ class PaymentsAutofillClient : public RiskDataLoader {
                const AutofillSuggestionDelegate::SuggestionMetadata&)>
           did_accept_suggestion) = 0;
 
-  // Hides the "Autofill payments" omnibox chip that appears for relevant
-  // payment checkout forms.
+  // Hides the entire omnibox chip.
   virtual void HideOmniboxAutofillChip() = 0;
 #endif
 
   // Shows the Payments Churned Users UI. This UI is responsible for providing
   // users that have turned off autofill with a value prop to turn autofill back
   // on.
-  virtual void ShowPaymentsChurnedUsersUI() {}
+  // TODO(crbug.com/524740910): Rename to MaybeShowPaymentsChurnedUsersUi().
+  virtual void ShowPaymentsChurnedUsersUI(base::OnceClosure accept_callback,
+                                          base::OnceClosure cancel_callback,
+                                          base::OnceClosure closed_callback) {}
 };
 
 }  // namespace payments

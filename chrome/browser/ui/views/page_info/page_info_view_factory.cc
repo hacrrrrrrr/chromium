@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/page_info/chrome_page_info_ui_delegate.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/page_info/page_info_ad_personalization_content_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_cookies_content_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_main_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_merchant_trust_content_view.h"
@@ -159,16 +158,6 @@ std::unique_ptr<views::View> PageInfoViewFactory::CreatePermissionPageView(
                           presenter_->GetSubjectNameForDisplay()),
       std::make_unique<PageInfoPermissionContentView>(presenter_, ui_delegate_,
                                                       type, web_contents));
-}
-
-std::unique_ptr<views::View>
-PageInfoViewFactory::CreateAdPersonalizationPageView() {
-  return std::make_unique<PageInfoSubpageView>(
-      CreateSubpageHeader(
-          l10n_util::GetStringUTF16(IDS_PAGE_INFO_AD_PRIVACY_HEADER),
-          presenter_->GetSubjectNameForDisplay()),
-      std::make_unique<PageInfoAdPersonalizationContentView>(presenter_,
-                                                             ui_delegate_));
 }
 
 std::unique_ptr<views::View> PageInfoViewFactory::CreateCookiesPageView() {
@@ -315,9 +304,8 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
                  ? &(features::IsRoundedIconsEnabled()
                          ? vector_icons::kAccountCircleOffIcon
                          : vector_icons::kAccountCircleOffChromeRefreshOldIcon)
-                 : &(features::IsRoundedIconsEnabled() ? kAccountCircleIcon
-                     : features::IsRoundedIconsEnabled()
-                         ? vector_icons::kAccountCircleIcon
+                 : &(features::IsRoundedIconsEnabled()
+                         ? kAccountCircleIcon
                          : vector_icons::kAccountCircleChromeRefreshOldIcon);
       break;
     case ContentSettingsType::IMAGES:
@@ -418,8 +406,7 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
                  ? &(features::IsRoundedIconsEnabled()
                          ? vector_icons::kSyncDisabledIcon
                          : vector_icons::kSyncOffChromeRefreshOldIcon)
-                 : &(features::IsRoundedIconsEnabled() ? kSyncIcon
-                     : features::IsRoundedIconsEnabled()
+                 : &(features::IsRoundedIconsEnabled()
                          ? vector_icons::kSyncIcon
                          : vector_icons::kSyncChromeRefreshOldIcon);
       break;
@@ -557,14 +544,12 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
                          : vector_icons::kVideogameAssetChromeRefreshOldIcon);
       break;
     case ContentSettingsType::IDLE_DETECTION:
-      icon = show_blocked_badge
-                 ? &(features::IsRoundedIconsEnabled()
-                         ? vector_icons::kDevicesOffIcon
-                         : vector_icons::kDevicesOffOldIcon)
-                 : &(features::IsRoundedIconsEnabled() ? kDevicesIcon
-                     : features::IsRoundedIconsEnabled()
-                         ? vector_icons::kDevicesIcon
-                         : vector_icons::kDevicesOldIcon);
+      icon = show_blocked_badge ? &(features::IsRoundedIconsEnabled()
+                                        ? vector_icons::kDevicesOffIcon
+                                        : vector_icons::kDevicesOffOldIcon)
+                                : &(features::IsRoundedIconsEnabled()
+                                        ? kDevicesIcon
+                                        : vector_icons::kDevicesOldIcon);
       break;
     case ContentSettingsType::STORAGE_ACCESS:
       icon = show_blocked_badge
@@ -776,10 +761,9 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
                    : vector_icons::kVideogameAssetOldIcon);
       break;
     case ContentSettingsType::IDLE_DETECTION:
-      icon = &(features::IsRoundedIconsEnabled() ? kDevicesIcon
-               : features::IsRoundedIconsEnabled()
-                   ? vector_icons::kDevicesIcon
-                   : vector_icons::kDevicesOldIcon);
+      icon =
+          &(features::IsRoundedIconsEnabled() ? kDevicesIcon
+                                              : vector_icons::kDevicesOldIcon);
       break;
     case ContentSettingsType::STORAGE_ACCESS:
       icon = &(features::IsRoundedIconsEnabled()

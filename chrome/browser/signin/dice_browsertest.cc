@@ -828,12 +828,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, Signin) {
 
   // Check that the Dice request header was sent.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
 
   base::HistogramTester histogram_tester;
   // Check that the token was requested and added to the token service.
@@ -1050,12 +1051,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, SupportOAuthOutageInDice) {
   NavigateToURL(base::StrCat({kSigninURL, "?outage=true"}));
   // Check that the Dice request header was sent.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
   // Check that the reconcilor was blocked and not unblocked before timeout.
   EXPECT_EQ(1, reconcilor_blocked_count_);
   EXPECT_EQ(0, reconcilor_unblocked_count_);
@@ -1082,12 +1084,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest,
   NavigateToURL(base::StrCat({kSigninURL, "?outage=true"}));
   // Check that the Dice request header was sent.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
   // Check that the reconcilor was blocked.
   EXPECT_EQ(1, reconcilor_blocked_count_);
   EXPECT_EQ(0, reconcilor_unblocked_count_);
@@ -1112,12 +1115,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, Reauth) {
 
   // Check that the Dice request header was sent.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
 
   // Check that the token was requested and added to the token service.
   SendRefreshTokenResponse();
@@ -1353,12 +1357,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, SignInAfterToken) {
 
   // Check that the Dice request header was sent, with signout confirmation.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
 
   content::WebContents* tab_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -1466,12 +1471,13 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTest, ProfileSignInBeforeToken) {
 
   // Check that the Dice request header was sent, with signout confirmation.
   std::string client_id = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
-  EXPECT_EQ(base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
-                               "signin_mode=all_accounts,"
-                               "signout_mode=show_confirmation",
-                               signin::kDiceProtocolVersion, client_id.c_str(),
-                               GetDeviceId().c_str()),
-            dice_request_header_);
+  EXPECT_EQ(
+      base::StringPrintf("version=%s,client_id=%s,device_id=%s,"
+                         "signin_mode=all_accounts,"
+                         "signout_mode=show_confirmation",
+                         signin::DiceHeaderHelper::GetDiceProtocolVersion(),
+                         client_id.c_str(), GetDeviceId().c_str()),
+      dice_request_header_);
 
   // Wait for the Sync confirmation UI and click through. This is only needed
   // when `syncer::kReplaceSyncPromosWithSignInPromos` is disabled, because
@@ -1758,7 +1764,7 @@ IN_PROC_BROWSER_TEST_F(DiceBrowserTestWithSyncOptinScreen,
   // Open the signin tab from the tabs history page (reuses the previous sign
   // in tab with an updated entry point).
   access_point = signin_metrics::AccessPoint::kRecentTabs;
-  signin_ui_util::SignInAndEnableHistorySync(browser(), browser()->profile(),
+  signin_ui_util::SignInAndEnableHistorySync(browser(), browser()->GetProfile(),
                                              access_point);
   // Receive token.
   SendRefreshTokenResponse();
@@ -2209,7 +2215,7 @@ IN_PROC_BROWSER_TEST_F(DiceManageAccountBrowserTest,
   content::RunAllTasksUntilIdle();
 
   // Verify that there is an active profile.
-  Profile* initial_profile = browser()->profile();
+  Profile* initial_profile = browser()->GetProfile();
   EXPECT_EQ(1U, g_browser_process->profile_manager()->GetNumberOfProfiles());
   EXPECT_EQ(g_browser_process->profile_manager()->GetLastUsedProfile(),
             initial_profile);

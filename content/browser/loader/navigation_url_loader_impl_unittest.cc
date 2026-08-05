@@ -147,8 +147,9 @@ class NavigationURLLoaderImplTest : public testing::Test {
 
     blink::mojom::BeginNavigationParamsPtr begin_params =
         blink::mojom::BeginNavigationParams::New(
-            initiator_frame_token, headers, net::LOAD_NORMAL,
-            false /* skip_service_worker */,
+            initiator_frame_token, std::nullopt /* initiator_state_token */,
+            std::nullopt /* initiator_document_token */, headers,
+            net::LOAD_NORMAL, false /* skip_service_worker */,
             blink::mojom::RequestContextType::LOCATION,
             blink::mojom::MixedContentContextType::kBlockable,
             false /* is_form_submission */,
@@ -204,7 +205,6 @@ class NavigationURLLoaderImplTest : public testing::Test {
             false /* is_pdf */, ChildProcessId() /* initiator_process_id */,
             std::nullopt /* initiator_document_token */,
             false /* allow_cookies_from_browser */, 0 /* navigation_id */,
-            false /* shared_storage_writable */,
             is_ad_tagged /* is_ad_tagged */,
             false /* force_no_https_upgrade */));
 
@@ -513,6 +513,8 @@ TEST_F(NavigationURLLoaderImplTest,
                               ->enabled_client_hints->origin);
 }
 
+// TODO(crbug.com/539424101): Flaky / timing out on macOS.
+#if !BUILDFLAG(IS_MAC)
 TEST_F(NavigationURLLoaderImplTest, Redirect301Tests) {
   ASSERT_TRUE(http_test_server_.Start());
 
@@ -589,6 +591,7 @@ TEST_F(NavigationURLLoaderImplTest, Redirect308Tests) {
   HTTPRedirectOriginHeaderTest(https_redirect_url, "POST", "POST", "null",
                                true);
 }
+#endif  // !BUILDFLAG(IS_MAC)
 
 namespace {
 
@@ -625,7 +628,6 @@ class TestAsyncInterceptor final : public NavigationLoaderInterceptor {
       const network::ResourceRequest& request,
       network::mojom::URLResponseHeadPtr* response_head,
       mojo::ScopedDataPipeConsumerHandle* response_body,
-      mojo::PendingRemote<network::mojom::URLLoader>* loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
       blink::ThrottlingURLLoader* url_loader,
       bool* skip_other_interceptors) override {
@@ -665,7 +667,6 @@ class TestResponseInterceptor final : public NavigationLoaderInterceptor {
       const network::ResourceRequest& request,
       network::mojom::URLResponseHeadPtr* response_head,
       mojo::ScopedDataPipeConsumerHandle* response_body,
-      mojo::PendingRemote<network::mojom::URLLoader>* loader,
       mojo::PendingReceiver<network::mojom::URLLoaderClient>* client_receiver,
       blink::ThrottlingURLLoader* url_loader,
       bool* skip_other_interceptors) override {
@@ -1407,14 +1408,7 @@ TEST_F(NavigationURLLoaderImplTest, NavigationTimeoutTest) {
 
 // Like NavigationTimeoutTest but the navigation initially results in a redirect
 // before hanging, to test a slightly more complicated navigation.
-// TODO(crbug.com/40805451): Flaky on Linux.
-#if BUILDFLAG(IS_LINUX)
-#define MAYBE_NavigationTimeoutRedirectTest \
-  DISABLED_NavigationTimeoutRedirectTest
-#else
-#define MAYBE_NavigationTimeoutRedirectTest NavigationTimeoutRedirectTest
-#endif
-TEST_F(NavigationURLLoaderImplTest, MAYBE_NavigationTimeoutRedirectTest) {
+TEST_F(NavigationURLLoaderImplTest, NavigationTimeoutRedirectTest) {
   ASSERT_TRUE(http_test_server_.Start());
   const GURL hang_url = http_test_server_.GetURL("/hung");
   const GURL redirect_url =
@@ -1424,8 +1418,25 @@ TEST_F(NavigationURLLoaderImplTest, MAYBE_NavigationTimeoutRedirectTest) {
   loader->Start();
   loader->SetNavigationTimeout(base::Seconds(3));
   delegate.WaitForRequestRedirected();
+  loader->FollowRedirect({});
   delegate.WaitForRequestFailed();
   EXPECT_EQ(net::ERR_TIMED_OUT, delegate.net_error());
+}
+
+TEST_F(NavigationURLLoaderImplTest, NavigationTimeoutAfterResponseStartedTest) {
+  ASSERT_TRUE(http_test_server_.Start());
+  const GURL url = http_test_server_.GetURL("/echo");
+  TestNavigationURLLoaderDelegate delegate;
+  auto loader = CreateTestLoader(url, std::string(), "GET", &delegate);
+  loader->Start();
+  loader->SetNavigationTimeout(base::Seconds(30));
+  delegate.WaitForResponseStarted();
+
+  // Once response has started, OnReceiveResponse() cancels the navigation
+  // timeout timer. Advancing time past the timeout should not trigger the
+  // timer or cause any request failure.
+  task_environment_->FastForwardBy(base::Seconds(35));
+  EXPECT_EQ(net::OK, delegate.net_error());
 }
 
 // Verify that UKMs are recorded when OnAcceptCHFrameReceived is called.
@@ -1573,6 +1584,7 @@ TEST_F(NavigationURLLoaderImplTest, StorageAccessApiStatus_AccessViaAPI) {
 
   TestRenderFrameHost* rfh =
       static_cast<TestRenderFrameHost*>(web_contents_->GetPrimaryMainFrame());
+  rfh->SetLastCommittedOriginForTesting(url::Origin::Create(url));
   rfh->document_associated_data().PutCookieSettingOverride(
       net::CookieSettingOverride::kStorageAccessGrantEligible);
 
@@ -1596,6 +1608,7 @@ TEST_F(NavigationURLLoaderImplTest,
 
   TestRenderFrameHost* rfh =
       static_cast<TestRenderFrameHost*>(web_contents_->GetPrimaryMainFrame());
+  rfh->SetLastCommittedOriginForTesting(url::Origin::Create(url));
   rfh->document_associated_data().PutCookieSettingOverride(
       net::CookieSettingOverride::kStorageAccessGrantEligible);
 
@@ -1618,6 +1631,8 @@ TEST_F(NavigationURLLoaderImplTest, StorageAccessApiStatus_None_CrossOrigin) {
 
   TestRenderFrameHost* rfh =
       static_cast<TestRenderFrameHost*>(web_contents_->GetPrimaryMainFrame());
+  rfh->SetLastCommittedOriginForTesting(
+      url::Origin::Create(GURL("http://a.com")));
   rfh->document_associated_data().PutCookieSettingOverride(
       net::CookieSettingOverride::kStorageAccessGrantEligible);
 

@@ -28,8 +28,8 @@ class View;
 }  // namespace views
 
 class BrowserView;
+class ExtensionsContainerViews;
 class ContentSettingImageView;
-class PageActionIconController;
 class WebAppNavigationButtonContainer;
 class WebAppToolbarButtonContainer;
 class WebAppFrameToolbarView;
@@ -76,11 +76,10 @@ class WebAppFrameToolbarView : public views::AccessiblePaneView,
   }
 
   // ToolbarButtonProvider:
-  ExtensionsToolbarDesktop* GetExtensionsToolbarDesktop() override;
+  ExtensionsContainerViews* GetExtensionsContainerViews() override;
   PinnedToolbarActions* GetPinnedToolbarActions() override;
   gfx::Size GetToolbarButtonSize() const override;
   views::BubbleAnchor GetDefaultExtensionDialogAnchor() override;
-  PageActionIconView* GetPageActionIconView(PageActionIconType type) override;
   page_actions::PageActionViewInterface* GetPageActionViewInterface(
       actions::ActionId action_id) override;
   AppMenuControl* GetAppMenuControl() override;
@@ -95,7 +94,6 @@ class WebAppFrameToolbarView : public views::AccessiblePaneView,
   AvatarToolbarButtonInterface* GetAvatarToolbarButtonInterface() override;
   ToolbarButton* GetBackButton() override;
   ReloadControl* GetReloadButton() override;
-  IntentChipButton* GetIntentChipButton() override;
   ToolbarButton* GetDownloadButton() override;
   WebUIToolbarWebView* GetWebUIToolbarViewForTesting() override;
 
@@ -109,7 +107,6 @@ class WebAppFrameToolbarView : public views::AccessiblePaneView,
   WebAppToolbarButtonContainer* get_right_container_for_testing() {
     return right_container_;
   }
-  PageActionIconController* GetPageActionIconControllerForTesting();
 
  protected:
   // views::AccessiblePaneView:

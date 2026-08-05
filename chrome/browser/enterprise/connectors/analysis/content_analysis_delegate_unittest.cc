@@ -23,6 +23,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/gtest_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -1830,5 +1831,99 @@ TEST_F(ContentAnalysisDelegateWithLocalClient, FailClosed) {
   EXPECT_TRUE(called);
 }
 #endif
+
+using ContentAnalysisDelegateDeleteTest = BaseTest;
+
+TEST_F(ContentAnalysisDelegateDeleteTest, RunsCallbackAndDeletes) {
+  bool callback_ran = false;
+  ContentAnalysisDelegate::Data data;
+  auto delegate = test::FakeContentAnalysisDelegate::Create(
+      run_loop_.QuitClosure(),
+      base::BindRepeating([](const std::string&, const base::FilePath&) {
+        return test::FakeContentAnalysisDelegate::SuccessfulResponse({"dlp"});
+      }),
+      kDmToken, contents(), std::move(data),
+      base::BindLambdaForTesting([&](const ContentAnalysisDelegate::Data& data,
+                                     ContentAnalysisDelegate::Result& result) {
+        callback_ran = true;
+      }),
+      DeepScanAccessPoint::COPY);
+
+  auto* delegate_ptr = delegate.release();
+  delegate_ptr->Delete();
+  RunUntilDone();
+
+  EXPECT_TRUE(callback_ran);
+}
+
+TEST_F(ContentAnalysisDelegateDeleteTest, DoesNotRunCallbackIfAlreadyRun) {
+  int callback_count = 0;
+  ContentAnalysisDelegate::Data data;
+  auto delegate = test::FakeContentAnalysisDelegate::Create(
+      run_loop_.QuitClosure(),
+      base::BindRepeating([](const std::string&, const base::FilePath&) {
+        return test::FakeContentAnalysisDelegate::SuccessfulResponse({"dlp"});
+      }),
+      kDmToken, contents(), std::move(data),
+      base::BindLambdaForTesting(
+          [&](const ContentAnalysisDelegate::Data& data,
+              ContentAnalysisDelegate::Result& result) { callback_count++; }),
+      DeepScanAccessPoint::COPY);
+
+  auto* delegate_ptr = delegate.release();
+  delegate_ptr->BypassWarnings(std::nullopt);
+
+  EXPECT_EQ(1, callback_count);
+
+  delegate_ptr->Delete();
+  RunUntilDone();
+
+  EXPECT_EQ(1, callback_count);
+}
+
+using ContentAnalysisDelegateUpdateFinalResultTest = BaseTest;
+
+class MinimalTestContentAnalysisDelegate : public ContentAnalysisDelegate {
+ public:
+  MinimalTestContentAnalysisDelegate(content::WebContents* web_contents,
+                                     Data data)
+      : ContentAnalysisDelegate(
+            web_contents,
+            std::move(data),
+            base::BindOnce([](const Data& data, Result& result) {}),
+            DeepScanAccessPoint::PASTE) {}
+};
+
+TEST_F(ContentAnalysisDelegateUpdateFinalResultTest, Precedence) {
+  ContentAnalysisDelegate::Data data;
+  data.url = GURL("https://example.com");
+
+  // Create a minimal delegate just to call UpdateFinalResult on it.
+  auto delegate = std::make_unique<MinimalTestContentAnalysisDelegate>(
+      contents(), std::move(data));
+
+  // Initial state should be SUCCESS.
+  EXPECT_EQ(FinalContentAnalysisResult::SUCCESS, delegate->final_result_);
+
+  // Overriding SUCCESS with KEPT_IN_MANAGED_CHROME should work.
+  delegate->UpdateFinalResult(
+      FinalContentAnalysisResult::KEPT_IN_MANAGED_CHROME, "dlp", {});
+  EXPECT_EQ(FinalContentAnalysisResult::KEPT_IN_MANAGED_CHROME,
+            delegate->final_result_);
+
+  // Overriding KEPT_IN_MANAGED_CHROME with FAILURE should work.
+  delegate->UpdateFinalResult(FinalContentAnalysisResult::FAILURE, "dlp", {});
+  EXPECT_EQ(FinalContentAnalysisResult::FAILURE, delegate->final_result_);
+
+  // Attempting to override FAILURE with WARNING should NOT work.
+  delegate->UpdateFinalResult(FinalContentAnalysisResult::WARNING, "dlp", {});
+  EXPECT_EQ(FinalContentAnalysisResult::FAILURE, delegate->final_result_);
+
+  // Attempting to override FAILURE with KEPT_IN_MANAGED_CHROME should
+  // NOT work.
+  delegate->UpdateFinalResult(
+      FinalContentAnalysisResult::KEPT_IN_MANAGED_CHROME, "dlp", {});
+  EXPECT_EQ(FinalContentAnalysisResult::FAILURE, delegate->final_result_);
+}
 
 }  // namespace enterprise_connectors

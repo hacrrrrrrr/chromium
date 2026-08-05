@@ -8,13 +8,13 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.content.Context;
 import android.os.Handler;
-import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 
 import androidx.annotation.ColorInt;
 import androidx.annotation.IdRes;
+import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.view.ViewCompat;
 
@@ -36,6 +36,7 @@ import org.chromium.chrome.browser.omnibox.OmniboxMetrics;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator;
+import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController.OnSuggestionsReceivedListener;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionListViewBinder.SuggestionListViewHolder;
 import org.chromium.chrome.browser.omnibox.suggestions.action.OmniboxActionDelegateImpl;
@@ -61,6 +62,8 @@ import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
@@ -68,6 +71,14 @@ import java.util.function.Supplier;
 /** Coordinator that handles the interactions with the autocomplete system. */
 @NullMarked
 public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
+    @IntDef({NavigationTarget.CURRENT_TAB, NavigationTarget.NEW_TAB, NavigationTarget.NEW_WINDOW})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface NavigationTarget {
+        int CURRENT_TAB = 0;
+        int NEW_TAB = 1;
+        int NEW_WINDOW = 2;
+    }
+
     private final ViewGroup mParent;
     private final MonotonicObservableSupplier<Profile> mProfileSupplier;
     private final Callback<Profile> mProfileChangeCallback;
@@ -95,6 +106,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
     public AutocompleteCoordinator(
             ViewGroup parent,
             AutocompleteDelegate delegate,
+            OmniboxResourceProvider resourceProvider,
             OmniboxSuggestionsDropdownEmbedder dropdownEmbedder,
             UrlBarEditingTextStateProvider urlBarEditingTextProvider,
             Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
@@ -120,6 +132,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         ModelList listItems = new ModelList();
         PropertyModel listModel =
                 new PropertyModel.Builder(SuggestionListProperties.ALL_KEYS)
+                        .with(SuggestionListProperties.RESOURCE_PROVIDER, resourceProvider)
                         .with(SuggestionListProperties.EMBEDDER, dropdownEmbedder)
                         .with(SuggestionListProperties.OMNIBOX_SESSION_ACTIVE, false)
                         .with(
@@ -133,6 +146,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         mMediator =
                 new AutocompleteMediator(
                         context,
+                        resourceProvider,
                         delegate,
                         urlBarEditingTextProvider,
                         listModel,
@@ -150,6 +164,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
                         deferredIMEWindowInsetApplicationCallback,
                         fuseboxCoordinator,
                         uiOverrides);
+
         mMediator.initDefaultProcessors();
 
         if (scrollListener != null) {
@@ -181,7 +196,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
                 listModel,
                 SuggestionListProperties.OMNIBOX_SESSION_ACTIVE,
                 mViewProvider,
-                SuggestionListViewBinder::bind);
+                new SuggestionListViewBinder());
 
         BaseSuggestionViewBinder.resetCachedResources();
 
@@ -212,7 +227,8 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
             AutocompleteMediator mediator,
             MonotonicObservableSupplier<Profile> profileObservableSupplier,
             LocationBarEmbedder locationBarEmbedder,
-            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier) {
+            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
+            OmniboxResourceProvider resourceProvider) {
         mParent = parent;
         mMediator = mediator;
         mProfileSupplier = profileObservableSupplier;
@@ -265,7 +281,6 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         private @Nullable SuggestionListViewHolder mHolder;
         private boolean mForceSyncInflate;
         private final ModelList mListItems;
-
         SuggestionListViewHolderProvider(ModelList listItems) {
             mListItems = listItems;
         }
@@ -340,11 +355,15 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         mMediator.beginInput(session);
     }
 
-    /** Navigate using the current typed omnibox text. */
-    public void loadTypedOmniboxText(boolean openInNewTab) {
+    /**
+     * Navigate using the current typed omnibox text.
+     *
+     * @param eventTime The timestamp when the navigation was triggered (e.g., uptimeMillis).
+     * @param target The target destination for the navigation (current tab, new tab, new window).
+     */
+    public void loadTypedOmniboxText(long eventTime, @NavigationTarget int target) {
         if (mMediator.hasAutocompleteController()) {
-            mMediator.loadTypedOmniboxText(
-                    SystemClock.uptimeMillis(), openInNewTab, /* openInNewWindow= */ false);
+            mMediator.loadTypedOmniboxText(eventTime, target);
         }
     }
 
@@ -402,6 +421,16 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
      */
     public @Nullable AutocompleteMatch getSuggestionAt(int index) {
         return mMediator.getSuggestionAt(index);
+    }
+
+    /** Triggers a prefetch for the default (first) autocomplete suggestion, if available. */
+    public void prefetchDefaultMatch(long eventTime) {
+        if (getSuggestionCount() > 0) {
+            AutocompleteMatch suggestion = getSuggestionAt(0);
+            if (suggestion != null) {
+                mMediator.onSuggestionTouchDown(suggestion, 0, eventTime);
+            }
+        }
     }
 
     /** Signals that native initialization has completed. */
@@ -473,24 +502,6 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
 
         boolean isShowingList = mContainer != null && mContainer.isShown();
 
-        // Always handle <ENTER> key, even if the suggestions list is not showing.
-        // This allows users to navigate to the typed url or query.
-        // Try to dispatch to suggestions list, if one is showing, otherwise invoke navigation.
-        if (KeyNavigationUtil.isEnter(event)) {
-            if (isShowingList && assumeNonNull(mContainer).onKeyDown(keyCode, event)) {
-                return true;
-            }
-
-            boolean openInNewTab = event.isAltPressed();
-            boolean openInNewWindow = !openInNewTab && event.isShiftPressed();
-            if (mParent.getVisibility() == View.VISIBLE && mMediator.hasAutocompleteController()) {
-                mMediator.loadTypedOmniboxText(event.getEventTime(), openInNewTab, openInNewWindow);
-                return true;
-            }
-
-            return false;
-        }
-
         // Do not attempt to interpret any navigation keys when the suggestions list is not showing.
         if (!isShowingList) {
             return false;
@@ -503,8 +514,9 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
                 || (keyCode == KeyEvent.KEYCODE_DPAD_DOWN)
                 || KeyNavigationUtil.isTabNavigation(event)) {
             mMediator.allowPendingItemSelection();
-            assumeNonNull(mContainer).onKeyDown(keyCode, event);
-            return true;
+            return assumeNonNull(mContainer).onKeyDown(keyCode, event);
+        } else if (KeyNavigationUtil.isEnter(event)) {
+            return assumeNonNull(mContainer).onKeyDown(keyCode, event);
         }
 
         return false;
@@ -532,16 +544,22 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         mDropdown.resetSelection();
     }
 
-    /** Keyboard select the first item in the suggestions list. */
-    public void selectFirstItem() {
-        if (mDropdown == null) return;
-        mDropdown.selectFirstItem();
+    /**
+     * Keyboard select the first item in the suggestions list. Returns true if this selected an
+     * item, false if no item was selected.
+     */
+    public boolean selectFirstItem() {
+        if (mDropdown == null) return false;
+        return mDropdown.selectFirstItem();
     }
 
-    /** Keyboard select the last item in the suggestions list. */
-    public void selectLastItem() {
-        if (mDropdown == null) return;
-        mDropdown.selectLastItem();
+    /**
+     * Keyboard select the last item in the suggestions list. Returns true if this selected an item,
+     * false if no item was selected.
+     */
+    public boolean selectLastItem() {
+        if (mDropdown == null) return false;
+        return mDropdown.selectLastItem();
     }
 
     /**
@@ -613,9 +631,9 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         mMediator.stopAutocomplete(AutocompleteStopReason.CLOBBERED);
     }
 
-    /** {@see AutocompleteMediator#loadUrlFromVoice(String)} */
+    /** {@see AutocompleteMediator#loadUrlFromVoice(String, Profile)} */
     public void loadUrlFromVoice(String query) {
-        mMediator.loadUrlFromVoice(query);
+        mMediator.loadUrlFromVoice(query, mProfileSupplier.get());
     }
 
     /** Returns whether Autocomplete is serving suggestions. */
@@ -644,6 +662,17 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         OmniboxSuggestionsContainer oldValue = mContainer;
         mContainer = container;
         ResettersForTesting.register(() -> mContainer = oldValue);
+    }
+
+    /**
+     * Sets the suggestions dropdown for testing.
+     *
+     * @param dropdown The dropdown to use.
+     */
+    public void setSuggestionsDropdownForTest(OmniboxSuggestionsDropdown dropdown) {
+        OmniboxSuggestionsDropdown oldValue = mDropdown;
+        mDropdown = dropdown;
+        ResettersForTesting.register(() -> mDropdown = oldValue);
     }
 
     /**

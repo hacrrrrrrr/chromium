@@ -37,6 +37,7 @@ source_set("signin") {
   if (enable_dice_support) {
     sources += [
       "chrome_signout_confirmation_prompt.h",
+      "cross_device_signin_qr_bubble.h",
       "dice_migration_service.h",
       "dice_migration_service_factory.h",
       "dice_web_signin_interceptor_delegate.h",
@@ -47,6 +48,7 @@ source_set("signin") {
       "signin_qrcode_infobar.h",
       "signin_qrcode_infobar_delegate.h",
       "signin_qrcode_model.h",
+      "signin_qrcode_view.h",
     ]
     public_deps += [
       "//chrome/browser/signin",
@@ -116,6 +118,7 @@ source_set("impl") {
       "signin_qrcode_infobar.cc",
       "signin_qrcode_infobar_delegate.cc",
       "signin_qrcode_model.cc",
+      "signin_qrcode_view.cc",
     ]
 
     deps += [
@@ -126,7 +129,7 @@ source_set("impl") {
       "//chrome/browser/ui/views:layout_provider",
       "//chrome/browser/ui/views/controls",
       "//chrome/browser/ui/views/infobars",
-      "//chrome/browser/ui/views/webauthn:webauthn",
+      "//chrome/browser/ui/views/webauthn",
       "//chrome/browser/ui/web_applications",
       "//components/infobars/content",
       "//components/pref_registry",
@@ -158,6 +161,7 @@ if (!is_android) {
         "//chrome/browser",
         "//chrome/browser/bookmarks",
         "//chrome/browser/password_manager:test_support",
+        "//chrome/browser/signin:signin_browser_test_base",
         "//chrome/browser/ui",
         "//chrome/browser/ui:browser_element_identifiers",
         "//chrome/browser/ui:chrome_pages",
@@ -215,6 +219,7 @@ if (!is_android) {
       "//base",
       "//base/test:test_support",
       "//chrome/browser",
+      "//chrome/browser/signin:signin_browser_test_base",
       "//chrome/browser/sync",
       "//chrome/browser/sync/test/integration:sync_integration_test_support",
       "//chrome/browser/ui",

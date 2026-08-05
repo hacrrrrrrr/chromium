@@ -362,14 +362,9 @@ void IntentPickerTabHelper::ShowOrHideIconInternal(bool should_show_icon) {
     return;
   }
 
-  if (IsPageActionMigrated(PageActionIconType::kIntentPicker)) {
-    tabs::TabInterface* tab_interface =
-        tabs::TabInterface::GetFromContents(&GetWebContents());
-    UpdatePageAction(tab_interface, should_show_icon);
-  } else {
-    BrowserWindow::FromBrowser(browser)->UpdatePageActionIcon(
-        PageActionIconType::kIntentPicker);
-  }
+  tabs::TabInterface* tab_interface =
+      tabs::TabInterface::GetFromContents(&GetWebContents());
+  UpdatePageAction(tab_interface, should_show_icon);
 
   icon_resolved_ = true;
   if (icon_update_closure_for_testing_) {
@@ -383,6 +378,12 @@ void IntentPickerTabHelper::ShowIntentPickerOrLaunchAppImpl(
     ShowIntentPickerBubbleCallback callback,
     std::vector<apps::IntentPickerAppInfo> apps) {
   if (apps.empty() || IsShuttingDown(web_contents())) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), /*launched=*/false));
+    return;
+  }
+
+  if (!IsValidWebContentsForIntentPicker(web_contents())) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), /*launched=*/false));
     return;
@@ -439,6 +440,12 @@ void IntentPickerTabHelper::OnIntentPickerClosedMaybeLaunch(
     apps::IntentPickerCloseReason close_reason,
     bool should_persist) {
   if (IsShuttingDown(web_contents())) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), /*launched=*/false));
+    return;
+  }
+
+  if (!IsValidWebContentsForIntentPicker(web_contents())) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE, base::BindOnce(std::move(callback), /*launched=*/false));
     return;

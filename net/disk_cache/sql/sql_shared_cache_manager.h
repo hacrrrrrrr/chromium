@@ -19,6 +19,7 @@
 #include "base/threading/sequence_bound.h"
 #include "net/base/net_export.h"
 #include "net/base/network_isolation_key.h"
+#include "net/disk_cache/sql/sql_read_cache_memory_monitor.h"
 #include "net/disk_cache/sql/sql_shared_cache.h"
 #include "net/disk_cache/sql/sql_shared_cache_handle.h"
 #include "net/disk_cache/sql/sql_shared_cache_index_database.h"
@@ -40,9 +41,11 @@ class NET_EXPORT_PRIVATE SqlSharedCacheManager {
   using InitCallback = base::OnceCallback<void(
       base::expected<void, SqlSharedCacheIndexDatabase::Error>)>;
 
-  SqlSharedCacheManager(SqlPersistentStore& store,
-                        const base::FilePath& path,
-                        scoped_refptr<BackendCleanupTracker> cleanup_tracker);
+  SqlSharedCacheManager(
+      SqlPersistentStore& store,
+      const base::FilePath& path,
+      scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor,
+      scoped_refptr<BackendCleanupTracker> cleanup_tracker);
   ~SqlSharedCacheManager();
 
   // Asynchronously initializes the index database.
@@ -62,6 +65,12 @@ class NET_EXPORT_PRIVATE SqlSharedCacheManager {
       const net::NetworkIsolationKey& nik,
       bool require_shared_cache_db_id,
       base::OnceCallback<void(scoped_refptr<SqlSharedCacheHandle>)> callback);
+
+  // Asynchronously deletes the shared cache resources specified by `resources`.
+  // The resources are grouped by their database ID and deleted from their
+  // corresponding isolated databases. Invokes `callback` upon completion.
+  void DeleteResources(std::vector<SqlSharedCacheResourceId> resources,
+                       base::OnceClosure callback);
 
  private:
   // Handle used to signal completion of a serialized database operation.
@@ -104,10 +113,17 @@ class NET_EXPORT_PRIVATE SqlSharedCacheManager {
       DbOperationHandle db_operation_handle,
       base::expected<std::string, SqlSharedCacheIndexDatabase::Error> result);
 
+  void DeleteNextResourceGroup(
+      absl::flat_hash_map<SqlSharedCacheDbId, std::vector<SqlSharedCacheRowId>>
+          grouped_resources,
+      base::OnceClosure callback,
+      DbOperationHandle db_operation_handle);
+
   const raw_ref<SqlPersistentStore> store_;
   const base::FilePath directory_;
   scoped_refptr<base::SequencedTaskRunner> db_task_runner_;
   SqlTrackedSequenceBound<SqlSharedCacheIndexDatabase> index_database_;
+  scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor_;
   scoped_refptr<BackendCleanupTracker> cleanup_tracker_;
 
   base::queue<base::OnceCallback<void(DbOperationHandle)>>

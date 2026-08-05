@@ -51,7 +51,6 @@
 #include "content/public/browser/btm_service.h"
 #include "content/public/browser/cookie_access_details.h"
 #include "content/public/browser/global_routing_id.h"
-#include "content/public/browser/interest_group_manager.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/render_frame_host.h"
@@ -2121,7 +2120,7 @@ IN_PROC_BROWSER_TEST_F(BtmBounceDetectorBrowserTest,
     (async () => {
       const worker = await new Promise((resolve, reject) => {
         const worker =
-            new SharedWorker("/workers/shared_fetcher_treat_as_public.js");
+            new SharedWorker("/workers/shared_fetcher.js");
         worker.port.addEventListener("message", () => resolve(worker));
         worker.addEventListener("error", reject);
         worker.port.start();
@@ -2184,7 +2183,7 @@ IN_PROC_BROWSER_TEST_F(BtmBounceDetectorBrowserTest,
             EvalJs(GetActiveWebContents(), JsReplace(
                                                R"(
     (async () => {
-      const worker = new Worker("/workers/fetcher_treat_as_public.js");
+      const worker = new Worker("/workers/fetcher.js");
 
       const messagePromise = new Promise((resolve) => {
         const listener = (event) => resolve(event.data);

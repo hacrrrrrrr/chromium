@@ -137,9 +137,6 @@ class COMPONENT_EXPORT(USERDATAAUTH_CLIENT) UserDataAuthClient {
   using GetArcDiskFeaturesCallback =
       chromeos::DBusMethodCallback<::user_data_auth::GetArcDiskFeaturesReply>;
 
-  using GetRecoverableKeyStoresCallback = chromeos::DBusMethodCallback<
-      ::user_data_auth::GetRecoverableKeyStoresReply>;
-
   using SetUserDataStorageWriteEnabledCallback = chromeos::DBusMethodCallback<
       ::user_data_auth::SetUserDataStorageWriteEnabledReply>;
 
@@ -371,11 +368,6 @@ class COMPONENT_EXPORT(USERDATAAUTH_CLIENT) UserDataAuthClient {
   virtual void GetArcDiskFeatures(
       const ::user_data_auth::GetArcDiskFeaturesRequest& request,
       GetArcDiskFeaturesCallback callback) = 0;
-
-  // Retrieve LSKF-wrapped key material for upload to a remote recovery service.
-  virtual void GetRecoverableKeyStores(
-      const ::user_data_auth::GetRecoverableKeyStoresRequest& request,
-      GetRecoverableKeyStoresCallback callback) = 0;
 
   // Enable/disable write access permissions to MyFiles directory.
   virtual void SetUserDataStorageWriteEnabled(

@@ -97,7 +97,11 @@ class ToolbarDependencyProvider : public WebUIToolbarUI::DependencyProvider {
  public:
   explicit ToolbarDependencyProvider(Browser* browser) : browser_(browser) {}
 
-  ~ToolbarDependencyProvider() = default;
+  ~ToolbarDependencyProvider() override = default;
+
+  base::WeakPtr<DependencyProvider> GetWeakPtr() override {
+    return weak_factory_.GetWeakPtr();
+  }
 
   // This might blow up in the future. We are implicitly assuming that the
   // delegate isn't going to be used in this test.
@@ -130,6 +134,7 @@ class ToolbarDependencyProvider : public WebUIToolbarUI::DependencyProvider {
 
  private:
   raw_ptr<BrowserWindowInterface> browser_;
+  base::WeakPtrFactory<DependencyProvider> weak_factory_{this};
 };
 
 class WebUIToolbarInitializer : public WebUIControllerInitalizer {
@@ -649,8 +654,8 @@ IN_PROC_BROWSER_TEST_F(InitialWebUIMetricsMappingBrowserTest,
   EXPECT_GE(total_webium_count, 1);
 }
 
-// TODO(crbug.com/491012584): Flaky on ChromeOS MSan.
-#if BUILDFLAG(IS_CHROMEOS) && defined(MEMORY_SANITIZER)
+// TODO(crbug.com/491012584): Flaky on ChromeOS MSan and Win.
+#if (BUILDFLAG(IS_CHROMEOS) && defined(MEMORY_SANITIZER)) || BUILDFLAG(IS_WIN)
 #define MAYBE_NormalRendererMetricsAreNotMapped \
   DISABLED_NormalRendererMetricsAreNotMapped
 #else
@@ -914,7 +919,7 @@ IN_PROC_BROWSER_TEST_F(InitialWebUINavigationBrowserTest,
 // restored as minimized.
 IN_PROC_BROWSER_TEST_F(InitialWebUINavigationBrowserTest,
                        SessionRestoreMinimizedWindow) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // Enable session restore and minimize the current window.
   SessionStartupPref pref(SessionStartupPref::LAST);

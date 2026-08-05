@@ -30,7 +30,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
             ${this.file.isDeletable ? html`<cr-icon-button
                 id="removeInjectedInputIconButton"
                 class="remove-button"
-                iron-icon="cr:clear"
+                iron-icon="cr:close"
                 title="${this.file.name}"
                 aria-label="${this.getDeleteFileButtonTitle_()}"
                 @click="${this.onRemoveButtonClick_}">
@@ -59,7 +59,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
             ${this.file.isDeletable ? html`<cr-icon-button
                 id="removeInjectedInputButton"
                 class="remove-button"
-                iron-icon="cr:clear"
+                iron-icon="cr:close"
                 title="${this.file.name}"
                 aria-label="${this.getDeleteFileButtonTitle_()}"
                 @click="${this.onRemoveButtonClick_}">
@@ -81,7 +81,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
           ${this.file.isDeletable ? html`<cr-icon-button
               class="img-overlay"
               id="removeInjectedInputImgButton"
-              iron-icon="cr:clear"
+              iron-icon="cr:close"
               title="${this.file.name}"
               aria-label="${this.getDeleteFileButtonTitle_()}"
               @click="${this.onRemoveButtonClick_}">
@@ -113,7 +113,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
             ${this.file.isDeletable ? html`<cr-icon-button
               id="removeTabButton"
               class="remove-button"
-              iron-icon="cr:clear"
+              iron-icon="cr:close"
               title="${this.file.name}"
               aria-label="${this.getDeleteFileButtonTitle_()}"
               @click="${this.onRemoveButtonClick_}">
@@ -122,7 +122,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
           <div class="chip-overlay"></div>
         </div>
       ` : (this.file.type.startsWith('image/') || this.file.objectUrl
-            || this.file.dataUrl) ? html`
+            || this.file.dataUrl || this.file.thumbnailUrl) ? html`
         <div id="imgChip" class="img-chip">
           ${this.isUploading_ ? html`
             <svg role="image" class="spinner" viewBox="0 0 100 100">
@@ -133,6 +133,16 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
               <img is="cr-auto-img" class="img-thumbnail"
                 auto-src="${this.file.thumbnailUrl}"
                 aria-label="${this.file.name}">
+            ` : this.isVideo_() && this.file.objectUrl ? html`
+              <video class="img-thumbnail"
+                src="${this.file.objectUrl}#t=0.001"
+                preload="metadata"
+                muted
+                playsinline
+                disablepictureinpicture
+                disableremoteplayback
+                aria-label="${this.file.name}">
+              </video>
             ` : html`
             <img class="img-thumbnail"
               src="${this.file.objectUrl || this.file.dataUrl}"
@@ -142,7 +152,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
           ${this.file.isDeletable ? html`<cr-icon-button
               class="img-overlay"
               id="removeImgButton"
-              iron-icon="cr:clear"
+              iron-icon="cr:close"
               title="${this.file.name}"
               aria-label="${this.getDeleteFileButtonTitle_()}"
               @click="${this.onRemoveButtonClick_}">
@@ -175,7 +185,7 @@ export function getHtml(this: ComposeboxFileThumbnailElement) {
             ${this.file.isDeletable ? html`<cr-icon-button
                 id="removeDocumentButton"
                 class="remove-button"
-                iron-icon="cr:clear"
+                iron-icon="cr:close"
                 title="${this.file.name}"
                 aria-label="${this.getDeleteFileButtonTitle_()}"
                 @click="${this.onRemoveButtonClick_}">

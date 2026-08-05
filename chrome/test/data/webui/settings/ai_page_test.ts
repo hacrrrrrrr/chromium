@@ -317,6 +317,29 @@ suite('AiPage', function() {
     assertEquals(routes.AI, currentRoute.parent);
   });
 
+  test('inlineCueMenuRow', async () => {
+    loadTimeData.overrideValues({
+      showAiPage: true,
+      showInlineCueMenuControl: true,
+    });
+    resetRouterForTesting();
+    await createPage();
+
+    const inlineCueMenuRow =
+        page.shadowRoot!.querySelector<HTMLElement>('#inlineCueMenuRow');
+
+    assertTrue(!!inlineCueMenuRow);
+    assertTrue(isVisible(inlineCueMenuRow));
+    inlineCueMenuRow.click();
+    await verifyFeatureInteractionMetrics(
+        AiPageInteractions.INLINE_CUE_MENU_CLICK,
+        'Settings.AiPage.InlineCueMenuEntryPointClick');
+
+    const currentRoute = Router.getInstance().getCurrentRoute();
+    assertEquals(routes.INLINE_CUE_MENU, currentRoute);
+    assertEquals(routes.AI, currentRoute.parent);
+  });
+
   test('skillsRow', async () => {
     loadTimeData.overrideValues({
       showAiPage: true,
@@ -347,6 +370,7 @@ suite('AiPage', function() {
     assertTrue(!!row);
     assertTrue(isVisible(row));
 
+    page.setPrefValue('contextual_search.drive_consent_state', 0);
     row.click();
     await verifyFeatureInteractionMetrics(
         AiPageInteractions.GOOGLE_SEARCH_AI_MODE_WORKSPACE_CLICK,
@@ -354,6 +378,28 @@ suite('AiPage', function() {
 
     const url = await openWindowProxy.whenCalled('openUrl');
     assertEquals(loadTimeData.getString('googleSearchAiModeWorkspaceUrl'), url);
+  });
+
+  test('GoogleSearchAiModeRowRestricted', async () => {
+    loadTimeData.overrideValues({
+      showGoogleSearchAiModeWorkspaceControl: true,
+    });
+    await createPage();
+
+    const row = page.shadowRoot!.querySelector<HTMLElement>(
+        '#googleSearchAiModeWorkspaceRow');
+    assertTrue(!!row);
+    assertTrue(isVisible(row));
+
+    page.setPrefValue('contextual_search.drive_consent_state', 1);
+    row.click();
+    await verifyFeatureInteractionMetrics(
+        AiPageInteractions.GOOGLE_SEARCH_AI_MODE_WORKSPACE_CLICK,
+        'Settings.AiPage.GoogleSearchAiModeWorkspaceEntryPointClick');
+
+    const url = await openWindowProxy.whenCalled('openUrl');
+    assertEquals(
+        loadTimeData.getString('googleSearchAiModeRestrictedUrl'), url);
   });
 
   test('NoGoogleSearchAiModeRowWhenFeatureDisabled', async () => {

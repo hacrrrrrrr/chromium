@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
@@ -161,6 +162,13 @@ class VerticalTabDragTest
         InteractiveBrowserTest>::GetEnabledFeatures();
     enabled.push_back({features::kCollapseTabGroupDuringDrag, {}});
     return enabled;
+  }
+
+  const std::vector<base::test::FeatureRef> GetDisabledFeatures() override {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    return {omnibox::internal::kWebUIOmniboxPopup,
+            omnibox::internal::kWebUIOmniboxAimPopup};
   }
 
  protected:
@@ -1073,6 +1081,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabDragTest,
         ASSERT_NE(nullptr, controller);
         EXPECT_TRUE(controller->IsCollapsed());
         EXPECT_EQ(kInitialWidth, controller->GetUncollapsedWidth());
+        EXPECT_EQ(1, new_browser.GetTabStripModel()->count());
+        EXPECT_EQ(2, browser()->GetTabStripModel()->count());
       }));
 }
 

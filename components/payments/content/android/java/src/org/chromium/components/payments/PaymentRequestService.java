@@ -986,7 +986,8 @@ public class PaymentRequestService
             if (mBrowserPaymentRequest.showNoMatchingPaymentCredential()) {
                 if (sNativeObserverForTest != null) {
                     sNativeObserverForTest.onAppListReady(
-                            mBrowserPaymentRequest.getPaymentApps(), mSpec.getRawTotal());
+                            mBrowserPaymentRequest.getPaymentApps(),
+                            mBrowserPaymentRequest.getPaymentApps().get(0).getTotalForSpc());
                 }
                 return null;
             }
@@ -1296,10 +1297,10 @@ public class PaymentRequestService
             onShowFailed(ErrorStrings.ANOTHER_UI_SHOWING, PaymentErrorReason.ALREADY_SHOWING);
             return;
         }
+        PaymentRequestWebContentsData paymentRequestWebContentsData =
+                PaymentRequestWebContentsData.from(mWebContents);
+        assumeNonNull(paymentRequestWebContentsData);
         if (!hadUserActivation) {
-            PaymentRequestWebContentsData paymentRequestWebContentsData =
-                    PaymentRequestWebContentsData.from(mWebContents);
-            assumeNonNull(paymentRequestWebContentsData);
             if (paymentRequestWebContentsData.hadActivationlessShow()) {
                 // Reject the call to show(), because only one activationless show is allowed per
                 // page.

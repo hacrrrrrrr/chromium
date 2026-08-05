@@ -25,6 +25,7 @@ import org.chromium.chrome.browser.app.tab_activity_glue.ReparentingDelegateFact
 import org.chromium.chrome.browser.app.tab_activity_glue.ReparentingTask;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.prefetch.settings.PreloadPagesSettingsBridge;
 import org.chromium.chrome.browser.prefetch.settings.PreloadPagesState;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -339,8 +340,17 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
             int assignedTabId = IntentHandler.getTabId(intent);
             boolean isReparenting = isReparenting(assignedTabId);
             AsyncTabParams asyncParams = mAsyncTabParamsManager.remove(assignedTabId);
+            if ((type == TabLaunchType.FROM_REPARENTING
+                            || type == TabLaunchType.FROM_REPARENTING_BACKGROUND)
+                    && asyncParams == null) {
+                return null;
+            }
 
             boolean openInForeground = mOrderController.willOpenInForeground(type, mIncognito);
+            boolean disableRenderer =
+                    intent != null
+                            && IntentUtils.safeGetBooleanExtra(
+                                    intent, IntentHandler.EXTRA_DISABLE_INITIALIZE_RENDERER, false);
             TabDelegateFactory delegateFactory =
                     parent == null ? createDefaultTabDelegateFactory() : null;
             Tab tab;
@@ -395,7 +405,8 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
                 TabParentIntent.from(tab).set(parentIntent).setCurrentTab(selector::getCurrentTab);
                 webContents.resumeLoadingCreatedWebContents();
             } else if ((!openInForeground && SysUtils.isLowEndDevice())
-                    || type == TabLaunchType.FROM_SYNC_BACKGROUND) {
+                    || type == TabLaunchType.FROM_SYNC_BACKGROUND
+                    || disableRenderer) {
                 // For tab group sync we don't want to trigger a navigation until the user opens the
                 // tab so use the lazy load mechanism for this.
 
@@ -405,7 +416,8 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
                 tab =
                         TabBuilder.createForLazyLoad(getProfile(), loadUrlParams, title)
                                 .setContentViewDeferred(
-                                        ChromeFeatureList.sLoadAllTabsAtStartup.isEnabled())
+                                        ChromeFeatureList.sLoadAllTabsAtStartup.isEnabled()
+                                                || disableRenderer)
                                 .setParent(parent)
                                 .setWindow(mNativeWindow)
                                 .setLaunchType(type)
@@ -604,7 +616,13 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
     public @Nullable Tab launchUrlFromExternalApp(
             LoadUrlParams loadUrlParams, String appId, boolean forceNewTab, Intent intent) {
         if (mTabModel == null) return null;
-        assert !mIncognito;
+        assert !mIncognito || isIncognitoForced();
+
+        if (mIncognito) {
+            forceNewTab = true;
+            appId = null;
+        }
+
         // Don't re-use tabs for intents from Chrome. Note that this can be spoofed so shouldn't be
         // relied on for anything security sensitive.
         boolean isLaunchedFromChrome = TextUtils.equals(appId, mActivity.getPackageName());
@@ -813,6 +831,12 @@ public class ChromeTabCreator implements TabCreator, NeedsTabModel, NeedsTabMode
     @Override
     public void setTabModelOrderController(TabModelOrderController tabModelOrderController) {
         mOrderController = tabModelOrderController;
+    }
+
+    private boolean isIncognitoForced() {
+        ProfileProvider profileProvider = mProfileProviderSupplier.get();
+        if (profileProvider == null) return false;
+        return IncognitoUtils.isIncognitoModeForced(profileProvider.getOriginalProfile());
     }
 
     /** Returns the default tab delegate factory to be used if creating new tabs w/o parents. */

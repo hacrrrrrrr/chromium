@@ -227,7 +227,8 @@ std::vector<Suggestion> CreateLoyaltyCardSuggestionsForMerge(
   Suggestion submenu_suggestion = Suggestion(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_LOYALTY_CARDS_SUBMENU_TITLE),
       SuggestionType::kAllLoyaltyCardsEntry);
-  submenu_suggestion.acceptability = Suggestion::Acceptability::kUnacceptable;
+  submenu_suggestion.acceptability =
+      Suggestion::Acceptability::kSelectableButUnacceptable;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   submenu_suggestion.icon = Suggestion::Icon::kGoogleWalletMonochrome;
 #endif
@@ -326,7 +327,9 @@ void LoyaltyCardSuggestionGenerator::GenerateSuggestions(
       all_loyalty_cards, [&](const LoyaltyCard& card) {
         return card.GetAffiliationCategory(
                    client.GetLastCommittedPrimaryMainFrameURL()) ==
-               LoyaltyCard::AffiliationCategory::kAffiliated;
+                   LoyaltyCard::AffiliationCategory::kAffiliated &&
+               client.GetLastCommittedPrimaryMainFrameOrigin() ==
+                   trigger_field.origin();
       });
 
   base::span<const LoyaltyCard> affiliated_cards =
@@ -396,7 +399,8 @@ void LoyaltyCardSuggestionGenerator::GenerateSuggestions(
       l10n_util::GetStringUTF16(
           IDS_AUTOFILL_LOYALTY_CARDS_ALL_YOUR_CARDS_SUBMENU_TITLE),
       SuggestionType::kAllLoyaltyCardsEntry);
-  submenu_suggestion.acceptability = Suggestion::Acceptability::kUnacceptable;
+  submenu_suggestion.acceptability =
+      Suggestion::Acceptability::kSelectableButUnacceptable;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   submenu_suggestion.icon = Suggestion::Icon::kGoogleWalletMonochrome;
 #endif

@@ -10,6 +10,7 @@
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
+#include "chrome/browser/bad_message.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/first_party_sets/first_party_sets_policy_service.h"
 #include "chrome/browser/first_party_sets/first_party_sets_policy_service_factory.h"
@@ -18,6 +19,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_constraints.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/permissions/constants.h"
 #include "components/permissions/permission_decision.h"
 #include "components/permissions/permission_prompt_decision.h"
@@ -33,9 +35,9 @@
 #include "net/first_party_sets/first_party_set_metadata.h"
 #include "services/network/public/mojom/cookie_manager.mojom.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-shared.h"
-#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/features_generated.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-shared.h"
+#include "third_party/blink/public/mojom/permissions/permission_status.mojom-shared.h"
 
 namespace {
 
@@ -71,7 +73,7 @@ void TopLevelStorageAccessPermissionContext::DecidePermission(
     permissions::BrowserPermissionCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!base::FeatureList::IsEnabled(
-          blink::features::kStorageAccessAPIRelatedWebsiteSets)) {
+          content_settings::features::kStorageAccessAPIRelatedWebsiteSets)) {
     RecordOutcomeSample(
         TopLevelStorageAccessRequestOutcome::kDeniedByPrerequisites);
     std::move(callback).Run(content::PermissionResult(
@@ -95,6 +97,22 @@ void TopLevelStorageAccessPermissionContext::DecidePermission(
     return;
   }
 
+  net::SchemefulSite embedding_site(request_data->embedding_origin);
+  net::SchemefulSite requesting_site(request_data->requesting_origin);
+
+  if (requesting_site == embedding_site) {
+    // Well-behaved renderers don't send same-site permissions requests, since
+    // there is no privacy boundary within a site. This must be a compromised
+    // renderer.
+    bad_message::ReceivedBadMessage(
+        rfh->GetProcess(), bad_message::BadMessageReason::
+                               TLSAPC_INVALID_PERMISSION_REQUEST_CONTEXT);
+    std::move(callback).Run(content::PermissionResult(
+        blink::mojom::PermissionStatus::DENIED,
+        content::PermissionStatusSource::UNSPECIFIED));
+    return;
+  }
+
   if (!request_data->user_gesture || !rfh->HasTransientUserActivation() ||
       !request_data->requesting_origin.is_valid() ||
       !request_data->embedding_origin.is_valid()) {
@@ -110,9 +128,6 @@ void TopLevelStorageAccessPermissionContext::DecidePermission(
         content::PermissionStatusSource::UNSPECIFIED));
     return;
   }
-
-  net::SchemefulSite embedding_site(request_data->embedding_origin);
-  net::SchemefulSite requesting_site(request_data->requesting_origin);
 
   first_party_sets::FirstPartySetsPolicyServiceFactory::GetForBrowserContext(
       browser_context())

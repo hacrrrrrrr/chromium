@@ -29,6 +29,7 @@
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "content/browser/media/media_devices_util.h"
+#include "content/browser/renderer_host/media/audio_output_authorization_handler.h"
 #include "content/browser/renderer_host/media/media_stream_ui_proxy.h"
 #include "content/browser/renderer_host/media/mock_video_capture_provider.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
@@ -293,16 +294,26 @@ class TestBrowserClient : public ContentBrowserClient {
     return std::make_unique<ScreenEnumeratorMock>(screen_count_);
   }
 
+  bool IsVideoCaptureAllowedWhileScreenLocked(
+      const url::Origin& origin) override {
+    return is_video_capture_allowed_while_screen_locked_;
+  }
+  void set_is_video_capture_allowed_while_screen_locked(bool allowed) {
+    is_video_capture_allowed_while_screen_locked_ = allowed;
+  }
+
   MOCK_METHOD(void,
               NotifyMultiCaptureStateChanged,
               (GlobalRenderFrameHostId render_frame_host_id,
                const std::string& label,
-               MultiCaptureChanged state),
+               MultiCaptureChanged state,
+               base::OnceClosure stop_callback),
               (override));
 
  private:
   raw_ptr<MediaObserver> media_observer_;
   raw_ptr<const size_t> screen_count_;
+  bool is_video_capture_allowed_while_screen_locked_ = false;
 };
 
 class MockMediaStreamUIProxy : public FakeMediaStreamUIProxy {
@@ -738,9 +749,11 @@ class MediaStreamManagerTest : public ::testing::Test {
       const std::string& label,
       const media::AudioParameters& output_parameters,
       const blink::mojom::StreamDevicesSet& stream_devices_set,
-      blink::mojom::MediaStreamRequestResult result) {
+      blink::mojom::MediaStreamRequestResult result,
+      bool is_allowed_while_screen_locked = false) {
     media_stream_manager_->HandleAccessRequestResponse(
-        label, output_parameters, stream_devices_set, result);
+        label, output_parameters, stream_devices_set, result,
+        is_allowed_while_screen_locked);
   }
 
   std::string GetLatestLabel() const {
@@ -750,7 +763,8 @@ class MediaStreamManagerTest : public ::testing::Test {
 
   std::string GenerateStreamsAndWaitForApproval(
       const blink::StreamControls& controls,
-      MediaStreamManager::DeviceStoppedCallback stopped_cb =
+      MediaStreamManager::DeviceStoppedCallback stopped_cb = base::DoNothing(),
+      MediaStreamManager::GenerateStreamsCallback generate_stream_cb =
           base::DoNothing()) {
     base::RunLoop run_loop;
     EXPECT_CALL(*media_observer_,
@@ -763,7 +777,7 @@ class MediaStreamManagerTest : public ::testing::Test {
         kRenderFrameHostId, /*requester_id=*/1, /*page_request_id=*/1, controls,
         MediaDeviceSaltAndOrigin::Empty(), /*user_gesture=*/true,
         blink::mojom::StreamSelectionInfo::NewSearchOnlyByDeviceId({}),
-        base::DoNothing(), std::move(stopped_cb), base::DoNothing(),
+        std::move(generate_stream_cb), std::move(stopped_cb), base::DoNothing(),
         base::DoNothing(), base::DoNothing(), base::DoNothing(),
         base::DoNothing());
 
@@ -957,6 +971,59 @@ TEST_F(MediaStreamManagerTest, MakeMultipleRequests) {
   run_loop_.Run();
 }
 
+TEST_F(MediaStreamManagerTest, IsSessionAllowedOnLockScreen) {
+  media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating([]() {
+    auto fake_ui = std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+    fake_ui->AddAvailableDevices({blink::MediaStreamDevice(
+        blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE, "Camera",
+        "Camera")});
+    return fake_ui;
+  }));
+
+  browser_content_client_->set_is_video_capture_allowed_while_screen_locked(
+      true);
+
+  EXPECT_CALL(*media_observer_, OnMediaRequestStateChanged(_, _, _, _, _, _))
+      .Times(testing::AnyNumber());
+
+  blink::StreamControls controls(/*request_audio=*/false,
+                                 /*request_video=*/true);
+  base::UnguessableToken video_session_id;
+  base::RunLoop run_loop;
+  MediaStreamManager::GenerateStreamsCallback generate_stream_cb =
+      base::BindOnce(
+          [](base::UnguessableToken* out_session_id, base::RunLoop* run_loop,
+             blink::mojom::MediaStreamRequestResult result,
+             const std::string& label,
+             blink::mojom::StreamDevicesSetPtr stream_devices_set,
+             bool pan_tilt_zoom_allowed) {
+            if (stream_devices_set &&
+                !stream_devices_set->stream_devices.empty() &&
+                stream_devices_set->stream_devices[0]
+                    ->video_device.has_value()) {
+              *out_session_id = stream_devices_set->stream_devices[0]
+                                    ->video_device->session_id();
+            }
+            run_loop->Quit();
+          },
+          &video_session_id, &run_loop);
+
+  media_stream_manager_->GenerateStreams(
+      kRenderFrameHostId, /*requester_id=*/1, /*page_request_id=*/1, controls,
+      MediaDeviceSaltAndOrigin::Empty(), /*user_gesture=*/true,
+      blink::mojom::StreamSelectionInfo::NewSearchOnlyByDeviceId({}),
+      std::move(generate_stream_cb), base::DoNothing(), base::DoNothing(),
+      base::DoNothing(), base::DoNothing(), base::DoNothing(),
+      base::DoNothing());
+
+  run_loop.Run();
+
+  EXPECT_FALSE(video_session_id.is_empty());
+  EXPECT_TRUE(
+      media_stream_manager_->IsSessionAllowedOnLockScreen(video_session_id));
+}
+
 TEST_F(MediaStreamManagerTest, MakeAndCancelMultipleRequests) {
   std::string label1 = MakeMediaAccessRequest(0);
   std::string label2 = MakeMediaAccessRequest(1);
@@ -1094,6 +1161,96 @@ TEST_F(MediaStreamManagerTest, GenerateDifferentStreamsForAudioDevice) {
     session_ids.insert(audio_device.session_id());
   }
   EXPECT_EQ(session_ids.size(), num_call_iterations);
+}
+
+TEST_F(MediaStreamManagerTest, ValidateAudioSession) {
+  media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating([]() {
+    return std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+  }));
+
+  const blink::MediaStreamDevice audio_device = CreateOrSearchAudioDeviceStream(
+      blink::mojom::StreamSelectionInfo::NewSearchOnlyByDeviceId({}));
+  ASSERT_TRUE(audio_device.session_id());
+
+  EXPECT_TRUE(media_stream_manager_->ValidateAudioSession(
+      audio_device.session_id(), kRenderFrameHostId));
+
+  const GlobalRenderFrameHostId other_frame(
+      kRenderFrameHostId.child_id, kRenderFrameHostId.frame_routing_id + 1);
+  EXPECT_FALSE(media_stream_manager_->ValidateAudioSession(
+      audio_device.session_id(), other_frame));
+
+  const GlobalRenderFrameHostId other_process(
+      ChildProcessId(kRenderFrameHostId.child_id.value() + 1),
+      kRenderFrameHostId.frame_routing_id);
+  EXPECT_FALSE(media_stream_manager_->ValidateAudioSession(
+      audio_device.session_id(), other_process));
+
+  EXPECT_FALSE(media_stream_manager_->ValidateVideoSession(
+      audio_device.session_id(), kRenderFrameHostId));
+
+  // Inactive sessions are accepted to avoid terminating a renderer when a
+  // session closes concurrently with validation. The subsequent device lookup
+  // then fails gracefully.
+  EXPECT_TRUE(media_stream_manager_->ValidateAudioSession(
+      base::UnguessableToken::Create(), kRenderFrameHostId));
+}
+
+TEST_F(MediaStreamManagerTest, AudioOutputAuthorizationUsesBoundFrame) {
+  media_stream_manager_->UseFakeUIFactoryForTests(base::BindRepeating([]() {
+    return std::make_unique<FakeMediaStreamUIProxy>(
+        /*tests_use_fake_render_frame_hosts=*/true);
+  }));
+
+  const blink::MediaStreamDevice audio_device = CreateOrSearchAudioDeviceStream(
+      blink::mojom::StreamSelectionInfo::NewSearchOnlyByDeviceId({}));
+  ASSERT_TRUE(audio_device.session_id());
+
+  const GlobalRenderFrameHostId other_frame(
+      kRenderFrameHostId.child_id, kRenderFrameHostId.frame_routing_id + 1);
+  const GlobalRenderFrameHostId other_process(
+      ChildProcessId(kRenderFrameHostId.child_id.value() + 1),
+      kRenderFrameHostId.frame_routing_id);
+
+  {
+    AudioOutputAuthorizationHandler handler(
+        audio_system_.get(), media_stream_manager_.get(), kRenderFrameHostId);
+    base::test::TestFuture<media::OutputDeviceStatus,
+                           const media::AudioParameters&, const std::string&,
+                           const std::string&>
+        authorization;
+    handler.RequestDeviceAuthorization(audio_device.session_id(), std::string(),
+                                       authorization.GetCallback());
+    // The selected device may be either the default device or an output device
+    // matched to the audio input. Only authorization is relevant here.
+    EXPECT_EQ(authorization.Get<0>(), media::OUTPUT_DEVICE_STATUS_OK);
+  }
+
+  const auto expect_not_authorized =
+      [&](GlobalRenderFrameHostId render_frame_host_id) {
+        SCOPED_TRACE(testing::Message()
+                     << "child_id=" << render_frame_host_id.child_id.value()
+                     << ", frame_routing_id="
+                     << render_frame_host_id.frame_routing_id);
+        AudioOutputAuthorizationHandler handler(audio_system_.get(),
+                                                media_stream_manager_.get(),
+                                                render_frame_host_id);
+        base::test::TestFuture<media::OutputDeviceStatus,
+                               const media::AudioParameters&,
+                               const std::string&, const std::string&>
+            authorization;
+        handler.RequestDeviceAuthorization(audio_device.session_id(),
+                                           std::string(),
+                                           authorization.GetCallback());
+        EXPECT_EQ(authorization.Get<0>(),
+                  media::OUTPUT_DEVICE_STATUS_ERROR_NOT_AUTHORIZED);
+        EXPECT_EQ(authorization.Get<2>(), std::string());
+        EXPECT_EQ(authorization.Get<3>(), std::string());
+      };
+
+  expect_not_authorized(other_frame);
+  expect_not_authorized(other_process);
 }
 
 TEST_F(MediaStreamManagerTest, GenerateAndReuseStreamForAudioDevice) {

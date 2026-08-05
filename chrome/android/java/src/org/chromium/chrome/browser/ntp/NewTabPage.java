@@ -12,6 +12,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.os.SystemClock;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
@@ -24,6 +25,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.CallbackController;
 import org.chromium.base.CallbackUtils;
+import org.chromium.base.DeviceInfo;
 import org.chromium.base.Log;
 import org.chromium.base.TimeUtils;
 import org.chromium.base.TraceEvent;
@@ -35,6 +37,7 @@ import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.EnsuresNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.feed.FeedActionDelegateImpl;
 import org.chromium.chrome.browser.back_press.BackPressManager;
@@ -98,11 +101,14 @@ import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.chrome.browser.ui.native_page.NativePageHost;
+import org.chromium.chrome.browser.ui.side_ui.SideUiStateProvider;
 import org.chromium.chrome.browser.ui.theme.ChromeSemanticColorUtils;
 import org.chromium.chrome.browser.url_constants.UrlConstantResolver;
 import org.chromium.chrome.browser.url_constants.UrlConstantResolverFactory;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
+import org.chromium.components.browser_ui.util.BrowserControlsVisibilityDelegate;
+import org.chromium.components.browser_ui.util.FirstDrawDetector;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.Tracker;
@@ -143,6 +149,9 @@ public class NewTabPage
     private static int sTotalCount;
 
     protected final Tab mTab;
+    private final long mNavigationStartMs;
+    private boolean mRecordedFcp;
+
     private final Supplier<@Nullable Tab> mActivityTabProvider;
     private final ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
 
@@ -405,6 +414,7 @@ public class NewTabPage
      * @param moduleRegistrySupplier Supplier for the {@link ModuleRegistry}.
      * @param edgeToEdgeControllerSupplier Supplier for the {@link EdgeToEdgeController}.
      * @param topInsetProvider Provider for top insets.
+     * @param sideUiStateProviderSupplier Supplies the {@link SideUiStateProvider}.
      * @param startupMetricsTracker Used to record NTP startup metric.
      * @param backPressManager Manages back press dispatching.
      */
@@ -432,9 +442,12 @@ public class NewTabPage
             OneshotSupplier<ModuleRegistry> moduleRegistrySupplier,
             MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier,
             TopInsetProvider topInsetProvider,
+            OneshotSupplier<SideUiStateProvider> sideUiStateProviderSupplier,
             StartupMetricsTracker startupMetricsTracker,
             BackPressManager backPressManager) {
         mConstructedTimeNs = System.nanoTime();
+        long startMs = tab.getNavigationStartMs();
+        mNavigationStartMs = startMs > 0 ? startMs : SystemClock.uptimeMillis();
         TraceEvent.begin(TAG);
 
         mActivity = activity;
@@ -530,8 +543,9 @@ public class NewTabPage
                         bottomSheetController,
                         modalDialogManager,
                         snackbarManager,
-                        mIsLff,
+                        isLff,
                         mTabStripHeightSupplier,
+                        sideUiStateProviderSupplier,
                         homeSurfaceTracker,
                         backPressManager);
 
@@ -598,7 +612,36 @@ public class NewTabPage
 
         updateNtpScrollListener(true);
 
+        recordFcpOnFirstDraw();
         TraceEvent.end(TAG);
+    }
+
+    private void recordFcpOnFirstDraw() {
+        View view = getView();
+        if (view == null) return;
+
+        FirstDrawDetector.waitForFirstDraw(
+                view,
+                () -> {
+                    if (mRecordedFcp) return;
+                    mRecordedFcp = true;
+                    long durationMs = SystemClock.uptimeMillis() - mNavigationStartMs;
+                    if (DeviceInfo.isDesktop()) {
+                        // Keep collecting this histogram for Android desktop to avoid losing data.
+                        // TODO(crbug.com/531793117): Remove this histogram once we have finished
+                        // the study for Android desktop.
+                        RecordHistogram.recordMediumTimesHistogram(
+                                "NewTabPage.LoadTime.FirstContentfulPaint", durationMs);
+                    }
+                    // LINT.IfChange(page_load_histogram)
+                    RecordHistogram.recordCustomTimesHistogram(
+                            "NewTabPage.LoadTime.FirstContentfulPaint2",
+                            durationMs,
+                            10,
+                            10 * TimeUtils.MILLISECONDS_PER_MINUTE,
+                            100);
+                    // LINT.ThenChange(/components/page_load_metrics/browser/page_load_metrics_util.h:page_load_histogram)
+                });
     }
 
     /**
@@ -721,7 +764,7 @@ public class NewTabPage
         if (!mIsLff) {
             mUseLightIconTint = applyWhiteBackgroundOnSearchBox;
         }
-        mNewTabPageCoordinator.onCustomizedBackgroundChanged(applyWhiteBackgroundOnSearchBox);
+        mNewTabPageCoordinator.onCustomizedBackgroundChanged();
     }
 
     /** Initializes whether to use a light tint color on icons of toolbar and status bar. */
@@ -1337,6 +1380,17 @@ public class NewTabPage
             if (!(provider instanceof BrowserControlsVisibilityManager)) return;
 
             BrowserControlsVisibilityManager manager = (BrowserControlsVisibilityManager) provider;
+
+            // If browser controls are locked persistently in the SHOWN state (e.g., during layout
+            // transitions or background tab creation animations), ignore scroll events to prevent
+            // hiding the bottom controls.
+            BrowserControlsVisibilityDelegate visibilityDelegate =
+                    manager.getBrowserVisibilityDelegate();
+            if (visibilityDelegate != null
+                    && visibilityDelegate.get() == BrowserControlsState.SHOWN) {
+                return;
+            }
+
             int bottomControlsHeight = manager.getBottomControlsHeight();
             if (bottomControlsHeight <= 0) return;
 

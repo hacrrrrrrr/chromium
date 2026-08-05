@@ -262,6 +262,7 @@ constexpr auto kContentSettingsTypeGroupNames = std::to_array<
     {ContentSettingsType::SUSPICIOUS_NOTIFICATION_SHOW_ORIGINAL, nullptr},
     {ContentSettingsType::LOCAL_NETWORK_ACCESS, nullptr},
     {ContentSettingsType::SUB_APPS_WITHOUT_PROMPTS, nullptr},
+    {ContentSettingsType::SUSPICIOUS_SITE_WARNING_DATA, nullptr},
 });
 
 static_assert(
@@ -615,10 +616,6 @@ std::vector<ContentSettingsType> GetVisiblePermissionCategories(
   if (!initialized) {
     // The permission categories in this block are only shown when running with
     // certain flags/switches.
-    if (base::FeatureList::IsEnabled(features::kGlicSelectionPrompt)) {
-      base_types->push_back(ContentSettingsType::INLINE_CUE_MENU);
-    }
-
     if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             ::switches::kEnableExperimentalWebPlatformFeatures)) {
       base_types->push_back(ContentSettingsType::BLUETOOTH_SCANNING);

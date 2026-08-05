@@ -1878,6 +1878,30 @@ TEST_F(AuthenticatorContentBrowserClientTest,
             AuthenticatorStatus::SUCCESS);
 }
 
+TEST_F(AuthenticatorContentBrowserClientTest, ReportTLSError) {
+  NavigateAndCommit(GURL(kTestOrigin1));
+  test_client_.is_webauthn_security_level_acceptable = false;
+  PublicKeyCredentialReportOptionsPtr options =
+      GetTestPublicKeyCredentialReportOptions();
+  EXPECT_EQ(AuthenticatorReport(std::move(options)),
+            AuthenticatorStatus::CERTIFICATE_ERROR);
+}
+
+TEST_F(AuthenticatorContentBrowserClientTest,
+       ReportSkipTLSCheckWithVirtualEnvironment) {
+  NavigateAndCommit(GURL(kTestOrigin1));
+  content::AuthenticatorEnvironment::GetInstance()
+      ->EnableVirtualAuthenticatorFor(
+          static_cast<content::RenderFrameHostImpl*>(main_rfh())
+              ->frame_tree_node(),
+          /*enable_ui=*/false);
+  test_client_.is_webauthn_security_level_acceptable = false;
+  PublicKeyCredentialReportOptionsPtr options =
+      GetTestPublicKeyCredentialReportOptions();
+  EXPECT_EQ(AuthenticatorReport(std::move(options)),
+            AuthenticatorStatus::SUCCESS);
+}
+
 TEST_F(AuthenticatorContentBrowserClientTest, TestGetAssertionCancel) {
   NavigateAndCommit(GURL(kTestOrigin1));
   test_client_.simulate_user_cancelled_ = true;
@@ -3222,6 +3246,40 @@ TEST_F(AuthenticatorImplRemoteDesktopClientOverrideTest, GetAssertionAppid) {
 
     auto result = AuthenticatorGetAssertion(std::move(options));
     EXPECT_EQ(result.status, test.expected);
+  }
+}
+
+// A Chrome extension should not be authorized to use the
+// remoteDesktopClientOverride request extension.
+TEST_F(AuthenticatorImplRemoteDesktopClientOverrideTest,
+       ExtensionCallerOrigin) {
+  static const std::string kExtensionOrigin =
+      base::StrCat({kExtensionScheme, "://abcdefg"});
+  test_client_.GetTestWebAuthenticationDelegate()->permit_extensions = true;
+
+  {
+    PublicKeyCredentialCreationOptionsPtr options =
+        GetTestPublicKeyCredentialCreationOptions();
+    options->relying_party.id = kExampleRpId;
+    options->remote_desktop_client_override = RemoteDesktopClientOverride::New(
+        url::Origin::Create(GURL(kExampleOrigin)), true);
+    EXPECT_EQ(
+        AuthenticatorMakeCredential(std::move(options)).status,
+        AuthenticatorStatus::REMOTE_DESKTOP_CLIENT_OVERRIDE_NOT_AUTHORIZED);
+  }
+
+  {
+    PublicKeyCredentialRequestOptionsPtr options =
+        GetTestPublicKeyCredentialRequestOptions();
+    options->relying_party_id = kExampleRpId;
+    options->extensions->remote_desktop_client_override =
+        RemoteDesktopClientOverride::New(
+            url::Origin::Create(GURL(kExampleOrigin)), true);
+    ASSERT_TRUE(virtual_device_factory_->mutable_state()->InjectRegistration(
+        options->allow_credentials[0].id, kExtensionOrigin));
+    EXPECT_EQ(
+        AuthenticatorGetAssertion(std::move(options)).status,
+        AuthenticatorStatus::REMOTE_DESKTOP_CLIENT_OVERRIDE_NOT_AUTHORIZED);
   }
 }
 
@@ -10624,7 +10682,7 @@ TEST_F(AuthenticatorImplTest, CrossDeviceFallbackUrl_BlockedByCSP) {
       network::mojom::ContentSecurityPolicySource::kHTTP, GURL(kTestOrigin1));
   static_cast<RenderFrameHostImpl*>(main_rfh())
       ->policy_container_host()
-      ->AddContentSecurityPolicies(std::move(policies));
+      ->AddContentSecurityPoliciesForTesting(std::move(policies));
 
   device::VirtualCtap2Device::Config config;
   virtual_device_factory_->SetCtap2Config(config);
@@ -10751,7 +10809,8 @@ TEST_F(AuthenticatorImplTest, CmtgKeyEndToEnd) {
 
   // Trigger generation of a new CMTG key on next assertion.
   virtual_device_factory_->mutable_state()
-      ->generate_new_cmtg_key_on_next_assertion = true;
+      ->registrations.at(credential_id)
+      .generate_cmtg_key_on_next_operation = true;
   PublicKeyCredentialRequestOptionsPtr get_options2 =
       GetTestPublicKeyCredentialRequestOptions();
   get_options2->allow_credentials[0].id = credential_id;

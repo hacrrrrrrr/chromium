@@ -234,6 +234,8 @@ bool IsTabGroupMenuMoreEntryPointsEnabled() {
   return base::FeatureList::IsEnabled(kTabGroupMenuMoreEntryPoints);
 }
 
+BASE_FEATURE(kNewTabButtonContextMenu, base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kTabGroupHoverCards, base::FEATURE_ENABLED_BY_DEFAULT);
 
 bool IsTabGroupHoverCardsEnabled() {
@@ -251,8 +253,6 @@ BASE_FEATURE(kTabHoverCardImages,
              base::FEATURE_ENABLED_BY_DEFAULT
 #endif
 );
-
-BASE_FEATURE(kTabStripNewTabButtonFlickerFix, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabModalUsesDesktopWidget, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -315,12 +315,12 @@ BASE_FEATURE(kEnterpriseReleaseNotes, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kManagedProfileRequiredInterstitial,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kMigrateManagementPageToWebUIOnMobile,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+
 #if BUILDFLAG(IS_MAC)
 BASE_FEATURE(kViewsJSAppModalDialog, base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
-
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-BASE_FEATURE(kUsePortalAccentColor, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 BASE_FEATURE(kPageSpecificDataDialogRelatedInstalledAppsSection,
@@ -329,74 +329,16 @@ BASE_FEATURE(kPageSpecificDataDialogRelatedInstalledAppsSection,
 BASE_FEATURE(kEnableManagementPromotionBanner,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kLensOverlayHomeworkPageActionFocusOptimization,
+BASE_FEATURE(kPageActionAnchoredMessageEasyDismiss,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kPageActionsMigration, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kAiModePageActionOptimization, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationEnableAll,
-                   &kPageActionsMigration,
-                   "enable_all",
-                   false);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationIntentPicker,
-                   &kPageActionsMigration,
-                   "intent_picker",
-// TODOD(crbug.com/480035938): Enable on ChromeOS.
-#if BUILDFLAG(IS_CHROMEOS)
-                   true
-#else
-                   true
-#endif
-);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationAutofillMandatoryReauth,
-                   &kPageActionsMigration,
-                   "mandatory_reauth",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationVirtualCard,
-                   &kPageActionsMigration,
-                   "virtual_card",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationFilledCardInformation,
-                   &kPageActionsMigration,
-                   "filled_card_information",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationReadingMode,
-                   &kPageActionsMigration,
-                   "reading_mode",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationSavePayments,
-                   &kPageActionsMigration,
-                   "save_payments",
-                   true);
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationBookmarkStar,
-                   &kPageActionsMigration,
-                   "bookmark_star",
-                   true);
 
 BASE_FEATURE(kPageActionsPrioritySelector, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kByDateHistoryInSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabsFromOtherDevicesSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kTabsFromOtherDevicesSidePanelExcludeStableChannel,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabsFromOtherDevicesSidePanelPinnedByDefault,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -427,82 +369,121 @@ bool IsNewTabAddsToActiveGroupEnabled() {
 }
 
 BASE_FEATURE(kWebUIAvatarButton, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kWebUIMediaButton, base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsWebUIReloadButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIReloadButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIReloadButton));
 }
 
 bool IsWebUIHomeButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIHomeButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIHomeButton));
 }
 
 bool IsWebUIBatterySaverButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIBatterySaverButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIBatterySaverButton));
 }
 
 bool IsWebUIAppMenuButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIAppMenuButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIAppMenuButton));
 }
 
 bool IsWebUIBackForwardButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIBackForwardButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIBackForwardButton));
 }
 
 bool IsWebUIPinnedToolbarActionsEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIPinnedToolbarActions);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIPinnedToolbarActions));
 }
 
 bool IsWebUIExtensionsContainerEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIExtensionsContainer);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIExtensionsContainer));
 }
 
 bool IsWebUISplitTabsButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUISplitTabsButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUISplitTabsButton));
 }
 
 bool IsWebUIAvatarButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUIAvatarButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIAvatarButton));
+}
+
+bool IsWebUIMediaButtonEnabled() {
+  return !IsProcessOverheadExperimentActive() &&
+         base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUIMediaButton));
 }
 
 bool IsWebUIPerformanceInterventionButtonEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(
-             features::kWebUIPerformanceInterventionButton);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(
+              features::kWebUIPerformanceInterventionButton));
 }
 
 bool IsWebUILocationBarEnabled() {
   return !IsProcessOverheadExperimentActive() &&
          base::FeatureList::IsEnabled(features::kInitialWebUI) &&
-         base::FeatureList::IsEnabled(features::kWebUILocationBar);
+         (base::FeatureList::IsEnabled(features::kWebUIToolbar) ||
+          base::FeatureList::IsEnabled(features::kWebUILocationBar));
 }
 
 bool IsWebUIToolbarEnabled() {
+  // Checking IsProcessOverheadExperimentActive() and features::kInitialWebUI
+  // first is a minor optimization, since all other methods return false, if the
+  // first is enabled or the second is disabled.
   return !IsProcessOverheadExperimentActive() &&
+         base::FeatureList::IsEnabled(features::kInitialWebUI) &&
          (IsWebUIReloadButtonEnabled() || IsWebUISplitTabsButtonEnabled() ||
           IsWebUIHomeButtonEnabled() || IsWebUILocationBarEnabled() ||
           IsWebUIBackForwardButtonEnabled() ||
           IsWebUIPinnedToolbarActionsEnabled() ||
           IsWebUIExtensionsContainerEnabled() || IsWebUIAvatarButtonEnabled() ||
-          IsWebUIAppMenuButtonEnabled() || IsWebUIBatterySaverButtonEnabled() ||
+          IsWebUIMediaButtonEnabled() || IsWebUIAppMenuButtonEnabled() ||
+          IsWebUIBatterySaverButtonEnabled() ||
+          IsWebUIPerformanceInterventionButtonEnabled());
+}
+
+bool IsWebUIToolbarFullyEnabled() {
+  // The first block is an optimization, and is not needed for correctness.
+  return (base::FeatureList::IsEnabled(features::kWebUIToolbar) &&
+          !IsProcessOverheadExperimentActive() &&
+          base::FeatureList::IsEnabled(features::kInitialWebUI)) ||
+         (IsWebUIReloadButtonEnabled() && IsWebUISplitTabsButtonEnabled() &&
+          IsWebUIHomeButtonEnabled() && IsWebUILocationBarEnabled() &&
+          IsWebUIBackForwardButtonEnabled() &&
+          IsWebUIPinnedToolbarActionsEnabled() &&
+          IsWebUIExtensionsContainerEnabled() && IsWebUIAvatarButtonEnabled() &&
+          IsWebUIMediaButtonEnabled() && IsWebUIAppMenuButtonEnabled() &&
+          IsWebUIBatterySaverButtonEnabled() &&
           IsWebUIPerformanceInterventionButtonEnabled());
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -540,35 +521,20 @@ BASE_FEATURE_PARAM(bool,
                    "tab_groups_focusing_pinned_tabs",
                    false);
 
-BASE_FEATURE_PARAM(bool,
-                   kTabGroupsFocusingAutoClose,
-                   &kTabGroupsFocusing,
-                   "tab_groups_focusing_auto_close",
-                   false);
+BASE_FEATURE(kTabGroupRibbon, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE_PARAM(bool,
-                   kTabGroupsFocusingDefaultToFocused,
-                   &kTabGroupsFocusing,
-                   "tab_groups_focusing_default_to_focused",
-                   false);
+bool IsTabGroupRibbonEnabled() {
+  return base::FeatureList::IsEnabled(kTabGroupsFocusing) &&
+         base::FeatureList::IsEnabled(kTabGroupRibbon);
+}
 
-BASE_FEATURE(kVerticalTabsGrabHandleRemoval, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kOmniboxResizingPrioritization, base::FEATURE_ENABLED_BY_DEFAULT);
 
-// If false, then the grab handle will only be removed when the vertical tab
-// strip is expanded.
-BASE_FEATURE_PARAM(bool,
-                   kVerticalTabsGrabHandleRemovalAlways,
-                   &kVerticalTabsGrabHandleRemoval,
-                   "vertical_tab_grab_handle_remove_always",
-                   true);
+BASE_FEATURE(kToolbarAppMenuLabelResizing, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kOmniboxResizingPrioritization, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kToolbarProfileChipResizing, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kToolbarAppMenuLabelResizing, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kToolbarProfileChipResizing, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kToolbarGlicButtonResizing, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kToolbarGlicButtonResizing, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kOSCryptAsyncAvailabilityInfoBar,
 #if BUILDFLAG(IS_MAC)

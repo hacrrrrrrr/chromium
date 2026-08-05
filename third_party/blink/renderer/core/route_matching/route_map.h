@@ -8,10 +8,10 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/route_matching/navigation_preposition.h"
 #include "third_party/blink/renderer/core/route_matching/navigation_state.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -21,8 +21,6 @@
 namespace blink {
 
 class Document;
-class Element;
-class JSONValue;
 class Route;
 class URLPattern;
 
@@ -30,37 +28,10 @@ class URLPattern;
 //
 // See;
 // https://github.com/WICG/declarative-partial-updates?tab=readme-ov-file#part-2-route-matching
-class CORE_EXPORT RouteMap final : public ScriptWrappable,
+class CORE_EXPORT RouteMap final : public GarbageCollected<RouteMap>,
                                    public Supplement<Document> {
-  DEFINE_WRAPPERTYPEINFO();
-
  public:
   static const char kSupplementName[];
-
-  struct ParseResult final {
-    // TODO(crbug.com/436805487): Error reporting needs to be specced.
-    enum Status {
-      kSuccess,
-      kSyntaxError,
-      kTypeError,
-    };
-
-    Status status;
-    String message;
-
-    // For `kSuccess` cases (which don't have messages).
-    explicit ParseResult(Status status) : status(status) {
-      CHECK_EQ(status, kSuccess);
-    }
-
-    // For error cases.
-    ParseResult(Status status, String message)
-        : status(status), message(message) {
-      CHECK(status != kSuccess);
-    }
-
-    bool IsSuccess() const { return status == kSuccess; }
-  };
 
   using MatchCollection = HeapHashSet<WeakMember<Route>>;
 
@@ -70,8 +41,6 @@ class CORE_EXPORT RouteMap final : public ScriptWrappable,
   RouteMap();
 
   void Trace(Visitor*) const final;
-
-  Route* get(const String& route_name);
 
   // Supplement support. Document pointers may be null (in which case null will
   // be returned).
@@ -95,8 +64,6 @@ class CORE_EXPORT RouteMap final : public ScriptWrappable,
     needs_style_update_on_navigation_ = true;
   }
 
-  ParseResult ParseAndApplyRoutes(const String& route_map_text);
-
   void AddRouteFromRule(const String& dashed_ident, URLPattern*);
   void AddAnonymousRoute(const AtomicString& url_pattern_string);
 
@@ -104,8 +71,8 @@ class CORE_EXPORT RouteMap final : public ScriptWrappable,
   const Route* FindAnonymousRoute(const AtomicString& url_pattern_string) const;
 
   // Re-match all routes. Schedule for re-evaluation of CSS rules if something
-  // changed.
-  void UpdateActiveRoutes();
+  // changed. NavigationState may be nullptr.
+  void UpdateActiveRoutes(NavigationState*);
 
   // TODO(crbug.com/436805487): We probably don't need to keep this.
   void GetActiveRoutesForTesting(NavigationPreposition, MatchCollection*) const;
@@ -116,31 +83,29 @@ class CORE_EXPORT RouteMap final : public ScriptWrappable,
   // Navigation API.
   void EstablishNavigationStateFromActivation();
 
-  // Set the URLs that we're navigating between at the start of navigation. This
-  // is used to match @route "from" (and "to") rules. This will establish a
-  // NavigationState object. If one already exists, it will be overwritten.
-  void OnNavigationStart(const KURL& previous_url,
-                         const KURL& next_url,
-                         Element* source_element);
+  // Set the navigation as started, based on the current NavigationState. This
+  // is used to match @route "from" (and "to") rules.
+  void SetNavigationStarted();
 
-  void OnNavigationTraverse(NavigationState::HistoryTraverseType type);
+  void SetTraverseType(NavigationState::HistoryTraverseType type);
 
   // The current URL has changed. This is used to match @route "at" and "with"
   // rules. What was "at" is now "with", and vice versa.
-  void OnNavigationCommitted();
+  void SetCommitted();
 
-  // Clear the URL that we're navigating between when the navigation is
-  // complete. Calling this if there's no active navigation is allowed, and has
-  // no effect.
-  void OnNavigationDone();
+  // Finish the navigation if allowed, and update routes. Calling this if
+  // there's no active navigation is allowed, and has no effect.
+  //
+  // Returns false if we cannot finish yet, e.g. due to an active view
+  // transition.
+  bool AttemptSetNavigationFinished();
 
   void OnPreviewStart();
   void OnPreviewFinished();
 
-  const NavigationState* GetNavigationState() const {
-    return navigation_state_;
+  bool IsActiveNavigation() const {
+    return !!NavigationState::Get(&GetDocument());
   }
-  bool IsActiveNavigation() const { return !!navigation_state_; }
 
   // Get the "active navigation URL", given the specified preposition.
   //
@@ -148,22 +113,10 @@ class CORE_EXPORT RouteMap final : public ScriptWrappable,
   KURL GetActiveNavigationURL(NavigationPreposition) const;
 
  private:
-  ParseResult AddPatternToRoute(Route&, const JSONValue&);
-
-  // Update the match status of the route, given the current "at", "from",
-  // "with" and "to" URLs. `routes_needing_event`, if set, will be populated by
-  // the routes whose "at" match status changed, which may be used to fire
-  // "activate" or "deactivate" events if the match status changes.
-  bool UpdateMatchStatus(
-      Route&,
-      HeapVector<Member<Route>>* routes_needing_event = nullptr);
-
   void NotifyStyleEngineIfNeeded();
 
   HeapHashMap<String, Member<Route>> routes_;
   HeapHashMap<String, Member<Route>> anonymous_routes_;
-
-  Member<NavigationState> navigation_state_;
 
   bool has_history_rules_ = false;
 

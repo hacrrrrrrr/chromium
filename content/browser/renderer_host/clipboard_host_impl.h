@@ -85,6 +85,7 @@ class CONTENT_EXPORT ClipboardHostImpl
   FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest,
                            WriteBookmark_InvalidUrl_DoesNotCrash);
   FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest, WriteBookmark_EmptyUrl);
+  FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest, WriteBookmark_FileUrl);
   FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest, WriteBitmap);
   FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest, WriteBitmap_Empty);
   FRIEND_TEST_ALL_PREFIXES(ClipboardHostImplWriteTest,
@@ -251,6 +252,14 @@ class CONTENT_EXPORT ClipboardHostImpl
                    ui::ClipboardSequenceNumberToken seqno,
                    ReadFilesCallback callback,
                    std::vector<ui::FileInfo> filenames);
+
+  // Completes ReadFiles() once the data controls / DLP policy decision is
+  // available. Grants the renderer read access to only the files the policy
+  // allows, so no capability is ever issued for blocked files.
+  void OnReadFilesPolicyResult(
+      std::vector<ui::FileInfo> filenames,
+      ReadFilesCallback callback,
+      std::optional<ClipboardPasteData> clipboard_paste_data);
 
   void OnReadDataTransferCustomData(ui::ClipboardBuffer clipboard_buffer,
                                     const std::u16string& type,

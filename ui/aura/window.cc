@@ -31,6 +31,7 @@
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
@@ -319,6 +320,10 @@ void Window::Init(ui::LayerType layer_type) {
   SetLayer(ui::Layer::Create(layer_type));
   layer()->SetVisible(false);
   layer()->set_delegate(this);
+  if (auto* surface = layer()->AsSurface()) {
+    surface->SetBackgroundColor(SkColors::kWhite);
+  }
+
   UpdateLayerName();
   Env::GetInstance()->NotifyWindowInitialized(this);
 }
@@ -412,7 +417,9 @@ void Window::SetLayerManagedByParent(bool layer_managed_by_parent) {
 void Window::SetFillsBoundsCompletely(bool fills_bounds) {
   CHECK(layer());
   DUMP_WILL_BE_CHECK(!is_destroying_);
-  layer()->SetFillsBoundsCompletely(fills_bounds);
+  if (auto* textured = layer()->AsTextured()) {
+    textured->SetFillsBoundsCompletely(fills_bounds);
+  }
 }
 
 Window* Window::GetRootWindow() {
@@ -522,6 +529,30 @@ gfx::Rect Window::GetActualBoundsInScreen() const {
     bounds.set_origin(origin_in_screen);
   }
   return bounds;
+}
+
+gfx::Rect Window::GetBoundsInScreenWithoutTransform() const {
+  if (aura::client::ScreenPositionClient* screen_position_client =
+          aura::client::GetScreenPositionClient(GetRootWindow())) {
+    gfx::Point origin;
+    screen_position_client->ConvertPointToScreenIgnoringTransforms(this,
+                                                                   &origin);
+    return gfx::Rect(origin, bounds().size());
+  } else {
+    gfx::Point origin;
+    const Window* current_window = this;
+    const Window* root_window = GetRootWindow();
+    if (root_window) {
+      // If aura::client::GetScreenPositionClient returns null, then the origin
+      // of the root_window is always (0, 0).
+      CHECK_EQ(root_window->GetBoundsInScreen().origin(), gfx::Point(0, 0));
+    }
+    while (current_window && current_window != root_window) {
+      origin += current_window->bounds().OffsetFromOrigin();
+      current_window = current_window->parent();
+    }
+    return gfx::Rect(origin, bounds().size());
+  }
 }
 
 void Window::SetTransform(const gfx::Transform& transform) {
@@ -1110,6 +1141,9 @@ void Window::GetDebugInfo(const aura::Window* active_window,
     case ui::LAYER_NINE_PATCH:
       *out << " layer(nine_patch ";
       break;
+    case ui::LAYER_SURFACE:
+      *out << " layer(surface ";
+      break;
   }
 
   *out << (layer()->GetTargetVisibility() ? " visible)" : " hidden)");
@@ -1475,7 +1509,12 @@ void Window::NotifyAddedToRootWindow() {
 
 void Window::NotifyWindowHierarchyChange(
     const WindowObserver::HierarchyChangeParams& params) {
-  ScopedDeleteBlocker blocker(this);
+
+  // Block deletion of old_parent and new_parent across all target
+  // sub-tree callbacks to ensure neither parent is destroyed before
+  // NotifyWindowHierarchyChangeUp() runs.
+  ScopedDeleteBlocker old_blocker(params.old_parent);
+  ScopedDeleteBlocker new_blocker(params.new_parent);
 
   params.target->NotifyWindowHierarchyChangeDown(params);
   switch (params.phase) {
@@ -1507,6 +1546,8 @@ void Window::NotifyWindowHierarchyChangeUp(
 
 void Window::NotifyWindowHierarchyChangeAtReceiver(
     const WindowObserver::HierarchyChangeParams& params) {
+  ScopedDeleteBlocker blocker(this);
+
   WindowObserver::HierarchyChangeParams local_params = params;
   local_params.receiver = this;
 
@@ -1993,9 +2034,10 @@ void Window::SetLayer(std::unique_ptr<ui::Layer> alayer) {
 
 void Window::OnFirstSurfaceActivation(const viz::SurfaceInfo& surface_info) {
   DCHECK_EQ(surface_info.id().frame_sink_id(), GetFrameSinkId());
-  layer()->SetShowSurface(surface_info.id(), bounds().size(), SK_ColorWHITE,
-                          cc::DeadlinePolicy::UseDefaultDeadline(),
-                          false /* stretch_content_to_fill_bounds */);
+  layer()->AsSurface()->SetShowSurface(
+      surface_info.id(), bounds().size(),
+      cc::DeadlinePolicy::UseDefaultDeadline(),
+      /*stretch_content_to_fill_bounds=*/false);
 }
 
 void Window::OnFrameTokenChanged(uint32_t frame_token,
@@ -2155,6 +2197,29 @@ void Window::SetVisible(bool visible) {
   else
     Hide();
   // Changed notification is handled in SetVisibleInternal().
+}
+
+Window::ScopedDeleteBlocker::ScopedDeleteBlocker(Window* window)
+    : window_(window) {
+  if (window_) {
+    window_->delete_block_count_++;
+  }
+}
+
+Window::ScopedDeleteBlocker::ScopedDeleteBlocker(const Windows& windows)
+    : windows_(windows) {
+  for (Window* window : windows_) {
+    window->delete_block_count_++;
+  }
+}
+
+Window::ScopedDeleteBlocker::~ScopedDeleteBlocker() {
+  if (window_) {
+    window_->delete_block_count_--;
+  }
+  for (Window* window : windows_) {
+    window->delete_block_count_--;
+  }
 }
 
 BEGIN_METADATA_BASE(Window)

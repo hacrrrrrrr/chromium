@@ -33,7 +33,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -72,7 +72,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -111,7 +111,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -150,7 +150,115 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 4
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "arm64",
+            "os": "Mac-26",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 4
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "arm64",
+            "os": "Mac-26",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 4
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "arm64",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -193,7 +301,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -232,7 +340,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -271,7 +379,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -310,7 +418,115 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "os": "Mac-15",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "os": "Mac-15",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -516,7 +732,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -543,7 +759,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -570,7 +786,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -596,7 +812,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -622,7 +838,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -648,7 +864,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -679,7 +895,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -706,7 +922,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -733,7 +949,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -759,7 +975,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -785,7 +1001,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -811,7 +1027,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -1380,7 +1596,7 @@
             "cpu": "arm64",
             "device": "iPhone14,5",
             "device_status": "available",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "named_caches": [
@@ -1421,7 +1637,7 @@
             "cpu": "arm64",
             "device": "iPhone14,5",
             "device_status": "available",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "named_caches": [
@@ -1470,7 +1686,7 @@
           ],
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "named_caches": [
@@ -1518,7 +1734,7 @@
           ],
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "named_caches": [
@@ -1642,6 +1858,112 @@
     "isolated_scripts": [
       {
         "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "gce": "0",
+            "os": "Ubuntu-22.04",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "gce": "0",
+            "gpu": "10de|1002|8086:4680|8086:a780|8086:a7a0",
+            "os": "Ubuntu-22.04",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "gce": "0",
+            "os": "Ubuntu-22.04",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
           "--benchmark_binary_dir=./",
           "--backends=cpu"
         ],
@@ -1751,88 +2073,6 @@
         },
         "test": "model_validation_tests_light",
         "test_id_prefix": "ninja://components/optimization_guide/internal/testing:model_validation_tests_light/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=cpu"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_cpu_no_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "cpu": "x86-64",
-            "gce": "0",
-            "os": "Ubuntu-22.04",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=gpu"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_gpu_no_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "cpu": "x86-64",
-            "gce": "0",
-            "os": "Ubuntu-22.04",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=gpu",
-          "--use_submodel"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_gpu_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "cpu": "x86-64",
-            "gce": "0",
-            "os": "Ubuntu-22.04",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
       },
       {
         "args": [
@@ -1935,7 +2175,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -1956,7 +2196,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -1979,7 +2219,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -1997,7 +2237,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2009,10 +2249,7 @@
     "isolated_scripts": [
       {
         "args": [
-          "--framework=litert-lm",
-          "--backend=cpu",
-          "--performance-hint=ON_DEVICE_MODEL_PERFORMANCE_HINT_CPU",
-          "--expectations-file=AIExpectations_LiteRTCPU",
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
           "--release",
           "--timeout-multiplier=5",
           "--child-processes=1",
@@ -2028,7 +2265,7 @@
         },
         "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
         "module_scheme": "webtest",
-        "name": "chrome_ai_wpt_tests_litert_cpu",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
         "resultdb": {
           "enable": true,
           "has_native_resultdb_integration": true
@@ -2037,7 +2274,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -2048,10 +2285,7 @@
       },
       {
         "args": [
-          "--framework=litert-lm",
-          "--backend=gpu",
-          "--performance-hint=ON_DEVICE_MODEL_PERFORMANCE_HINT_FASTEST_INFERENCE",
-          "--expectations-file=AIExpectations_LiteRTGPU",
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
           "--release",
           "--timeout-multiplier=5",
           "--child-processes=1",
@@ -2067,7 +2301,7 @@
         },
         "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
         "module_scheme": "webtest",
-        "name": "chrome_ai_wpt_tests_litert_gpu",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
         "resultdb": {
           "enable": true,
           "has_native_resultdb_integration": true
@@ -2076,7 +2310,43 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 4
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "arm64",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -2103,7 +2373,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2129,7 +2399,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2158,7 +2428,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2183,7 +2453,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2211,7 +2481,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2233,7 +2503,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "arm64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-26",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2258,7 +2528,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2279,7 +2549,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2302,7 +2572,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2320,7 +2590,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2332,10 +2602,7 @@
     "isolated_scripts": [
       {
         "args": [
-          "--framework=litert-lm",
-          "--backend=cpu",
-          "--performance-hint=ON_DEVICE_MODEL_PERFORMANCE_HINT_CPU",
-          "--expectations-file=AIExpectations_LiteRTCPU",
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
           "--release",
           "--timeout-multiplier=5",
           "--child-processes=1",
@@ -2351,7 +2618,7 @@
         },
         "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
         "module_scheme": "webtest",
-        "name": "chrome_ai_wpt_tests_litert_cpu",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
         "resultdb": {
           "enable": true,
           "has_native_resultdb_integration": true
@@ -2360,7 +2627,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -2371,10 +2638,7 @@
       },
       {
         "args": [
-          "--framework=litert-lm",
-          "--backend=gpu",
-          "--performance-hint=ON_DEVICE_MODEL_PERFORMANCE_HINT_FASTEST_INFERENCE",
-          "--expectations-file=AIExpectations_LiteRTGPU",
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
           "--release",
           "--timeout-multiplier=5",
           "--child-processes=1",
@@ -2390,7 +2654,7 @@
         },
         "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
         "module_scheme": "webtest",
-        "name": "chrome_ai_wpt_tests_litert_gpu",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
         "resultdb": {
           "enable": true,
           "has_native_resultdb_integration": true
@@ -2399,7 +2663,43 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
+            "pool": "chrome.tests"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 4
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--driver-name",
+          "Google Chrome",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "cpu": "x86-64",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
@@ -2426,7 +2726,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2452,7 +2752,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2481,7 +2781,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2506,7 +2806,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2534,7 +2834,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -2556,7 +2856,7 @@
         "swarming": {
           "dimensions": {
             "cpu": "x86-64",
-            "os": "Mac-15|Mac-26",
+            "os": "Mac-15",
             "pool": "chrome.tests"
           },
           "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
@@ -3301,6 +3601,109 @@
     "isolated_scripts": [
       {
         "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_cpu",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "gce": "0",
+            "os": "Windows-10-19045",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--additional-driver-flag=--enable-features=OnDeviceModelGpuAudioInput:on_device_model_audio_input_vram_min/5000",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_high_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "gce": "0",
+            "os": "Windows-10-19045",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
+          "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+          "--release",
+          "--timeout-multiplier=5",
+          "--child-processes=1",
+          "--write-run-histories-to=${ISOLATED_OUTDIR}/run_histories.json"
+        ],
+        "merge": {
+          "args": [
+            "--verbose"
+          ],
+          "script": "//third_party/blink/tools/merge_web_test_results.py"
+        },
+        "module_name": "//components/optimization_guide/internal/testing:chrome_ai_wpt_tests",
+        "module_scheme": "webtest",
+        "name": "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+        "resultdb": {
+          "enable": true,
+          "has_native_resultdb_integration": true
+        },
+        "results_handler": "layout tests",
+        "swarming": {
+          "dimensions": {
+            "gce": "0",
+            "os": "Windows-10-19045",
+            "pool": "chrome.tests.intelligence"
+          },
+          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com",
+          "shards": 8
+        },
+        "test": "chrome_ai_wpt_tests",
+        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:chrome_ai_wpt_tests/"
+      },
+      {
+        "args": [
           "--benchmark_binary_dir=./",
           "--backends=cpu"
         ],
@@ -3404,85 +3807,6 @@
         },
         "test": "model_validation_tests_light",
         "test_id_prefix": "ninja://components/optimization_guide/internal/testing:model_validation_tests_light/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=cpu"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_cpu_no_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "gce": "0",
-            "os": "Windows-10-19045",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=gpu"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_gpu_no_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "gce": "0",
-            "os": "Windows-10-19045",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
-      },
-      {
-        "args": [
-          "--benchmark_binary_dir=./",
-          "--backends=gpu",
-          "--use_submodel"
-        ],
-        "merge": {
-          "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
-        },
-        "module_name": "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
-        "module_scheme": "flat",
-        "name": "ondevice_model_benchmark_tests_gpu_submodel",
-        "resultdb": {
-          "enable": true,
-          "has_native_resultdb_integration": true
-        },
-        "swarming": {
-          "dimensions": {
-            "gce": "0",
-            "os": "Windows-10-19045",
-            "pool": "chrome.tests.intelligence"
-          },
-          "service_account": "chrome-tester@chops-service-accounts.iam.gserviceaccount.com"
-        },
-        "test": "ondevice_model_benchmark_tests",
-        "test_id_prefix": "ninja://components/optimization_guide/internal/testing:ondevice_model_benchmark_tests/"
       },
       {
         "args": [

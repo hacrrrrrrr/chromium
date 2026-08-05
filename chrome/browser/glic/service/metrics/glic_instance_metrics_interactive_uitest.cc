@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
+
 #include "base/strings/string_number_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
@@ -12,7 +14,6 @@
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_side_panel_coordinator.h"
 #include "chrome/browser/glic/service/glic_instance_impl.h"
-#include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
 #include "chrome/browser/glic/service/metrics/glic_metrics_session_manager.h"
 #include "chrome/browser/glic/test_support/glic_test_util.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
@@ -31,15 +32,18 @@ namespace glic {
 
 DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSecondTabElementId);
 
+namespace {
 // Use 45 ms for testing.
-base::TimeDelta INACTIVITY_TIMEOUT_MS = base::Milliseconds(45);
+constexpr base::TimeDelta kInactivityTimeoutMs = base::Milliseconds(45);
 // Use 30 ms for testing.
-base::TimeDelta HIDDEN_TIMEOUT_MS = base::Milliseconds(30);
+constexpr base::TimeDelta kHiddenTimeoutMs = base::Milliseconds(30);
 // Use 5 ms for testing.
-base::TimeDelta START_TIMER_MS = base::Milliseconds(5);
+constexpr base::TimeDelta kStartTimerMs = base::Milliseconds(5);
 // Use 1 ms for testing.
-base::TimeDelta DEBOUNCE_TIMEOUT_MS = base::Milliseconds(1);
+constexpr base::TimeDelta kDebounceTimeoutMs = base::Milliseconds(1);
+}  // namespace
 
+// TODO(crbug.com/537846973): Migrate this test suite to GlicBrowserTest.
 class GlicInstanceMetricsTest : public test::InteractiveGlicTest {
  public:
   GlicInstanceMetricsTest() {
@@ -47,14 +51,14 @@ class GlicInstanceMetricsTest : public test::InteractiveGlicTest {
         {
             {features::kGlicMetricsSession,
              {{features::kGlicMetricsSessionInactivityTimeout.name,
-               base::NumberToString(INACTIVITY_TIMEOUT_MS.InMilliseconds()) +
+               base::NumberToString(kInactivityTimeoutMs.InMilliseconds()) +
                    "ms"},
               {features::kGlicMetricsSessionHiddenTimeout.name,
-               base::NumberToString(HIDDEN_TIMEOUT_MS.InMilliseconds()) + "ms"},
+               base::NumberToString(kHiddenTimeoutMs.InMilliseconds()) + "ms"},
               {features::kGlicMetricsSessionStartTimeout.name,
-               base::NumberToString(START_TIMER_MS.InMilliseconds()) + "ms"},
+               base::NumberToString(kStartTimerMs.InMilliseconds()) + "ms"},
               {features::kGlicMetricsSessionRestartDebounceTimer.name,
-               base::NumberToString(DEBOUNCE_TIMEOUT_MS.InMilliseconds()) +
+               base::NumberToString(kDebounceTimeoutMs.InMilliseconds()) +
                    "ms"}}},
         },
         {});
@@ -80,7 +84,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTest,
     base::RunLoop run_loop;
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(),
-        START_TIMER_MS + base::Milliseconds(10));
+        kStartTimerMs + base::Milliseconds(10));
     run_loop.Run();
   }
   EXPECT_EQ(user_action_tester_.GetActionCount("Glic.Instance.Created"), 1);
@@ -95,7 +99,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTest,
     base::RunLoop run_loop;
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(),
-        START_TIMER_MS + base::Milliseconds(10));
+        kStartTimerMs + base::Milliseconds(10));
     run_loop.Run();
   }
   RunTestSequence(
@@ -114,12 +118,12 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTest, SessionEndsWhenHidden) {
   RunTestSequence(
       ToggleGlicWindow(GlicWindowMode::kAttached),
       WaitForAndInstrumentGlic(GlicInstrumentMode::kHostAndContents),
-      Wait(START_TIMER_MS + base::Milliseconds(10)), CloseGlic(),
+      Wait(kStartTimerMs + base::Milliseconds(10)), CloseGlic(),
       WaitForHide(kGlicHostElementId));
   {
     base::RunLoop run_loop;
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(), HIDDEN_TIMEOUT_MS);
+        FROM_HERE, run_loop.QuitClosure(), kHiddenTimeoutMs);
     run_loop.Run();
   }
   EXPECT_EQ(
@@ -154,7 +158,7 @@ IN_PROC_BROWSER_TEST_F(GlicFreMetricsTest, FreShownAndDismissed) {
   RunTestSequence(
       ToggleGlicWindow(GlicWindowMode::kAttached),
       WaitForAndInstrumentGlic(GlicInstrumentMode::kHostAndContents),
-      Wait(START_TIMER_MS + base::Milliseconds(10)),
+      Wait(kStartTimerMs + base::Milliseconds(10)),
       ToggleGlicWindow(GlicWindowMode::kAttached),
       WaitForHide(kGlicHostElementId));
 
@@ -181,7 +185,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTest,
             browser(), false, mojom::InvocationSource::kAutoOpenedForPdf);
       }),
       WaitForAndInstrumentGlic(GlicInstrumentMode::kHostAndContents),
-      Wait(START_TIMER_MS + base::Milliseconds(10)), CloseGlic(),
+      Wait(kStartTimerMs + base::Milliseconds(10)), CloseGlic(),
       WaitForHide(kGlicHostElementId));
 
   auto entries = ukm_tester.GetEntriesByName(
@@ -223,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTestWithDaisyChaining,
             browser(), false, mojom::InvocationSource::kAutoOpenedForPdf);
       }),
       WaitForAndInstrumentGlic(GlicInstrumentMode::kHostAndContents),
-      Wait(START_TIMER_MS + base::Milliseconds(10)),
+      Wait(kStartTimerMs + base::Milliseconds(10)),
       StopObservingState(glic::test::internal::kDelayState),
       // Open Tab 2 and switch to it
       AddInstrumentedTab(kSecondTabElementId,
@@ -245,7 +249,7 @@ IN_PROC_BROWSER_TEST_F(GlicInstanceMetricsTestWithDaisyChaining,
                                        DaisyChainSource::kAutoOpenPdf);
       }),
       WaitForShow(kGlicViewElementId),
-      Wait(START_TIMER_MS + base::Milliseconds(10)),
+      Wait(kStartTimerMs + base::Milliseconds(10)),
       StopObservingState(glic::test::internal::kDelayState),
       // Explicitly close Glic side panel on Tab 2
       Do([this] {

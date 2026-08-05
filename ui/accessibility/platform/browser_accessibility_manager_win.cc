@@ -63,6 +63,14 @@ BrowserAccessibility* GetUiaTextPatternProvider(BrowserAccessibility& node) {
 constexpr char kBrowserRootViewClassName[] = "BrowserRootView";
 constexpr char kTabClassName[] = "Tab";
 
+BrowserAccessibilityComWin* ToBrowserAccessibilityComWin(AXPlatformNode* node) {
+  if (!node) {
+    return nullptr;
+  }
+  return ::ui::ToBrowserAccessibilityComWin(
+      BrowserAccessibility::FromAXPlatformNodeDelegate(node->GetDelegate()));
+}
+
 }  // namespace
 
 // static
@@ -134,22 +142,11 @@ AXTreeUpdate BrowserAccessibilityManagerWin::GetEmptyDocument() {
 }
 
 HWND BrowserAccessibilityManagerWin::GetParentHWND() const {
-  if (!delegate()) {
+  AXPlatformTreeManagerDelegate* delegate = GetDelegateForNativeView();
+  if (!delegate) {
     return nullptr;
   }
-
-  // For non-web-content sources (e.g., Views), the delegate directly provides
-  // the HWND. For web content, we must walk up to the root frame manager to
-  // find the HWND, because child frames (iframes) share the top-level HWND.
-  if (!delegate()->AccessibilityIsWebContentSource()) {
-    return delegate()->AccessibilityGetAcceleratedWidget();
-  }
-
-  AXPlatformTreeManagerDelegate* root_delegate = GetDelegateFromRootManager();
-  if (!root_delegate) {
-    return nullptr;
-  }
-  return root_delegate->AccessibilityGetAcceleratedWidget();
+  return delegate->AccessibilityGetAcceleratedWidget();
 }
 
 void BrowserAccessibilityManagerWin::UserIsReloading() {
@@ -1026,12 +1023,8 @@ bool BrowserAccessibilityManagerWin::CanFireEvents() const {
     return false;
   }
 
-  if (delegate()->AccessibilityIsWebContentSource()) {
-    return GetDelegateFromRootManager() &&
-           GetDelegateFromRootManager()->AccessibilityGetAcceleratedWidget();
-  }
-
-  return delegate()->AccessibilityGetAcceleratedWidget();
+  AXPlatformTreeManagerDelegate* delegate = GetDelegateForNativeView();
+  return delegate && delegate->AccessibilityGetAcceleratedWidget();
 }
 
 void BrowserAccessibilityManagerWin::OnSubtreeWillBeDeleted(AXTree* tree,
@@ -1067,8 +1060,9 @@ void BrowserAccessibilityManagerWin::OnAtomicUpdateFinished(
   // recomputes all of win_attributes_ other than IAccessibleText.
   auto state_scan = update_states.begin();
   for (auto* node : objs_to_update) {
-    static_cast<BrowserAccessibilityComWin*>(node)
-        ->UpdateStep1ComputeWinAttributes(&*state_scan);
+    if (auto* com_win = ToBrowserAccessibilityComWin(node)) {
+      com_win->UpdateStep1ComputeWinAttributes(&*state_scan);
+    }
     ++state_scan;
   }
 
@@ -1076,8 +1070,9 @@ void BrowserAccessibilityManagerWin::OnAtomicUpdateFinished(
   // concatenation of all of its child text nodes, so it can't run until
   // the text of all of the nodes was computed in the previous step.
   for (auto* node : objs_to_update) {
-    static_cast<BrowserAccessibilityComWin*>(node)
-        ->UpdateStep2ComputeHypertext();
+    if (auto* com_win = ToBrowserAccessibilityComWin(node)) {
+      com_win->UpdateStep2ComputeHypertext();
+    }
   }
 
   // The third step fires events on nodes based on what's changed - like
@@ -1089,7 +1084,9 @@ void BrowserAccessibilityManagerWin::OnAtomicUpdateFinished(
   // At the end, it deletes old_win_attributes_ since they're not needed
   // anymore.
   for (auto* node : objs_to_update) {
-    static_cast<BrowserAccessibilityComWin*>(node)->UpdateStep3FireEvents();
+    if (auto* com_win = ToBrowserAccessibilityComWin(node)) {
+      com_win->UpdateStep3FireEvents();
+    }
   }
 }
 
@@ -1253,12 +1250,7 @@ void BrowserAccessibilityManagerWin::EnqueueSelectionChangedEvent(
 
 gfx::Rect BrowserAccessibilityManagerWin::GetViewBoundsInScreenCoordinates()
     const {
-  // For views-sourced managers, use own delegate directly (no root-frame
-  // hierarchy).  For web content, walk up to the root frame manager.
-  AXPlatformTreeManagerDelegate* target_delegate =
-      (delegate() && !delegate()->AccessibilityIsWebContentSource())
-          ? delegate()
-          : GetDelegateFromRootManager();
+  AXPlatformTreeManagerDelegate* target_delegate = GetDelegateForNativeView();
   if (!target_delegate) {
     return gfx::Rect();
   }

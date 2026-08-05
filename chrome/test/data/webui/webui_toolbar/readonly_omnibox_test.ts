@@ -24,6 +24,7 @@ class MockToolbarUiHandler extends TestBrowserProxy {
     return Promise.resolve({
       adjustedText: text,
       adjustedUrl: null,
+      pageTitle: null,
     });
   }
 }
@@ -46,6 +47,7 @@ suite('ReadonlyOmnibox', function() {
     browserVersion: 0,
     uiVersion: 0,
     textPieces: [],
+    placeholder: null,
     inlineAutocompletion: '',
     additionalText: '',
     formattedFullUrl: '',
@@ -124,6 +126,42 @@ suite('ReadonlyOmnibox', function() {
   function fakeLeftMouseUp(buttons = 0) {
     const evUp = new MouseEvent('mouseup', {detail: 1, button: 0, buttons});
     getTextInput().dispatchEvent(evUp);
+  }
+
+  function fakePointerDown(
+      pointerId: number, pointerType: string, clientX = 0, clientY = 0) {
+    const evDown = new PointerEvent('pointerdown', {
+      pointerId,
+      pointerType,
+      clientX,
+      clientY,
+      bubbles: true,
+      cancelable: true,
+    });
+    getTextInput().dispatchEvent(evDown);
+  }
+
+  function fakePointerUp(
+      pointerId: number, pointerType: string, clientX = 0, clientY = 0) {
+    const evUp = new PointerEvent('pointerup', {
+      pointerId,
+      pointerType,
+      clientX,
+      clientY,
+      bubbles: true,
+      cancelable: true,
+    });
+    getTextInput().dispatchEvent(evUp);
+  }
+
+  function fakePointerCancel(pointerId: number, pointerType: string) {
+    const evCancel = new PointerEvent('pointercancel', {
+      pointerId,
+      pointerType,
+      bubbles: true,
+      cancelable: true,
+    });
+    getTextInput().dispatchEvent(evCancel);
   }
 
   setup(() => {
@@ -369,6 +407,124 @@ suite('ReadonlyOmnibox', function() {
     assertEquals(2, omnibox.omniboxViewState.uiVersion);
   });
 
+  test('Render inline completion w/IME active', async () => {
+    getTextInput().dispatchEvent(new CompositionEvent('compositionstart'));
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+        {
+          text: '/artic',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxTextDimmed,
+        },
+      ],
+      inlineAutocompletion: 'les/1/',
+      selection: {start: 17, end: 17},
+      textIsUrl: true,
+    };
+    await microtasksFinished();
+
+    // Since IME is active, inline autocomplete gets rendered separately...
+    assertEquals('example.com/artic', omnibox.$.textContainer.textContent);
+    assertEquals('example.com/artic', omnibox.$.textInput.value);
+    assertEquals('', getStringSelection());
+
+    assertEquals('les/1/', omnibox.$.inlineAutocomplete.textContent);
+    // And it should be visible.
+    let style = omnibox.$.inlineAutocomplete.computedStyleMap();
+    assertEquals('visible', style.get('visibility')?.toString());
+
+    getTextInput().dispatchEvent(new CompositionEvent('compositionend'));
+
+    // Now try with IME uninvolved.
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+        {
+          text: '/articl',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxTextDimmed,
+        },
+      ],
+      inlineAutocompletion: 'es/1/',
+      selection: {start: 18, end: 18},
+      textIsUrl: true,
+    };
+    await microtasksFinished();
+
+    // Now this should show up as selection
+    assertEquals('example.com/articl', omnibox.$.textContainer.textContent);
+    assertEquals('example.com/articles/1/', omnibox.$.textInput.value);
+    assertEquals('es/1/', getStringSelection());
+
+    // The separate inline autocomplete label should be hidden
+    // (but still set, for positioning).
+    assertEquals('es/1/', omnibox.$.inlineAutocomplete.textContent);
+    style = omnibox.$.inlineAutocomplete.computedStyleMap();
+    assertEquals('hidden', style.get('visibility')?.toString());
+  });
+
+  test('IME composition deflicker', async () => {
+    // 1. Set up initial state with some text and completion.
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com/artic',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      inlineAutocompletion: 'les/1/',
+      additionalText: ' - Wikipedia',
+      selection: {start: 17, end: 17},
+      uiVersion: 1,
+      browserVersion: 1,
+    };
+    await microtasksFinished();
+
+    assertEquals(' - Wikipedia', omnibox.$.additionalText.textContent);
+
+    // Start composition.
+    omnibox.isComposing = true;
+
+    // Set the input value to match.
+    getTextInput().value = 'example.com/artic';
+
+    // 2. Simulate user typing next character of completion via IME.
+    // The IME updates the input value to 'example.com/articl'.
+    getTextInput().value = 'example.com/articl';
+
+    // Trigger the input event.
+    getTextInput().dispatchEvent(new InputEvent('input'));
+
+    // 3. Verify that the inline autocompletion was NOT cleared,
+    // but instead sliced to 'es/1/'.
+    assertEquals('es/1/', omnibox.omniboxViewState.inlineAutocompletion);
+    // Verify additional text is preserved.
+    assertEquals(' - Wikipedia', omnibox.omniboxViewState.additionalText);
+    assertEquals(' - Wikipedia', omnibox.$.additionalText.textContent);
+
+    // 4. Verify that we sent the updated input to the browser.
+    assertEquals(1, uiHandler.getCallCount('onOmniboxAction'));
+    const args = uiHandler.getArgs('onOmniboxAction');
+    assertTrue(!!args[0].textInput);
+    assertEquals('example.com/articl', args[0].textInput.text);
+    assertEquals('es/1/', args[0].textInput.inlineAutocompletion);
+    // Version should be incremented.
+    assertEquals(2, omnibox.omniboxViewState.uiVersion);
+  });
+
   test('Additional text', async () => {
     omnibox.browserOmniboxState = {
       ...initialState,
@@ -437,6 +593,36 @@ suite('ReadonlyOmnibox', function() {
     // writing this test).
     assertLE(Math.abs(right1 - right2), 0.1);
     assertLE(Math.abs(right2 - right3), 0.1);
+  });
+
+  test('Clear additional text on delete', async () => {
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'popula',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      inlineAutocompletion: 'r page',
+      additionalText: ' - uk.wikipedia.org',
+    };
+    await microtasksFinished();
+
+    assertEquals(' - uk.wikipedia.org', omnibox.$.additionalText.textContent);
+
+    // Simulate user pressing backspace, which deletes the selection.
+    // The input value becomes "popula".
+    getTextInput().value = 'popula';
+    getTextInput().dispatchEvent(
+        new Event('input', {bubbles: true, composed: true}));
+
+    await microtasksFinished();
+
+    // Verify that additional text is cleared locally.
+    assertEquals('', omnibox.omniboxViewState.additionalText);
+    assertEquals('', omnibox.$.additionalText.textContent);
   });
 
   test('Inline completion race vs. browser handling', async () => {
@@ -930,5 +1116,170 @@ suite('ReadonlyOmnibox', function() {
     assertEquals(9, input.selectionStart);
     assertEquals(13, input.selectionEnd);
   });
+
+  test('Single touch tap selects all and triggers zero-suggest', async () => {
+    uiHandler.reset();
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      selection: {start: 0, end: 0},
+    };
+    await microtasksFinished();
+    const input = getTextInput();
+    assertEquals('example.com', input.value);
+    assertEquals('', getStringSelection());
+
+    fakePointerDown(/*pointerId=*/ 1, 'touch');
+    fakePointerUp(/*pointerId=*/ 1, 'touch');
+    await microtasksFinished();
+
+    assertEquals('example.com', getStringSelection());
+    assertEquals(3, uiHandler.getCallCount('onOmniboxAction'));
+    const lastArgs = uiHandler.getArgs('onOmniboxAction').at(-1);
+    assertTrue(!!lastArgs.pointer);
+    assertEquals(false, lastArgs.pointer.isPointerDown);
+    assertEquals(true, lastArgs.pointer.startZeroSuggest);
+  });
+
+  test('Single pen tap selects all and triggers zero-suggest', async () => {
+    uiHandler.reset();
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      selection: {start: 0, end: 0},
+    };
+    await microtasksFinished();
+    const input = getTextInput();
+    assertEquals('example.com', input.value);
+    assertEquals('', getStringSelection());
+
+    fakePointerDown(/*pointerId=*/ 1, 'pen');
+    fakePointerUp(/*pointerId=*/ 1, 'pen');
+    await microtasksFinished();
+
+    assertEquals('example.com', getStringSelection());
+    assertEquals(3, uiHandler.getCallCount('onOmniboxAction'));
+    const lastArgs = uiHandler.getArgs('onOmniboxAction').at(-1);
+    assertTrue(!!lastArgs.pointer);
+    assertEquals(false, lastArgs.pointer.isPointerDown);
+    assertEquals(true, lastArgs.pointer.startZeroSuggest);
+  });
+
+  test('Multi-finger touch sequence cancels automatic select-all', async () => {
+    uiHandler.reset();
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      selection: {start: 0, end: 0},
+    };
+    await microtasksFinished();
+
+    // First finger touches down.
+    fakePointerDown(/*pointerId=*/ 1, 'touch');
+    // Second finger touches down (multi-finger pinch/tap gesture).
+    fakePointerDown(/*pointerId=*/ 2, 'touch');
+
+    // First finger lifts.
+    fakePointerUp(/*pointerId=*/ 1, 'touch');
+    await microtasksFinished();
+    // Second finger remains on screen, so select-all should not happen yet.
+    assertEquals('', getStringSelection());
+
+    // Second finger lifts.
+    fakePointerUp(/*pointerId=*/ 2, 'touch');
+    await microtasksFinished();
+
+    // Multi-finger sequence must not trigger automatic select-all.
+    assertEquals('', getStringSelection());
+    const lastArgs = uiHandler.getArgs('onOmniboxAction').at(-1);
+    assertTrue(!!lastArgs.pointer);
+    assertEquals(false, lastArgs.pointer.startZeroSuggest);
+  });
+
+  test('Pointercancel fallback cancels touch selection', async () => {
+    uiHandler.reset();
+    omnibox.browserOmniboxState = {
+      ...initialState,
+      textPieces: [
+        {
+          text: 'example.com',
+          strikethrough: false,
+          color: OmniboxTextColor.kOmniboxText,
+        },
+      ],
+      selection: {start: 0, end: 0},
+    };
+    await microtasksFinished();
+
+    fakePointerDown(/*pointerId=*/ 1, 'touch');
+    // System cancels pointer (e.g. gesture scroll or pinch takeover).
+    fakePointerCancel(/*pointerId=*/ 1, 'touch');
+    fakePointerUp(/*pointerId=*/ 1, 'touch');
+    await microtasksFinished();
+
+    // Select-all should be cancelled by pointercancel fallback.
+    assertEquals('', getStringSelection());
+  });
+
+  test(
+      'Pasting text/plain sanitizes javascript schema and newlines',
+      async () => {
+        const input = getTextInput();
+        input.focus();
+
+        const clipboardData = new DataTransfer();
+        clipboardData.setData(
+            'text/plain', '  javascript:javascript:alert(1)\r\nhello world\n');
+        const pasteEvent = new ClipboardEvent('paste', {
+          clipboardData,
+          bubbles: true,
+          cancelable: true,
+        });
+
+        input.dispatchEvent(pasteEvent);
+        await microtasksFinished();
+
+        assertTrue(pasteEvent.defaultPrevented);
+        assertEquals('alert(1) hello world', input.value);
+      });
+
+  test(
+      'Pasting text/uri-list fallback sanitizes javascript schema',
+      async () => {
+        const input = getTextInput();
+        input.focus();
+
+        const clipboardData = new DataTransfer();
+        clipboardData.setData('text/uri-list', 'javascript:alert(1)');
+        const pasteEvent = new ClipboardEvent('paste', {
+          clipboardData,
+          bubbles: true,
+          cancelable: true,
+        });
+
+        input.dispatchEvent(pasteEvent);
+        await microtasksFinished();
+
+        assertTrue(pasteEvent.defaultPrevented);
+        assertEquals('alert(1)', input.value);
+      });
 
 });

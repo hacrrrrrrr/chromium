@@ -188,7 +188,7 @@ class GlicActorGeneralUiTest : public GlicActorUiTest {
     return browser()->GetTabStripModel()->GetActiveTab()->GetHandle();
   }
 
-  PrefService* prefs() { return browser()->profile()->GetPrefs(); }
+  PrefService* prefs() { return browser()->GetProfile()->GetPrefs(); }
 
   tabs::TabHandle null_tab_handle_;
 };
@@ -342,6 +342,8 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, ActionTargetNotFound) {
   RunTestSequence(
       InitializeWithOpenGlicWindow(),
       StartActorTaskInNewTab(task_url, kNewActorTabId),
+      // Save APC before sending the fake target id.
+      GetPageContextForActorTab(),
       ExecuteAction(std::move(click_provider),
                     actor::mojom::ActionResultCode::kInvalidDomNodeId));
 }
@@ -500,7 +502,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
         ASSERT_EQ(last_execution_result()->windows().size(), 1);
         apc::WindowObservation window =
            last_execution_result()->windows().at(0);
-        EXPECT_EQ(window.id(), browser()->session_id().id());
+        EXPECT_EQ(window.id(), browser()->GetSessionID().id());
         EXPECT_EQ(window.activated_tab_id(), tab_handle_.raw_value());
         EXPECT_TRUE(window.active());
         ASSERT_GE(browser()->tab_strip_model()->count(), 2);
@@ -681,7 +683,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, CreateActorTabForeground) {
 
   TabStripModel* tab_strip = browser()->tab_strip_model();
   const int initiator_tab_id = GetActiveTabHandle().raw_value();
-  const int initiator_window = browser()->session_id().id();
+  const int initiator_window = browser()->GetSessionID().id();
   const bool open_in_background = false;
 
   RunTestSequence(
@@ -714,7 +716,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, CreateActorTabBackground) {
 
   TabStripModel* tab_strip = browser()->tab_strip_model();
   const int initiator_tab_id = GetActiveTabHandle().raw_value();
-  const int initiator_window = browser()->session_id().id();
+  const int initiator_window = browser()->GetSessionID().id();
   const bool open_in_background = true;
 
   RunTestSequence(
@@ -751,7 +753,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest, CreateActorTabOnNewTabPage) {
   tabs::TabInterface* ntp_tab;
 
   const int initiator_tab_id = GetActiveTabHandle().raw_value();
-  const int initiator_window = browser()->session_id().id();
+  const int initiator_window = browser()->GetSessionID().id();
   const bool open_in_background = true;
 
   RunTestSequence(
@@ -809,7 +811,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorGeneralUiTest,
   tabs::TabInterface* ntp_tab;
 
   const int initiator_tab_id = GetActiveTabHandle().raw_value();
-  const int initiator_window = browser()->session_id().id();
+  const int initiator_window = browser()->GetSessionID().id();
   const bool open_in_background = false;
 
   RunTestSequence(

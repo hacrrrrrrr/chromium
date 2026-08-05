@@ -189,6 +189,9 @@ public class PaymentHandlerCoordinator {
                     assumeNonNull(mPaymentHandlerWebContents);
                     mPaymentHandlerWebContents.destroy();
                 };
+        boolean hasFrameworkCloseButton = bottomSheetController.isLargeFormFactorUiEnabled(view);
+        mToolbarCoordinator.setCloseButtonVisibility(!hasFrameworkCloseButton);
+
         boolean isShowSuccess = bottomSheetController.requestShowContent(view, /* animate= */ true);
         if (!isShowSuccess) return null;
 
@@ -217,7 +220,7 @@ public class PaymentHandlerCoordinator {
 
         LoadUrlParams params = new LoadUrlParams(url.getSpec());
         if (PaymentFeatureList.isEnabled(
-                PaymentFeatureList.PAYMENT_HANDLER_DIALOG_USE_INITIATOR_IN_URL_LOAD_FOR_ANDROID)) {
+                PaymentFeatureList.PAYMENT_HANDLER_DIALOG_USE_INITIATOR_IN_URL_LOAD)) {
             params.setInitiatorOrigin(
                     Origin.create(paymentRequestWebContents.getLastCommittedUrl()));
         }

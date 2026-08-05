@@ -68,7 +68,9 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.pdf.PdfUtils.PdfHyperlinkClickResult;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.native_page.NativePageHost;
 import org.chromium.chrome.browser.util.ChromeFileProvider;
@@ -86,6 +88,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.lang.reflect.Proxy;
 
 @RunWith(BaseRobolectricTestRunner.class)
 @DisableFeatures(ChromeFeatureList.PDF_REUSE_FRAGMENT)
@@ -154,6 +157,7 @@ public class PdfCoordinatorUnitTest {
         mPdfCoordinator.mChromePdfViewerFragment.setPdfViewForTesting(mPdfView);
         ViewGroup contentView = mActivity.findViewById(android.R.id.content);
         contentView.addView(mPdfCoordinator.getView());
+        ShadowLooper.idleMainLooper();
         if (mPdfCoordinator.getUri() != null) {
             mPdfCoordinator.mChromePdfViewerFragment.setDocumentUri(mPdfCoordinator.getUri());
         }
@@ -183,7 +187,7 @@ public class PdfCoordinatorUnitTest {
 
         // Assert
         ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
-        float expectedYOffsetPoints = (PDF_CONTENT_HEIGHT / 2f) / shadowPdfView.mZoom;
+        float expectedYOffsetPoints = (mPdfView.getHeight() / 2f) / shadowPdfView.mZoom;
         assertEquals(new PdfPoint(pageIndex, 0f, expectedYOffsetPoints), shadowPdfView.mPdfPoint);
     }
 
@@ -242,9 +246,14 @@ public class PdfCoordinatorUnitTest {
         };
 
         for (String raw : blockedUris) {
+            HistogramWatcher histogramExpectation =
+                    HistogramWatcher.newSingleRecordWatcher(
+                            "Android.Pdf.Hyperlink.ClickResult",
+                            PdfHyperlinkClickResult.BLOCKED_INVALID_SCHEME);
             assertFalse(
                     "onLinkClicked should reject " + raw,
                     mPdfCoordinator.onLinkClicked(Uri.parse(raw)));
+            histogramExpectation.assertExpected();
         }
         verify(mNativePageHost, never()).loadUrl(any(LoadUrlParams.class), anyBoolean());
     }
@@ -255,9 +264,31 @@ public class PdfCoordinatorUnitTest {
         when(mProfile.isOffTheRecord()).thenReturn(false);
         createPdfCoordinator();
 
+        HistogramWatcher histogramExpectation =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Android.Pdf.Hyperlink.ClickResult",
+                        PdfHyperlinkClickResult.BLOCKED_INVALID_SCHEME);
         assertFalse(
                 "onLinkClicked should reject schemeless URI.",
                 mPdfCoordinator.onLinkClicked(Uri.parse("//www.example.com/foo")));
+        histogramExpectation.assertExpected();
+        verify(mNativePageHost, never()).loadUrl(any(LoadUrlParams.class), anyBoolean());
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    public void testOnLinkClicked_V2Disabled() {
+        when(mProfile.isOffTheRecord()).thenReturn(false);
+        createPdfCoordinator();
+
+        HistogramWatcher histogramExpectation =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Android.Pdf.Hyperlink.ClickResult",
+                        PdfHyperlinkClickResult.IGNORED_V2_DISABLED);
+        assertFalse(
+                "onLinkClicked should return false when inline PDF V2 is disabled.",
+                mPdfCoordinator.onLinkClicked(Uri.parse("https://www.example.com/")));
+        histogramExpectation.assertExpected();
         verify(mNativePageHost, never()).loadUrl(any(LoadUrlParams.class), anyBoolean());
     }
 
@@ -277,9 +308,14 @@ public class PdfCoordinatorUnitTest {
         };
 
         for (String raw : allowedUris) {
+            HistogramWatcher histogramExpectation =
+                    HistogramWatcher.newSingleRecordWatcher(
+                            "Android.Pdf.Hyperlink.ClickResult",
+                            PdfHyperlinkClickResult.SUCCESS_LOAD_INITIATED);
             assertTrue(
                     "onLinkClicked should accept " + raw,
                     mPdfCoordinator.onLinkClicked(Uri.parse(raw)));
+            histogramExpectation.assertExpected();
         }
         verify(mNativePageHost, times(allowedUris.length))
                 .loadUrl(any(LoadUrlParams.class), eq(false));
@@ -289,8 +325,13 @@ public class PdfCoordinatorUnitTest {
         when(mProfile.isOffTheRecord()).thenReturn(isIncognito);
         createPdfCoordinator();
         Uri linkUri = Uri.parse(LINK_URL);
+        HistogramWatcher histogramExpectation =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Android.Pdf.Hyperlink.ClickResult",
+                        PdfHyperlinkClickResult.SUCCESS_LOAD_INITIATED);
         boolean result = mPdfCoordinator.onLinkClicked(linkUri);
         assertTrue("name should verify true", result);
+        histogramExpectation.assertExpected();
         ArgumentCaptor<LoadUrlParams> captor = ArgumentCaptor.forClass(LoadUrlParams.class);
         verify(mNativePageHost).loadUrl(captor.capture(), eq(isIncognito));
         LoadUrlParams params = captor.getValue();
@@ -389,7 +430,7 @@ public class PdfCoordinatorUnitTest {
         assertEquals(2, shadowPdfView.mPagesPerRow);
         assertEquals(zoomLevel, shadowPdfView.mZoom, 0.001f);
 
-        float expectedYOffsetPoints = (PDF_CONTENT_HEIGHT / 2f) / zoomLevel;
+        float expectedYOffsetPoints = (mPdfView.getHeight() / 2f) / zoomLevel;
         assertEquals(
                 new PdfPoint(currentPageIndex, 0f, expectedYOffsetPoints), shadowPdfView.mPdfPoint);
 
@@ -402,12 +443,81 @@ public class PdfCoordinatorUnitTest {
 
     @Test
     @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    @Config(shadows = {ShadowPdfView.class})
+    public void testResetLoadState_ResetsTwoPagesPerRow() {
+        createPdfCoordinator();
+        mPdfCoordinator.toggleTwoPagesPerRow(true, 1.5f, 2);
+        ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
+        assertEquals(2, shadowPdfView.mPagesPerRow);
+
+        mPdfCoordinator.resetLoadState();
+
+        assertEquals(1, shadowPdfView.mPagesPerRow);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
     public void testToggleTwoPagesPerRow_PdfViewNull() {
         createPdfCoordinator();
         mPdfCoordinator.mChromePdfViewerFragment.setPdfViewForTesting(null);
 
         // Verify that no exception is thrown when mPdfView is null.
         mPdfCoordinator.toggleTwoPagesPerRow(true, 1.5f, 2);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    @Config(shadows = {ShadowPdfView.class})
+    public void testToggleTwoPagesPerRow_negativePageIndex() {
+        createPdfCoordinator();
+        float zoomLevel = 1.5f;
+
+        // Negative page index should be clamped to 0 and not throw IllegalArgumentException.
+        mPdfCoordinator.toggleTwoPagesPerRow(true, zoomLevel, -1);
+
+        ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
+        assertEquals(2, shadowPdfView.mPagesPerRow);
+        float expectedYOffsetPoints = (mPdfView.getHeight() / 2f) / zoomLevel;
+        assertEquals(new PdfPoint(0, 0f, expectedYOffsetPoints), shadowPdfView.mPdfPoint);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    @Config(shadows = {ShadowPdfView.class})
+    public void testToggleFitToPage_negativePageIndex() {
+        createPdfCoordinator();
+        boolean[] getPageInfoCalled = new boolean[1];
+        PdfDocument mockPdfDocument =
+                (PdfDocument)
+                        Proxy.newProxyInstance(
+                                PdfDocument.class.getClassLoader(),
+                                new Class[] {PdfDocument.class},
+                                (proxy, method, args) -> {
+                                    if (method.getName().equals("getPageInfo")
+                                            && args != null
+                                            && args.length == 2) {
+                                        // Verify page index -1 was clamped to 0.
+                                        assertEquals(0, args[0]);
+                                        getPageInfoCalled[0] = true;
+                                        return null;
+                                    }
+                                    if (method.getName().equals("getPageCount")) {
+                                        return 5;
+                                    }
+                                    Class<?> returnType = method.getReturnType();
+                                    if (returnType.equals(Void.TYPE)) return null;
+                                    if (returnType.equals(Boolean.TYPE)) return false;
+                                    if (returnType.equals(Integer.TYPE)) return 0;
+                                    if (returnType.equals(Long.TYPE)) return 0L;
+                                    if (returnType.equals(Float.TYPE)) return 0f;
+                                    return null;
+                                });
+        ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
+        shadowPdfView.mPdfDocument = mockPdfDocument;
+
+        // Negative page index should be clamped to 0 and not throw an exception.
+        mPdfCoordinator.toggleFitToPage(true, -1);
+        assertTrue("getPageInfo should be called with clamped index 0", getPageInfoCalled[0]);
     }
 
     @Test
@@ -454,7 +564,7 @@ public class PdfCoordinatorUnitTest {
         ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
         PdfDocument mockPdfDocument =
                 (PdfDocument)
-                        java.lang.reflect.Proxy.newProxyInstance(
+                        Proxy.newProxyInstance(
                                 PdfDocument.class.getClassLoader(),
                                 new Class[] {PdfDocument.class},
                                 (proxy, method, args) -> {
@@ -601,6 +711,7 @@ public class PdfCoordinatorUnitTest {
 
     @Test
     @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    @Config(qualifiers = "w800dp")
     public void testToolBoxViewVisibility() {
         createPdfCoordinator();
 
@@ -737,6 +848,40 @@ public class PdfCoordinatorUnitTest {
         assertTrue(restorePositionPending);
     }
 
+    @Test
+    @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    public void testOnDownloadComplete_WhenLoaded_ReloadsWithContentUri() {
+        createPdfCoordinator();
+        assertTrue(mPdfCoordinator.getIsPdfLoadedForTesting());
+
+        String newFilePath = "/data/user/10/com.google.android.apps.chrome/cache/pdfs/new_fw4.pdf";
+        String newFileName = "new_fw4.pdf";
+        mPdfCoordinator.onDownloadComplete(newFilePath, newFileName);
+
+        assertEquals(newFilePath, mPdfCoordinator.getFilepath());
+        Uri expectedUri =
+                PdfUtils.getContentUri(newFilePath, newFileName, String.valueOf(TAB_ID), false);
+        assertEquals(expectedUri, mPdfCoordinator.getUri());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.INLINE_PDF_V2)
+    public void testReloadWhenViewDetached() {
+        createPdfCoordinator();
+        assertTrue(mPdfCoordinator.getIsPdfLoadedForTesting());
+
+        ViewGroup contentView = mActivity.findViewById(android.R.id.content);
+        contentView.removeView(mPdfCoordinator.getView());
+        assertNull(mPdfCoordinator.getView().getParent());
+
+        mPdfCoordinator.reload();
+        assertFalse(mPdfCoordinator.getIsPdfLoadedForTesting());
+
+        contentView.addView(mPdfCoordinator.getView());
+        ShadowLooper.idleMainLooper();
+        assertTrue(mPdfCoordinator.getIsPdfLoadedForTesting());
+    }
+
     public static class TestModalDialogActivity extends org.chromium.ui.base.TestActivity
             implements org.chromium.ui.modaldialog.ModalDialogManagerHolder {
         private org.chromium.ui.modaldialog.ModalDialogManager mModalDialogManager;
@@ -779,7 +924,7 @@ public class PdfCoordinatorUnitTest {
         ShadowPdfView shadowPdfView = Shadow.extract(mPdfView);
         PdfDocument mockPdfDocument =
                 (PdfDocument)
-                        java.lang.reflect.Proxy.newProxyInstance(
+                        Proxy.newProxyInstance(
                                 PdfDocument.class.getClassLoader(),
                                 new Class[] {PdfDocument.class},
                                 (proxy, method, args) -> {
@@ -809,6 +954,9 @@ public class PdfCoordinatorUnitTest {
                                     return null;
                                 });
         shadowPdfView.mPdfDocument = mockPdfDocument;
+
+        // Run posted tasks (loadPdfFile) before showing properties
+        ShadowLooper.idleMainLooper();
 
         mPdfCoordinator.showDocumentProperties();
 
@@ -877,7 +1025,7 @@ public class PdfCoordinatorUnitTest {
             ShadowPdfView shadowPdfView = Shadow.extract(pdfView);
             PdfDocument mockPdfDocument =
                     (PdfDocument)
-                            java.lang.reflect.Proxy.newProxyInstance(
+                            Proxy.newProxyInstance(
                                     PdfDocument.class.getClassLoader(),
                                     new Class[] {PdfDocument.class},
                                     (proxy, method, args) -> {
@@ -907,6 +1055,9 @@ public class PdfCoordinatorUnitTest {
                                         return null;
                                     });
             shadowPdfView.mPdfDocument = mockPdfDocument;
+
+            // Run posted tasks (loadPdfFile) before showing properties
+            ShadowLooper.idleMainLooper();
 
             pdfCoordinator.showDocumentProperties();
 

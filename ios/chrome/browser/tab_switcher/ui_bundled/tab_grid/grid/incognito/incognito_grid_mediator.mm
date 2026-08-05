@@ -101,11 +101,7 @@
 #pragma mark - TabGridToolbarsGridDelegate
 
 - (void)closeAllButtonTapped:(id)sender {
-  if (base::FeatureList::IsEnabled(kTabSwitcherOverflowMenu)) {
-    [self.incognitoDelegate showCloseAllConfirmationFromSourceView:sender];
-    return;
-  }
-  [self closeAllItems];
+  [self.incognitoDelegate showCloseAllConfirmationFromSourceView:sender];
 }
 
 - (void)closeOtherTabsButtonTapped:(id)sender {
@@ -184,7 +180,7 @@
     [self configureButtonsInSelectionMode:toolbarsConfiguration];
   } else {
     toolbarsConfiguration.closeAllButton = !self.webStateList->empty();
-    toolbarsConfiguration.doneButton = !self.webStateList->empty();
+    toolbarsConfiguration.exitTabGridButton = !self.webStateList->empty();
     toolbarsConfiguration.newTabButton = YES;
     toolbarsConfiguration.searchButton = YES;
     toolbarsConfiguration.selectTabsButton = !self.webStateList->empty();

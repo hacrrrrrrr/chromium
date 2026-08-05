@@ -65,10 +65,6 @@ declare global {
   }
 }
 
-// TODO(crbug.com/447113309): This file along with all of its dependencies
-// should be moved to .../settings/your_saved_info_page directory after
-// full release of the `Your Saved Info` page.
-
 export interface SettingsPaymentsSectionElement {
   $: {
     autofillCreditCardToggle: SettingsToggleButtonElement,
@@ -231,15 +227,6 @@ export class SettingsPaymentsSectionElement extends
         },
       },
 
-      /**
-       * Indicates if this element is used as a Your saved info subpage. Causes
-       * slight adjustments like different title, no page shadow, cards being
-       * visible.
-       */
-      isYourSavedInfoSubpage_: {
-        type: Boolean,
-        value: () => loadTimeData.getBoolean('enableYourSavedInfoSettingsPage'),
-      },
     };
   }
 
@@ -268,7 +255,6 @@ export class SettingsPaymentsSectionElement extends
   declare private cardBenefitsSublabel_: string;
   declare private shouldShowPayOverTimeSettings_: boolean;
   declare private payOverTimeSublabel_: string;
-  declare private isYourSavedInfoSubpage_: boolean;
   declare private mandatoryReauthFeatureFlagEnabled_: boolean;
 
   override connectedCallback() {
@@ -335,15 +321,6 @@ export class SettingsPaymentsSectionElement extends
     this.paymentsManager_.removePersonalDataManagerListener(
         this.setPersonalDataListener_);
     this.setPersonalDataListener_ = null;
-  }
-
-  private getMultiCardClass_(): string {
-    return this.isYourSavedInfoSubpage_ ? 'multi-card' : '';
-  }
-
-  private getPageTitleLabel_(): string {
-    return this.i18n(
-      this.isYourSavedInfoSubpage_ ? 'paymentsTitle' : 'creditCards');
   }
 
   private setCreditCards_(cardList: chrome.autofillPrivate.CreditCardEntry[]) {

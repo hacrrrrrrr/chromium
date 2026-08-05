@@ -585,8 +585,7 @@ bool BrowserAccessibilityAndroid::ShouldUsePaneTitle() const {
 bool BrowserAccessibilityAndroid::IsInterestingOnAndroid() const {
   // The root is not interesting if it doesn't have a title, even
   // though it's focusable.
-  if (ui::IsPlatformDocument(GetRole()) &&
-      GetSubstringTextContentUTF16(1).empty()) {
+  if (ui::IsPlatformDocument(GetRole()) && !HasTextContent()) {
     return false;
   }
 
@@ -665,7 +664,29 @@ bool BrowserAccessibilityAndroid::IsInterestingOnAndroid() const {
     return false;
   }
 
-  // Otherwise, the interesting nodes are leaf or link nodes with non-whitespace
+  // If this node is a label (`Role::kLabelText`), or inside a label, that
+  // labels a focusable radio button, mark it as uninteresting because the radio
+  // button control will read the label text.
+  const BrowserAccessibility* node_to_check = this;
+  while (node_to_check && !node_to_check->IsFocusable()) {
+    if (node_to_check->GetRole() == ax::mojom::Role::kLabelText) {
+      std::set<ui::AXNodeID> labelled_nodes =
+          manager()->ax_tree()->GetReverseRelations(
+              ax::mojom::IntListAttribute::kLabelledbyIds,
+              node_to_check->node()->id());
+      for (ui::AXNodeID target_id : labelled_nodes) {
+        BrowserAccessibilityAndroid* target =
+            static_cast<BrowserAccessibilityAndroid*>(
+                manager()->GetFromID(target_id));
+        if (target && target->GetRole() == ax::mojom::Role::kRadioButton) {
+          return false;
+        }
+      }
+    }
+    node_to_check = node_to_check->InternalGetParent();
+  }
+
+  // Otherwise, the interesting nodes are leaf nodes with non-whitespace
   // accessible name or text content.
 
   // First, we determine whether we have a nonempty, nonwhitespace name.
@@ -937,8 +958,7 @@ bool BrowserAccessibilityAndroid::ComputeIsLeaf() const {
   // are some exceptions where we want nodes to be navigatable despite the
   // screen reader reading the contents twice such as a heading which contains a
   // grid.
-  std::u16string name = GetSubstringTextContentUTF16(1);
-  if (!name.empty() && GetNameFrom() == ax::mojom::NameFrom::kContents &&
+  if (HasTextContent() && GetNameFrom() == ax::mojom::NameFrom::kContents &&
       (HasState(ax::mojom::State::kFocusable) ||
        GetRole() == ax::mojom::Role::kHeading)) {
     return IsLeafConsideringChildren();
@@ -1021,6 +1041,10 @@ std::u16string BrowserAccessibilityAndroid::GetBrailleRoleDescription() const {
 
 std::u16string BrowserAccessibilityAndroid::GetTextContentUTF16() const {
   return GetSubstringTextContentUTF16(std::nullopt);
+}
+
+bool BrowserAccessibilityAndroid::HasTextContent() const {
+  return !GetSubstringTextContentUTF16(/*min_length=*/1).empty();
 }
 
 int BrowserAccessibilityAndroid::GetTextContentLengthUTF16() const {
@@ -2320,7 +2344,7 @@ void BrowserAccessibilityAndroid::GetLineBoundaries(
     std::vector<int32_t>* line_ends,
     int offset) {
   // If this node has no children, treat it as all one line.
-  if (GetSubstringTextContentUTF16(1).size() > 0 && !InternalChildCount()) {
+  if (HasTextContent() && !InternalChildCount()) {
     line_starts->push_back(offset);
     line_ends->push_back(offset + GetTextContentLengthUTF16());
   }
@@ -2540,11 +2564,13 @@ BrowserAccessibilityAndroid::PlatformGetLowestPlatformAncestor() const {
   if (lowest_unignored_node->IsIgnored()) {
     lowest_unignored_node = lowest_unignored_node->PlatformGetParent();
   }
-  DCHECK(!lowest_unignored_node || !lowest_unignored_node->IsIgnored())
+  if (!lowest_unignored_node) {
+    return current_object;
+  }
+  CHECK(!lowest_unignored_node->IsIgnored())
       << "`BrowserAccessibility::PlatformGetParent()` should return either an "
          "unignored object or nullptr.";
 
-  // `highest_leaf_node` could be nullptr.
   ui::BrowserAccessibility* highest_leaf_node = lowest_unignored_node;
   // For the purposes of this method, a leaf node does not include leaves in the
   // internal accessibility tree, only in the platform exposed tree.
@@ -2554,14 +2580,7 @@ BrowserAccessibilityAndroid::PlatformGetLowestPlatformAncestor() const {
       highest_leaf_node = ancestor_node;
     }
   }
-  if (highest_leaf_node) {
-    return highest_leaf_node;
-  }
-
-  if (lowest_unignored_node) {
-    return lowest_unignored_node;
-  }
-  return current_object;
+  return highest_leaf_node;
 }
 
 bool BrowserAccessibilityAndroid::HasOnlyTextChildren() const {

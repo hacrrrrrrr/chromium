@@ -32,7 +32,7 @@ constexpr CGFloat kTopToolbarIPhonePortraitHeight = 54;
 constexpr CGFloat kLocationBarHeight = 42;
 constexpr CGFloat kTopLocationBarIPhonePortraitHeight = 46;
 constexpr CGFloat kToolbarPadding = 10;
-constexpr CGFloat kTopToolbarIPhonePortraitPadding = 8;
+constexpr CGFloat kToolbarCompactLocationBarPadding = 8;
 
 constexpr CGFloat kTopToolbarIPadHeightFullscreen = 20;
 constexpr CGFloat kToolbarHeightFullscreen = 40;
@@ -43,3 +43,8 @@ constexpr CGFloat kOuterSeparatorVerticalOffset = 4;
 constexpr CGFloat kKeyboardAttachedOmniboxBottomPadding = 10;
 constexpr CGFloat kKeyboardAttachedOmniboxBottomPaddingLandscape =
     kLocationBarHeightFullscreen - kOuterSeparatorVerticalOffset + 1;
+
+constexpr CGFloat kGlassToolbarMargin = 5;
+constexpr CGFloat kGlassFullscreenMargin = 2;
+constexpr CGFloat kGlassExpandedHeight = 60;
+constexpr CGFloat kGlassCollapsedHeight = 38;

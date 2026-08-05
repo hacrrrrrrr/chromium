@@ -93,8 +93,14 @@ class DictationSessionUiImplBrowserTest
     });
   }
 
+  auto StartDictationStream(DictationStreamStartTrigger trigger) {
+    return Do([this, trigger]() {
+      dictation_service().session_controller()->StartDictationStream(
+          DefaultInPageTarget(web_contents()), trigger);
+    });
+  }
+
  private:
-  base::WeakPtr<ListenerStreamProvider> last_started_provider_ = nullptr;
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
@@ -138,6 +144,20 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
                       &views::LabelButton::GetText, u"Start"),
     CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
                       &views::View::GetEnabled, true)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest, UpdateAudioLevel) {
+  // clang-format off
+  RunTestSequence(
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+    Do([this]{
+      SessionUi* ui = session_ui();
+      ASSERT_TRUE(ui);
+      ui->UpdateAudioLevel(0.5f);
+    })
   );
   // clang-format on
 }
@@ -373,6 +393,122 @@ IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest, ShowsToastOnError) {
     WaitForHide(DictationBubbleUi::kViewElementIdForTesting),
     CheckShowingDictationErrorToast(true),
     Check([this]{ return session_ui() == nullptr; })
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       FailedStreamInitAllowsOngoingFinalizing) {
+  base::WeakPtr<ListenerStreamProvider> finalizing_stream;
+  StreamId finalizing_stream_id;
+
+  // clang-format off
+  RunTestSequence(
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+
+    ExtensionAPISetStreamState(ExtensionStreamState::kTranscribing),
+    CheckResult(GetSessionState(), SessionState::kTranscribing),
+
+    // End active stream to transition the first stream to finalization.
+    Do([&finalizing_stream, &finalizing_stream_id, this] {
+      finalizing_stream = last_started_provider_;
+      ASSERT_NE(finalizing_stream, nullptr);
+      finalizing_stream_id = finalizing_stream->stream_id_for_testing();
+      dictation_service().session_controller()->EndDictationStream();
+    }),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+    CheckResult(HasAttachedStreamProvider(), false),
+
+    // Start a second stream while the first stream is finalizing.
+    StartDictationStream(DictationStreamStartTrigger::kFocusChange),
+    CheckResult(GetSessionState(), SessionState::kStreamInitializing),
+    CheckResult(HasAttachedStreamProvider(), true),
+    ExtensionAPIWaitForStreamStart(),
+
+    CheckShowingDictationErrorToast(false),
+
+    // Simulate the second stream failing to initialize.
+    ExtensionAPISetStreamState(ExtensionStreamState::kFailed),
+
+    // The second stream failure should show the error toast. However, because
+    // the first stream is still finalizing, the session should remain active in
+    // the finalizing state rather than immediately ending.
+    CheckShowingDictationErrorToast(true),
+    CheckHasSession(true),
+    CheckResult(GetSessionState(), SessionState::kFinalizing),
+    CheckResult(HasAttachedStreamProvider(), false),
+    EnsurePresent(DictationBubbleUi::kViewElementIdForTesting),
+    CheckViewProperty(DictationBubbleUi::kToggleButtonElementIdForTesting,
+                      &views::View::GetEnabled, false),
+
+    // The finalizing stream should still be able to accept final text.
+    ExtensionAPIUpdateTranscription(finalizing_stream_id,
+                                    ExtensionTranscriptionType::kFinal,
+                                    "Final text"),
+    Check([&finalizing_stream] {
+      return finalizing_stream &&
+             finalizing_stream->GetLatestTranscriptionForTesting() ==
+                 "Final text" &&
+             finalizing_stream->IsTranscriptionFinalForTesting();
+    }),
+
+    // Once the finalizing stream completes, the session should end.
+    ExtensionAPISetStreamState(finalizing_stream_id,
+                               ExtensionStreamState::kComplete),
+    WaitForHide(DictationBubbleUi::kViewElementIdForTesting),
+    CheckHasSession(false)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       NavigationEndsSession) {
+  // clang-format off
+  RunTestSequence(
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+
+    // Simulate navigation.
+    Do([this]{
+      ASSERT_TRUE(chrome_test_utils::NavigateToURL(web_contents(),
+                                                   GURL("about:blank")));
+    }),
+
+    // The UI should hide and the session should be ended immediately.
+    WaitForHide(DictationBubbleUi::kViewElementIdForTesting),
+    CheckHasSession(false),
+    CheckShowingDictationStoppedToast(true)
+  );
+  // clang-format on
+}
+
+IN_PROC_BROWSER_TEST_F(DictationSessionUiImplBrowserTest,
+                       SecondWindowInvokesDictationMovesUI) {
+  // Create a second browser window.
+  Browser* second_browser = CreateBrowser(browser()->GetProfile());
+  content::WebContents* window2_contents =
+      second_browser->tab_strip_model()->GetActiveWebContents();
+  ASSERT_NE(window2_contents, nullptr);
+
+  // clang-format off
+  RunTestSequence(
+    // Start dictation session in Window 1.
+    StartSession(),
+    WaitForShow(DictationBubbleUi::kViewElementIdForTesting),
+
+    // Invoke dictation from the context menu in Window 2.
+    Do([this, window2_contents] {
+      dictation_service().ContextMenuHandler(
+          DefaultInPageTarget(window2_contents));
+    }),
+
+    // Verify UI is showing in Window 2 and not showing in Window 1.
+    InContext(BrowserElements::From(second_browser)->GetContext(),
+              WaitForShow(DictationBubbleUi::kViewElementIdForTesting)),
+    InContext(BrowserElements::From(browser())->GetContext(),
+              EnsureNotPresent(DictationBubbleUi::kViewElementIdForTesting)),
+    CheckHasSession(true)
   );
   // clang-format on
 }

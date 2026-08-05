@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/top_level_storage_access_api/top_level_storage_access_permission_context.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -24,6 +25,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/cookie_settings_base.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/permissions/test/mock_permission_prompt_factory.h"
@@ -188,12 +190,12 @@ class RequestStorageAccessForBaseBrowserTest : public InProcessBrowserTest {
     // manager to help reduce the potential for flakiness due to the race
     // condition described in the bug.
     browser()
-        ->profile()
+        ->GetProfile()
         ->GetDefaultStoragePartition()
         ->GetCookieManagerForBrowserProcess()
         ->BlockThirdPartyCookies(value);
 
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         prefs::kCookieControlsMode,
         static_cast<int>(
             value ? content_settings::CookieControlsMode::kBlockThirdParty
@@ -298,7 +300,7 @@ class InsecureRequestStorageAccessForBaseBrowserTest
 
   void SetUp() override {
     features_.InitAndEnableFeature(
-        blink::features::kStorageAccessAPIRelatedWebsiteSets);
+        content_settings::features::kStorageAccessAPIRelatedWebsiteSets);
     InProcessBrowserTest::SetUp();
   }
 
@@ -312,7 +314,7 @@ class InsecureRequestStorageAccessForBaseBrowserTest
     ASSERT_TRUE(http_server_.Start());
   }
   void SetBlockThirdPartyCookies(bool value) {
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         prefs::kCookieControlsMode,
         static_cast<int>(
             value ? content_settings::CookieControlsMode::kBlockThirdParty
@@ -406,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(RequestStorageAccessForBrowserTest,
   };
 
   auto* cookie_manager = browser()
-                             ->profile()
+                             ->GetProfile()
                              ->GetDefaultStoragePartition()
                              ->GetCookieManagerForBrowserProcess();
 
@@ -455,7 +457,8 @@ class RequestStorageAccessForEnabledBrowserTest
  public:
   std::vector<base::test::FeatureRefAndParams> GetEnabledFeatures()
       const override {
-    return {{blink::features::kStorageAccessAPIRelatedWebsiteSets, {}}};
+    return {
+        {content_settings::features::kStorageAccessAPIRelatedWebsiteSets, {}}};
   }
 };
 
@@ -640,7 +643,15 @@ class RequestStorageAccessForWithFirstPartySetsBrowserTest
  public:
   std::vector<base::test::FeatureRefAndParams> GetEnabledFeatures()
       const override {
-    return {{blink::features::kStorageAccessAPIRelatedWebsiteSets, {}}};
+    return {
+        {content_settings::features::kStorageAccessAPIRelatedWebsiteSets, {}}};
+  }
+
+  std::vector<base::test::FeatureRef> GetDisabledFeatures() const override {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    return {omnibox::internal::kWebUIOmniboxPopup,
+            omnibox::internal::kWebUIOmniboxAimPopup};
   }
 
   RequestStorageAccessForWithFirstPartySetsBrowserTest() {
@@ -653,7 +664,7 @@ class RequestStorageAccessForWithFirstPartySetsBrowserTest
   void SetUpOnMainThread() override {
     RequestStorageAccessForBaseBrowserTest::SetUpOnMainThread();
     // Explicitly enable Related Website Sets (formerly First Party Sets).
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         prefs::kPrivacySandboxRelatedWebsiteSetsEnabled, true);
   }
 

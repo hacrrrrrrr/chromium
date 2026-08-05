@@ -14,11 +14,11 @@
 
 #include "base/memory/stack_allocated.h"
 #include "base/types/optional_ref.h"
+#include "base/unguessable_token.h"
 #include "base/values.h"
 #include "content/browser/devtools/devtools_device_request_prompt_info.h"
 #include "content/browser/devtools/devtools_throttle_handle.h"
 #include "content/browser/devtools/protocol/emulation_handler.h"
-#include "content/browser/interest_group/devtools_enums.h"
 #include "content/browser/preloading/prefetch/prefetch_status.h"
 #include "content/browser/preloading/prerender/prerender_final_status.h"
 #include "content/common/content_export.h"
@@ -42,10 +42,6 @@
 #include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom-forward.h"
 
 class GURL;
-
-namespace base {
-class UnguessableToken;
-}
 
 namespace blink {
 struct UserAgentMetadata;
@@ -145,8 +141,10 @@ DevtoolsOverriddenOutputParams ApplyEmulationOverrides(
 // Applies extra headers set via Network.setExtraHTTPHeaders to a WebSocket
 // handshake request. This is needed because WebSocket connections bypass the
 // normal URLLoader path where ApplyNetworkRequestOverrides is called.
-void ApplyExtraHeadersForWebSocket(const GlobalRenderFrameHostId& frame_id,
-                                   net::HttpRequestHeaders* headers);
+void ApplyExtraHeadersForWebSocket(
+    const GlobalRenderFrameHostId& frame_id,
+    const std::optional<base::UnguessableToken>& devtools_worker_token,
+    net::HttpRequestHeaders* headers);
 
 // Returns true if devtools want |*override_out| to be used.
 // (A true return and |*override_out| being nullopt means no user agent client

@@ -4,6 +4,7 @@
 
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 #include "base/strings/strcat.h"
@@ -12,15 +13,19 @@
 #include "base/test/test_future.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/actor/actor_test_util.h"
+#include "chrome/browser/actor/tools/click_tool_request.h"
 #include "chrome/browser/actor/tools/tool_request.h"
 #include "chrome/browser/actor/tools/tools_test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/actor.mojom.h"
 #include "chrome/common/actor/action_result.h"
+#include "chrome/common/actor/actor_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
 #include "components/actor/core/actor_features.h"
 #include "components/actor/public/mojom/actor_types.mojom.h"
+#include "components/optimization_guide/content/browser/page_content_proto_provider.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -52,6 +57,38 @@ constexpr char kTargetCenterHitElementIdScript[] = R"JS(
   const y = target_rect.top + target_rect.height / 2;
   document.elementFromPoint(x, y).id;
 )JS";
+
+mojom::ToolInvocationPtr MakeZeroAreaNormalClickInvocation(
+    TaskId task_id,
+    int target_id,
+    mojom::ToolTargetPtr target,
+    float device_scale_factor) {
+  auto observed_target = mojom::ObservedToolTarget::New();
+  observed_target->node_attribute =
+      blink::mojom::AIPageContentAttributes::New();
+  observed_target->node_attribute->dom_node_id = target_id;
+  observed_target->node_attribute->geometry =
+      blink::mojom::AIPageContentGeometry::New();
+  auto& geometry = *observed_target->node_attribute->geometry;
+  // Actor validation receives the repaired unioned bounds in widget pixels.
+  // Current descendant client rects, not APC fragment boxes, provide the live
+  // click point.
+  const gfx::Rect observed_bounds = gfx::ScaleToEnclosingRect(
+      gfx::Rect(50, 50, 210, 40), device_scale_factor);
+  geometry.outer_bounding_box = observed_bounds;
+  geometry.visible_bounding_box = observed_bounds;
+
+  auto click = mojom::ClickAction::New();
+  click->type = mojom::ClickType::kLeft;
+  click->count = mojom::ClickCount::kSingle;
+
+  auto invocation = mojom::ToolInvocation::New();
+  invocation->task_id = task_id;
+  invocation->action = mojom::ToolAction::NewClick(std::move(click));
+  invocation->target = std::move(target);
+  invocation->observed_target = std::move(observed_target);
+  return invocation;
+}
 
 // This observer detects when WebContents receives notification of a user
 // gesture having occurred, following a user input event targeted to
@@ -793,6 +830,15 @@ class ActorClickToolValidationBrowserTest : public ActorClickToolBrowserTest {
         {});
   }
 
+  void NavigateAndCaptureApc(const std::string& path) {
+    const GURL url = embedded_test_server()->GetURL(path);
+    ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+    // Save APC so TOCTOU validation can find the action's target id in the last
+    // page snapshot.
+    GetPageApc();
+  }
+
   static mojom::ObservedToolTargetPtr MakeBroadObservedTarget(int node_id) {
     auto observed_target = mojom::ObservedToolTarget::New();
     observed_target->node_attribute =
@@ -865,6 +911,14 @@ class ActorClickToolValidationBrowserTest : public ActorClickToolBrowserTest {
     const GURL url = embedded_test_server()->GetURL(path);
     ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
 
+    ExpectCurrentPageDirectActivationRejectedDuringRendererValidation(
+        expected_code, expect_panel_hit);
+  }
+
+  void ExpectCurrentPageDirectActivationRejectedDuringRendererValidation(
+      mojom::ActionResultCode expected_code,
+      bool expect_panel_hit = true,
+      std::string_view expected_message = {}) {
     std::optional<int> target_id = GetDOMNodeId(*main_frame(), "#target");
     ASSERT_TRUE(target_id);
 
@@ -906,6 +960,9 @@ class ActorClickToolValidationBrowserTest : public ActorClickToolBrowserTest {
     const mojom::ActionResultPtr& error_result =
         initialize_result->get_error_result();
     EXPECT_EQ(expected_code, error_result->code);
+    if (!expected_message.empty()) {
+      EXPECT_EQ(expected_message, error_result->message);
+    }
     EXPECT_FALSE(error_result->requires_page_stabilization);
     EXPECT_THAT(EvalJs(web_contents(), "click_log.join(',')").ExtractString(),
                 testing::IsEmpty());
@@ -938,6 +995,33 @@ class ActorClickToolValidationBrowserTest : public ActorClickToolBrowserTest {
     // These tests mutate the page after initialization. A setup failure here
     // means the test never reached the live execution-time revalidation path.
     ASSERT_TRUE(initialize_future.Get()->is_success_point());
+  }
+
+ private:
+  base::test::ScopedFeatureList validation_feature_list_;
+};
+
+class ActorClickToolZeroAreaDomIdClicksBrowserTest
+    : public ActorClickToolBrowserTest {
+ public:
+  ActorClickToolZeroAreaDomIdClicksBrowserTest() {
+    validation_feature_list_.InitWithFeatures(
+        {features::kGlicActorToctouValidation,
+         features::kGlicActorDomIdClicksOnZeroAreaTargets},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList validation_feature_list_;
+};
+
+class ActorClickToolZeroAreaDomIdClicksDisabledBrowserTest
+    : public ActorClickToolBrowserTest {
+ public:
+  ActorClickToolZeroAreaDomIdClicksDisabledBrowserTest() {
+    validation_feature_list_.InitWithFeatures(
+        {features::kGlicActorToctouValidation},
+        {features::kGlicActorDomIdClicksOnZeroAreaTargets});
   }
 
  private:
@@ -994,9 +1078,7 @@ class ActorClickToolDirectActivationNoToctouBrowserTest
 
 IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
                        ClickTool_OccludedByFixedContainer_FailsValidation) {
-  const GURL url =
-      embedded_test_server()->GetURL("/actor/click_occluded_by_fixed.html");
-  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+  NavigateAndCaptureApc("/actor/click_occluded_by_fixed.html");
 
   std::optional<int> target_id = GetDOMNodeId(*main_frame(), "#target");
   ASSERT_TRUE(target_id);
@@ -1087,8 +1169,83 @@ IN_PROC_BROWSER_TEST_F(
   ActResultFuture result;
   actor_task().Act(ToRequestList(action), result.GetCallback());
 
-  ExpectErrorResult(
-      result, mojom::ActionResultCode::kFrameLocationChangedSinceObservation);
+  ExpectErrorResult(result, mojom::ActionResultCode::kInvalidDomNodeId);
+  EXPECT_THAT(EvalJs(web_contents(), "click_log.join(',')").ExtractString(),
+              testing::IsEmpty());
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ActorClickToolValidationBrowserTest,
+    ClickTool_DirectActivation_RejectsTargetsWithoutApcNodeId) {
+  // Direct activation needs a non-root DOM node so it can find the target in
+  // APC. Bad targets should return an argument error instead of crashing.
+  const std::string document_identifier =
+      optimization_guide::DocumentIdentifierUserData::
+          GetOrCreateForCurrentDocument(main_frame())
+              ->serialized_token();
+  const PageTarget invalid_targets[] = {
+      gfx::Point(10, 20),
+      DomNode{.node_id = kRootElementDomNodeId,
+              .document_identifier = document_identifier},
+  };
+
+  for (const PageTarget& target : invalid_targets) {
+    SCOPED_TRACE(target.index());
+    std::unique_ptr<ToolRequest> action = std::make_unique<ClickToolRequest>(
+        active_tab()->GetHandle(), target,
+        mojom::ClickType::kLeftOnOccludedTarget, mojom::ClickCount::kSingle);
+    ActResultFuture result;
+    actor_task().Act(ToRequestList(action), result.GetCallback());
+
+    ExpectErrorResult(result, mojom::ActionResultCode::kArgumentsInvalid);
+  }
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_DirectActivation_RequiresTargetInLastApc) {
+  // Direct activation rejects a target added after APC was saved.
+  NavigateAndCaptureApc("/actor/click_occluded_by_fixed.html");
+
+  // Add the target after saving APC. It exists in the page, but not in the
+  // saved snapshot.
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    const late_target = document.createElement('div');
+    late_target.id = 'late-target';
+    late_target.style.cssText =
+        'position:absolute; top:220px; left:70px; width:50px; height:50px;';
+    document.body.appendChild(late_target);
+    recordEvents('late-target');
+  )JS"));
+
+  std::optional<int> late_target_id =
+      GetDOMNodeId(*main_frame(), "#late-target");
+  ASSERT_TRUE(late_target_id);
+
+  // Confirm that the new target is behind the fixed panel. This keeps the
+  // request on the direct-activation path.
+  ASSERT_THAT(EvalJs(web_contents(), R"JS(
+    const target_rect =
+        document.getElementById('late-target').getBoundingClientRect();
+    const x = target_rect.left + target_rect.width / 2;
+    const y = target_rect.top + target_rect.height / 2;
+    document.elementFromPoint(x, y).id;
+  )JS")
+                  .ExtractString(),
+              testing::Eq("fixed-container"));
+
+  std::unique_ptr<ToolRequest> action = MakeDirectElementActivationClickRequest(
+      *main_frame(), late_target_id.value());
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(action), result.GetCallback());
+
+  const auto& action_results = result.Get();
+  ASSERT_EQ(1u, action_results.size());
+  ASSERT_TRUE(action_results[0].result);
+  EXPECT_EQ(mojom::ActionResultCode::kInvalidDomNodeId,
+            action_results[0].result->code)
+      << ToDebugString(*action_results[0].result);
+  EXPECT_EQ("The target was not found in the last APC snapshot.",
+            action_results[0].result->message);
   EXPECT_THAT(EvalJs(web_contents(), "click_log.join(',')").ExtractString(),
               testing::IsEmpty());
 }
@@ -1204,10 +1361,79 @@ IN_PROC_BROWSER_TEST_F(
 }
 
 IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_ToctouAllowsSameProcessSubframe) {
+  // TOCTOU validation accepts an observed target in a same-process iframe.
+  const GURL url =
+      embedded_https_test_server().GetURL("/actor/positioned_iframe.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  const GURL subframe_url = embedded_https_test_server().GetURL(
+      "/actor/page_with_clickable_element.html");
+  ASSERT_TRUE(NavigateIframeToURL(web_contents(), "iframe", subframe_url));
+
+  RenderFrameHost* subframe =
+      ChildFrameAt(web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(subframe);
+  ASSERT_FALSE(subframe->IsCrossProcessSubframe());
+
+  // Record the subframe button in APC. Target-id validation should find it in
+  // the last snapshot.
+  GetPageApc();
+
+  std::optional<int> button_id =
+      GetDOMNodeIdFromSubframe(*main_frame(), "#iframe", "button#clickable");
+  ASSERT_TRUE(button_id);
+
+  std::unique_ptr<ToolRequest> action =
+      MakeClickRequest(*subframe, button_id.value());
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(action), result.GetCallback());
+
+  ExpectOkResult(result);
+  EXPECT_EQ(true, EvalJs(subframe, "button_clicked"));
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_ToctouAllowsCrossProcessSubframe) {
+  // TOCTOU validation accepts an observed target in a cross-process iframe.
+  // This test needs the iframe to run in a separate renderer process.
+  if (!content::AreAllSitesIsolatedForTesting()) {
+    GTEST_SKIP();
+  }
+
+  const GURL url = embedded_https_test_server().GetURL(
+      "foo.com", "/actor/positioned_iframe.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  const GURL subframe_url = embedded_https_test_server().GetURL(
+      "bar.com", "/actor/page_with_clickable_element.html");
+  ASSERT_TRUE(NavigateIframeToURL(web_contents(), "iframe", subframe_url));
+
+  RenderFrameHost* subframe =
+      ChildFrameAt(web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(subframe);
+  ASSERT_TRUE(subframe->IsCrossProcessSubframe());
+
+  // Save APC after loading the iframe. Validation must match the button using
+  // its document id and node id.
+  GetPageApc();
+
+  std::optional<int> button_id = GetDOMNodeId(*subframe, "button#clickable");
+  ASSERT_TRUE(button_id);
+
+  std::unique_ptr<ToolRequest> action =
+      MakeClickRequest(*subframe, button_id.value());
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(action), result.GetCallback());
+
+  ExpectOkResult(result);
+  EXPECT_EQ(true, EvalJs(subframe, "button_clicked"));
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
                        ClickTool_DirectActivation_RejectsSameProcessSubframe) {
-  // Click-behind direct activation is currently scoped to the main frame. The
-  // same-process case is subtle because actor initializes the renderer tool on
-  // the local root, so validation must inspect the resolved target document.
+  // Direct activation bypasses normal hit testing, so it only supports targets
+  // in the main frame.
   const GURL url =
       embedded_https_test_server().GetURL("/actor/positioned_iframe.html");
   ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
@@ -1225,29 +1451,21 @@ IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
       GetDOMNodeIdFromSubframe(*main_frame(), "#iframe", "#target");
   ASSERT_TRUE(target_id);
 
-  // The main-frame-only guard runs before APC matching for subframe targets,
-  // so this test does not need a page observation.
-
+  // Subframe rejection runs before APC lookup, so no snapshot is needed.
   std::unique_ptr<ToolRequest> action =
       MakeDirectElementActivationClickRequest(*subframe, target_id.value());
   ActResultFuture result;
   actor_task().Act(ToRequestList(action), result.GetCallback());
 
-  const auto& action_results = result.Get();
-  ASSERT_EQ(1u, action_results.size());
-  ASSERT_TRUE(action_results[0].result);
-  EXPECT_EQ(mojom::ActionResultCode::kArgumentsInvalid,
-            action_results[0].result->code)
-      << ToDebugString(*action_results[0].result);
+  ExpectErrorResult(result, mojom::ActionResultCode::kArgumentsInvalid);
   EXPECT_THAT(EvalJs(subframe, "click_log.join(',')").ExtractString(),
               testing::IsEmpty());
 }
 
 IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
                        ClickTool_DirectActivation_RejectsCrossProcessSubframe) {
-  // Click-behind direct activation is currently scoped to the main frame. A
-  // subframe target may become supported later, but that needs separate frame
-  // ownership, routing, and cross-frame occlusion validation.
+  // Direct activation rejects subframe targets even when the iframe runs in
+  // another process.
   if (!content::AreAllSitesIsolatedForTesting()) {
     GTEST_SKIP();
   }
@@ -1268,10 +1486,7 @@ IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
   std::optional<int> target_id = GetDOMNodeId(*subframe, "#target");
   ASSERT_TRUE(target_id);
 
-  // The main-frame-only guard runs before APC matching for subframe targets,
-  // so this test does not need a page observation. Avoiding APC extraction also
-  // keeps the test independent of cross-frame extraction timing.
-
+  // Subframe rejection runs before APC lookup, so no snapshot is needed.
   std::unique_ptr<ToolRequest> action =
       MakeDirectElementActivationClickRequest(*subframe, target_id.value());
   ActResultFuture result;
@@ -1298,6 +1513,133 @@ IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
     // target once the server has chosen this action.
     ExpectDirectActivationClicksTarget();
   }
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolZeroAreaDomIdClicksBrowserTest,
+                       ClickTool_DomIdClickUsesVisibleDescendant) {
+  const GURL url =
+      embedded_test_server()->GetURL("/actor/click_zero_area_anchor.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  std::optional<int> target_id = GetDOMNodeId(*main_frame(), "#target");
+  ASSERT_TRUE(target_id);
+  // The anchor has no box of its own; its children provide the visible
+  // geometry.
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().width"));
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().height"));
+
+  // A DOM-ID click should use the first visible descendant as its interaction
+  // point.
+  auto invocation = MakeZeroAreaNormalClickInvocation(
+      actor_task().id(), target_id.value(),
+      mojom::ToolTarget::NewDomNodeId(target_id.value()),
+      web_contents()->GetRenderWidgetHostView()->GetDeviceScaleFactor());
+
+  mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> chrome_render_frame;
+  main_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
+      &chrome_render_frame);
+
+  TestFuture<mojom::InitializeToolResultPtr> initialize_future;
+  chrome_render_frame->InitializeTool(std::move(invocation),
+                                      initialize_future.GetCallback());
+  mojom::InitializeToolResultPtr initialize_result = initialize_future.Take();
+  ASSERT_TRUE(initialize_result->is_success_point())
+      << ToDebugString(*initialize_result->get_error_result());
+
+  TestFuture<mojom::ActionResultPtr> execute_future;
+  chrome_render_frame->ExecuteTool(actor_task().id(),
+                                   execute_future.GetCallback());
+  EXPECT_TRUE(IsOk(*execute_future.Get()));
+  EXPECT_EQ(1, EvalJs(web_contents(), "click_count"));
+  EXPECT_EQ("fragment", EvalJs(web_contents(), "last_click_target_id"));
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolZeroAreaDomIdClicksBrowserTest,
+                       ClickTool_DomIdClickUsesVisibleShadowDescendant) {
+  const GURL url =
+      embedded_test_server()->GetURL("/actor/click_zero_area_anchor.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    window.shadow_click_count = 0;
+    const host = document.createElement('span');
+    host.style.display = 'contents';
+    const shadow_root = host.attachShadow({mode: 'open'});
+    shadow_root.innerHTML = `
+      <style>
+        #shadow-fragment {
+          position: absolute;
+          left: 50px;
+          top: 50px;
+          width: 80px;
+          height: 40px;
+        }
+      </style>
+      <span id="shadow-fragment">Activate</span>`;
+    shadow_root.querySelector('#shadow-fragment').addEventListener(
+        'click', () => ++window.shadow_click_count);
+    target.replaceChildren(host);
+  )JS"));
+
+  std::optional<int> target_id = GetDOMNodeId(*main_frame(), "#target");
+  ASSERT_TRUE(target_id);
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().width"));
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().height"));
+
+  auto invocation = MakeZeroAreaNormalClickInvocation(
+      actor_task().id(), target_id.value(),
+      mojom::ToolTarget::NewDomNodeId(target_id.value()),
+      web_contents()->GetRenderWidgetHostView()->GetDeviceScaleFactor());
+
+  mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> chrome_render_frame;
+  main_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
+      &chrome_render_frame);
+
+  TestFuture<mojom::InitializeToolResultPtr> initialize_future;
+  chrome_render_frame->InitializeTool(std::move(invocation),
+                                      initialize_future.GetCallback());
+  mojom::InitializeToolResultPtr initialize_result = initialize_future.Take();
+  ASSERT_TRUE(initialize_result->is_success_point())
+      << ToDebugString(*initialize_result->get_error_result());
+
+  TestFuture<mojom::ActionResultPtr> execute_future;
+  chrome_render_frame->ExecuteTool(actor_task().id(),
+                                   execute_future.GetCallback());
+  EXPECT_TRUE(IsOk(*execute_future.Get()));
+  EXPECT_EQ(1, EvalJs(web_contents(), "shadow_click_count"));
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolZeroAreaDomIdClicksDisabledBrowserTest,
+                       ClickTool_DomIdClickFailsWhenFeatureDisabled) {
+  const GURL url =
+      embedded_test_server()->GetURL("/actor/click_zero_area_anchor.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  std::optional<int> target_id = GetDOMNodeId(*main_frame(), "#target");
+  ASSERT_TRUE(target_id);
+  // Keep the same zero-area precondition as the enabled-feature test.
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().width"));
+  ASSERT_EQ(0, EvalJs(web_contents(), "target.getBoundingClientRect().height"));
+
+  auto invocation = MakeZeroAreaNormalClickInvocation(
+      actor_task().id(), target_id.value(),
+      mojom::ToolTarget::NewDomNodeId(target_id.value()),
+      web_contents()->GetRenderWidgetHostView()->GetDeviceScaleFactor());
+
+  mojo::AssociatedRemote<chrome::mojom::ChromeRenderFrame> chrome_render_frame;
+  main_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
+      &chrome_render_frame);
+
+  // The disabled gate should reject the target during initialization, before
+  // any click is dispatched.
+  TestFuture<mojom::InitializeToolResultPtr> initialize_future;
+  chrome_render_frame->InitializeTool(std::move(invocation),
+                                      initialize_future.GetCallback());
+  mojom::InitializeToolResultPtr initialize_result = initialize_future.Take();
+  ASSERT_TRUE(initialize_result->is_error_result());
+  EXPECT_EQ(mojom::ActionResultCode::kElementOffscreen,
+            initialize_result->get_error_result()->code);
+  EXPECT_EQ(0, EvalJs(web_contents(), "click_count"));
 }
 
 IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
@@ -1508,12 +1850,122 @@ IN_PROC_BROWSER_TEST_F(
 
 IN_PROC_BROWSER_TEST_F(
     ActorClickToolValidationBrowserTest,
-    ClickTool_DirectActivation_FailsForEmbeddedContentOccluder) {
-  // Embedded content occluders are rejected server-side today. If one reaches
-  // the client anyway, fail closed rather than normalizing child-frame hits.
-  ExpectDirectActivationRejectedDuringRendererValidation(
-      "/actor/click_occluded_by_fixed.html?panel=iframe",
+    ClickTool_DirectActivation_RejectsSubframeHitInsideTarget) {
+  const GURL url = embedded_test_server()->GetURL(
+      "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    const iframe = document.getElementById('fixed-container');
+    const target = document.getElementById('target');
+    target.appendChild(iframe);
+    target.style =
+        'position:relative;margin:220px 0 0 10px;width:50px;height:50px';
+    iframe.style = 'position:static;width:100%;height:100%;border:0';
+  )JS"));
+
+  // The same-process hit comes from the child document, but its iframe owner
+  // is inside the target's flat-tree subtree. Direct activation must recognize
+  // that the target is no longer occluded instead of looking for a panel.
+  ExpectCurrentPageDirectActivationRejectedDuringRendererValidation(
+      mojom::ActionResultCode::kTargetNodeInteractionPointObscured,
+      /*expect_panel_hit=*/true,
+      "The target is no longer occluded; use a normal click instead.");
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_DirectActivation_OccludedBySubframe) {
+  // The target stays in the top document while a fixed iframe covers it.
+  const GURL url = embedded_test_server()->GetURL(
+      "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  ExpectDirectActivationClicksTarget();
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ActorClickToolValidationBrowserTest,
+    ClickTool_DirectActivation_OccludedBySubframeInFixedAncestor) {
+  // An ordinary iframe also qualifies when a fixed top-document ancestor is
+  // the panel covering the target.
+  const GURL url = embedded_test_server()->GetURL(
+      "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    const iframe = document.getElementById('fixed-container');
+    const panel = document.createElement('div');
+    panel.style =
+        'position:fixed;top:200px;left:0;width:100%;height:100px;z-index:10';
+    iframe.before(panel);
+    panel.appendChild(iframe);
+    iframe.style = 'position:static;width:100%;height:100%';
+  )JS"));
+
+  ExpectDirectActivationClicksTarget();
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_DirectActivation_RejectsPanelInsideSubframe) {
+  // The iframe owner must be the panel. A fixed element inside an ordinary
+  // iframe does not qualify for direct activation.
+  const GURL url = embedded_test_server()->GetURL(
+      "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    const iframe = document.getElementById('fixed-container');
+    iframe.style.position = 'relative';
+    iframe.contentDocument.body.innerHTML =
+        '<div style="position:fixed;inset:0">Embedded Panel</div>';
+  )JS"));
+
+  ExpectCurrentPageDirectActivationRejectedDuringRendererValidation(
       mojom::ActionResultCode::kTargetNodeInteractionPointObscured);
+}
+
+IN_PROC_BROWSER_TEST_F(ActorClickToolValidationBrowserTest,
+                       ClickTool_DirectActivation_RejectsNestedSubframe) {
+  // Direct activation only follows a hit into one child document. A nested
+  // iframe is outside that supported scope, even when the outer iframe is the
+  // fixed panel.
+  const GURL url = embedded_test_server()->GetURL(
+      "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+  ASSERT_TRUE(ExecJs(web_contents(), R"JS(
+    const iframe = document.getElementById('fixed-container');
+    iframe.contentDocument.body.innerHTML = `
+      <iframe style="position:fixed;inset:0;width:100%;height:100%;border:0"
+          srcdoc="<body style='margin:0'>Nested Frame</body>">
+      </iframe>`;
+  )JS"));
+  ASSERT_TRUE(content::WaitForLoadStop(web_contents()));
+
+  ExpectCurrentPageDirectActivationRejectedDuringRendererValidation(
+      mojom::ActionResultCode::kTargetNodeInteractionPointObscured);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ActorClickToolValidationBrowserTest,
+    ClickTool_DirectActivation_OccludedByCrossProcessSubframe) {
+  // A cross-process iframe can be the panel covering a top-document target.
+  if (!content::AreAllSitesIsolatedForTesting()) {
+    GTEST_SKIP();
+  }
+
+  const GURL url = embedded_https_test_server().GetURL(
+      "foo.com", "/actor/click_occluded_by_fixed.html?panel=iframe");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
+
+  const GURL subframe_url = embedded_https_test_server().GetURL(
+      "bar.com", "/actor/page_with_clickable_element.html");
+  RenderFrameHost* subframe = ChildFrameAt(main_frame(), 0);
+  ASSERT_TRUE(subframe);
+  ASSERT_TRUE(content::NavigateToURLFromRenderer(subframe, subframe_url));
+  // Cross-site navigation replaces the local frame with a remote frame.
+  subframe = ChildFrameAt(main_frame(), 0);
+  ASSERT_TRUE(subframe);
+  ASSERT_EQ(subframe_url, subframe->GetLastCommittedURL());
+  ASSERT_TRUE(subframe->IsCrossProcessSubframe());
+
+  ExpectDirectActivationClicksTarget();
 }
 
 IN_PROC_BROWSER_TEST_F(

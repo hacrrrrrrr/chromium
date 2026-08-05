@@ -42,7 +42,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
-#include "chrome/browser/ui/views/page_info/page_info_ad_personalization_content_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_cookies_content_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_permission_content_view.h"
 #include "chrome/browser/ui/views/page_info/page_info_view_factory.h"
@@ -303,12 +302,6 @@ class PageInfoBubbleViewBrowserTest : public InProcessBrowserTest {
     return presenter;
   }
 
-  void SetAdPersonalizationInfo(
-      const PageInfoUI::AdPersonalizationInfo& identity_info) {
-    auto* presenter = GetPresenter();
-    EXPECT_TRUE(presenter->ui_for_testing());
-    presenter->ui_for_testing()->SetAdPersonalizationInfo(identity_info);
-  }
 
   void SetPageInfoBubbleIdentityInfo(
       const PageInfoUI::IdentityInfo& identity_info) {
@@ -932,46 +925,6 @@ IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
           u" " + l10n_util::GetStringUTF16(IDS_LEARN_MORE));
 }
 
-IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest, AdPrivacyStrings) {
-  base::UserActionTester user_actions_stats;
-  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
-  https_server.AddDefaultHandlers(
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
-  ASSERT_TRUE(https_server.Start());
-
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), https_server.GetURL("/simple.html")));
-
-  // Setup the bogus ad personalization info.
-  PageInfoUI::AdPersonalizationInfo info;
-  info.has_joined_user_to_interest_group = true;
-
-  auto* pscs = content_settings::PageSpecificContentSettings::GetForFrame(
-      browser()
-          ->tab_strip_model()
-          ->GetActiveWebContents()
-          ->GetPrimaryMainFrame());
-  pscs->OnTopicAccessed(
-      url::Origin::Create(GURL("https://a.test")), false,
-      privacy_sandbox::CanonicalTopic(browsing_topics::Topic(1), 1));
-
-  OpenPageInfoBubble(browser());
-
-  SetAdPersonalizationInfo(info);
-
-  views::View* button =
-      GetView(PageInfoViewFactory::VIEW_ID_PAGE_INFO_AD_PERSONALIZATION_BUTTON);
-  PerformMouseClickOnView(button);
-
-  auto* label = PageInfoBubbleView::GetPageInfoBubbleForTesting()->GetViewByID(
-      PageInfoViewFactory::VIEW_ID_PAGE_INFO_AD_PERSONALIZATION_LABEL);
-  ASSERT_TRUE(label);
-
-  EXPECT_EQ(user_actions_stats.GetActionCount(
-                "PageInfo.AdPersonalization.OpenedWithTopics"),
-            1);
-}
-
 IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest, UnwantedSoftwareStrings) {
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
   https_server.AddDefaultHandlers(
@@ -1061,8 +1014,8 @@ IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
 // warning. The reset decisions button should be shown.
 IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
                        ResetWarningDecisionsButtonHttpsFirstMode) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
-                                               true);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
+                                                  true);
 
   GURL http_url = embedded_test_server()->GetURL("foo.com", "/simple.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), http_url));
@@ -1077,8 +1030,8 @@ IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
       GetView(PageInfoViewFactory::VIEW_ID_PAGE_INFO_RESET_DECISIONS_LABEL);
   EXPECT_TRUE(reset_decisions_label->GetVisible());
 
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
-                                               false);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
+                                                  false);
 }
 
 // Navigate to an HTTP page with HTTPS-Upgrades enabled but not HTTPS-First
@@ -1086,8 +1039,8 @@ IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
 // shown.
 IN_PROC_BROWSER_TEST_F(PageInfoBubbleViewBrowserTest,
                        ResetWarningDecisionsButtonHttpsUpgrades) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
-                                               false);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kHttpsOnlyModeEnabled,
+                                                  false);
 
   GURL http_url = embedded_test_server()->GetURL("foo.com", "/simple.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), http_url));
@@ -1458,18 +1411,18 @@ class PageInfoBubbleViewBrowserTestCookiesSubpage
   }
 
   void SetCookieControlsMode(content_settings::CookieControlsMode mode) {
-    browser()->profile()->GetPrefs()->SetInteger(prefs::kCookieControlsMode,
-                                                 static_cast<int>(mode));
+    browser()->GetProfile()->GetPrefs()->SetInteger(prefs::kCookieControlsMode,
+                                                    static_cast<int>(mode));
   }
 
 #if BUILDFLAG(IS_CHROMEOS)
   void EnableCookieSync() {
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         chromeos::prefs::kFloatingSsoEnabled, true);
   }
 
   void SetBlockedDomainsForCookieSync(base::ListValue domains) {
-    browser()->profile()->GetPrefs()->SetList(
+    browser()->GetProfile()->GetPrefs()->SetList(
         chromeos::prefs::kFloatingSsoDomainBlocklist, std::move(domains));
   }
 #endif
@@ -1504,11 +1457,11 @@ class PageInfoBubbleViewBrowserTestCookiesSubpage
 
     // The preference should only be recorded when blocking 3P cookies.
     const bool block_third_party =
-        browser()->profile()->GetPrefs()->GetInteger(
+        browser()->GetProfile()->GetPrefs()->GetInteger(
             prefs::kCookieControlsMode) ==
             static_cast<int>(
                 content_settings::CookieControlsMode::kBlockThirdParty) ||
-        browser()->profile()->IsIncognitoProfile();
+        browser()->GetProfile()->IsIncognitoProfile();
     EXPECT_EQ(browser()->GetProfile()->GetPrefs()->GetBoolean(
                   prefs::kInContextCookieControlsOpened),
               block_third_party);

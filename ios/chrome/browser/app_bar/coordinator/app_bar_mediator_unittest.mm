@@ -6,6 +6,7 @@
 
 #import <memory>
 
+#import "base/run_loop.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/test/metrics/histogram_tester.h"
 #import "base/test/scoped_feature_list.h"
@@ -18,6 +19,7 @@
 #import "components/signin/public/base/consent_level.h"
 #import "components/signin/public/base/signin_pref_names.h"
 #import "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
+#import "components/signin/public/identity_manager/tribool.h"
 #import "components/sync_preferences/testing_pref_service_syncable.h"
 #import "components/tab_groups/tab_group_id.h"
 #import "components/tab_groups/tab_group_visual_data.h"
@@ -39,6 +41,7 @@
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
 #import "ios/chrome/browser/lens_overlay/model/lens_overlay_tab_helper.h"
 #import "ios/chrome/browser/lens_overlay/public/lens_overlay_availability.h"
+#import "ios/chrome/browser/lens_overlay/public/lens_overlay_entrypoint.h"
 #import "ios/chrome/browser/menu/ui_bundled/browser_action_factory.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service_factory.h"
@@ -58,8 +61,8 @@
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/fullscreen_commands.h"
 #import "ios/chrome/browser/shared/public/commands/gemini_commands.h"
-#import "ios/chrome/browser/shared/public/commands/lens_commands.h"
-#import "ios/chrome/browser/shared/public/commands/open_lens_input_selection_command.h"
+#import "ios/chrome/browser/shared/public/commands/lens_overlay_commands.h"
+#import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/shared/public/commands/qr_scanner_commands.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
@@ -88,6 +91,7 @@
 #import "ios/web/public/test/fakes/fake_navigation_manager.h"
 #import "ios/web/public/test/fakes/fake_web_state.h"
 #import "ios/web/public/test/web_task_environment.h"
+#import "net/base/mock_network_change_notifier.h"
 #import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "third_party/ocmock/gtest_support.h"
@@ -125,7 +129,7 @@ class AppBarMediatorTest : public PlatformTest {
                                 BuildIdentityManagerForTests));
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateMockSyncService));
@@ -262,14 +266,15 @@ class AppBarMediatorTest : public PlatformTest {
     mediator_.sceneHandler = mock_scene_handler_;
     mock_settings_handler_ = OCMProtocolMock(@protocol(SettingsCommands));
     mediator_.settingsHandler = mock_settings_handler_;
-    mock_lens_handler_ = OCMProtocolMock(@protocol(LensCommands));
+    mock_lens_overlay_handler_ =
+        OCMProtocolMock(@protocol(LensOverlayCommands));
     [regular_browser_->GetCommandDispatcher()
-        startDispatchingToTarget:mock_lens_handler_
-                     forProtocol:@protocol(LensCommands)];
+        startDispatchingToTarget:mock_lens_overlay_handler_
+                     forProtocol:@protocol(LensOverlayCommands)];
     [incognito_browser_->GetCommandDispatcher()
-        startDispatchingToTarget:mock_lens_handler_
-                     forProtocol:@protocol(LensCommands)];
-    mediator_.lensHandler = mock_lens_handler_;
+        startDispatchingToTarget:mock_lens_overlay_handler_
+                     forProtocol:@protocol(LensOverlayCommands)];
+    mediator_.lensOverlayHandler = mock_lens_overlay_handler_;
     mock_gemini_handler_ = OCMProtocolMock(@protocol(GeminiCommands));
     mediator_.geminiHandler = mock_gemini_handler_;
     mock_tab_groups_handler_ = OCMProtocolMock(@protocol(TabGroupsCommands));
@@ -308,6 +313,36 @@ class AppBarMediatorTest : public PlatformTest {
     signin::UpdateAccountInfoForAccount(identity_manager, account_info);
   }
 
+  void SignInWithTriboolCapability(signin::Tribool capability) {
+    id<SystemIdentity> identity = [FakeSystemIdentity fakeIdentity1];
+    FakeSystemIdentityManager* system_identity_manager =
+        FakeSystemIdentityManager::FromSystemIdentityManager(
+            GetApplicationContext()->GetSystemIdentityManager());
+    system_identity_manager->AddIdentity(identity);
+
+    signin::IdentityManager* identity_manager =
+        IdentityManagerFactory::GetForProfile(regular_profile_.get());
+
+    signin::AccountAvailabilityOptionsBuilder builder;
+    builder.WithGaiaId(identity.gaiaId)
+        .AsPrimary(signin::ConsentLevel::kSignin);
+
+    AccountInfo account_info = signin::MakeAccountAvailable(
+        identity_manager,
+        builder.Build(base::SysNSStringToUTF8(identity.userEmail)));
+
+    AccountCapabilitiesTestMutator mutator(&account_info);
+    if (capability == signin::Tribool::kTrue) {
+      mutator.set_can_use_model_execution_features(true);
+      mutator.set_can_use_gemini_in_chrome(true);
+    } else if (capability == signin::Tribool::kFalse) {
+      mutator.set_can_use_model_execution_features(false);
+      mutator.set_can_use_gemini_in_chrome(false);
+    }
+
+    signin::UpdateAccountInfoForAccount(identity_manager, account_info);
+  }
+
   // Sets the location eligibility.
   void SetLocationEligible(bool eligible) {
     if (eligible) {
@@ -326,6 +361,52 @@ class AppBarMediatorTest : public PlatformTest {
   // Wrapper for `InvokeFloaty`.
   void InvokeFloaty(GeminiBrowserAgent* agent, GeminiConfiguration* config) {
     agent->InvokeFloaty(config);
+  }
+
+  AppBarMediator* CreateMediatorWithCustomGeminiService(
+      GeminiService* gemini_service) {
+    BrowserActionFactory* regular_action_factory =
+        [[BrowserActionFactory alloc] initWithBrowser:regular_browser_.get()
+                                             scenario:kTestMenuScenario];
+    BrowserActionFactory* incognito_action_factory =
+        [[BrowserActionFactory alloc] initWithBrowser:incognito_browser_.get()
+                                             scenario:kTestMenuScenario];
+    AppBarMediator* mediator = [[AppBarMediator alloc]
+            initWithRegularWebStateList:regular_web_state_list_.get()
+                  incognitoWebStateList:incognito_web_state_list_.get()
+            regularFullscreenController:TestFullscreenController::FromBrowser(
+                                            regular_browser_.get())
+          incognitoFullscreenController:TestFullscreenController::FromBrowser(
+                                            incognito_browser_.get())
+          regularFullscreenBrowserAgent:FullscreenBrowserAgent::FromBrowser(
+                                            regular_browser_.get())
+        incognitoFullscreenBrowserAgent:FullscreenBrowserAgent::FromBrowser(
+                                            incognito_browser_.get())
+                   regularActionFactory:regular_action_factory
+                 incognitoActionFactory:incognito_action_factory
+                            prefService:regular_profile_
+                                            ->GetTestingPrefService()
+                     templateURLService:search_engines_test_environment_
+                                            .template_url_service()
+                  authenticationService:auth_service_
+                        identityManager:IdentityManagerFactory::GetForProfile(
+                                            regular_profile_.get())
+                          geminiService:gemini_service
+                     geminiBrowserAgent:GeminiBrowserAgent::FromBrowser(
+                                            regular_browser_.get())
+                  aimEligibilityService:aim_eligibility_service_.get()
+                              URLLoader:url_loader_
+                           tabGridState:tab_grid_state_
+                         incognitoState:incognito_state_
+               lensOverlayStateNotifier:lens_overlay_state_];
+    mediator.consumer = consumer_;
+    mediator.sceneHandler = mock_scene_handler_;
+    mediator.settingsHandler = mock_settings_handler_;
+    mediator.lensOverlayHandler = mock_lens_overlay_handler_;
+    mediator.geminiHandler = mock_gemini_handler_;
+    mediator.regularTabGroupsCommands = mock_tab_groups_handler_;
+    mediator.incognitoTabGroupsCommands = mock_tab_groups_handler_;
+    return mediator;
   }
 
   web::WebTaskEnvironment task_environment_;
@@ -357,7 +438,7 @@ class AppBarMediatorTest : public PlatformTest {
   id mock_settings_handler_;
   id mock_gemini_handler_;
   id mock_tab_groups_handler_;
-  id mock_lens_handler_;
+  id mock_lens_overlay_handler_;
 };
 
 // Tests that the consumer is updated when a web state is added.
@@ -839,8 +920,184 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonStateAsk_GeminiAvailable) {
   EXPECT_OCMOCK_VERIFY(consumer_);
 }
 
+// Tests that when account capability is unknown and device is offline,
+// the button optimistically falls back to kAsk.
+TEST_F(AppBarMediatorTest, TestOptimisticFallback_WhenCapabilityIsUnknown) {
+  std::unique_ptr<net::test::MockNetworkChangeNotifier> mock_network =
+      net::test::MockNetworkChangeNotifier::Create();
+  mock_network->SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kUnknown);
+
+  OCMExpect([consumer_ setAssistantButtonState:AppBarAssistantButtonState::kAsk
+                                   highlighted:NO
+                                       enabled:NO
+                                        avatar:nil
+                                      signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that when account capability is explicitly false (e.g. child account),
+// optimistic fallback is blocked and the button falls back to Account/AIM.
+TEST_F(AppBarMediatorTest, TestNoFallback_WhenCapabilityExplicitlyFalse) {
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kFalse);
+
+  OCMExpect([consumer_
+      setAssistantButtonState:AppBarAssistantButtonState::kAccount
+                  highlighted:NO
+                      enabled:YES
+                       avatar:[OCMArg any]
+                     signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that when online and workspace check explicitly returns disabled,
+// optimistic fallback is blocked.
+TEST_F(AppBarMediatorTest, TestNoFallback_WhenWorkspaceExplicitlyDisabled) {
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kTrue);
+
+  auto fake_gemini = std::make_unique<FakeGeminiService>();
+  gemini::IneligibilityReasons reasons;
+  reasons.workspace = true;
+  fake_gemini->SetIneligibilityReasons(reasons);
+
+  [mediator_ disconnect];
+  gemini_service_ptr_ = std::move(fake_gemini);
+  mediator_ = CreateMediatorWithCustomGeminiService(gemini_service_ptr_.get());
+
+  OCMExpect([consumer_
+      setAssistantButtonState:AppBarAssistantButtonState::kAccount
+                  highlighted:NO
+                      enabled:YES
+                       avatar:[OCMArg any]
+                     signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that when offline, a failed/false workspace check is bypassed by
+// optimistic fallback and shows kAsk.
+TEST_F(AppBarMediatorTest,
+       TestOptimisticFallback_WhenOfflineAndWorkspaceDisabledDueToNetwork) {
+  std::unique_ptr<net::test::MockNetworkChangeNotifier> mock_network =
+      net::test::MockNetworkChangeNotifier::Create();
+  mock_network->SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kTrue);
+
+  auto fake_gemini = std::make_unique<FakeGeminiService>();
+  gemini::IneligibilityReasons reasons;
+  reasons.workspace = true;
+  fake_gemini->SetIneligibilityReasons(reasons);
+
+  [mediator_ disconnect];
+  gemini_service_ptr_ = std::move(fake_gemini);
+  mediator_ = CreateMediatorWithCustomGeminiService(gemini_service_ptr_.get());
+
+  OCMExpect([consumer_ setAssistantButtonState:AppBarAssistantButtonState::kAsk
+                                   highlighted:NO
+                                       enabled:NO
+                                        avatar:nil
+                                      signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that local enterprise policy disablement overrides optimistic fallback.
+TEST_F(AppBarMediatorTest, TestNoFallback_WhenLocalEnterprisePolicyDisabled) {
+  std::unique_ptr<net::test::MockNetworkChangeNotifier> mock_network =
+      net::test::MockNetworkChangeNotifier::Create();
+  mock_network->SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kUnknown);
+
+  regular_profile_->GetTestingPrefService()->SetInteger(
+      prefs::kGenAiEnabledByPolicy,
+      static_cast<int>(gemini::GenAiDefaultSettingsPolicy::kNotAllowed));
+
+  OCMExpect([consumer_
+      setAssistantButtonState:AppBarAssistantButtonState::kAccount
+                  highlighted:NO
+                      enabled:YES
+                       avatar:[OCMArg any]
+                     signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
+// Tests that in incognito mode, the assistant button stays in kAsk state but is
+// disabled.
+TEST_F(AppBarMediatorTest, TestGeminiButtonDisabled_WhenInIncognito) {
+  std::unique_ptr<net::test::MockNetworkChangeNotifier> mock_network =
+      net::test::MockNetworkChangeNotifier::Create();
+  mock_network->SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kUnknown);
+  incognito_state_.incognitoContentVisible = YES;
+
+  OCMExpect([consumer_ setAssistantButtonState:AppBarAssistantButtonState::kAsk
+                                   highlighted:NO
+                                       enabled:NO
+                                        avatar:nil
+                                      signedIn:YES]);
+  [mediator_ updateAssistantButton];
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
 // Tests that tapping the assistant button in the ask state dispatches the
 // Gemini entry flow command when ChromeNextIa is enabled.
+// Tests that the assistant button state is updated when the network connection
+// changes.
+TEST_F(AppBarMediatorTest, TestAssistantButtonUpdatedOnNetworkChange) {
+  std::unique_ptr<net::test::MockNetworkChangeNotifier> mock_network =
+      net::test::MockNetworkChangeNotifier::Create();
+  mock_network->SetConnectionType(net::NetworkChangeNotifier::CONNECTION_NONE);
+
+  // Re-instantiate the mediator so that it registers with the mock network.
+  [mediator_ disconnect];
+  mediator_ = CreateMediatorWithCustomGeminiService(gemini_service_ptr_.get());
+  mediator_.consumer = consumer_;
+
+  SetLocationEligible(true);
+  SignInWithTriboolCapability(signin::Tribool::kUnknown);
+
+  // Initial update configures button for offline fallback (kAsk).
+  [mediator_ updateAssistantButton];
+
+  base::RunLoop run_loop;
+  base::RepeatingClosure quit_closure = run_loop.QuitClosure();
+
+  // Expect the consumer to be notified when the network reconnects.
+  // Because the Gemini capability is kUnknown, it transitions from optimistic
+  // offline fallback (kAsk) to kAccount when online.
+  OCMExpect([consumer_
+                setAssistantButtonState:AppBarAssistantButtonState::kAccount
+                            highlighted:NO
+                                enabled:YES
+                                 avatar:[OCMArg any]
+                               signedIn:YES])
+      .andDo(^(NSInvocation* invocation) {
+        quit_closure.Run();
+      });
+
+  // Simulate network reconnecting.
+  mock_network->SetConnectionTypeAndNotifyObservers(
+      net::NetworkChangeNotifier::CONNECTION_WIFI);
+
+  // Process the network change notification asynchronously.
+  run_loop.Run();
+
+  EXPECT_OCMOCK_VERIFY(consumer_);
+}
+
 TEST_F(AppBarMediatorTest, TestAssistantButtonTappedEligible) {
   SignInAndSetCapability(true);
   [mediator_ updateAssistantButton];
@@ -852,8 +1109,6 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonTappedEligible) {
         return state.entryPoint == gemini::EntryPoint::AppBar;
       }]
                         baseViewController:[OCMArg any]
-                               accessPoint:signin_metrics::AccessPoint::
-                                               kIosAppBar
                   showSnackbarOnCompletion:YES
                                 completion:[OCMArg any]]);
   [mediator_ assistantButtonTappedWithState:AppBarAssistantButtonState::kAsk
@@ -906,8 +1161,7 @@ TEST_F(AppBarMediatorTest,
   EXPECT_OCMOCK_VERIFY(consumer_);
 }
 
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
-TEST_F(AppBarMediatorTest, DISABLED_TestAssistantButtonStateAIM) {
+TEST_F(AppBarMediatorTest, TestAssistantButtonStateAIM) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures({kGeminiKillSwitch}, {kPageActionMenu});
 
@@ -923,14 +1177,25 @@ TEST_F(AppBarMediatorTest, DISABLED_TestAssistantButtonStateAIM) {
   EXPECT_OCMOCK_VERIFY(consumer_);
 }
 
-// Tests that tapping the assistant button in the kAIM state dispatches
-// the show assistant command.
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
-TEST_F(AppBarMediatorTest, DISABLED_TestAssistantButtonTappedAIM) {
-  OCMExpect([mock_scene_handler_ showAssistant]);
+// Tests that tapping the AIM button on the App Bar navigates to the AIM SRP
+// URL in the current tab, rather than triggering the Assistant Container flow.
+TEST_F(AppBarMediatorTest, TestAimButtonTappedOpensAimSrp) {
   [mediator_ assistantButtonTappedWithState:AppBarAssistantButtonState::kAIM
                                    fromView:nil];
-  EXPECT_OCMOCK_VERIFY(mock_scene_handler_);
+  EXPECT_EQ(1, url_loader_->load_current_tab_call_count);
+  EXPECT_TRUE(url_loader_->last_params.web_params.url.is_valid());
+  histogram_tester_.ExpectUniqueSample(kAppBarAssistantButtonTappedHistogram,
+                                       AppBarAssistantButtonState::kAIM, 1);
+}
+
+// Tests that tapping the AIM button in Incognito mode navigates to the AIM SRP
+// URL in the current tab.
+TEST_F(AppBarMediatorTest, TestAimButtonTappedOpensAimSrpIncognito) {
+  incognito_state_.incognitoContentVisible = YES;
+  [mediator_ assistantButtonTappedWithState:AppBarAssistantButtonState::kAIM
+                                   fromView:nil];
+  EXPECT_EQ(1, url_loader_->load_current_tab_call_count);
+  EXPECT_TRUE(url_loader_->last_params.web_params.url.is_valid());
   histogram_tester_.ExpectUniqueSample(kAppBarAssistantButtonTappedHistogram,
                                        AppBarAssistantButtonState::kAIM, 1);
 }
@@ -1072,7 +1337,7 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonStateLensWhenIneligibleSignedIn) {
   mediator_.consumer = consumer_;
   mediator_.sceneHandler = mock_scene_handler_;
   mediator_.settingsHandler = mock_settings_handler_;
-  mediator_.lensHandler = mock_lens_handler_;
+  mediator_.lensOverlayHandler = mock_lens_overlay_handler_;
 
   mediator_.overrideLensAvailabilityForTesting = YES;
 
@@ -1086,18 +1351,15 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonStateLensWhenIneligibleSignedIn) {
 }
 
 // Tests that tapping the assistant button in the kLens state dispatches
-// the Lens command.
+// the Lens Overlay command.
 TEST_F(AppBarMediatorTest, TestAssistantButtonTappedLens) {
-  OCMExpect([mock_lens_handler_
-      openLensInputSelection:[OCMArg
-                                 checkWithBlock:^BOOL(
-                                     OpenLensInputSelectionCommand* command) {
-                                   return command.entryPoint ==
-                                          LensEntrypoint::AppBar;
-                                 }]]);
+  OCMExpect([mock_lens_overlay_handler_
+      createAndShowLensUI:YES
+               entrypoint:LensOverlayEntrypoint::kAppBar
+               completion:[OCMArg any]]);
   [mediator_ assistantButtonTappedWithState:AppBarAssistantButtonState::kLens
                                    fromView:nil];
-  EXPECT_OCMOCK_VERIFY(mock_lens_handler_);
+  EXPECT_OCMOCK_VERIFY(mock_lens_overlay_handler_);
   histogram_tester_.ExpectUniqueSample(kAppBarAssistantButtonTappedHistogram,
                                        AppBarAssistantButtonState::kLens, 1);
 }
@@ -1420,9 +1682,8 @@ TEST_F(AppBarMediatorTest,
 
 // Tests that the assistant button state is kAIM when Gemini is disabled
 // by GeminiSettings policy, but AIM features are allowed.
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
 TEST_F(AppBarMediatorTest,
-       DISABLED_TestAssistantButtonStateAIM_WhenGeminiDisabledByPolicy) {
+       TestAssistantButtonStateAIM_WhenGeminiDisabledByPolicy) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures({kPageActionMenu}, {kGeminiKillSwitch});
 
@@ -1448,9 +1709,8 @@ TEST_F(AppBarMediatorTest,
 
 // Tests that the assistant button state is kAIM when Gemini is disabled
 // by GenAiDefaultSettings policy, but AIM features are allowed.
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
 TEST_F(AppBarMediatorTest,
-       DISABLED_TestAssistantButtonStateAIM_WhenGenAiDisabledByPolicy) {
+       TestAssistantButtonStateAIM_WhenGenAiDisabledByPolicy) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures({kPageActionMenu}, {kGeminiKillSwitch});
 
@@ -1613,8 +1873,7 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonStateOnLoadMetric_Account) {
 }
 
 // Tests the AIM state on-load metric.
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
-TEST_F(AppBarMediatorTest, DISABLED_TestAssistantButtonStateOnLoadMetric_AIM) {
+TEST_F(AppBarMediatorTest, TestAssistantButtonStateOnLoadMetric_AIM) {
   // Disable Gemini via policy.
   regular_profile_->GetTestingPrefService()->SetInteger(
       prefs::kGeminiEnabledByPolicy,
@@ -1709,9 +1968,7 @@ TEST_F(AppBarMediatorTest, TestAssistantButtonStatePriority_GeminiOverAll) {
 
 // Tests the priority chain: AIM (kAIM) has priority over Lens (kLens) when
 // Gemini is ineligible.
-// TODO(crbug.com/532071605): Re-enable when AIM button on App Bar is enabled.
-TEST_F(AppBarMediatorTest,
-       DISABLED_TestAssistantButtonStatePriority_AIMOverLens) {
+TEST_F(AppBarMediatorTest, TestAssistantButtonStatePriority_AIMOverLens) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures({}, {});
 

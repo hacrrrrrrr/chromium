@@ -11,6 +11,7 @@ mojom("mojo_bindings") {
   sources = [
     "default_browser.mojom",
     "feature_showcase.mojom",
+    "gemini.mojom",
     "google_lens.mojom",
     "password_manager.mojom",
     "themes_and_customization.mojom",
@@ -26,6 +27,10 @@ source_set("feature_showcase") {
     "feature_showcase_handler.h",
     "feature_showcase_ui.cc",
     "feature_showcase_ui.h",
+    "gemini_disclosure.cc",
+    "gemini_disclosure.h",
+    "gemini_handler.cc",
+    "gemini_handler.h",
     "google_lens_handler.cc",
     "google_lens_handler.h",
     "password_manager_handler.cc",
@@ -45,6 +50,7 @@ source_set("feature_showcase") {
     "//chrome/app/theme:chrome_unscaled_resources",
     "//chrome/browser:browser_process",
     "//chrome/browser:shell_integration",
+    "//chrome/browser/glic",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/regional_capabilities",
     "//chrome/browser/resources/feature_showcase:resources",
@@ -58,11 +64,13 @@ source_set("feature_showcase") {
     "//chrome/browser/ui/webui/cr_components/theme_color_picker:impl",
     "//chrome/browser/ui/webui/intro",
     "//chrome/common:constants",
+    "//components/glic:glic_pref_names",
     "//components/lens",
     "//components/lens:enterprise_policy",
     "//components/prefs",
     "//components/regional_capabilities",
     "//components/signin/public/base:signin_switches",
+    "//components/variations/service",
     "//content/public/browser",
     "//ui/webui",
   ]
@@ -73,4 +81,40 @@ source_set("feature_showcase") {
       "//chrome/installer/util:with_no_strings",
     ]
   }
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "default_browser_handler_unittest.cc",
+    "feature_showcase_handler_unittest.cc",
+    "gemini_disclosure_unittest.cc",
+    "gemini_handler_unittest.cc",
+    "google_lens_handler_unittest.cc",
+    "password_manager_handler_unittest.cc",
+    "themes_and_customization_handler_unittest.cc",
+  ]
+  deps = [
+    ":feature_showcase",
+    ":mojo_bindings",
+    "//chrome/browser:shell_integration",
+    "//chrome/browser/glic",
+    "//chrome/browser/glic/test_support",
+    "//chrome/browser/signin",
+    "//chrome/browser/themes",
+    "//chrome/browser/ui:feature_showcase_metrics",
+    "//chrome/browser/ui/actions",
+    "//chrome/browser/ui/actions:actions_headers",
+    "//chrome/browser/ui/lens",
+    "//chrome/browser/ui/toolbar/pinned_toolbar",
+    "//chrome/browser/ui/webui/intro",
+    "//chrome/test:test_support",
+    "//components/glic:glic_pref_names",
+    "//components/lens",
+    "//components/prefs",
+    "//components/prefs:test_support",
+    "//content/test:test_support",
+    "//testing/gtest",
+    "//ui/actions",
+  ]
 }

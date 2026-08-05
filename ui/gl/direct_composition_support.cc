@@ -113,18 +113,18 @@ void SetOverlayCapsValid(bool valid) {
 }
 
 // A wrapper of IDXGIOutput4::CheckOverlayColorSpaceSupport()
-bool CheckOverlayColorSpaceSupport(
-    DXGI_FORMAT dxgi_format,
-    DXGI_COLOR_SPACE_TYPE dxgi_color_space,
-    Microsoft::WRL::ComPtr<IDXGIOutput> output,
-    Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device) {
+bool CheckOverlayColorSpaceSupport(DXGI_FORMAT dxgi_format,
+                                   DXGI_COLOR_SPACE_TYPE dxgi_color_space,
+                                   IDXGIOutput* output,
+                                   ID3D11Device* d3d11_device) {
   UINT color_space_support_flags = 0;
   Microsoft::WRL::ComPtr<IDXGIOutput4> output4;
-  if (FAILED(output.As(&output4)) ||
+  if (FAILED(output->QueryInterface(IID_PPV_ARGS(&output4))) ||
       FAILED(output4->CheckOverlayColorSpaceSupport(
-          dxgi_format, dxgi_color_space, d3d11_device.Get(),
-          &color_space_support_flags)))
+          dxgi_format, dxgi_color_space, d3d11_device,
+          &color_space_support_flags))) {
     return false;
+  }
   return (color_space_support_flags &
           DXGI_OVERLAY_COLOR_SPACE_SUPPORT_FLAG_PRESENT);
 }
@@ -248,8 +248,9 @@ void GetGpuDriverOverlayInfo(bool* supports_overlays,
   Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter;
   CHECK_EQ(dxgi_device->GetAdapter(&dxgi_adapter), S_OK);
 
-  // This will fail if the D3D device is "Microsoft Basic Display Adapter".
-  Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device;
+  // This will fail for software devices such as WARP or Microsoft Basic
+  // Display Adapter.
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice1> video_device;
   if (FAILED(d3d11_device.As(&video_device))) {
     LOG(ERROR) << __func__ << ": Failed to retrieve video device";
     return;
@@ -286,7 +287,7 @@ void GetGpuDriverOverlayInfo(bool* supports_overlays,
       if (g_check_ycbcr_studio_g22_left_p709_for_nv12_support &&
           !CheckOverlayColorSpaceSupport(
               DXGI_FORMAT_NV12, DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
-              output, d3d11_device)) {
+              output.Get(), d3d11_device.Get())) {
         // Some new Intel drivers only claim to support unscaled overlays, but
         // scaled overlays still work. It's possible DWM works around it by
         // performing an extra scaling Blt before calling the driver. Even when
@@ -314,8 +315,10 @@ void GetGpuDriverOverlayInfo(bool* supports_overlays,
     if (FlagsSupportsOverlays(*rgb10a2_overlay_support_flags)) {
       if (!CheckOverlayColorSpaceSupport(
               DXGI_FORMAT_R10G10B10A2_UNORM,
-              DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, output, d3d11_device))
+              DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, output.Get(),
+              d3d11_device.Get())) {
         *rgb10a2_overlay_support_flags = 0;
+      }
     }
     if (g_force_rgb10a2_overlay_support) {
       *rgb10a2_overlay_support_flags = DXGI_OVERLAY_SUPPORT_FLAG_SCALING;
@@ -554,17 +557,16 @@ void QueryVideoProcessorCustomExtForHDR() {
     return;
   }
 
-  Microsoft::WRL::ComPtr<ID3D11VideoContext> d3d11_video_context;
-  if (FAILED(d3d11_context.As(&d3d11_video_context))) {
-    LOG(ERROR) << __func__ << ": Failed to retrieve video context";
-    return;
-  }
-
-  Microsoft::WRL::ComPtr<ID3D11VideoDevice> d3d11_video_device;
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice1> d3d11_video_device;
   if (FAILED(d3d11_device.As(&d3d11_video_device))) {
     LOG(ERROR) << __func__ << ": Failed to retrieve video device";
     return;
   }
+
+  // QueryInterface for ID3D11VideoContext1 always succeeds on all Windows
+  // versions supported by Chrome if ID3D11VideoDevice1 QueryInterface succeeds.
+  Microsoft::WRL::ComPtr<ID3D11VideoContext1> d3d11_video_context;
+  CHECK_EQ(d3d11_context.As(&d3d11_video_context), S_OK);
 
   D3D11_VIDEO_PROCESSOR_CONTENT_DESC desc = {};
   desc.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -886,6 +888,20 @@ bool DirectCompositionDecodeSwapChainSupported() {
   return false;
 }
 
+// Returns true if |color_space| is supported by the IHV overlay hardware for
+// |format| on |output|. The caller (DCLayerTree) is responsible for finding
+// the correct IDXGIOutput by enumerating all adapters, so this works even when
+// the window is on a monitor driven by a different adapter than the rendering
+// device.
+bool DirectCompositionColorSpaceOverlaySupported(
+    DXGI_FORMAT format,
+    DXGI_COLOR_SPACE_TYPE color_space,
+    IDXGIOutput* output) {
+  DCHECK(output);
+  return CheckOverlayColorSpaceSupport(format, color_space, output,
+                                       GetDirectCompositionD3D11Device());
+}
+
 void DisableDirectCompositionOverlays() {
   SetSupportsOverlays(false);
   DirectCompositionOverlayCapsMonitor::GetInstance()
@@ -919,7 +935,7 @@ bool CheckVideoProcessorFormatSupport(DXGI_FORMAT dxgi_format) {
     return false;
   }
 
-  Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device;
+  Microsoft::WRL::ComPtr<ID3D11VideoDevice1> video_device;
   if (FAILED(d3d11_device.As(&video_device))) {
     LOG(ERROR) << __func__ << ": Failed to retrieve video device";
     return false;

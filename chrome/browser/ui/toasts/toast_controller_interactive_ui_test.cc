@@ -28,13 +28,11 @@
 #include "chrome/browser/ui/toasts/toast_view.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/location_bar/star_view.h"
 #include "chrome/browser/ui/views/test/split_view_interactive_test_mixin.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "components/omnibox/common/omnibox_features.h"
-#include "components/plus_addresses/core/common/features.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "net/dns/mock_host_resolver.h"
@@ -134,8 +132,7 @@ class ToastControllerInteractiveTest
       override {
     return {{toast_features::kLinkCopiedToast, {}},
             {toast_features::kImageCopiedToast, {}},
-            {toast_features::kReadingListToast, {}},
-            {plus_addresses::features::kPlusAddressesEnabled, {}}};
+            {toast_features::kReadingListToast, {}}};
   }
 
   GURL GetURL(std::string_view hostname = "example.com",
@@ -144,7 +141,7 @@ class ToastControllerInteractiveTest
   }
 
   ToastController* GetToastController() {
-    return browser()->browser_window_features()->toast_controller();
+    return browser()->GetFeatures().toast_controller();
   }
 
   auto ShowToast(ToastParams params) {
@@ -430,7 +427,8 @@ IN_PROC_BROWSER_TEST_F(ToastControllerInteractiveTest,
 // closes the toast.
 IN_PROC_BROWSER_TEST_F(ToastControllerInteractiveTest,
                        MenuButtonClickOpensMenu) {
-  ToastParams params(ToastId::kPlusAddressOverride);
+  ToastParams params(ToastId::kEmailVerified);
+  params.body_string_replacement_params = {u"dummy"};
   int counter = 0;
   params.menu_model = std::make_unique<TestMenuModel>(
       base::BindLambdaForTesting([&counter]() { ++counter; }));
@@ -445,24 +443,45 @@ IN_PROC_BROWSER_TEST_F(ToastControllerInteractiveTest,
 
 // Tests that attempting to close the `ToastView` does not succeed while the
 // menu is open. If that happens, the `ToastView` is closed once the menu
-// closes.
+// closes via Escape key.
+IN_PROC_BROWSER_TEST_F(ToastControllerInteractiveTest,
+                       ToastDoesNotCloseWhileMenuIsOpen_Escape) {
+  ToastParams params(ToastId::kEmailVerified);
+  params.body_string_replacement_params = {u"dummy"};
+  params.menu_model = std::make_unique<TestMenuModel>(base::DoNothing());
+  RunTestSequence(ShowToast(std::move(params)),
+                  WaitForShow(toasts::ToastView::kToastViewId),
+                  EnsurePresent(toasts::ToastView::kToastMenuButton),
+                  PressButton(toasts::ToastView::kToastMenuButton),
+                  WaitForShow(kSampleMenuItem),
+                  EnsurePresent(toasts::ToastView::kToastViewId),
+                  FireToastCloseTimer(),
+                  EnsurePresent(toasts::ToastView::kToastViewId),
+                  SendKeyPress(kBrowserViewElementId, ui::VKEY_ESCAPE),
+                  WaitForHide(toasts::ToastView::kToastViewId));
+}
 
+// Tests that attempting to close the `ToastView` does not succeed while the
+// menu is open. If that happens, the `ToastView` is closed once the menu
+// closes via clicking the menu button again.
 // TODO(crbug.com/398296825): Flaky on Windows builds.
 #if BUILDFLAG(IS_WIN)
-#define MAYBE_ToastDoesNotCloseWhileMenuIsOpen \
-  DISABLED_ToastDoesNotCloseWhileMenuIsOpen
+#define MAYBE_ToastDoesNotCloseWhileMenuIsOpen_Mouse \
+  DISABLED_ToastDoesNotCloseWhileMenuIsOpen_Mouse
 #else
-#define MAYBE_ToastDoesNotCloseWhileMenuIsOpen ToastDoesNotCloseWhileMenuIsOpen
+#define MAYBE_ToastDoesNotCloseWhileMenuIsOpen_Mouse \
+  ToastDoesNotCloseWhileMenuIsOpen_Mouse
 #endif
 IN_PROC_BROWSER_TEST_F(ToastControllerInteractiveTest,
-                       MAYBE_ToastDoesNotCloseWhileMenuIsOpen) {
+                       MAYBE_ToastDoesNotCloseWhileMenuIsOpen_Mouse) {
 #if BUILDFLAG(IS_OZONE)
   if (ui::OzonePlatform::RunningOnWaylandForTest()) {
     GTEST_SKIP() << "Flaky in Wayland due to way events are routed and bounds "
                     "are reported";
   }
 #endif
-  ToastParams params(ToastId::kPlusAddressOverride);
+  ToastParams params(ToastId::kEmailVerified);
+  params.body_string_replacement_params = {u"dummy"};
   params.menu_model = std::make_unique<TestMenuModel>(base::DoNothing());
   RunTestSequence(ShowToast(std::move(params)),
                   WaitForShow(toasts::ToastView::kToastViewId),

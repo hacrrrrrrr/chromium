@@ -6,29 +6,41 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/check.h"
 #include "base/check_op.h"
+#include "base/containers/adapters.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ref.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/pdf/renderer/pdf_accessibility_tree_builder.h"
 #include "pdf/accessibility_structs.h"
 #include "pdf/pdf_features.h"
 #include "third_party/abseil-cpp/absl/cleanup/cleanup.h"
+#include "third_party/icu/source/common/unicode/uchar.h"
+#include "third_party/icu/source/common/unicode/uscript.h"
+#include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect_f.h"
+
+namespace pdf {
 
 namespace {
 
 // Don't try to apply font size thresholds to automatically identify headings
 // if the median font size is not at least this many points.
 constexpr float kMinimumFontSize = 5.0f;
+
+// Font sizes within this threshold of each other are considered equivalent for
+// heading levels.
+constexpr float kFontSizeWiggleRoom = 1.0f;
 
 // Don't try to apply paragraph break thresholds to automatically identify
 // paragraph breaks if the median line break is not at least this many points.
@@ -38,9 +50,23 @@ constexpr float kMinimumLineSpacing = 5.0f;
 // for that text run to be considered to be a heading instead of normal text.
 constexpr float kHeadingFontSizeRatio = 1.2f;
 
+// Ratio between the largest heading candidate font size and the median font
+// size on the page for it to be considered an H1 instead of H2.
+constexpr float kH1MinFontSizeRatio = 1.7f;
+
 // Ratio between the line spacing between two lines and the median on the
 // page for that line spacing to be considered a paragraph break.
 constexpr float kParagraphLineSpacingRatio = 1.2f;
+
+// The default heading level used when the run is determined to be a heading.
+constexpr int kDefaultHeadingLevel = 2;
+
+// The largest heading level used when the run is determined to be a heading due
+// to a combination of its font size and other styling, instead of just size.
+constexpr int kLargestStyledHeadingLevel = 3;
+
+// The smallest heading level allowed (corresponds to <h6>).
+constexpr int kSmallestHeadingLevel = 6;
 
 // This class is used as part of our heuristic to determine which text runs live
 // on the same "line".  As we process runs, we keep a weighted average of the
@@ -164,10 +190,26 @@ size_t NormalizeTextRunIndex(uint32_t object_end_text_run_index,
       current_text_run_index ? current_text_run_index - 1 : 0);
 }
 
+bool IsAllUppercase(base::span<const chrome_pdf::AccessibilityCharInfo> chars) {
+  bool has_cased_letter = false;
+  for (const auto& char_info : chars) {
+    UChar32 c = static_cast<UChar32>(char_info.unicode_character);
+    if (u_islower(c)) {
+      return false;
+    }
+    if (u_isupper(c)) {
+      has_cased_letter = true;
+    }
+  }
+  return has_cased_letter;
+}
+
 void ComputeParagraphAndHeadingThresholds(
     const std::vector<chrome_pdf::AccessibilityTextRunInfo>& text_runs,
     float* out_heading_font_size_threshold,
-    float* out_paragraph_spacing_threshold) {
+    float* out_paragraph_spacing_threshold,
+    float* out_median_font_size,
+    std::map<float, int>* out_heading_font_size_mapping) {
   // Scan over the font sizes and line spacing within this page and
   // set heuristic thresholds so that text larger than the median font
   // size can be marked as a heading, and spacing larger than the median
@@ -186,10 +228,45 @@ void ComputeParagraphAndHeadingThresholds(
   }
   if (font_sizes.size() > 2) {
     std::sort(font_sizes.begin(), font_sizes.end());
-    float median_font_size = font_sizes[font_sizes.size() / 2];
-    if (median_font_size > kMinimumFontSize) {
+    *out_median_font_size = font_sizes[font_sizes.size() / 2];
+    if (*out_median_font_size > kMinimumFontSize) {
       *out_heading_font_size_threshold =
-          median_font_size * kHeadingFontSizeRatio;
+          *out_median_font_size * kHeadingFontSizeRatio;
+
+      if (features::IsPdfAccessibilityHeuristicEnhancementsEnabled()) {
+        CHECK(out_heading_font_size_mapping->empty());
+        // Start at heading level 1 only if the font size is significantly
+        // larger than the median.
+        float current_cluster_font_size = font_sizes.back();
+        bool is_much_larger = current_cluster_font_size >=
+                              (*out_median_font_size * kH1MinFontSizeRatio);
+        int current_level = is_much_larger ? 1 : 2;
+        float min_mapping_font_size = *out_median_font_size;
+        // Iterate from the largest font size down to the median font size. The
+        // largest font size is compared to itself in the first iteration of the
+        // loop so that it's set as the first level.
+        for (float size : base::Reversed(font_sizes)) {
+          if (size < min_mapping_font_size) {
+            break;
+          }
+          // If the current cluster size and the new size are different enough,
+          // update the heading level. Otherwise, maintain the current cluster.
+          if (current_cluster_font_size - size > kFontSizeWiggleRoom) {
+            current_cluster_font_size = size;
+            if (current_level < kSmallestHeadingLevel) {
+              current_level++;
+            }
+          }
+          // Once the normal heading size threshold is reached, start at level
+          // `kMaxStyledHeadingLevel` and increment from there so that no text
+          // of size < heading threshold is a heading level h1 or h2.
+          if (size < *out_heading_font_size_threshold &&
+              current_level < kLargestStyledHeadingLevel) {
+            current_level = kLargestStyledHeadingLevel;
+          }
+          (*out_heading_font_size_mapping)[size] = current_level;
+        }
+      }
     }
   }
   if (line_spacings.size() > 4) {
@@ -202,26 +279,129 @@ void ComputeParagraphAndHeadingThresholds(
   }
 }
 
-bool BreakParagraph(
-    const std::vector<chrome_pdf::AccessibilityTextRunInfo>& text_runs,
-    uint32_t text_run_index,
-    float paragraph_spacing_threshold) {
-  // Check to see if its also a new paragraph, i.e., if the distance between
-  // lines is greater than the threshold.  If there's no threshold, that
-  // means there weren't enough lines to compute an accurate median, so
-  // we compare against the line size instead.
-  float line_spacing = fabsf(text_runs[text_run_index + 1].bounds.y() -
-                             text_runs[text_run_index].bounds.y());
-  return ((paragraph_spacing_threshold > 0 &&
-           line_spacing > paragraph_spacing_threshold) ||
-          (paragraph_spacing_threshold == 0 &&
-           line_spacing > kParagraphLineSpacingRatio *
-                              text_runs[text_run_index].bounds.height()));
+// Returns the hierarchical heading level (1 to 6) for a given font size,
+// based on the mapping of unique heading font sizes. Returns 0 if not a
+// heading.
+int GetHeadingLevelFromSize(
+    const std::map<float, int>& heading_font_size_mapping,
+    float font_size) {
+  CHECK(features::IsPdfAccessibilityHeuristicEnhancementsEnabled());
+  if (heading_font_size_mapping.empty()) {
+    return 0;
+  }
+
+  // Find the first key in the map that is >= font_size.
+  auto it = heading_font_size_mapping.lower_bound(font_size);
+  float best_diff = kFontSizeWiggleRoom;
+  int best_level = 0;
+
+  // Check the mapped candidate font size that is greater than or equal to
+  // `font_size` (the upper bound).
+  if (it != heading_font_size_mapping.end()) {
+    float diff = std::abs(it->first - font_size);
+    if (diff <= best_diff) {
+      best_diff = diff;
+      best_level = it->second;
+    }
+  }
+
+  // Check the mapped candidate font size that is strictly smaller than
+  // `font_size` (the lower neighbor).
+  if (it != heading_font_size_mapping.begin()) {
+    auto prev_it = std::prev(it);
+    float diff = std::abs(prev_it->first - font_size);
+    if (diff <= best_diff) {
+      best_diff = diff;
+      best_level = prev_it->second;
+    }
+  }
+
+  return best_level;
 }
 
-void BuildStaticNode(ui::AXNodeData** static_text_node,
-                     std::string* static_text) {
-  // If we're in the middle of building a static text node, finish it before
+// Returns a span of AccessibilityCharInfo corresponding to the text run at
+// `text_run_index`.
+base::span<const chrome_pdf::AccessibilityCharInfo> GetTextRunChars(
+    const PageLayoutData& layout,
+    size_t text_run_index) {
+  uint32_t start_index = layout.text_run_start_indices[text_run_index];
+  uint32_t len = layout.text_runs[text_run_index].len;
+  return base::span(layout.chars).subspan(start_index, len);
+}
+
+HeadingClassifier GetHeadingClassifier(
+    const chrome_pdf::AccessibilityTextRunInfo& text_run,
+    base::span<const chrome_pdf::AccessibilityCharInfo> text_run_chars,
+    float median_font_size) {
+  CHECK(features::IsPdfAccessibilityHeuristicEnhancementsEnabled());
+
+  const chrome_pdf::AccessibilityTextStyleInfo& style = text_run.style;
+  if (style.font_size < median_font_size) {
+    return HeadingClassifier::kNone;
+  }
+
+  if (PdfAccessibilityTreeBuilder::IsBoldStyle(style)) {
+    return HeadingClassifier::kBoldStyle;
+  }
+
+  if (IsAllUppercase(text_run_chars)) {
+    return HeadingClassifier::kAllUppercase;
+  }
+
+  return HeadingClassifier::kNone;
+}
+
+void PromoteNodeToHeading(ui::AXNodeData* block_node, int heading_level) {
+  block_node->role = ax::mojom::Role::kHeading;
+  block_node->AddIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel,
+                              heading_level);
+  block_node->AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag,
+                                 "h" + base::NumberToString(heading_level));
+}
+
+bool BreakParagraph(uint32_t text_run_index,
+                    const ui::AXNodeData* block_node,
+                    HeadingClassifier heading_classifier,
+                    const PageLayoutData& layout,
+                    const HeuristicThresholds& thresholds) {
+  // Use line spacing to determine where to break body text.
+  if (!features::IsPdfAccessibilityHeuristicEnhancementsEnabled() ||
+      heading_classifier == HeadingClassifier::kNone) {
+    float line_spacing = fabsf(layout.text_runs[text_run_index + 1].bounds.y() -
+                               layout.text_runs[text_run_index].bounds.y());
+    return (
+        (thresholds.paragraph_spacing_threshold > 0 &&
+         line_spacing > thresholds.paragraph_spacing_threshold) ||
+        (thresholds.paragraph_spacing_threshold == 0 &&
+         line_spacing > kParagraphLineSpacingRatio *
+                            layout.text_runs[text_run_index].bounds.height()));
+  }
+
+  // Use heading level and classifier to determine where to break headings. i.e.
+  // if the next run is the same heading level as the current run, and has the
+  // same classifier don't break. If the heading levels are the same, but the
+  // classifier is different (e.g. the first heading is bolded and the next one
+  // is all caps), do break the headings up.
+  int current_level =
+      block_node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel);
+  if (heading_classifier == HeadingClassifier::kFontSize) {
+    int next_level = GetHeadingLevelFromSize(
+        *thresholds.heading_font_size_mapping,
+        layout.text_runs[text_run_index + 1].style.font_size);
+    return current_level != next_level;
+  }
+
+  HeadingClassifier next_classifier = GetHeadingClassifier(
+      layout.text_runs[text_run_index + 1],
+      GetTextRunChars(layout, text_run_index + 1), thresholds.median_font_size);
+  return heading_classifier != next_classifier;
+}
+
+void BuildStaticNode(
+    ui::AXNodeData** static_text_node,
+    std::string* static_text,
+    std::optional<chrome_pdf::AccessibilityTextStyleInfo>* current_style) {
+  // If a static text node is currently being built, finish it before
   // moving on to the next object.
   if (*static_text_node) {
     (*static_text_node)
@@ -229,6 +409,7 @@ void BuildStaticNode(ui::AXNodeData** static_text_node,
     static_text->clear();
   }
   *static_text_node = nullptr;
+  current_style->reset();
 }
 
 void ConnectPreviousAndNextOnLine(ui::AXNodeData* previous_on_line_node,
@@ -241,11 +422,12 @@ void ConnectPreviousAndNextOnLine(ui::AXNodeData* previous_on_line_node,
 
 }  // namespace
 
-namespace pdf {
-
 PdfAccessibilityTreeBuilderHeuristic::PdfAccessibilityTreeBuilderHeuristic(
     PdfAccessibilityTreeBuilder& builder)
     : builder_(builder) {}
+
+PdfAccessibilityTreeBuilderHeuristic::~PdfAccessibilityTreeBuilderHeuristic() =
+    default;
 
 void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
   base::ElapsedTimer timer;
@@ -253,14 +435,34 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
     base::UmaHistogramTimes("Accessibility.PDF.Heuristic.BuildPageTreeTime",
                             timer.Elapsed());
   };
-  ComputeParagraphAndHeadingThresholds(builder_->text_runs(),
-                                       &heading_font_size_threshold_,
-                                       &paragraph_spacing_threshold_);
+  float heading_font_size_threshold = 0;
+  float paragraph_spacing_threshold = 0;
+  float median_font_size = 0;
+  std::map<float, int> font_size_heading_mapping;
+  ComputeParagraphAndHeadingThresholds(
+      builder_->text_runs(), &heading_font_size_threshold,
+      &paragraph_spacing_threshold, &median_font_size,
+      &font_size_heading_mapping);
+
+  const PageLayoutData layout = {
+      .text_runs = builder_->text_runs(),
+      .chars = builder_->chars(),
+      .text_run_start_indices = builder_->text_run_start_indices(),
+  };
+
+  const HeuristicThresholds thresholds = {
+      .paragraph_spacing_threshold = paragraph_spacing_threshold,
+      .heading_font_size_mapping = raw_ref(font_size_heading_mapping),
+      .median_font_size = median_font_size,
+      .heading_font_size_threshold = heading_font_size_threshold,
+  };
 
   ui::AXNodeData* block_node = nullptr;
   ui::AXNodeData* static_text_node = nullptr;
   ui::AXNodeData* previous_on_line_node = nullptr;
   std::string static_text;
+  std::optional<chrome_pdf::AccessibilityTextStyleInfo> current_style;
+  HeadingClassifier current_heading_classifier = HeadingClassifier::kNone;
   LineHelper line_helper(builder_->text_runs());
   bool pdf_forms_enabled =
       base::FeatureList::IsEnabled(chrome_pdf::features::kAccessiblePDFForm);
@@ -283,7 +485,7 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
       // PDF searchifier only processes pages that have no text, hence OCR text
       // is never added in the middle of a paragraph.
       if (block_node) {
-        BuildStaticNode(&static_text_node, &static_text);
+        BuildStaticNode(&static_text_node, &static_text, &current_style);
         block_node = nullptr;
       }
       CHECK(ocr_block_start || text_run_index);
@@ -299,15 +501,18 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
 #endif  // BUILDFLAG(ENABLE_SCREEN_AI_SERVICE)
     // If we don't have a block level node, create one.
     if (!block_node) {
-      block_node = CreateBlockLevelNode(text_run.style.font_size);
+      block_node = CreateBlockLevelNode(text_run.style.font_size, thresholds);
       builder_->page_node()->child_ids.push_back(block_node->id);
+      if (block_node->role == ax::mojom::Role::kHeading) {
+        current_heading_classifier = HeadingClassifier::kFontSize;
+      }
     }
 
     // If the `text_run_index` is less than or equal to the link's
     // `text_run_index`, then push the link node in the block.
     if (IsObjectWithRangeInTextRun(builder_->links(), current_link_index_,
                                    text_run_index)) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       const chrome_pdf::AccessibilityLinkInfo& link =
           (builder_->links())[current_link_index_++];
       AddLinkToParaNode(link, block_node, &previous_on_line_node,
@@ -319,21 +524,21 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
 
     } else if (IsObjectInTextRun(builder_->images(), current_image_index_,
                                  text_run_index)) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       AddImageToParaNode((builder_->images())[current_image_index_++],
                          block_node, &text_run_index);
       continue;
     } else if (IsObjectWithRangeInTextRun(builder_->highlights(),
                                           current_highlight_index_,
                                           text_run_index)) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       AddHighlightToParaNode(
           (builder_->highlights())[current_highlight_index_++], block_node,
           &previous_on_line_node, &text_run_index);
     } else if (IsObjectInTextRun(builder_->text_fields(),
                                  current_text_field_index_, text_run_index) &&
                pdf_forms_enabled) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       AddTextFieldToParaNode(
           (builder_->text_fields())[current_text_field_index_++], block_node,
           &text_run_index);
@@ -341,14 +546,14 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
     } else if (IsObjectInTextRun(builder_->buttons(), current_button_index_,
                                  text_run_index) &&
                pdf_forms_enabled) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       AddButtonToParaNode((builder_->buttons())[current_button_index_++],
                           block_node, &text_run_index);
       continue;
     } else if (IsObjectInTextRun(builder_->choice_fields(),
                                  current_choice_field_index_, text_run_index) &&
                pdf_forms_enabled) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       AddChoiceFieldToParaNode(
           (builder_->choice_fields())[current_choice_field_index_++],
           block_node, &text_run_index);
@@ -358,10 +563,30 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
           builder_->page_index(),
           builder_->text_run_start_indices()[text_run_index]};
 
+      // Under enhanced heuristics, break and start a new static text node if
+      // the style changes. This prevents text runs of different styles (e.g.
+      // bold vs regular) from being merged into a single static text node.
+      if (features::IsPdfAccessibilityHeuristicEnhancementsEnabled() &&
+          static_text_node && current_style &&
+          !PdfAccessibilityTreeBuilder::AreStylesEquivalent(*current_style,
+                                                            text_run.style)) {
+        BuildStaticNode(&static_text_node, &static_text, &current_style);
+        current_heading_classifier = HeadingClassifier::kNone;
+      }
+
       // This node is for the text inside the block, it includes the text of all
       // of the text runs.
       if (!static_text_node) {
-        static_text_node = builder_->CreateStaticTextNode(page_char_index);
+        // No need to add text styling to the node if it's a heading because the
+        // heading has its own styling.
+        if (features::IsPdfAccessibilityHeuristicEnhancementsEnabled() &&
+            (block_node->role != ax::mojom::Role::kHeading)) {
+          static_text_node = builder_->CreateStaticTextNodeWithStyle(
+              page_char_index, text_run.style);
+          current_style = text_run.style;
+        } else {
+          static_text_node = builder_->CreateStaticTextNode(page_char_index);
+        }
         block_node->child_ids.push_back(static_text_node->id);
       }
 
@@ -393,20 +618,36 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
         } else {
           // The next run is on a new line.
           previous_on_line_node = nullptr;
+
+          // If this run satisfies certain styling requirements and is on its
+          // own line, make it a heading.
+          if (features::IsPdfAccessibilityHeuristicEnhancementsEnabled() &&
+              current_heading_classifier == HeadingClassifier::kNone) {
+            current_heading_classifier = GetHeadingClassifier(
+                text_run, GetTextRunChars(layout, text_run_index),
+                thresholds.median_font_size);
+            if (current_heading_classifier != HeadingClassifier::kNone) {
+              int heading_level =
+                  GetHeadingLevelFromSize(*thresholds.heading_font_size_mapping,
+                                          text_run.style.font_size);
+              PromoteNodeToHeading(block_node, heading_level);
+            }
+          }
         }
       }
     }
 
     if (text_run_index == builder_->text_runs().size() - 1) {
-      BuildStaticNode(&static_text_node, &static_text);
+      BuildStaticNode(&static_text_node, &static_text, &current_style);
       break;
     }
 
     if (!previous_on_line_node) {
-      if (BreakParagraph(builder_->text_runs(), text_run_index,
-                         paragraph_spacing_threshold_)) {
-        BuildStaticNode(&static_text_node, &static_text);
+      if (BreakParagraph(text_run_index, block_node, current_heading_classifier,
+                         layout, thresholds)) {
+        BuildStaticNode(&static_text_node, &static_text, &current_style);
         block_node = nullptr;
+        current_heading_classifier = HeadingClassifier::kNone;
       }
     }
   }
@@ -429,18 +670,25 @@ void PdfAccessibilityTreeBuilderHeuristic::BuildPageTree() {
 }
 
 ui::AXNodeData* PdfAccessibilityTreeBuilderHeuristic::CreateBlockLevelNode(
-    float font_size) {
+    float font_size,
+    const HeuristicThresholds& thresholds) {
   ui::AXNodeData* block_node = builder_->CreateAndAppendNode(
       ax::mojom::Role::kParagraph, ax::mojom::Restriction::kReadOnly);
   block_node->AddBoolAttribute(ax::mojom::BoolAttribute::kIsLineBreakingObject,
                                true);
 
   if (builder_->mark_headings_using_heuristic() &&
-      heading_font_size_threshold_ > 0 &&
-      font_size > heading_font_size_threshold_) {
-    block_node->role = ax::mojom::Role::kHeading;
-    block_node->AddIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel, 2);
-    block_node->AddStringAttribute(ax::mojom::StringAttribute::kHtmlTag, "h2");
+      thresholds.heading_font_size_threshold > 0 &&
+      font_size > thresholds.heading_font_size_threshold) {
+    int heading_level = kDefaultHeadingLevel;
+    if (features::IsPdfAccessibilityHeuristicEnhancementsEnabled()) {
+      int heuristic_heading_level = GetHeadingLevelFromSize(
+          *thresholds.heading_font_size_mapping, font_size);
+      if (heuristic_heading_level >= 1 && heuristic_heading_level <= 6) {
+        heading_level = heuristic_heading_level;
+      }
+    }
+    PromoteNodeToHeading(block_node, heading_level);
   }
 
   return block_node;

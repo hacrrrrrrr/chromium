@@ -33,21 +33,20 @@ class WebState;
 namespace actor {
 
 class ToolDelegate;
-struct ToolExecutionResult;
-
-class ProfileContextResolver;
+struct CredentialWithPermission;
 
 // Tool to attempt login on a page.
 class AttemptLoginTool : public ActorTool, public web::WebStateObserver {
  public:
-  static base::expected<std::unique_ptr<AttemptLoginTool>, ToolExecutionResult>
-  Create(const optimization_guide::proto::AttemptLoginAction& action,
-         ToolDelegate* tool_delegate,
-         const ProfileContextResolver& profile_context_resolver);
+  static std::unique_ptr<AttemptLoginTool> Create(
+      base::WeakPtr<web::WebState> web_state,
+      const optimization_guide::proto::AttemptLoginAction& action,
+      ToolDelegate* tool_delegate);
 
   ~AttemptLoginTool() override;
 
   // ActorTool:
+  void Validate(ToolExecutionCallback callback) override;
   void Execute(ToolExecutionCallback callback) override;
   void Cancel() override;
   base::WeakPtr<web::WebState> GetTargetWebState() const override;
@@ -63,8 +62,8 @@ class AttemptLoginTool : public ActorTool, public web::WebStateObserver {
 
   void OnGetCredentials(actor_login::CredentialsOrError credentials);
   void OnCredentialSelected(
-      std::optional<actor_login::Credential> selected_credential,
-      bool should_store_permission);
+      base::expected<std::optional<CredentialWithPermission>,
+                     ToolExecutionResult> result);
   void OnAttemptLogin(actor_login::Credential selected_credential,
                       bool should_store_permission,
                       actor_login::LoginStatusResultOrError login_status);

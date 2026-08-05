@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/i18n/language_tag.h"
 #include "base/json/json_reader.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/metrics_hashes.h"
@@ -295,13 +296,13 @@ TEST_F(TranslateManagerTest, GetTargetLanguageDefaultsToAppLocale) {
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("iw"));
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("he"));
   manager_->set_application_locale("he");
-  EXPECT_EQ("iw",
+  EXPECT_EQ("he",
             TranslateManager::GetTargetLanguage(&translate_prefs_, nullptr));
 
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("tl"));
-  ASSERT_FALSE(TranslateDownloadManager::IsSupportedLanguage("fil"));
+  ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("fil"));
   manager_->set_application_locale("fil");
-  EXPECT_EQ("tl",
+  EXPECT_EQ("fil",
             TranslateManager::GetTargetLanguage(&translate_prefs_, nullptr));
 
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("no"));
@@ -372,15 +373,15 @@ TEST_F(TranslateManagerTest, GetTargetLanguageFromModel) {
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("he"));
   mock_language_model_.details = {
       MockLanguageModel::LanguageDetails("he", 1.0)};
-  EXPECT_EQ("iw", TranslateManager::GetTargetLanguage(&translate_prefs_,
+  EXPECT_EQ("he", TranslateManager::GetTargetLanguage(&translate_prefs_,
                                                       &mock_language_model_));
 
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("tl"));
-  ASSERT_FALSE(TranslateDownloadManager::IsSupportedLanguage("fil"));
+  ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("fil"));
   mock_language_model_.details = {
       MockLanguageModel::LanguageDetails("fil", 1.0)};
-  EXPECT_EQ("tl", TranslateManager::GetTargetLanguage(&translate_prefs_,
-                                                      &mock_language_model_));
+  EXPECT_EQ("fil", TranslateManager::GetTargetLanguage(&translate_prefs_,
+                                                       &mock_language_model_));
 
   ASSERT_TRUE(TranslateDownloadManager::IsSupportedLanguage("no"));
   ASSERT_FALSE(TranslateDownloadManager::IsSupportedLanguage("nb"));
@@ -1021,7 +1022,8 @@ TEST_F(TranslateManagerTest, PredefinedTargetLanguage) {
 
   network_notifier_.SimulateOnline();
 
-  translate_manager_->SetPredefinedTargetLanguage("ru");
+  translate_manager_->SetPredefinedTargetLanguage(
+      base::i18n::GetKnownLanguageTag("ru"));
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
@@ -1070,7 +1072,8 @@ TEST_F(TranslateManagerTest,
   translate_prefs_.AddLanguagePairToAlwaysTranslateList("fr", "de");
   network_notifier_.SimulateOnline();
 
-  translate_manager_->SetPredefinedTargetLanguage("ru", true);
+  translate_manager_->SetPredefinedTargetLanguage(
+      base::i18n::GetKnownLanguageTag("ru"), true);
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
@@ -1103,7 +1106,8 @@ TEST_F(TranslateManagerTest, PredefinedTargetLanguage_BlockedLanguage) {
   ASSERT_FALSE(translate_prefs_.CanTranslateLanguage("de"));
   network_notifier_.SimulateOnline();
 
-  translate_manager_->SetPredefinedTargetLanguage("ru");
+  translate_manager_->SetPredefinedTargetLanguage(
+      base::i18n::GetKnownLanguageTag("ru"));
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
@@ -1130,12 +1134,13 @@ TEST_F(TranslateManagerTest, PredefinedTargetLanguage_OverrideBlockedLanguage) {
   network_notifier_.SimulateOnline();
 
   translate_manager_->SetPredefinedTargetLanguage(
-      "ru", /*should_auto_translate=*/true);
+      base::i18n::GetKnownLanguageTag("ru"), /*should_auto_translate=*/true);
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
   EXPECT_TRUE(translate_manager_->GetLanguageState()
-                  ->should_auto_translate_to_predefined_target_language());
+                  ->should_auto_translate_to_predefined_target_language()
+                  .has_value());
 
   translate_manager_->GetLanguageState()->LanguageDetermined("de", true);
 
@@ -1179,7 +1184,8 @@ TEST_F(TranslateManagerTest, PredefinedTargetLanguage_BlockedSite) {
 
   network_notifier_.SimulateOnline();
 
-  translate_manager_->SetPredefinedTargetLanguage("ru");
+  translate_manager_->SetPredefinedTargetLanguage(
+      base::i18n::GetKnownLanguageTag("ru"));
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
@@ -1205,12 +1211,13 @@ TEST_F(TranslateManagerTest, PredefinedTargetLanguage_AutoTranslate) {
   network_notifier_.SimulateOnline();
 
   translate_manager_->SetPredefinedTargetLanguage(
-      "ru", /*should_auto_translate=*/true);
+      base::i18n::GetKnownLanguageTag("ru"), /*should_auto_translate=*/true);
   EXPECT_EQ(
       "ru",
       translate_manager_->GetLanguageState()->GetPredefinedTargetLanguage());
   EXPECT_TRUE(translate_manager_->GetLanguageState()
-                  ->should_auto_translate_to_predefined_target_language());
+                  ->should_auto_translate_to_predefined_target_language()
+                  .has_value());
 
   translate_manager_->GetLanguageState()->LanguageDetermined("en", true);
 
@@ -1414,7 +1421,7 @@ TEST_F(TranslateManagerTest, ShowTranslateUI_ExplicitSourceLanguage) {
   // TRANSLATE_STEP_TRANSLATING step and the specified languages.
   EXPECT_CALL(
       mock_translate_client_,
-      ShowTranslateUI(TRANSLATE_STEP_TRANSLATING, "tl", "pl",
+      ShowTranslateUI(TRANSLATE_STEP_TRANSLATING, "fil", "pl",
                       TranslateErrors::NONE, false /* triggered_from_menu */))
       .WillOnce(Return(true));
 
@@ -1422,7 +1429,7 @@ TEST_F(TranslateManagerTest, ShowTranslateUI_ExplicitSourceLanguage) {
       &mock_translate_client_, &mock_translate_ranker_, &mock_language_model_);
 
   prefs_.SetBoolean(prefs::kOfferTranslateEnabled, true);
-  translate_manager_->GetLanguageState()->LanguageDetermined("tl", true);
+  translate_manager_->GetLanguageState()->LanguageDetermined("fil", true);
   network_notifier_.SimulateOnline();
 
   translate_manager_->ShowTranslateUI("fil", "pl", /* auto_translate */ true,

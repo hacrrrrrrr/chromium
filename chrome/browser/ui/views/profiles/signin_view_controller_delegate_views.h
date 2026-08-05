@@ -16,6 +16,7 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/base/mojom/ui_base_types.mojom-shared.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
@@ -23,6 +24,7 @@
 #include "ui/views/window/dialog_delegate.h"
 
 class Browser;
+class BrowserWindowInterface;
 class GURL;
 enum class SyncConfirmationStyle;
 
@@ -43,6 +45,7 @@ class SigninViewControllerDelegateViews
     : public views::DialogDelegateView,
       public SigninViewControllerDelegate,
       public content::WebContentsDelegate,
+      public content::WebContentsObserver,
       public ChromeWebModalDialogManagerDelegate,
       public views::ViewObserver {
   METADATA_HEADER(SigninViewControllerDelegateViews, views::DialogDelegateView)
@@ -87,7 +90,7 @@ class SigninViewControllerDelegateViews
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   static std::unique_ptr<views::WebView>
   CreateManagedUserNoticeConfirmationWebView(
-      Browser* browser,
+      BrowserWindowInterface& browser,
       std::unique_ptr<signin::EnterpriseProfileCreationDialogParams>
           create_param);
 #endif
@@ -165,12 +168,14 @@ class SigninViewControllerDelegateViews
   // Displays the modal dialog.
   void DisplayModal();
 
+  void AttachToWebContents(content::WebContents* web_contents);
+  void DetachFromWebContents();
+
   // If the widget is non-null, then it owns the
   // `SigninViewControllerDelegateViews` and the content view.
   raw_ptr<views::Widget> modal_signin_widget_ = nullptr;
 
   const raw_ptr<views::WebView> content_view_;
-  raw_ptr<content::WebContents, AcrossTasksDanglingUntriaged> web_contents_;
   const raw_ptr<Browser> browser_;
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;
   bool should_show_close_button_;

@@ -138,7 +138,9 @@ FillingProduct GetFillingProductFromSuggestionType(SuggestionType type) {
       return FillingProduct::kIdentityCredential;
     case SuggestionType::kOneTimePasswordEntry:
       return FillingProduct::kOneTimePassword;
+    case SuggestionType::kAtMemoryFetching:
     case SuggestionType::kAtMemorySearchResult:
+    case SuggestionType::kAtMemorySourceAttribution:
     case SuggestionType::kManageEnhancedAutofill:
       return FillingProduct::kAtMemory;
     case SuggestionType::kWebauthnCredential:

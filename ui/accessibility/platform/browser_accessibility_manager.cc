@@ -19,13 +19,11 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_common.h"
-#include "ui/accessibility/ax_language_detection.h"
 #include "ui/accessibility/ax_tree_data.h"
 #include "ui/accessibility/ax_tree_id.h"
 #include "ui/accessibility/ax_tree_serializer.h"
@@ -68,9 +66,6 @@ AXTreeUpdate MakeAXTreeUpdateForTesting(
     const AXNodeData& node12 /* = AXNodeData() */,
     const AXNodeData& node13 /* = AXNodeData() */,
     const AXNodeData& node14 /* = AXNodeData() */) {
-  static base::NoDestructor<AXNodeData> empty_data;
-  int32_t no_id = empty_data->id;
-
   AXTreeUpdate update;
   AXTreeData tree_data;
   tree_data.tree_id = AXTreeID::CreateNewAXTreeID();
@@ -80,32 +75,45 @@ AXTreeUpdate MakeAXTreeUpdateForTesting(
   update.has_tree_data = true;
   update.root_id = node1.id;
   update.nodes.push_back(node1);
-  if (node2.id != no_id)
+  if (node2.id != kInvalidAXNodeID) {
     update.nodes.push_back(node2);
-  if (node3.id != no_id)
+  }
+  if (node3.id != kInvalidAXNodeID) {
     update.nodes.push_back(node3);
-  if (node4.id != no_id)
+  }
+  if (node4.id != kInvalidAXNodeID) {
     update.nodes.push_back(node4);
-  if (node5.id != no_id)
+  }
+  if (node5.id != kInvalidAXNodeID) {
     update.nodes.push_back(node5);
-  if (node6.id != no_id)
+  }
+  if (node6.id != kInvalidAXNodeID) {
     update.nodes.push_back(node6);
-  if (node7.id != no_id)
+  }
+  if (node7.id != kInvalidAXNodeID) {
     update.nodes.push_back(node7);
-  if (node8.id != no_id)
+  }
+  if (node8.id != kInvalidAXNodeID) {
     update.nodes.push_back(node8);
-  if (node9.id != no_id)
+  }
+  if (node9.id != kInvalidAXNodeID) {
     update.nodes.push_back(node9);
-  if (node10.id != no_id)
+  }
+  if (node10.id != kInvalidAXNodeID) {
     update.nodes.push_back(node10);
-  if (node11.id != no_id)
+  }
+  if (node11.id != kInvalidAXNodeID) {
     update.nodes.push_back(node11);
-  if (node12.id != no_id)
+  }
+  if (node12.id != kInvalidAXNodeID) {
     update.nodes.push_back(node12);
-  if (node13.id != no_id)
+  }
+  if (node13.id != kInvalidAXNodeID) {
     update.nodes.push_back(node13);
-  if (node14.id != no_id)
+  }
+  if (node14.id != kInvalidAXNodeID) {
     update.nodes.push_back(node14);
+  }
   return update;
 }
 
@@ -164,9 +172,7 @@ BrowserAccessibilityManager::BrowserAccessibilityManager(
       node_id_delegate_(node_id_delegate),
       user_is_navigating_away_(false),
       device_scale_factor_(1.0f),
-      use_custom_device_scale_factor_for_testing_(false) {
-  ax_tree()->language_detection_manager->RegisterLanguageDetectionObserver();
-}
+      use_custom_device_scale_factor_for_testing_(false) {}
 
 BrowserAccessibilityManager::~BrowserAccessibilityManager() = default;
 
@@ -1464,7 +1470,7 @@ void BrowserAccessibilityManager::HitTest(const gfx::Point& frame_point,
 
 gfx::Rect BrowserAccessibilityManager::GetViewBoundsInScreenCoordinates()
     const {
-  AXPlatformTreeManagerDelegate* delegate = GetDelegateFromRootManager();
+  AXPlatformTreeManagerDelegate* delegate = GetDelegateForNativeView();
   if (delegate) {
     gfx::Rect bounds = delegate->AccessibilityGetViewBounds();
 
@@ -1969,6 +1975,14 @@ BrowserAccessibilityManager::GetDelegateFromRootManager() const {
   return nullptr;
 }
 
+AXPlatformTreeManagerDelegate*
+BrowserAccessibilityManager::GetDelegateForNativeView() const {
+  if (delegate_ && !delegate_->AccessibilityIsWebContentSource()) {
+    return delegate_.get();
+  }
+  return GetDelegateFromRootManager();
+}
+
 bool BrowserAccessibilityManager::IsRootFrameManager() const {
   // delegate_ can be null in unit tests.
   if (!delegate_)
@@ -1978,6 +1992,11 @@ bool BrowserAccessibilityManager::IsRootFrameManager() const {
   DCHECK(!is_root_tree || GetParentTreeID() == AXTreeIDUnknown())
       << "Root tree has parent tree id of: " << GetParentTreeID();
   return is_root_tree;
+}
+
+bool BrowserAccessibilityManager::IsWebContentSource() const {
+  // delegate_ can be null in unit tests.
+  return !delegate_ || delegate_->AccessibilityIsWebContentSource();
 }
 
 AXTreeUpdate BrowserAccessibilityManager::SnapshotAXTreeForTesting() {

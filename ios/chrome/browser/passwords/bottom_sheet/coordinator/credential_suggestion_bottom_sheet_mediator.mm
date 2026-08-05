@@ -84,8 +84,8 @@ FormSuggestionProviderQuery* MakeQueryFromParameters(
         formRendererID:params.form_renderer_id
        fieldIdentifier:base::SysUTF8ToNSString(params.field_identifier)
        fieldRendererID:params.field_renderer_id
-             fieldType:base::SysUTF8ToNSString(params.field_type)
-                  type:base::SysUTF8ToNSString(params.type)
+             fieldType:params.field_type
+                  type:params.type
             typedValue:base::SysUTF8ToNSString(params.value)
                frameID:base::SysUTF8ToNSString(params.frame_id)
           onlyPassword:YES];
@@ -147,25 +147,10 @@ NSMutableSet<NSString*>* GetPasskeyUsernames(
     NSArray<FormSuggestion*>* suggestions) {
   NSMutableSet<NSString*>* passkeyUsernames = [NSMutableSet set];
   for (FormSuggestion* suggestion in suggestions) {
-    if (suggestion.type == autofill::SuggestionType::kWebauthnCredential) {
-      std::string encodedId =
-          webauthn::GetPasskeySuggestionEncodedCredentialId(suggestion);
-      std::string decodedIdString;
-      if (base::Base64Decode(encodedId, &decodedIdString)) {
-        std::vector<uint8_t> decodedId(decodedIdString.begin(),
-                                       decodedIdString.end());
-        auto it = std::ranges::find_if(
-            passkeys,
-            [&decodedId](const password_manager::PasskeyCredential& passkey) {
-              return passkey.credential_id() == decodedId;
-            });
-        if (it != passkeys.end()) {
-          NSString* username = base::SysUTF8ToNSString(it->username());
-          if (username.length) {
-            [passkeyUsernames addObject:[username lowercaseString]];
-          }
-        }
-      }
+    NSString* passkeyUsername =
+        webauthn::GetPasskeyUsernameForSuggestion(suggestion, passkeys);
+    if (passkeyUsername.length) {
+      [passkeyUsernames addObject:[passkeyUsername lowercaseString]];
     }
   }
   return passkeyUsernames;
@@ -509,8 +494,8 @@ NSArray<FormSuggestion*>* FilterDuplicateSuggestions(
                                      self.suggestions.firstObject))
        secondaryActionString:l10n_util::GetNSString(
                                  IDS_IOS_CREDENTIAL_BOTTOM_SHEET_USE_KEYBOARD)
-        secondaryActionImage:DefaultSymbolWithPointSize(
-                                 kKeyboardSymbol, kSymbolActionPointSize)];
+        secondaryActionImage:SymbolWithPointSize(SymbolKeyboard,
+                                                 kSymbolActionPointSize)];
 }
 
 - (void)disconnect {

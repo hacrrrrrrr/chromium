@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.graphics.Color;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,16 +16,21 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxLayoutMode;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
+import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
 import org.chromium.chrome.browser.ui.vertical_tabs.VerticalTabUtils;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.modelutil.ListObservable;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
 /** Handles property updates to the suggestion list component. */
 @NullMarked
-class SuggestionListViewBinder {
+class SuggestionListViewBinder
+        implements PropertyModelChangeProcessor.ViewBinder<
+                PropertyModel, SuggestionListViewBinder.SuggestionListViewHolder, PropertyKey> {
+
     /** Holds the view components needed to renderer the suggestion list. */
     public static class SuggestionListViewHolder {
         public final OmniboxSuggestionsContainer container;
@@ -39,8 +46,12 @@ class SuggestionListViewBinder {
     /**
      * @see PropertyModelChangeProcessor.ViewBinder#bind(Object, Object, Object)
      */
-    public static void bind(
-            PropertyModel model, SuggestionListViewHolder view, PropertyKey propertyKey) {
+    @Override
+    public void bind(PropertyModel model, SuggestionListViewHolder view, PropertyKey propertyKey) {
+        // The resource provider must be set before any other properties are set and binded b/c
+        // some properties depend on it.
+        view.dropdown.setResourceProvider(model.get(SuggestionListProperties.RESOURCE_PROVIDER));
+
         if (SuggestionListProperties.ACTIVITY_WINDOW_FOCUSED.equals(propertyKey)) {
             updateContainerVisibility(model, view);
         } else if (SuggestionListProperties.ALLOW_PARKING_AT_SENTINEL.equals(propertyKey)) {
@@ -52,6 +63,8 @@ class SuggestionListViewBinder {
             view.dropdown.translateChildrenVertical(
                     model.get(SuggestionListProperties.CHILD_TRANSLATION_Y));
         } else if (SuggestionListProperties.COLOR_SCHEME.equals(propertyKey)) {
+            @BrandedColorScheme int scheme = model.get(SuggestionListProperties.COLOR_SCHEME);
+            view.dropdown.setBrandedColorScheme(scheme);
             updateColorScheme(model, view);
         } else if (SuggestionListProperties.CONTAINER_ALWAYS_VISIBLE.equals(propertyKey)) {
             if (model.get(SuggestionListProperties.CONTAINER_ALWAYS_VISIBLE)) {
@@ -91,10 +104,13 @@ class SuggestionListViewBinder {
             view.container.setEmbedder(model.get(SuggestionListProperties.EMBEDDER));
         } else if (SuggestionListProperties.GESTURE_OBSERVER.equals(propertyKey)) {
             view.dropdown.setGestureObserver(model.get(SuggestionListProperties.GESTURE_OBSERVER));
-        } else if (SuggestionListProperties.IS_LARGE_SCREEN.equals(propertyKey)) {
+        } else if (SuggestionListProperties.IS_LARGE_SCREEN.equals(propertyKey)
+                || SuggestionListProperties.ROUND_TOP_CORNERS.equals(propertyKey)) {
             updateColorScheme(model, view);
-            view.container.setShouldClipToOutline(
-                    model.get(SuggestionListProperties.IS_LARGE_SCREEN));
+            boolean isLargeScreen = model.get(SuggestionListProperties.IS_LARGE_SCREEN);
+            boolean roundTopCorners = model.get(SuggestionListProperties.ROUND_TOP_CORNERS);
+            view.container.setShouldRoundTopCorners(roundTopCorners);
+            view.container.setShouldClipToOutline(isLargeScreen || roundTopCorners);
         } else if (SuggestionListProperties.LIST_IS_FINAL.equals(propertyKey)) {
             if (model.get(SuggestionListProperties.LIST_IS_FINAL)) {
                 view.dropdown.emitWindowContentChangedAnnouncement();
@@ -108,9 +124,9 @@ class SuggestionListViewBinder {
                     model.get(SuggestionListProperties.OMNIBOX_SESSION_ACTIVE));
         } else if (SuggestionListProperties.RESET_SELECTION.equals(propertyKey)) {
             view.dropdown.resetSelection();
-        } else if (SuggestionListProperties.ROUND_TOP_CORNERS.equals(propertyKey)) {
-            view.container.setShouldRoundTopCorners(
-                    model.get(SuggestionListProperties.ROUND_TOP_CORNERS));
+        } else if (SuggestionListProperties.RESOURCE_PROVIDER.equals(propertyKey)) {
+            view.dropdown.setResourceProvider(
+                    model.get(SuggestionListProperties.RESOURCE_PROVIDER));
         } else if (SuggestionListProperties.SUGGESTION_MODELS.equals(propertyKey)) {
             ModelList listItems = model.get(SuggestionListProperties.SUGGESTION_MODELS);
             listItems.addObserver(
@@ -136,19 +152,12 @@ class SuggestionListViewBinder {
         }
     }
 
-    private static void updateColorScheme(PropertyModel model, SuggestionListViewHolder holder) {
+    private void updateColorScheme(PropertyModel model, SuggestionListViewHolder holder) {
         @FuseboxLayoutMode int layoutMode = model.get(SuggestionListProperties.FUSEBOX_LAYOUT_MODE);
         @ColorInt
         int backgroundColor =
-                OmniboxResourceProvider.getSuggestionsDropdownBackgroundColor(
-                        holder.dropdown.getContext(),
-                        model.get(SuggestionListProperties.COLOR_SCHEME));
-        if (layoutMode == FuseboxLayoutMode.SUGGESTIONS_POPOVER) {
-            backgroundColor =
-                    OmniboxResourceProvider.getStandardSuggestionBackgroundColor(
-                            holder.dropdown.getContext(),
-                            model.get(SuggestionListProperties.COLOR_SCHEME));
-        }
+                getResourceProvider(model)
+                        .getSuggestionBackgroundColor(layoutMode, /* isDropdownContainer= */ true);
 
         holder.dropdown.setBackgroundColor(backgroundColor);
 
@@ -176,6 +185,10 @@ class SuggestionListViewBinder {
         holder.container.setVisibility(containerVisibility);
         holder.dropdown.setVisibility(listVisibility);
         updateContainerMargin(model, holder);
+    }
+
+    private OmniboxResourceProvider getResourceProvider(PropertyModel model) {
+        return assumeNonNull(model.get(SuggestionListProperties.RESOURCE_PROVIDER));
     }
 
     private static void updateContainerMargin(

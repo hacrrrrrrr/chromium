@@ -571,6 +571,64 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
+<event name="Accessibility.ReadAnything.OmniboxEntryPoint">
+  <owner>lwinston@google.com</owner>
+  <owner>kristislee@google.com</owner>
+  <owner>komo-eng@google.com</owner>
+  <summary>
+    Recorded when the user interacts with or is shown the Read Anything omnibox
+    entry point.
+  </summary>
+  <metric name="Shown" enum="Boolean">
+    <summary>
+      Whether the omnibox chip is shown.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+  <metric name="Triggered" enum="Boolean">
+    <summary>
+      Whether the chip was triggered (via mouse or keyboard) to open Reading
+      mode.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+</event>
+
+<event name="Accessibility.ReadAnything.OmniboxEntryPointDistillation">
+  <owner>lwinston@google.com</owner>
+  <owner>kristislee@google.com</owner>
+  <owner>komo-eng@google.com</owner>
+  <summary>
+    Recorded when distillation completes after the Read Anything omnibox entry
+    point was used to open reading mode.
+  </summary>
+  <metric name="DistillationStatus" enum="ReadAnythingDistillationStatus">
+    <summary>
+      The distillation status in reading mode after the omnibox entry point was
+      used to open reading mode.
+    </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
+  </metric>
+</event>
+
 <event name="Accessibility.ReadAnything.SidePanel">
   <owner>gusmartin@google.com</owner>
   <owner>lwinston@google.com</owner>
@@ -4817,17 +4875,6 @@ be describing additional metrics about the same event.
       completed.
     </summary>
   </metric>
-  <metric name="AutoReauthn.TimeFromEmbargoWhenBlocked">
-    <summary>
-      Records the amount of time that has passed from the time the FedCM auto
-      re-authn API was embargoed to the time in which the next call occurs. Only
-      records a sample when there is an auto re-authn FedCM API call which is
-      blocked due to embargo. Samples are exponentially bucketed, with a max
-      bucket of 10 minutes, the embargo duration (see
-      `kFederatedIdentityAutoReauthnEmbargoDuration`). Records at the time the
-      API call is completed.
-    </summary>
-  </metric>
   <metric name="Button.AccountChooserResult" enum="FedCmAccountChooserResult">
     <summary>
       Records the outcome of the last account chooser the user sees in a button
@@ -5007,16 +5054,6 @@ be describing additional metrics about the same event.
       base::UmaHistogramCounts100.
     </summary>
   </metric>
-  <metric name="PreventSilentAccessFrameType" enum="FedCmRequesterFrameType">
-    <summary>
-      Records the type of frame that invokes preventSilentAccess(). Records only
-      when there is an existing FedCM sharing permission on the main frame, and
-      some frame in the page invokes the preventSilentAccess() JavaScript call.
-      Possible values are: main frame, same-site iframe, and cross-site iframe,
-      where the site of the caller frame is compared with the site of the main
-      frame. Records at the time the API call is completed.
-    </summary>
-  </metric>
   <metric name="RpMode" enum="FedCmRpMode">
     <summary>
       Records the RP mode of the FedCM API. Recorded once per API call together
@@ -5099,16 +5136,6 @@ be describing additional metrics about the same event.
       right before sending the response back to the renderer process. Records
       one sample for every disconnect call which sends a disconnect request.
       Records at the time the API call is completed.
-    </summary>
-  </metric>
-  <metric name="Timing.GetUserInfoToButtonMode">
-    <summary>
-      Records the time in milliseconds from when the accounts are received via
-      the getUserInfo() API to the time when the Button Mode API is called.
-      Recorded when the Button mode is invoked and there was a successful
-      accounts fetch via the getUserInfo API call on this page. Recorded at most
-      once per getUserInfo API call. Records at the time the API call is
-      completed.
     </summary>
   </metric>
   <metric name="Timing.IdTokenResponse">
@@ -8672,22 +8699,6 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
-<event name="Cookies.FirstPartyPartitionedInCrossSiteContextV3">
-  <owner>selya@chromium.org</owner>
-  <owner>dylancutler@google.com</owner>
-  <summary>
-    Recorded when a page loads that has a first-party partitioned cookie present
-    and the cookie's name is not receive-cookie-deprecation.
-  </summary>
-  <metric name="CookiePresent" enum="Boolean">
-    <summary>
-      Records true if one or more first-party partitioned cookies in a cross
-      site context are present and the cookie's name is not
-      receive-cookie-deprecation.
-    </summary>
-  </metric>
-</event>
-
 <event name="CPUUsageMeasurement">
   <owner>chrisha@chromium.org</owner>
   <owner>siggi@chromium.org</owner>
@@ -10717,6 +10728,13 @@ be describing additional metrics about the same event.
       The duration in milliseconds that the auto-opened Glic instance remained
       open.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <quantiles type="std-percentiles"/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
 </event>
 
@@ -10731,16 +10749,37 @@ be describing additional metrics about the same event.
     <summary>
       Whether the glic window was attached or detached.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
   <metric name="InvocationSource" enum="GlicInvocationSource">
     <summary>
       The source of the invocation of the glic window.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
   <metric name="WebClientMode" enum="GlicWebClientMode">
     <summary>
       The mode of the glic window.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
 </event>
 
@@ -10755,11 +10794,25 @@ be describing additional metrics about the same event.
     <summary>
       Whether the glic window was attached or detached.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
   <metric name="InvocationSource" enum="GlicInvocationSource">
     <summary>
       The source of the invocation of the glic window.
     </summary>
+    <aggregation>
+      <history>
+        <statistics>
+          <enumeration/>
+        </statistics>
+      </history>
+    </aggregation>
   </metric>
 </event>
 
@@ -11351,6 +11404,31 @@ be describing additional metrics about the same event.
       the end of each page load. As usual with PageLoad metrics, we consider app
       backgrounding on Android to be the end of page load as well as the app
       could be evicted by Android anytime after that happens.
+    </summary>
+  </metric>
+  <metric name="PaintTiming.FirstContentfulPaintSubmittedMs">
+    <summary>
+      Measures the time in milliseconds from navigation timing's navigation
+      start to the time the first contentful paint was rendered by Blink and
+      submitted to the compositor (but not yet presented on screen).
+    </summary>
+  </metric>
+  <metric name="PaintTiming.JsCompositionCompleteMs">
+    <summary>
+      Measures the time in milliseconds from navigation timing's navigation
+      start to the time Lit DOM composition completes.
+    </summary>
+  </metric>
+  <metric name="PaintTiming.JsResourcesLoadedMs">
+    <summary>
+      Measures the time in milliseconds from navigation timing's navigation
+      start to the time WebUI JS resources have evaluated.
+    </summary>
+  </metric>
+  <metric name="PaintTiming.LoadTimeDataReadMs">
+    <summary>
+      Measures the time in milliseconds from navigation timing's navigation
+      start to the time loadTimeData initial state is parsed.
     </summary>
   </metric>
   <metric name="PaintTiming.NavigationToFirstContentfulPaint">
@@ -15321,6 +15399,188 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
+<event name="MultistepFilter.ApplicationSession">
+  <owner>adigupt@google.com</owner>
+  <owner>chrome-multistep-filter-eng@google.com</owner>
+  <summary>
+    Recorded when a Multistep Filter suggestion application session is
+    concluded. The session starts when a suggestion is accepted. If the
+    application is unsuccessful, the session ends immediately. If successful,
+    the session continues to track post-application user engagement, ending when
+    the user navigates away or closes the tab. This event records the final
+    application outcome (represented by SuggestionApplicationResult enum) and
+    any post-application engagement metrics.
+  </summary>
+  <metric name="ApplicationOutcome" enum="SuggestionApplicationResult">
+    <summary>
+      The overall technical filter application outcome (AllFiltersApplied,
+      AbandonedBeforeVerification, or various Failure reasons) after a user
+      accepts a Multistep Filter suggestion.
+    </summary>
+  </metric>
+  <metric name="NumOfFilterFacetsAppliedSuccessfully">
+    <summary>
+      The number of filter facets successfully applied (clamped to
+      multistep_filter::kMultistepFilterMaxFacetsShownUkmClampingLimit). Logged
+      only if outcome is AllFiltersApplied.
+    </summary>
+  </metric>
+  <metric name="PostApplicationUserEngagement"
+      enum="MultistepFilterPostSuggestionApplicationUserEngagement">
+    <summary>
+      The user's engagement after the filters were applied (e.g. further
+      navigation, tab close, omnibox navigation) distinguished by whether it
+      happened within the
+      multistep_filter::kMultistepFilterPostApplicationSessionDuration window.
+    </summary>
+  </metric>
+  <metric name="RetentionState" enum="MultistepFilterRetentionState">
+    <summary>
+      The user's retention history state at the time the suggestion was shown
+      (must match the UI session).
+    </summary>
+  </metric>
+  <metric name="SessionId">
+    <summary>
+      A transient, randomly generated identifier used to correlate the UI
+      session event (MultistepFilter.UiSession) with the subsequent landing page
+      application session event (MultistepFilter.ApplicationSession).
+    </summary>
+  </metric>
+  <metric name="SuggestedFilterFacetTypes">
+    <summary>
+      A bitmask representing the types of filter facets in the accepted
+      suggestion. Each bit N corresponds to a filter facet type with enum value
+      N defined in MultistepFilterFacetType enum (e.g. Bit 1 is kAgeChild (1),
+      Bit 11 is kDateCheckin (11), Bit 0 is unused). This must match the UI
+      session.
+    </summary>
+  </metric>
+  <metric name="SuggestionAcceptedToAppliedTimeInMs">
+    <summary>
+      Time from the user accepting the suggestion to when the filters are
+      successfully applied on the landing page (in milliseconds, exponentially
+      bucketed). Logged only if outcome is AllApplied.
+    </summary>
+  </metric>
+  <metric name="TaskType" enum="MultistepFilterTaskType">
+    <summary>
+      The task type of the applied suggestion (must match the UI session).
+    </summary>
+  </metric>
+</event>
+
+<event name="MultistepFilter.UiSession">
+  <owner>adigupt@google.com</owner>
+  <owner>chrome-multistep-filter-eng@google.com</owner>
+  <summary>
+    Recorded when a Multistep Filter suggestion UI session is flushed
+    (concluded). This event captures the full lifecycle of the UI session,
+    including whether the suggestion was accepted, dismissed, or ignored, and
+    the associated latencies and age of the suggestion.
+  </summary>
+  <metric name="AcceptedAgeInMinutes">
+    <summary>
+      Measures the time elapsed (in minutes, clamped to
+      multistep_filter::kMultistepFilterSessionDuration) from when the potential
+      suggestion was extracted to when the user accepted it. Logged only if the
+      suggestion was accepted.
+    </summary>
+  </metric>
+  <metric name="IsSameDomain" enum="Boolean">
+    <summary>
+      True if the suggestion was shown on the same eTLD+1 as the page from which
+      it was extracted.
+    </summary>
+  </metric>
+  <metric name="NavigationToSuggestionAcceptedTimeInMs">
+    <summary>
+      Time from the end of the navigation that triggered the suggestion
+      generation to when the user accepted it (in milliseconds, exponentially
+      bucketed). Logged only if accepted.
+    </summary>
+  </metric>
+  <metric name="NavigationToSuggestionShownTimeInMs">
+    <summary>
+      Time from the end of the navigation that triggered the suggestion
+      generation to when it was first shown (in milliseconds, exponentially
+      bucketed).
+    </summary>
+  </metric>
+  <metric name="NumOfFilterFacetsShown">
+    <summary>
+      The number of filter facets which were part of the suggestion which was
+      shown (clamped to
+      multistep_filter::kMultistepFilterMaxFacetsShownUkmClampingLimit).
+    </summary>
+  </metric>
+  <metric name="ReopenedCueShown" enum="Boolean">
+    <summary>
+      True if the suggestion cue was reopened from the Omnibox.
+    </summary>
+  </metric>
+  <metric name="RetentionState" enum="MultistepFilterRetentionState">
+    <summary>
+      The user's retention history state at the time the suggestion was shown.
+    </summary>
+  </metric>
+  <metric name="SessionId">
+    <summary>
+      A transient, randomly generated identifier used to correlate the UI
+      session event (MultistepFilter.UiSession) with the subsequent landing page
+      application session event (MultistepFilter.ApplicationSession).
+    </summary>
+  </metric>
+  <metric name="ShownAgeInMinutes">
+    <summary>
+      Measures the time elapsed (in minutes, clamped to
+      multistep_filter::kMultistepFilterSessionDuration) from when the potential
+      suggestion was extracted to when it was first shown to the user.
+    </summary>
+  </metric>
+  <metric name="SuggestedFilterFacetTypes">
+    <summary>
+      A bitmask representing the types of filter facets in the suggestion shown
+      to the user. Each bit N corresponds to a filter facet type with enum value
+      N defined in MultistepFilterFacetType enum (e.g. Bit 1 is kAgeChild (1),
+      Bit 11 is kDateCheckin (11), Bit 0 is unused).
+    </summary>
+  </metric>
+  <metric name="SuggestionShownToAcceptedTimeInMs">
+    <summary>
+      Time from when the suggestion was first shown to when the user accepted it
+      (in milliseconds, exponentially bucketed). Logged only if accepted.
+    </summary>
+  </metric>
+  <metric name="TaskType" enum="MultistepFilterTaskType">
+    <summary>
+      The task type of the suggestion (e.g. Flight, Accommodation, etc).
+    </summary>
+  </metric>
+  <metric name="UserDecision" enum="SuggestionUserDecision">
+    <summary>
+      The user's final decision on the suggestion (Accepted, Dismissed, Settings
+      Opened, Ignored).
+    </summary>
+  </metric>
+</event>
+
+<event name="Navigation.DuplicateNavigationsIgnored">
+  <owner>annasato@chromium.org</owner>
+  <owner>chrome-navigation@google.com</owner>
+  <summary>
+    Records the number of subsequent duplicate navigation requests that were
+    ignored in favor of an ongoing navigation. This is caused by
+    IgnoreDuplicateNavs.
+  </summary>
+  <metric name="IgnoredDuplicateNavigationCount">
+    <summary>
+      The number of duplicate navigations that were ignored.
+      ukm::GetExponentialBucketMinForCounts1000() is applied.
+    </summary>
+  </metric>
+</event>
+
 <event name="Navigation.FromGoogleSearch.Abandoned">
   <owner>suzukikeita@chromium.org</owner>
   <owner>chrome-loading@google.com</owner>
@@ -19010,22 +19270,6 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
-<event name="PaymentRequest.TransactionAmount">
-  <owner>smcgruer@chromium.org</owner>
-  <owner>chrome-payments-eng@google.com</owner>
-  <metric name="Category">
-    <summary>
-      Tranaction size can be zero, micro, or regular. Values defined in the
-      TransactionSize enum of components/payments/core/journey_logger.h.
-    </summary>
-  </metric>
-  <metric name="CompletionStatus" enum="Boolean">
-    <summary>
-      Whether the transaction has been triggered or completed.
-    </summary>
-  </metric>
-</event>
-
 <event name="Pepper.Broker" singular="True">
   <owner>raymes@chromium.org</owner>
   <summary>
@@ -21663,32 +21907,6 @@ be describing additional metrics about the same event.
   </metric>
 </event>
 
-<event name="SchemefulSameSiteContextDowngrade">
-  <owner>bingler@chromium.org</owner>
-  <metric name="RequestPerCookie"
-      enum="SameSiteCookieContextBreakingDowngradeWithSecureness">
-    <summary>
-      An enum which records the type of schemeful same-site downgrade applied to
-      a cookie which is being sent on a request along with the secureness of the
-      origin the cookie is attempting to be sent to. This is recorded once per
-      cookie when the cookie is included in the request or if the cookie
-      excluded due to insufficient same-site context only. Cookies that meet the
-      above conditions but without a downgrade warning are not recorded.
-    </summary>
-  </metric>
-  <metric name="ResponsePerCookie"
-      enum="SameSiteCookieContextBreakingDowngradeWithSecureness">
-    <summary>
-      An enum which records the type of schemeful same-site downgrade applied to
-      a cookie which is being set by a response along with the secureness of the
-      origin that is attempting to set the cookie. This is recorded once per
-      cookie when the cookie is allowed to be set or if the cookie is ignored
-      due to insufficient same-site context only. Cookies that meet the above
-      conditions but without a downgrade warning are not recorded.
-    </summary>
-  </metric>
-</event>
-
 <event name="ScreenBrightness">
   <owner>pdyson@chromium.org</owner>
   <summary>
@@ -22410,6 +22628,40 @@ be describing additional metrics about the same event.
       The OptimizationTarget of the last selected segment before UKM is
       recorded. Some features might have several ML models with them. This
       metric records which model is currently selected for the feature.
+    </summary>
+  </metric>
+</event>
+
+<event name="ServiceWorker.MainResource.FetchHandlerError">
+  <owner>yyanagisawa@chromium.org</owner>
+  <owner>chrome-worker@google.com</owner>
+  <summary>
+    Recorded when a Service Worker fetch handler fails to load a main resource
+    due to a network error (such as &quot;failed to fetch&quot; errors occurring
+    in fetch() inside the fetch handler) or timing out during
+    race-network-and-fetch or normal fetch handler execution.
+  </summary>
+  <metric name="InitiatorType" enum="ServiceWorkerFetchHandlerInitiatorType">
+    <summary>
+      Indicates how the fetch handler was invoked.
+    </summary>
+  </metric>
+  <metric name="RaceFetchNetworkErrorCode">
+    <summary>
+      The specific net::ERR_ code indicating the reason for the failure.
+      (possible values are listed in net_error_list.h). Records the network
+      error that occurred when the Service Worker static routing API's
+      'race-network-and-fetch' handler deduplicates the network fetch with the
+      fetch() API call to the navigation URL. This metric is only populated when
+      this static routing strategy is active.
+    </summary>
+  </metric>
+  <metric name="RegularFetchNetworkErrorCode">
+    <summary>
+      The specific net::ERR_ code indicating the reason for the failure.
+      (possible values are listed in net_error_list.h). Records the network
+      error of the initial fetch() API call in cases where the deduplication
+      mentioned above does not apply.
     </summary>
   </metric>
 </event>

@@ -22,6 +22,8 @@ import {isActivationKey, isBackwardArrow, isForwardArrow, isVerticalArrow} from 
 import {ReadAnythingSettingsAction, ReadAnythingSettingsChange} from '../shared/metrics_browser_proxy.js';
 import {ReadAnythingLogger} from '../shared/read_anything_logger.js';
 
+import {SettingsItemType} from './menu_util.js';
+import type {SettingsItem} from './menu_util.js';
 import {getCss} from './settings_menu.css.js';
 import {getHtml} from './settings_menu.html.js';
 
@@ -32,26 +34,6 @@ export const MENU_SHOW_DELAY_MS = 400;
 // trigger opening another submenu. This is used to prevent accidental
 // opens of submenus.
 export const SUBMENU_SHOW_DELAY_MS = 800;
-
-export enum SettingsItemType {
-  MENU = 1,
-  TOGGLE = 2,
-  ACTION = 3,
-}
-
-interface SettingsItem {
-  id: SettingsOption;
-  icon: string;
-  title: string;
-  itemType: SettingsItemType;
-  // Whether the toggle is checked. Only used when itemType is TOGGLE
-  checked?: boolean;
-  // Whether the toggle is disabled. Only used when itemType is TOGGLE
-  disabled?: boolean;
-  // Needed when the aria label should be different from the title
-  ariaLabel?: string;
-  showSeparator?: boolean;
-}
 
 const MENU_ITEM_DATA: Record<SettingsOption, SettingsItem> = {
   [SettingsOption.APPEARANCE]: {
@@ -94,14 +76,24 @@ const MENU_ITEM_DATA: Record<SettingsOption, SettingsItem> = {
   },
   [SettingsOption.LINKS]: {
     id: SettingsOption.LINKS,
-    icon: 'read-anything:links-enabled',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:link' :
+        'read-anything:links-enabled-old',
     title: 'linksLabel',
     itemType: SettingsItemType.TOGGLE,
     showSeparator: true,
   },
+  [SettingsOption.MEDIA]: {
+    id: SettingsOption.MEDIA,
+    icon: 'read-anything:animated-images',
+    title: 'mediaTitle',
+    itemType: SettingsItemType.MENU,
+  },
   [SettingsOption.LINE_SPACING]: {
     id: SettingsOption.LINE_SPACING,
-    icon: 'read-anything:line-spacing',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:format-line-spacing' :
+        'read-anything:line-spacing-old',
     title: 'lineSpacingTitle',
     itemType: SettingsItemType.MENU,
   },
@@ -115,25 +107,33 @@ const MENU_ITEM_DATA: Record<SettingsOption, SettingsItem> = {
   },
   [SettingsOption.LINE_FOCUS]: {
     id: SettingsOption.LINE_FOCUS,
-    icon: 'read-anything:line-focus',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:wb-incandescent' :
+        'read-anything:line-focus-old',
     title: 'lineFocusLabel',
     itemType: SettingsItemType.MENU,
   },
   [SettingsOption.PINNED_TO_TOOLBAR]: {
     id: SettingsOption.PINNED_TO_TOOLBAR,
-    icon: 'read-anything:pin',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:keep' :
+        'read-anything:pin-old',
     title: 'pinLabel',
     itemType: SettingsItemType.TOGGLE,
   },
   [SettingsOption.PRESENTATION]: {
     id: SettingsOption.PRESENTATION,
-    icon: 'read-anything:view',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:fullscreen' :
+        'read-anything:view-old',
     title: 'viewLabel',
     itemType: SettingsItemType.MENU,
   },
   [SettingsOption.TEXT]: {
     id: SettingsOption.TEXT,
-    icon: 'read-anything:font',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:font-download' :
+        'read-anything:font-old',
     title: 'textSettingsTitle',
     itemType: SettingsItemType.MENU,
   },
@@ -145,7 +145,9 @@ const MENU_ITEM_DATA: Record<SettingsOption, SettingsItem> = {
   },
   [SettingsOption.VOICE_SELECTION]: {
     id: SettingsOption.VOICE_SELECTION,
-    icon: 'read-anything:voice-selection',
+    icon: loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'read-anything:voice-selection' :
+        'read-anything:voice-selection-old',
     title: 'voiceSelectionLabel',
     itemType: SettingsItemType.MENU,
   },
@@ -276,25 +278,17 @@ export class SettingsMenuElement extends SettingsMenuElementBase {
     return optionIDs;
   }
 
-  private initializeMenuOptionsForImprovedReadAloud_(): SettingsOption[] {
+  private initializeMenuOptionsForImprovedUi_(): SettingsOption[] {
     const optionIDs: SettingsOption[] = [
       SettingsOption.APPEARANCE,
+      SettingsOption.MEDIA,
       SettingsOption.TEXT,
       SettingsOption.VOICE_SELECTION,
       SettingsOption.VOICE_HIGHLIGHT,
     ];
 
-    if (chrome.readingMode.isLineFocusEnabled) {
-      optionIDs.push(SettingsOption.LINE_FOCUS);
-    }
-
     if (chrome.readingMode.isReadAnythingTranslateEntryPointEnabled) {
       optionIDs.push(SettingsOption.TRANSLATION_REQUESTED);
-    }
-    optionIDs.push(SettingsOption.LINKS);
-
-    if (chrome.readingMode.imagesFeatureEnabled) {
-      optionIDs.push(SettingsOption.IMAGES);
     }
 
     if (this.isImmersiveMode) {
@@ -306,9 +300,9 @@ export class SettingsMenuElement extends SettingsMenuElementBase {
 
   private initializeMenuOptions_() {
     let optionIDs: SettingsOption[];
-    if (chrome.readingMode.isImprovedReadAloudEnabled &&
+    if (chrome.readingMode.isReadAnythingImprovedUiEnabled &&
         chrome.readingMode.isImmersiveEnabled) {
-      optionIDs = this.initializeMenuOptionsForImprovedReadAloud_();
+      optionIDs = this.initializeMenuOptionsForImprovedUi_();
     } else {
       optionIDs = this.initializeMenuOptionsLegacy_();
     }
@@ -733,6 +727,8 @@ export class SettingsMenuElement extends SettingsMenuElementBase {
       focused.click();
     }
   }
+
+
 }
 
 declare global {

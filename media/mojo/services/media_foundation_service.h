@@ -30,7 +30,6 @@ class MEDIA_MOJO_EXPORT MediaFoundationService final
   // `ensure_sandboxed_cb` must be called after necessary initialization to
   // ensure the process is sandboxed.
   explicit MediaFoundationService(
-      bool is_os_cdm,
       mojo::PendingReceiver<mojom::MediaFoundationService> receiver);
   MediaFoundationService(const MediaFoundationService&) = delete;
   MediaFoundationService operator=(const MediaFoundationService&) = delete;
@@ -38,6 +37,7 @@ class MEDIA_MOJO_EXPORT MediaFoundationService final
 
   // mojom::MediaFoundationService implementation:
   void IsKeySystemSupported(const std::string& key_system,
+                            bool is_hw_secure,
                             IsKeySystemSupportedCallback callback) final;
   void CreateInterfaceFactory(
       mojo::PendingReceiver<mojom::InterfaceFactory> receiver,
@@ -52,11 +52,6 @@ class MEDIA_MOJO_EXPORT MediaFoundationService final
   // IMFContentDecryptionModule implementations typically require MTA to run.
   base::win::ScopedCOMInitializer com_initializer_{
       base::win::ScopedCOMInitializer::kMTA};
-
-  // An OS CDM is a CDM that is implemented by the OS, such as PlayReady.
-  // This type of CDM does not usually have a CDM path since the implementation
-  // is usually provided by the OS through a particular framework.
-  bool is_os_cdm_;
 };
 
 }  // namespace media

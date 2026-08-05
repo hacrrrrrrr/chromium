@@ -103,4 +103,56 @@ TEST_F(ContentWebStateTest, SetHasOpener) {
   EXPECT_TRUE(content_web_state()->HasOpener());
 }
 
+// Tests that GetCreationTime()/GetLastActiveTime() start out equal, and that
+// WasShown() advances only the last active time.
+TEST_F(ContentWebStateTest, CreationAndLastActiveTime) {
+  base::Time creation_time = content_web_state()->GetCreationTime();
+  EXPECT_EQ(creation_time, content_web_state()->GetLastActiveTime());
+
+  content_web_state()->WasShown();
+
+  EXPECT_EQ(creation_time, content_web_state()->GetCreationTime());
+  EXPECT_GE(content_web_state()->GetLastActiveTime(), creation_time);
+}
+
+// Tests that setting and getting the favicon status works.
+//
+// The visible NavigationItem's own favicon status starts out invalid (no
+// favicon fetched yet), so GetFaviconStatus() falls back to the value set via
+// SetFaviconStatus().
+TEST_F(ContentWebStateTest, FaviconStatus) {
+  EXPECT_FALSE(content_web_state()->GetFaviconStatus().valid);
+
+  FaviconStatus favicon_status;
+  favicon_status.valid = true;
+  favicon_status.url = GURL("https://chromium.test/favicon.ico");
+  content_web_state()->SetFaviconStatus(favicon_status);
+
+  EXPECT_TRUE(content_web_state()->GetFaviconStatus().valid);
+  EXPECT_EQ(favicon_status.url, content_web_state()->GetFaviconStatus().url);
+}
+
+// Tests that reload with web::ReloadType::NORMAL is no-op when navigation
+// manager only has the initial NavigationEntry that content::WebContents is
+// created with (i.e. no real navigation has happened yet).
+//
+// Unlike WKBasedNavigationManager used by the existing WebKit-based WebState,
+// content::NavigationController always starts with an initial
+// NavigationEntry, so the last committed item is never null even before any
+// real navigation happens.
+TEST_F(ContentWebStateTest,
+       ReloadWithNormalTypeWithInitialNavigationEntryOnly) {
+  NavigationManager* navigation_manager =
+      content_web_state()->GetNavigationManager();
+  ASSERT_FALSE(navigation_manager->GetPendingItem());
+  ASSERT_TRUE(navigation_manager->GetLastCommittedItem());
+  int initial_item_count = navigation_manager->GetItemCount();
+
+  navigation_manager->Reload(web::ReloadType::NORMAL,
+                             /*check_for_repost=*/false);
+
+  EXPECT_FALSE(navigation_manager->GetPendingItem());
+  EXPECT_EQ(initial_item_count, navigation_manager->GetItemCount());
+}
+
 }  // namespace web

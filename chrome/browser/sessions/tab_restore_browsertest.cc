@@ -36,6 +36,7 @@
 #include "chrome/browser/ui/browser_init_state.h"
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -303,7 +304,7 @@ class TabRestoreTest : public InProcessBrowserTest {
   void EnableSessionService(
       SessionStartupPref::Type type = SessionStartupPref::Type::DEFAULT) {
     SessionStartupPref pref(type);
-    Profile* profile = browser()->profile();
+    Profile* profile = browser()->GetProfile();
     SessionStartupPref::SetStartupPref(profile, pref);
   }
 
@@ -685,14 +686,15 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   // grouped tab. This should restore the tab and not recreate the group.
   Browser::CreateParams app_browser_params =
       Browser::CreateParams::CreateForApp("App Name", true, gfx::Rect(),
-                                          browser()->profile(), false);
+                                          browser()->GetProfile(), false);
   Browser* app_browser = Browser::Create(app_browser_params);
   EXPECT_FALSE(app_browser->tab_strip_model()->group_model());
 
   // Create a tab entry with a group and add it to TabRestoreService directly.
   auto service = std::make_unique<sessions::TabRestoreServiceImpl>(
-      std::make_unique<ChromeTabRestoreServiceClient>(app_browser->profile()),
-      app_browser->profile()->GetPrefs(), nullptr, os_crypt_async_.get());
+      std::make_unique<ChromeTabRestoreServiceClient>(
+          app_browser->GetProfile()),
+      app_browser->GetProfile()->GetPrefs(), nullptr, os_crypt_async_.get());
 
   tab_groups::TabGroupId group_id = tab_groups::TabGroupId::GenerateNew();
   std::unique_ptr<sessions::tab_restore::Tab> tab =
@@ -1110,7 +1112,7 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWithExistingSiteInstance) {
   content::WebContents* tab =
       browser()->tab_strip_model()->GetWebContentsAt(tab_count - 1);
   content::LoadStopObserver observer(tab);
-  static_cast<content::WebContentsDelegate*>(browser())->OpenURLFromTab(
+  BrowserWebContentsDelegate::From(browser())->OpenURLFromTab(
       tab,
       content::OpenURLParams(http_url2, content::Referrer(),
                              WindowOpenDisposition::CURRENT_TAB,
@@ -3900,5 +3902,52 @@ IN_PROC_BROWSER_TEST_F(TabRestoreVerticalTabsTest,
   EXPECT_EQ(new_state_controller->GetUncollapsedWidth(), kUncollapsedWidth);
 }
 
+class TabRestoreFocusModeTest : public TabRestoreTest {
+ public:
+  TabRestoreFocusModeTest() {
+    scoped_feature_list.InitAndEnableFeature(features::kTabGroupsFocusing);
+  }
+
+  TabRestoreFocusModeTest(const TabRestoreFocusModeTest&) = delete;
+  TabRestoreFocusModeTest& operator=(const TabRestoreFocusModeTest&) = delete;
+
+ protected:
+  base::test::ScopedFeatureList scoped_feature_list;
+};
+
+IN_PROC_BROWSER_TEST_F(TabRestoreFocusModeTest, RestoreFocusedTabGroup) {
+  AddFileSchemeTabs(browser(), 2);
+  TabStripModel* tab_strip_model = browser()->GetTabStripModel();
+  ASSERT_TRUE(tab_strip_model->SupportsTabGroups());
+
+  const tab_groups::TabGroupId group = tab_strip_model->AddToNewGroup({0, 1});
+  tab_strip_model->SetFocusedGroup(group);
+  EXPECT_EQ(group, tab_strip_model->GetFocusedGroup());
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), chrome::ChromeUINewTabURLAsGURL(),
+      WindowOpenDisposition::NEW_WINDOW,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
+  EXPECT_EQ(2u, GlobalBrowserCollection::GetInstance()->GetSize());
+
+  // Close the first browser.
+  CloseBrowserSynchronously(browser());
+  EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
+
+  // Restore the closed window.
+  ui_test_utils::BrowserCreatedObserver browser_created_observer;
+  chrome::RestoreTab(GetLastActiveBrowserWindowInterfaceWithAnyProfile());
+  BrowserWindowInterface* const restored_browser_window =
+      browser_created_observer.Wait();
+  Browser* restored_browser =
+      restored_browser_window->GetBrowserForMigrationOnly();
+
+  // Verify that the restored window is in focus mode for the group.
+  TabStripModel* restored_tab_strip_model =
+      restored_browser->GetTabStripModel();
+  EXPECT_TRUE(restored_tab_strip_model->GetFocusedGroup().has_value());
+  EXPECT_EQ(restored_tab_strip_model->GetTabGroupForTab(0),
+            restored_tab_strip_model->GetFocusedGroup());
+}
 
 }  // namespace sessions

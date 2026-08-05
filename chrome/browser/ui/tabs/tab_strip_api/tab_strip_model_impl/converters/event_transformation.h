@@ -40,7 +40,7 @@ mojom::OnNodeMovedEventPtr ToEvent(
 
 mojom::OnDataChangedEventPtr ToEvent(
     const tabs_api::TabStripModelAdapter& adapter,
-    size_t index,
+    tabs::TabInterface* tab,
     TabChangeType change_type);
 
 mojom::OnDataChangedEventPtr ToEvent(
@@ -53,6 +53,12 @@ mojom::OnDataChangedEventPtr ToEvent(
 
 std::vector<Event> ToEvent(const TabStripSelectionChange& selection,
                            const tabs_api::TabStripModelAdapter& adapter);
+
+// Builds a data changed event for every tab with only the favicon field marked
+// as changed. This is used to refresh theme-dependent favicons (e.g. the
+// default favicon) after the color provider changes.
+std::vector<Event> ToFaviconChangedEvents(
+    const tabs_api::TabStripModelAdapter& adapter);
 
 }  // namespace tabs_api::events
 

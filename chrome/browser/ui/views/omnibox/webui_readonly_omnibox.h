@@ -23,6 +23,10 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_context_menu_mixin.h"
 #include "components/browser_apis/ui_controllers/toolbar/toolbar_ui_api_data_model.mojom.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/search_engines/template_url_service_observer.h"
+#include "content/public/browser/context_menu_params.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/mojom/base/error.mojom.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "ui/events/keycodes/dom/dom_key.h"
@@ -44,6 +48,7 @@ class Widget;
 }  // namespace views
 
 class LocationBar;
+class WebUIToolbarControlDelegate;
 
 // WebUI-implementation of OmniboxView, which happens to be readonly,
 // as it counts on the popup to handle the editing.
@@ -51,13 +56,16 @@ class LocationBar;
 // classes here. It's also no longer read-only!
 class WebUIReadOnlyOmnibox
     : public OmniboxView,
-      public OmniboxContextMenuMixin<ui::SimpleMenuModel::Delegate> {
+      public OmniboxContextMenuMixin<ui::SimpleMenuModel::Delegate>,
+      public TemplateURLServiceObserver,
+      public content::WebContentsObserver {
  public:
   class UpdatePropagator {
    public:
     virtual ~UpdatePropagator();
     virtual void PropagateOmniboxUpdate(
         toolbar_ui_api::mojom::OmniboxViewStatePtr update) = 0;
+    virtual void PropagateApplyFocusRingToAimButton(bool force_focus) = 0;
     virtual void PropagateFocusRequest(
         toolbar_ui_api::mojom::FocusRequestTarget target) = 0;
     virtual std::optional<GURL> ConsumeDroppedUrl(
@@ -65,8 +73,9 @@ class WebUIReadOnlyOmnibox
   };
 
   // Parameters must outlive `this`.
-  // `location_bar` may be null in tests.
+  // `location_bar` and `toolbar_delegate` may be null in tests.
   WebUIReadOnlyOmnibox(LocationBar* location_bar,
+                       WebUIToolbarControlDelegate* toolbar_delegate,
                        OmniboxController* controller,
                        UpdatePropagator& update_propagator);
   WebUIReadOnlyOmnibox(const WebUIReadOnlyOmnibox&) = delete;
@@ -75,7 +84,7 @@ class WebUIReadOnlyOmnibox
 
   // Called from the location bar.
   void SaveStateToTab(content::WebContents* tab);
-  void OnTabChanged(const content::WebContents* web_contents);
+  void OnTabChanged(content::WebContents* web_contents);
   void ResetTabState(content::WebContents* web_contents);
   base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnOmniboxAction(
       toolbar_ui_api::mojom::OmniboxActionPtr action);
@@ -83,13 +92,14 @@ class WebUIReadOnlyOmnibox
   void HandleContextMenu(views::Widget* widget,
                          const gfx::Point& point,
                          ui::mojom::MenuSourceType source_type,
-                         int edit_flags);
+                         const content::ContextMenuParams& menu_params);
 
   // Updates the state of the display stored in `this` OmniboxView. Doesn't
   // notify the OmniboxEditModel or the WebUI end.
   void SetTextAndSelectedRange(const std::u16string& text,
                                const std::u16string& inline_autocompletion,
-                               const gfx::Range& selection);
+                               const gfx::Range& selection,
+                               bool keep_additional_text);
 
   // OmniboxView:
   void Update() override;
@@ -107,6 +117,7 @@ class WebUIReadOnlyOmnibox
   void RevertAll() override;
   void UpdatePopup() override;
   void SetFocus(bool is_user_initiated) override;
+  void ApplyFocusRingToAimButton(bool focus_aim) override;
   bool AimButtonVisible() const override;
   void ApplyCaretVisibility() override;
   void OnTemporaryTextMaybeChanged(const std::u16string& display_text,
@@ -121,6 +132,7 @@ class WebUIReadOnlyOmnibox
                              const AutocompleteMatch& match) override;
   void OnBeforePossibleChange() override;
   bool OnAfterPossibleChange(bool allow_keyword_ui_change) override;
+  void OnKeywordPlaceholderTextChange() override;
   int GetOmniboxTextLength() const override;
   void EmphasizeURLComponents() override;
   void SetEmphasis(bool emphasize, const gfx::Range& range) override;
@@ -128,13 +140,16 @@ class WebUIReadOnlyOmnibox
 
   // ui::SimpleMenuModel::Delegate:
   void ExecuteCommand(int command_id, int event_flags) override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) const override;
 
   // OmniboxContextMenuMixinBase:
   bool IsContextMenuForReadOnlyOmnibox() const override;
   const gfx::FontList& FontListForContextMenu() const override;
   bool IsContextMenuTextEditingCommandEnabled(int command_id) const override;
+  views::Widget* GetWidgetForTextServices() override;
 
-  toolbar_ui_api::mojom::OmniboxViewStatePtr ComputeMojoState() const;
+  toolbar_ui_api::mojom::OmniboxViewStatePtr ComputeMojoState();
 
   // Requests focus with particular omnibox-related target
   void SetFocusWithTarget(toolbar_ui_api::mojom::FocusRequestTarget target);
@@ -150,8 +165,9 @@ class WebUIReadOnlyOmnibox
       const toolbar_ui_api::mojom::OmniboxActionTextInput& text_input);
   base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnKey(
       const toolbar_ui_api::mojom::OmniboxActionKey& key);
-  base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnMouse(
-      const toolbar_ui_api::mojom::OmniboxActionMouse& mouse);
+  base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnPointer(
+      bool is_down,
+      bool start_zero_suggest);
   base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnDropText(
       const toolbar_ui_api::mojom::OmniboxActionDropText& drop_text);
   base::expected<std::monostate, mojo_base::mojom::ErrorPtr> OnDropFile(
@@ -163,7 +179,16 @@ class WebUIReadOnlyOmnibox
 
   ui::DomKey LookupAndCacheDomKey(std::string_view key_str);
 
+  // TemplateURLServiceObserver:
+  void OnTemplateURLServiceChanged() override;
+
+  // content::WebContentsObserver:
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
+  void TitleWasSet(content::NavigationEntry* entry) override;
+
   raw_ptr<LocationBar> location_bar_;  // owns `this`
+  raw_ptr<WebUIToolbarControlDelegate> toolbar_delegate_;  // indirect owner.
   raw_ref<UpdatePropagator> update_propagator_;
 
   absl::flat_hash_map<std::string, ui::DomKey> key_code_cache_;
@@ -201,10 +226,18 @@ class WebUIReadOnlyOmnibox
   // used in `OnAfterPossibleChange()` to figure out what changed.
   State state_before_change_;
 
+  bool has_focus_ = false;
+  bool aim_hint_currently_shown_ = false;
+  bool aim_page_action_icon_has_fake_focus_ = false;
+
   // Used to show the context menu.
-  int edit_flags_for_context_menu_ = 0;  // See blink::ContextMenuDataEditFlags
+  content::ContextMenuParams menu_params_;
   std::unique_ptr<ui::SimpleMenuModel> menu_model_;
   std::unique_ptr<views::MenuRunner> menu_runner_;
+
+  PrefChangeRegistrar pref_change_registrar_;
+  base::ScopedObservation<TemplateURLService, TemplateURLServiceObserver>
+      scoped_template_url_service_observation_{this};
 
   base::WeakPtrFactory<WebUIReadOnlyOmnibox> weak_ptr_factory_{this};
 };

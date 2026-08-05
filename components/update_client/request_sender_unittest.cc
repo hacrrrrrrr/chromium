@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/strings/strcat.h"
-#include "base/strings/string_util.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "components/client_update_protocol/features.h"
@@ -105,12 +105,9 @@ void RequestSenderTest::SetUp() {
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
 
-  std::vector<GURL> urls;
-  urls.push_back(GURL(kUrl1));
-  urls.push_back(GURL(kUrl2));
-
   post_interceptor_ = std::make_unique<URLLoaderPostInterceptor>(
-      urls, config_->test_url_loader_factory());
+      std::vector<GURL>{GURL(kUrl1), GURL(kUrl2)},
+      config_->test_url_loader_factory());
   EXPECT_TRUE(post_interceptor_);
 }
 
@@ -225,11 +222,10 @@ TEST_P(RequestSenderTest, RequestSendFailed) {
   EXPECT_TRUE(post_interceptor_->ExpectRequest(
       std::make_unique<PartialMatch>("test"), net::HTTP_FORBIDDEN));
 
-  const std::vector<GURL> urls = {GURL(kUrl1), GURL(kUrl2)};
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
   request_sender_->Send(
-      urls, {}, "test", false,
+      {GURL(kUrl1), GURL(kUrl2)}, {}, "test", false,
       base::BindOnce(&RequestSenderTest::RequestSenderComplete,
                      base::Unretained(this)));
   RunThreads();
@@ -250,11 +246,10 @@ TEST_P(RequestSenderTest, RequestSendFailed) {
 
 // Tests that the request fails when no urls are provided.
 TEST_P(RequestSenderTest, RequestSendFailedNoUrls) {
-  std::vector<GURL> urls;
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
   request_sender_->Send(
-      urls, {}, "test", false,
+      {}, {}, "test", false,
       base::BindOnce(&RequestSenderTest::RequestSenderComplete,
                      base::Unretained(this)));
   RunThreads();
@@ -264,15 +259,15 @@ TEST_P(RequestSenderTest, RequestSendFailedNoUrls) {
 
 // Tests that a CUP request fails if the response is not signed.
 TEST_P(RequestSenderTest, RequestSendCupError) {
+  base::HistogramTester histogram_tester;
   EXPECT_TRUE(post_interceptor_->ExpectRequest(
       std::make_unique<PartialMatch>("test"),
       GetTestFilePath("updatecheck_reply_1.json")));
 
-  const std::vector<GURL> urls = {GURL(kUrl1)};
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
   request_sender_->Send(
-      urls, {}, "test", true,
+      {GURL(kUrl1)}, {}, "test", true,
       base::BindOnce(&RequestSenderTest::RequestSenderComplete,
                      base::Unretained(this)));
   RunThreads();
@@ -285,6 +280,12 @@ TEST_P(RequestSenderTest, RequestSendCupError) {
   EXPECT_EQ("test", post_interceptor_->GetRequestBody(0));
   EXPECT_EQ(-10000, error_);
   EXPECT_TRUE(response_.empty());
+
+  histogram_tester.ExpectUniqueSample("UpdateClient.CupValidationResult", false,
+                                      1);
+  histogram_tester.ExpectTotalCount("UpdateClient.CupValidationTime", 1);
+  histogram_tester.ExpectUniqueSample("UpdateClient.CupFallbackToEtag", false,
+                                      1);
 }
 
 TEST_P(RequestSenderTest, RetryAfterSecClamped) {
@@ -293,11 +294,10 @@ TEST_P(RequestSenderTest, RetryAfterSecClamped) {
       GetTestFilePath("updatecheck_reply_1.json"),
       {{"X-Retry-After", "100000"}}));  // > 24 hours (86400)
 
-  const std::vector<GURL> urls = {GURL(kUrl1)};
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
   request_sender_->Send(
-      urls, {}, "test", true,
+      {GURL(kUrl1)}, {}, "test", true,
       base::BindOnce(&RequestSenderTest::RequestSenderComplete,
                      base::Unretained(this)));
   RunThreads();
@@ -335,19 +335,55 @@ TEST_P(RequestSenderTest, CupKeySelection) {
   EXPECT_TRUE(
       post_interceptor_->ExpectRequest(std::make_unique<PartialMatch>("test")));
 
-  const std::vector<GURL> urls = {GURL(kUrl1)};
   request_sender_ =
       base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
   request_sender_->Send(
-      urls, {}, "test", true,
+      {GURL(kUrl1)}, {}, "test", true,
       base::BindOnce(&RequestSenderTest::RequestSenderComplete,
                      base::Unretained(this)));
   RunThreads();
 
   std::string query(std::get<2>(post_interceptor_->GetRequests()[0]).query());
   EXPECT_TRUE(IsPqcCupSigningEnabled()
-                  ? base::StartsWith(query, "cup2key=ML-DSA-44-16:")
-                  : base::StartsWith(query, "cup2key=16:"));
+                  ? query.starts_with("cup2key=ML-DSA-44-16:")
+                  : query.starts_with("cup2key=16:"));
+}
+
+TEST_P(RequestSenderTest, CupFallbackToEtagHistogram_XCupServerProofPreferred) {
+  base::HistogramTester histogram_tester;
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      std::make_unique<PartialMatch>("test"),
+      GetTestFilePath("updatecheck_reply_1.json"),
+      {{"X-Cup-Server-Proof", "some_proof"}, {"ETag", "proof"}}));
+
+  request_sender_ =
+      base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
+  request_sender_->Send(
+      {GURL(kUrl1)}, {}, "test", true,
+      base::BindOnce(&RequestSenderTest::RequestSenderComplete,
+                     base::Unretained(this)));
+  RunThreads();
+
+  histogram_tester.ExpectUniqueSample("UpdateClient.CupFallbackToEtag", false,
+                                      1);
+}
+
+TEST_P(RequestSenderTest, CupFallbackToEtagHistogram_EtagFallback) {
+  base::HistogramTester histogram_tester;
+  EXPECT_TRUE(post_interceptor_->ExpectRequest(
+      std::make_unique<PartialMatch>("test"),
+      GetTestFilePath("updatecheck_reply_1.json"), {{"ETag", "proof"}}));
+
+  request_sender_ =
+      base::MakeRefCounted<RequestSender>(config_->GetNetworkFetcherFactory());
+  request_sender_->Send(
+      {GURL(kUrl1)}, {}, "test", true,
+      base::BindOnce(&RequestSenderTest::RequestSenderComplete,
+                     base::Unretained(this)));
+  RunThreads();
+
+  histogram_tester.ExpectUniqueSample("UpdateClient.CupFallbackToEtag", true,
+                                      1);
 }
 
 }  // namespace update_client

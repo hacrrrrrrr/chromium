@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/page_action/test_support/page_action_interactive_test_mixin.h"
 #include "chrome/browser/ui/views/performance_controls/memory_saver_bubble_view.h"
@@ -103,6 +102,7 @@ class MemorySaverDiscardPolicyInteractiveTest
 
   void SetUpOnMainThread() override {
     InteractiveBrowserTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
     embedded_test_server()->StartAcceptingConnections();
   }
 
@@ -284,8 +284,8 @@ class MemorySaverChipInteractiveTest
 
   views::BubbleDialogDelegate* GetMemorySaverBubble() {
     return browser()
-        ->browser_window_features()
-        ->memory_saver_bubble_controller()
+        ->GetFeatures()
+        .memory_saver_bubble_controller()
         ->bubble_for_testing();
   }
 
@@ -584,7 +584,7 @@ IN_PROC_BROWSER_TEST_P(MemorySaverChipInteractiveTest,
       PressButton(MemorySaverBubbleView::kMemorySaverDialogCancelButton),
       WaitForHide(MemorySaverBubbleView::kMemorySaverDialogBodyElementId),
       Do(base::BindLambdaForTesting([=, this]() {
-        PrefService* const pref_service = browser()->profile()->GetPrefs();
+        PrefService* const pref_service = browser()->GetProfile()->GetPrefs();
         const base::DictValue& discard_exception =
             pref_service->GetDict(performance_manager::user_tuning::prefs::
                                       kTabDiscardingExceptionsWithTime);

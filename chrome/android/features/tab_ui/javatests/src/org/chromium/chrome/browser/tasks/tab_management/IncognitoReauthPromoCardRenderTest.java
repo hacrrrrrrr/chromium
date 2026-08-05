@@ -11,7 +11,6 @@ import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
-import static org.chromium.base.test.util.Batch.PER_CLASS;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.createTabs;
 import static org.chromium.chrome.browser.tasks.tab_management.TabUiTestHelper.enterTabSwitcher;
 
@@ -19,6 +18,7 @@ import android.content.res.Configuration;
 
 import androidx.test.filters.MediumTest;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -35,8 +35,8 @@ import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.incognito.reauth.IncognitoReauthManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
 import org.chromium.chrome.test.transit.ChromeTransitTestRules;
-import org.chromium.chrome.test.transit.FreshCtaTransitTestRule;
 import org.chromium.chrome.test.transit.page.WebPageStation;
 import org.chromium.chrome.test.util.ActivityTestUtils;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
@@ -48,11 +48,11 @@ import java.io.IOException;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add(ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE)
 @Restriction(DeviceFormFactor.PHONE)
-@Batch(PER_CLASS)
+@Batch(Batch.PER_CLASS)
 public class IncognitoReauthPromoCardRenderTest {
     @Rule
-    public FreshCtaTransitTestRule mActivityTestRule =
-            ChromeTransitTestRules.freshChromeTabbedActivityRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.fastAutoResetCtaActivityRule();
 
     @Rule
     public ChromeRenderTestRule mRenderTestRule =
@@ -71,6 +71,11 @@ public class IncognitoReauthPromoCardRenderTest {
 
         CriteriaHelper.pollUiThread(
                 mActivityTestRule.getActivity().getTabModelSelector()::isTabStateInitialized);
+    }
+
+    @After
+    public void tearDown() {
+        ActivityTestUtils.clearActivityOrientation(mActivityTestRule.getActivity());
     }
 
     @Test

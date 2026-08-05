@@ -30,10 +30,6 @@ enum class SuggestionSection {
 // Returns the target section (body, footer, or structure) of this `type`.
 SuggestionSection GetSuggestionSection(SuggestionType type);
 
-// Returns whether this `SuggestionType` can, in principle, be accepted. Note
-// that even if this is true, the suggestion itself may still not be acceptable.
-bool IsAcceptableSuggestionType(SuggestionType id);
-
 // Returns whether the suggestion with this `type` belongs into
 // the footer section of the popup. Returns `false` for separators, which may
 // belong either to the main or the footer section.
@@ -48,6 +44,10 @@ bool IsFooterItem(const std::vector<Suggestion>& suggestions,
 // as the first suggestion (e.g. after deleting a suggestion). This is true for
 // all non-footer suggestions and false for most footer suggestions.
 bool IsStandaloneSuggestionType(SuggestionType type);
+
+// Returns whether `suggestion` should be displayed with deactivated visual
+// styling (e.g. disabled text style and grayed-out icons).
+bool ShouldApplyDeactivatedStyle(const Suggestion& suggestion);
 
 // Will be removed together with kAutofillSimplifyFocusCheck.
 // Returns the `RenderFrameHost` corresponding to an

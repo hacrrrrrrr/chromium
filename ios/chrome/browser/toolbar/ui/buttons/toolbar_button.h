@@ -10,10 +10,15 @@
 #import "ios/chrome/browser/toolbar/ui/buttons/toolbar_button_visibility.h"
 #import "ios/chrome/common/ui/elements/highlight_button.h"
 
+@protocol GeminiCommands;
+
 using ToolbarButtonImageLoader = UIImage* (^)(void);
 
 // Button displayed in the toolbar.
 @interface ToolbarButton : HighlightButton
+
+// Handler for Gemini commands.
+@property(nonatomic, weak) id<GeminiCommands> geminiHandler;
 
 // The visibility mask for this button.
 @property(nonatomic, assign) ToolbarButtonVisibility visibilityMask;
@@ -27,12 +32,12 @@ using ToolbarButtonImageLoader = UIImage* (^)(void);
 // When true, the button has a blue dot in the top right corner.
 @property(nonatomic, assign) BOOL hasBlueDot;
 
+// When true, shadow and background are removed from this button. Default NO.
+@property(nonatomic, assign) BOOL shadowAndBackgroundRemoved;
+
 // The string to be used for the accessibility label when the blue dot is
 // visible.
 @property(nonatomic, copy) NSString* blueDotAccessibilityLabel;
-
-// The background view of the button.
-@property(nonatomic, strong, readonly) UIView* backgroundView;
 
 // Initializer for this button in `incognito` with an `imageLoader`.
 - (instancetype)initWithImageLoader:(ToolbarButtonImageLoader)imageLoader

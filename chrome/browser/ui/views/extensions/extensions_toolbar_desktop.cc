@@ -590,6 +590,10 @@ ExtensionsToolbarDesktop::GetPoppedOutActionId() const {
   return popped_out_action_;
 }
 
+bool ExtensionsToolbarDesktop::IsVisible() const {
+  return GetVisible();
+}
+
 bool ExtensionsToolbarDesktop::IsActionVisibleOnToolbar(
     const std::string& action_id) const {
   return model_->IsActionPinned(action_id) || ShouldForceVisibility(action_id);
@@ -1242,7 +1246,13 @@ views::FocusManager* ExtensionsToolbarDesktop::GetFocusManagerForAccelerator() {
 
 views::BubbleAnchor ExtensionsToolbarDesktop::GetReferenceButtonForPopup(
     const extensions::ExtensionId& action_id) {
-  return GetViewForId(action_id)->GetReferenceButtonForPopup();
+  ToolbarActionView* view = GetViewForId(action_id);
+  return view ? view->GetReferenceButtonForPopup()
+              : GetExtensionsButtonAnchor();
+}
+
+views::BubbleAnchor ExtensionsToolbarDesktop::GetExtensionsButtonAnchor() {
+  return views::BubbleAnchor(GetExtensionsButton());
 }
 
 void ExtensionsToolbarDesktop::OnMouseExited(const ui::MouseEvent& event) {
@@ -1303,7 +1313,7 @@ void ExtensionsToolbarDesktop::MaybeShowIPH() {
 
   // The Extensions Zero State promo prompts users without extensions to
   // explore the Chrome Web Store. Only triggered for normal browser types.
-  if (browser_->type() == Browser::TYPE_NORMAL) {
+  if (browser_->GetType() == Browser::TYPE_NORMAL) {
     if (!g_zero_state_promo_next_show_time_opt.has_value()) {
       g_zero_state_promo_next_show_time_opt =
           base::TimeTicks::Now() + kZeroStatePromoIntervalBetweenLaunchAttempt;

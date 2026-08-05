@@ -548,7 +548,7 @@ unsigned TextControlElement::IndexForPosition(HTMLElement* inner_editor,
   for (Node* node = start_node; node;
        node = NodeTraversal::Previous(*node, inner_editor)) {
     if (auto* text_node = DynamicTo<Text>(node)) {
-      int length = text_node->length();
+      wtf_size_t length = text_node->length();
       if (node == passed_position.ComputeContainerNode())
         index += std::min(length, passed_position.OffsetInContainerNode());
       else
@@ -878,12 +878,15 @@ void TextControlElement::SelectionChanged(bool user_triggered) {
   if (!GetLayoutObject() || !IsTextControl())
     return;
 
-  // selectionStart() or selectionEnd() will return cached selection when this
-  // node doesn't have focus.
-  ComputedSelection computed_selection;
-  ComputeSelection(kStart | kEnd | kDirection, computed_selection);
-  CacheSelection(computed_selection.start, computed_selection.end,
-                 computed_selection.direction);
+  // The cached selection is authoritative while unfocused, so only refresh it
+  // from the live DOM selection when focused.
+  if (IsFocused() ||
+      !RuntimeEnabledFeatures::PreserveUnfocusedSelectionCacheEnabled()) {
+    ComputedSelection computed_selection;
+    ComputeSelection(kStart | kEnd | kDirection, computed_selection);
+    CacheSelection(computed_selection.start, computed_selection.end,
+                   computed_selection.direction);
+  }
 
   LocalFrame* frame = GetDocument().GetFrame();
   if (!frame || !user_triggered)

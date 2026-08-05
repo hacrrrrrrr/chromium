@@ -484,6 +484,12 @@ public class TabSwitcherPaneUnitTest {
     }
 
     @Test
+    public void testCreateNewTab() {
+        assertTrue(mTabSwitcherPane.createNewTab());
+        verify(mNewTabButtonClickListener).onClick(null);
+    }
+
+    @Test
     @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_bottom_bar_on_gts/true")
     public void testNewTabButton_BottomBarEnabled() {
         assertNull(mTabSwitcherPane.getActionButtonDataSupplier().get());
@@ -1396,5 +1402,18 @@ public class TabSwitcherPaneUnitTest {
         HubUtils.setIsTabletForTesting(true);
         mTabSwitcherPane.setPaneHubController(mPaneHubController);
         assertFalse(mTabSwitcherPane.getHubSearchBoxVisibilitySupplier().get());
+    }
+
+    @Test
+    public void testIsTouchOnInteractiveElement() {
+        assertFalse(mTabSwitcherPane.isTouchOnInteractiveElement(100f, 100f));
+
+        mTabSwitcherPane.createTabSwitcherPaneCoordinator();
+
+        when(mTabSwitcherPaneCoordinator.isTouchOnInteractiveElement(100f, 100f)).thenReturn(true);
+        assertTrue(mTabSwitcherPane.isTouchOnInteractiveElement(100f, 100f));
+
+        when(mTabSwitcherPaneCoordinator.isTouchOnInteractiveElement(100f, 100f)).thenReturn(false);
+        assertFalse(mTabSwitcherPane.isTouchOnInteractiveElement(100f, 100f));
     }
 }

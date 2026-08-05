@@ -48,6 +48,7 @@
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
+#include "components/variations/variations_switches.h"
 #include "content/public/test/browser_test.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -159,6 +160,9 @@ class ModelExecutionBrowserTestBase : public InProcessBrowserTest {
         model_quality_logs_server_
             ->GetURL(GetModelQualityLogsUploaderServiceURL().GetHost(), "/")
             .spec());
+    // Add a dummy variation ID so that the X-Client-Data header is appended to
+    // eligible requests to select Google servers.
+    cmd->AppendSwitchASCII(variations::switches::kForceVariationIds, "113355");
   }
 
   void SetUpBrowserContextKeyedServices(
@@ -204,7 +208,7 @@ class ModelExecutionBrowserTestBase : public InProcessBrowserTest {
   OptimizationGuideKeyedService* GetOptimizationGuideKeyedService(
       Profile* profile = nullptr) {
     if (!profile) {
-      profile = browser()->profile();
+      profile = browser()->GetProfile();
     }
     return OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   }
@@ -215,7 +219,7 @@ class ModelExecutionBrowserTestBase : public InProcessBrowserTest {
                     const proto::ComposeRequest& request_metadata,
                     Profile* profile = nullptr) {
     if (!profile) {
-      profile = browser()->profile();
+      profile = browser()->GetProfile();
     }
     base::RunLoop run_loop;
     ExecuteModelWithLogging(
@@ -580,7 +584,7 @@ IN_PROC_BROWSER_TEST_F(ModelExecutionEnabledBrowserTest,
 IN_PROC_BROWSER_TEST_F(ModelExecutionEnabledBrowserTest,
                        ModelExecutionFailsForUnsupportedLanguageResponse) {
   EnableSignin();
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kCompose),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -654,7 +658,7 @@ IN_PROC_BROWSER_TEST_F(
     ModelExecutionEnabledBrowserTestWithExplicitBrowserSignin,
     PRE_EnableFeatureViaPref) {
   EnableSignin();
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -707,7 +711,7 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_FALSE(IsSettingVisible(UserVisibleFeatureKey::kHistorySearch));
 #endif
 
-  browser()->profile()->GetPrefs()->SetInteger(
+  browser()->GetProfile()->GetPrefs()->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kHistorySearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
   EXPECT_TRUE(variations::IsInSyntheticTrialGroup(
@@ -839,7 +843,7 @@ IN_PROC_BROWSER_TEST_F(ModelExecutionEnterprisePolicyBrowserTest,
   ASSERT_TRUE(
       g_browser_process->GetMetricsServicesManager()->IsMetricsConsentGiven());
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kCompose),
       static_cast<int>(optimization_guide::prefs::FeatureOptInState::kEnabled));
@@ -901,7 +905,7 @@ IN_PROC_BROWSER_TEST_F(ModelExecutionEnterprisePolicyBrowserTest,
                        DisableThenEnableWallpaperSearch) {
   EnableSignin();
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));

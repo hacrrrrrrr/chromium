@@ -60,6 +60,10 @@ namespace optimization_guide {
 class RemoteModelExecutor;
 }
 
+namespace personal_context {
+class PersonalContextFirstRunService;
+}
+
 namespace tabs {
 class TabInterface;
 }
@@ -72,7 +76,7 @@ namespace autofill {
 class AutofillAiSaveUpdateEntityFlowManager;
 class SaveUpdateAddressProfileFlowManager;
 class AutofillMessageController;
-class AtMemoryBottomSheetBridge;
+class AutofillDialogController;
 class TouchToFillAutofillController;
 #endif
 
@@ -152,10 +156,8 @@ class ChromeAutofillClient : public ContentAutofillClient {
   EntityDataManager* GetEntityDataManager() final;
   WalletPassAccessManager* GetWalletPassAccessManager() final;
   SingleFieldFillRouter& GetSingleFieldFillRouter() final;
-  bool ShouldShowPersonalContextAmbientAutofillNotice() const override;
-  void MarkPersonalContextAmbientAutofillNoticeAsAcknowledged() override;
-  bool ShouldShowPersonalContextAtMemoryNotice() const override;
-  void MarkPersonalContextAtMemoryNoticeAsAcknowledged() override;
+  personal_context::PersonalContextFirstRunService*
+  GetPersonalContextFirstRunService() override;
   AutocompleteHistoryManager* GetAutocompleteHistoryManager() final;
   AutofillComposeDelegate* GetComposeDelegate() final;
   AtMemoryQueryService* GetAtMemoryQueryService() override;
@@ -226,10 +228,6 @@ class ChromeAutofillClient : public ContentAutofillClient {
       EntityType entity_type,
       const base::flat_set<EntityTypeName>& saved_entities,
       const FieldTypeSet& triggering_field_types) final;
-  void TriggerAutofillAiSavePromptSurvey(
-      bool prompt_accepted,
-      EntityType entity_type,
-      const base::flat_set<EntityTypeName>& saved_entities) final;
   bool IsTabInActorMode() const final;
   ActorKeyMetricsRecorder* GetActorKeyMetricsRecorder() final;
   bool IsAutofillEnabled() const final;
@@ -255,17 +253,16 @@ class ChromeAutofillClient : public ContentAutofillClient {
   // on Android.
   AutofillSnackbarControllerImpl* GetAutofillSnackbarController() final;
 
-  void ShowAtMemoryBottomSheet(
-      base::span<const Suggestion> suggestions,
-      base::WeakPtr<AutofillSuggestionDelegate> delegate) final;
-  void HideAtMemoryBottomSheet() final;
-
-  // Returns the AtMemoryBottomSheetBridge for the current tab.
-  AtMemoryBottomSheetBridge* GetOrCreateAtMemoryBottomSheetBridge();
+  bool ShowAmbientAutoFillNotice(
+      base::WeakPtr<TouchToFillAutofillDelegate> delegate) override;
+  void HideAmbientAutoFillNotice() override;
 
   // The AutofillMessageController is used to show native Android messages via
   // the messages API.
   AutofillMessageController* GetAutofillMessageController();
+
+  // The AutofillDialogController is used to show Android modal dialogs.
+  AutofillDialogController* GetAutofillDialogController();
 
   void SetTouchToFillAutofillControllerForTesting(
       std::unique_ptr<TouchToFillAutofillController>
@@ -294,7 +291,8 @@ class ChromeAutofillClient : public ContentAutofillClient {
   void CloseEntityImportBubble() final;
   void ShowAutofillAiLocalSaveNotification() final;
   void ShowAutofillAiSaveToWalletFailureNotification() final;
-  void ShowAutofillAiFetchFromWalletFailureNotification() final;
+  void ShowAutofillAiFetchEntityFailureNotification() final;
+  void ShowAtMemoryFetchFailureNotification() final;
   void ShowAutofillAiPreFetchFailureNotification() final;
   void ShowAutofillAiPrivateInferenceNotice() final;
   void ShowEmailVerifiedToast(const GURL& issuer) final;
@@ -364,6 +362,7 @@ class ChromeAutofillClient : public ContentAutofillClient {
     void OnTextCopiedToClipboard(content::RenderFrameHost* render_frame_host,
                                  const std::u16string& copied_text) override;
     void OnPaste() override;
+    void DidGetUserInteraction(const blink::WebInputEvent& event) override;
 
    private:
     const base::raw_ref<ChromeAutofillClient> client_;
@@ -420,13 +419,13 @@ class ChromeAutofillClient : public ContentAutofillClient {
   bool keep_popup_open_for_testing_ = false;
 #if BUILDFLAG(IS_ANDROID)
   std::unique_ptr<AutofillMessageController> autofill_message_controller_;
+  std::unique_ptr<AutofillDialogController> autofill_dialog_controller_impl_;
   std::unique_ptr<AutofillAiSaveUpdateEntityFlowManager>
       autofill_ai_save_update_entity_flow_manager_;
   std::unique_ptr<SaveUpdateAddressProfileFlowManager>
       save_update_address_profile_flow_manager_;
   std::unique_ptr<AutofillSnackbarControllerImpl>
       autofill_snackbar_controller_impl_;
-  std::unique_ptr<AtMemoryBottomSheetBridge> at_memory_bottom_sheet_bridge_;
   std::unique_ptr<TouchToFillAutofillController>
       touch_to_fill_autofill_controller_;
 #else   // BUILDFLAG(IS_ANDROID)

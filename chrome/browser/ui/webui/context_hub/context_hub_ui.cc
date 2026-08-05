@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "build/build_config.h"
+#include "chrome/browser/context_hub/features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/context_hub/context_hub.mojom-features.h"
 #include "chrome/browser/ui/webui/context_hub/context_hub_page_handler.h"
@@ -39,6 +40,8 @@ ContextHubUI::ContextHubUI(content::WebUI* web_ui)
   source->AddBoolean(
       "kAutoTodos",
       base::FeatureList::IsEnabled(browser::context_hub::mojom::kAutoTodos));
+  source->AddInteger("kMaxTabGroupChatHistoryTurns",
+                     context_hub::features::kMaxTabGroupChatHistoryTurns.Get());
 
 #if !BUILDFLAG(IS_ANDROID)
   content::URLDataSource::Add(
@@ -57,9 +60,10 @@ void ContextHubUI::BindInterface(
 }
 
 void ContextHubUI::CreatePageHandler(
+    mojo::PendingRemote<browser::context_hub::mojom::Page> page,
     mojo::PendingReceiver<browser::context_hub::mojom::PageHandler> handler) {
   page_handler_ = std::make_unique<ContextHubPageHandler>(
-      std::move(handler), Profile::FromWebUI(web_ui()),
+      std::move(page), std::move(handler), Profile::FromWebUI(web_ui()),
       web_ui()->GetWebContents());
 }
 

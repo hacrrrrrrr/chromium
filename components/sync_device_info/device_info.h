@@ -60,8 +60,8 @@ class DeviceInfo {
     kUnknown = 0,
     kSmsFetcher = 3,
     kRemoteCopy = 4,
-    kClickToCallV2 = 7,
-    kSharedClipboardV2 = 8,
+    // kClickToCallV2 = 7,  // Deprecated, do not reuse.
+    // kSharedClipboardV2 = 8,  // Deprecated, do not reuse.
     kOptimizationGuidePushNotification = 9,
     kOneTimeTokenBackendNotification = 10,
     kGlicExperimentalTriggering = 11,

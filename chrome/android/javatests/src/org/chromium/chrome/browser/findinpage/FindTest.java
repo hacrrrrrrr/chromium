@@ -45,6 +45,7 @@ import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.KeyUtils;
+import org.chromium.base.test.util.RequiresRestart;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
@@ -239,6 +240,7 @@ public class FindTest {
     @Test
     @MediumTest
     @Feature({"FindInPage"})
+    @DisableIf.Device(DeviceFormFactor.ONLY_TABLET)
     public void testFindNext() {
         String query = "pitts";
         loadTestAndVerifyFindInPage(query, "1/7");
@@ -254,6 +256,7 @@ public class FindTest {
     @Test
     @MediumTest
     @Feature({"FindInPage"})
+    @DisableIf.Device(DeviceFormFactor.ONLY_TABLET)
     public void testFindNextPrevious() {
         String query = "pitts";
         loadTestAndVerifyFindInPage(query, "1/7");
@@ -295,6 +298,7 @@ public class FindTest {
     @Test
     @MediumTest
     @Feature({"FindInPage"})
+    @RequiresRestart("crbug.com/539532908")
     public void testResultsBarVisibleAfterTypingText() {
         mActivityTestRule.loadUrl(mActivityTestRule.getTestServer().getURL(FILEPATH));
         findInPageFromMenu();

@@ -112,6 +112,7 @@
 #if !BUILDFLAG(IS_IOS)
 #include "components/history_clusters/core/config.h"  // nogncheck
 #include "components/omnibox/browser/actions/history_clusters_action.h"
+#include "components/omnibox/browser/geolocation_header_service.h"
 #include "components/omnibox/browser/history_cluster_provider.h"
 #include "components/open_from_clipboard/clipboard_recent_content_generic.h"
 #endif
@@ -947,6 +948,22 @@ void AutocompleteController::ResetSession() {
   smart_compose_stats_.reset();
 }
 
+void AutocompleteController::MaybeProcessInlineLocationSuggestionMatch(
+    const AutocompleteMatch& match) {
+#if !BUILDFLAG(IS_IOS)
+  if (auto* geolocation_header_service =
+          provider_client_->GetGeolocationHeaderService()) {
+    geolocation_header_service->MaybeRecordInlineLocationSuggestionClicked(
+        match);
+  }
+#endif
+
+  if (match.subtypes.contains(omnibox::SUBTYPE_LOCATION_SUGGEST_TRIGGER) &&
+      match.extra_headers.contains(kXGeoHeader)) {
+    provider_client_->ResetGeolocationPermissionToAsk(match.destination_url);
+  }
+}
+
 void AutocompleteController::
     UpdateMatchDestinationURLWithAdditionalSearchboxStats(
         base::TimeDelta query_formulation_time,
@@ -1137,7 +1154,7 @@ bool AutocompleteController::ShouldRunProvider(
   }
 
 #if BUILDFLAG(IS_ANDROID)
-  if (omnibox::IsAndroidHub(input_.current_page_classification())) {
+  if (omnibox::IsAndroidHubOrTabSearch(input_.current_page_classification())) {
     return provider->type() == AutocompleteProvider::TYPE_SEARCH ||
            provider->type() == AutocompleteProvider::TYPE_OPEN_TAB ||
            provider->type() == AutocompleteProvider::TYPE_BOOKMARK ||
@@ -1770,7 +1787,7 @@ void AutocompleteController::AttachActions() {
     return;
   }
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+#if !BUILDFLAG(IS_IOS)
   if (omnibox_feature_configs::ContextualSearch::Get()
           .contextual_zero_suggest_lens_fulfillment &&
       input_.IsZeroSuggest()) {
@@ -1802,12 +1819,12 @@ void AutocompleteController::AttachActions() {
       return;
     }
   }
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+#endif  // !BUILDFLAG(IS_IOS)
 
   // TabMatcher should run for ZPS for the Hub since open tab suggestions are
   // shown there.
   if (!input_.IsZeroSuggest() ||
-      omnibox::IsAndroidHub(input_.current_page_classification())) {
+      omnibox::IsAndroidHubOrTabSearch(input_.current_page_classification())) {
     // Do not look for matching tabs on Android unless we collected all the
     // suggestions. Tab matching is an expensive process with multiple JNI calls
     // involved. Run it only when all the suggestions are collected.

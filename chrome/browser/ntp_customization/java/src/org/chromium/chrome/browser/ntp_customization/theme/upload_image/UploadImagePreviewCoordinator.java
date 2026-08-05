@@ -41,8 +41,8 @@ import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils;
 import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeProperty;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase;
-import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase.PlatformType;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataUploadImage;
+import org.chromium.chrome.browser.ntp_customization.theme_sync.data.PlatformType;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
@@ -392,11 +392,7 @@ public class UploadImagePreviewCoordinator implements InsetObserver.WindowInsets
 
         NtpBackgroundDataUploadImage uploadImageData =
                 new NtpBackgroundDataUploadImage(
-                        PlatformType.ANDROID_LOCAL,
-                        info,
-                        bitmap,
-                        /* primaryColor= */ null,
-                        fileIdHash);
+                        PlatformType.ANDROID, info, bitmap, /* primaryColor= */ null, fileIdHash);
 
         // #onBackgroundDataChanged() will pick the primary color for the uploadImageData to
         // make it non-null.

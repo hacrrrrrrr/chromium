@@ -126,38 +126,48 @@ static_assert(std::size(kBlockedCameraNames) == BLOCKED_CAMERA_MAX + 1,
 
 // Use this list only for USB webcams.
 constexpr auto kModelIdsBlockedForMediaFoundation =
-    base::MakeFixedFlatSet<std::string_view>(
-        {// Devices using Empia 2860 or 2820 chips, see
-         // https://crbug.com/849636.
-         "eb1a:2860", "eb1a:2820", "1ce6:2820",
-         // Elgato HD60 Pro
-         "12ab:0380",
-         // Sensoray 2253
-         "1943:2253",
-         // Dell E5440
-         "0c45:64d0", "0c45:64d2",
-         // Dell E7440
-         "1bcf:2985",
-         // Lenovo Thinkpad Model 20CG0006FMZ front and rear cameras, see
-         // also https://crbug.com/924528.
-         "04ca:7047", "04ca:7048",
-         // HP Elitebook 840 G1
-         "04f2:b3ed", "04f2:b3ca", "05c8:035d", "05c8:0369",
-         // HP HD Camera. See https://crbug.com/1011888.
-         "04ca:7095",
-         // RBG/IR camera for Windows Hello Face Auth. See
-         // https://crbug.com/984864.
-         "13d3:5257",
-         // Acer Aspire f5-573g. See https://crbug.com/1034644.
-         "0bda:57f2",
-         // Elgato Camlink 4k
-         "0fd9:0066",
-         // ACER Aspire VN7-571G. See https://crbug.com/1327948.
-         "04f2:b469",
-         // Hauppauge USB-Live2. See https://crbug.com/1447113.
-         "2040:c200",
-         // TOSHIBA Web Camera - HD. See https://crbug.com/420284824.
-         "04f2:b7a3"});
+    base::MakeFixedFlatSet<std::string_view>({
+        // Devices using Empia 2860 or 2820 chips, see
+        // https://crbug.com/849636.
+        "eb1a:2860",
+        "eb1a:2820",
+        "1ce6:2820",
+        // Elgato HD60 Pro
+        "12ab:0380",
+        // Sensoray 2253
+        "1943:2253",
+        // Dell E5440
+        "0c45:64d0",
+        "0c45:64d2",
+        // Dell E7440
+        "1bcf:2985",
+        // Lenovo Thinkpad Model 20CG0006FMZ front and rear cameras, see
+        // also https://crbug.com/924528.
+        "04ca:7047",
+        "04ca:7048",
+        // HP Elitebook 840 G1
+        "04f2:b3ed",
+        "04f2:b3ca",
+        "05c8:035d",
+        "05c8:0369",
+        // HP HD Camera. See https://crbug.com/1011888.
+        "04ca:7095",
+        // RBG/IR camera for Windows Hello Face Auth. See
+        // https://crbug.com/984864.
+        "13d3:5257",
+        // Acer Aspire f5-573g. See https://crbug.com/1034644.
+        "0bda:57f2",
+        // Elgato Camlink 4k
+        "0fd9:0066",
+        // ACER Aspire VN7-571G. See https://crbug.com/1327948.
+        "04f2:b469",
+        // Hauppauge USB-Live2. See https://crbug.com/1447113.
+        "2040:c200",
+        // TOSHIBA Web Camera - HD. See https://crbug.com/420284824.
+        "04f2:b7a3",
+        // Microsoft LifeCam Studio. See https://crbug.com/535635412
+        "045e:0772",
+    });
 
 // Use this list only for USB webcams.
 constexpr auto kModelIdsBlockedForMediaFoundationD3D11VideoCapture =
@@ -358,11 +368,17 @@ class VideoCaptureDeviceFactoryWin::ComThreadData
 
   ComThreadData(base::WeakPtr<VideoCaptureDeviceFactoryWin> device_factory,
                 scoped_refptr<base::SingleThreadTaskRunner> com_thread_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner)
+                scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner,
+                bool use_media_foundation,
+                scoped_refptr<DXGIDeviceManager> dxgi_device_manager)
       : device_factory_(std::move(device_factory)),
         com_thread_runner_(std::move(com_thread_runner)),
-        origin_task_runner_(std::move(origin_task_runner)) {}
+        origin_task_runner_(std::move(origin_task_runner)),
+        use_media_foundation_(use_media_foundation),
+        dxgi_device_manager_(std::move(dxgi_device_manager)) {}
 
+  void GetDevicesInfoOnComThread(VideoCaptureDeviceFactoryWin* factory,
+                                 GetDevicesInfoCallback result_callback);
   void EnumerateDevicesUWP(std::vector<VideoCaptureDeviceInfo> devices_info,
                            GetDevicesInfoCallback result_callback);
 
@@ -381,6 +397,8 @@ class VideoCaptureDeviceFactoryWin::ComThreadData
   base::WeakPtr<VideoCaptureDeviceFactoryWin> device_factory_;
   scoped_refptr<base::SingleThreadTaskRunner> com_thread_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner_;
+  bool use_media_foundation_;
+  scoped_refptr<DXGIDeviceManager> dxgi_device_manager_;
 };
 
 class VideoCaptureDeviceFactoryWin::UsageReportHandler
@@ -588,6 +606,8 @@ VideoCaptureDeviceFactoryWin::~VideoCaptureDeviceFactoryWin() {
     monitor_->Stop();
   }
   if (com_thread_.IsRunning()) {
+    // Device enumeration tasks ran on `com_thread_` use virtual
+    // methods of `this`. Make sure the thread is stopped before destruction.
     com_thread_.Stop();
   }
 }
@@ -602,6 +622,9 @@ VideoCaptureErrorOrDevice VideoCaptureDeviceFactoryWin::CreateDevice(
     case VideoCaptureApi::WIN_MEDIA_FOUNDATION:
     case VideoCaptureApi::WIN_MEDIA_FOUNDATION_SENSOR: {
       DCHECK(PlatformSupportsMediaFoundation());
+      if (use_d3d11_with_media_foundation_ && !dxgi_device_manager_) {
+        dxgi_device_manager_ = DXGIDeviceManager::Create(luid_);
+      }
       ComPtr<IMFMediaSource> source;
       const bool banned_for_d3d11 =
           IsDeviceBlockedForMediaFoundationD3D11ByModelId(
@@ -609,7 +632,9 @@ VideoCaptureErrorOrDevice VideoCaptureDeviceFactoryWin::CreateDevice(
 
       MFSourceOutcome outcome = CreateDeviceSourceMediaFoundation(
           device_descriptor.device_id, device_descriptor.capture_api,
-          banned_for_d3d11, &source);
+          banned_for_d3d11,
+          use_d3d11_with_media_foundation_ ? dxgi_device_manager_ : nullptr,
+          &source);
       switch (outcome) {
         case MFSourceOutcome::kSuccess: {
           auto device = std::make_unique<VideoCaptureDeviceMFWin>(
@@ -751,6 +776,7 @@ MFSourceOutcome VideoCaptureDeviceFactoryWin::CreateDeviceSourceMediaFoundation(
     const std::string& device_id,
     VideoCaptureApi capture_api,
     const bool banned_for_d3d11,
+    scoped_refptr<DXGIDeviceManager> dxgi_device_manager,
     IMFMediaSource** source) {
   DCHECK(source);
   DCHECK(!*source);
@@ -771,13 +797,15 @@ MFSourceOutcome VideoCaptureDeviceFactoryWin::CreateDeviceSourceMediaFoundation(
   attributes->SetString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
                         base::SysUTF8ToWide(device_id).c_str());
 
-  return CreateDeviceSourceMediaFoundation(std::move(attributes),
-                                           banned_for_d3d11, source);
+  return CreateDeviceSourceMediaFoundation(
+      std::move(attributes), banned_for_d3d11, std::move(dxgi_device_manager),
+      source);
 }
 
 MFSourceOutcome VideoCaptureDeviceFactoryWin::CreateDeviceSourceMediaFoundation(
     ComPtr<IMFAttributes> attributes,
     const bool banned_for_d3d11,
+    scoped_refptr<DXGIDeviceManager> dxgi_device_manager,
     IMFMediaSource** source_out) {
   ComPtr<IMFMediaSource> source;
   HRESULT hr = MFCreateDeviceSource(attributes.Get(), &source);
@@ -786,9 +814,8 @@ MFSourceOutcome VideoCaptureDeviceFactoryWin::CreateDeviceSourceMediaFoundation(
   if (hr == E_ACCESSDENIED)
     return MFSourceOutcome::kFailedSystemPermissions;
 
-  if (SUCCEEDED(hr) && use_d3d11_with_media_foundation_ &&
-      dxgi_device_manager_ && !banned_for_d3d11) {
-    dxgi_device_manager_->RegisterWithMediaSource(source);
+  if (SUCCEEDED(hr) && dxgi_device_manager && !banned_for_d3d11) {
+    dxgi_device_manager->RegisterWithMediaSource(source);
   }
   *source_out = source.Detach();
   return SUCCEEDED(hr) ? MFSourceOutcome::kSuccess : MFSourceOutcome::kFailed;
@@ -808,14 +835,11 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
     GetDevicesInfoCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  std::vector<VideoCaptureDeviceInfo> devices_info;
-
   if (use_media_foundation_) {
     DCHECK(PlatformSupportsMediaFoundation());
-    devices_info = GetDevicesInfoMediaFoundation();
-    AugmentDevicesListWithDirectShowOnlyDevices(&devices_info);
-  } else {
-    devices_info = GetDevicesInfoDirectShow(devices_info);
+    if (use_d3d11_with_media_foundation_ && !dxgi_device_manager_) {
+      dxgi_device_manager_ = DXGIDeviceManager::Create(luid_);
+    }
   }
 
   if (!com_thread_.IsRunning()) {
@@ -825,12 +849,34 @@ void VideoCaptureDeviceFactoryWin::GetDevicesInfo(
   com_thread_data_ =
       base::MakeRefCounted<VideoCaptureDeviceFactoryWin::ComThreadData>(
           weak_ptr_factory_.GetWeakPtr(), com_thread_.task_runner(),
-          base::SingleThreadTaskRunner::GetCurrentDefault());
+          base::SingleThreadTaskRunner::GetCurrentDefault(),
+          use_media_foundation_,
+          use_d3d11_with_media_foundation_ ? dxgi_device_manager_ : nullptr);
+  // Passing `this` as a raw pointer to `com_thread_` is safe because
+  // `this` owns the `com_thread_`.
   com_thread_.task_runner()->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          &VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP,
-          com_thread_data_, std::move(devices_info), std::move(callback)));
+      FROM_HERE, base::BindOnce(&VideoCaptureDeviceFactoryWin::ComThreadData::
+                                    GetDevicesInfoOnComThread,
+                                com_thread_data_, this, std::move(callback)));
+}
+
+void VideoCaptureDeviceFactoryWin::ComThreadData::GetDevicesInfoOnComThread(
+    VideoCaptureDeviceFactoryWin* factory,
+    GetDevicesInfoCallback result_callback) {
+  DCHECK(com_thread_runner_->BelongsToCurrentThread());
+  // It's not required to run MediaFoundation and DirectShow enumeration on
+  // the COM thread, but as it can take a long time in some cases, it makes
+  // sense to run them here too to not block the main utility thread, which
+  // is used to pump camera frames.
+  std::vector<VideoCaptureDeviceInfo> devices_info;
+  if (use_media_foundation_) {
+    devices_info = factory->GetDevicesInfoMediaFoundation(dxgi_device_manager_);
+    factory->AugmentDevicesListWithDirectShowOnlyDevices(&devices_info);
+  } else {
+    devices_info = factory->GetDevicesInfoDirectShow(devices_info);
+  }
+
+  EnumerateDevicesUWP(std::move(devices_info), std::move(result_callback));
 }
 
 void VideoCaptureDeviceFactoryWin::ComThreadData::EnumerateDevicesUWP(
@@ -991,14 +1037,11 @@ void VideoCaptureDeviceFactoryWin::DeviceInfoReady(
   std::move(result_callback).Run(std::move(devices_info));
 }
 
-DevicesInfo VideoCaptureDeviceFactoryWin::GetDevicesInfoMediaFoundation() {
+DevicesInfo VideoCaptureDeviceFactoryWin::GetDevicesInfoMediaFoundation(
+    scoped_refptr<DXGIDeviceManager> dxgi_device_manager) {
   DVLOG(1) << " GetDevicesInfoMediaFoundation";
 
   DevicesInfo devices_info;
-
-  if (use_d3d11_with_media_foundation_ && !dxgi_device_manager_) {
-    dxgi_device_manager_ = DXGIDeviceManager::Create(luid_);
-  }
 
   // Recent non-RGB (depth, IR) cameras could be marked as sensor cameras in
   // driver inf file and MFEnumDeviceSources enumerates them only if attribute
@@ -1051,11 +1094,12 @@ DevicesInfo VideoCaptureDeviceFactoryWin::GetDevicesInfoMediaFoundation() {
                 IsDeviceBlockedForMediaFoundationD3D11ByModelId(model_id);
             if (CreateDeviceSourceMediaFoundation(
                     device_id, api_attributes.first, banned_for_d3d11,
+                    dxgi_device_manager,
                     &source) == MFSourceOutcome::kSuccess) {
               control_support =
                   VideoCaptureDeviceMFWin::GetControlSupport(source);
               supported_formats = GetSupportedFormatsMediaFoundation(
-                  source, banned_for_d3d11, display_name);
+                  source, banned_for_d3d11, display_name, dxgi_device_manager);
             }
             devices_info.emplace_back(VideoCaptureDeviceDescriptor(
                 display_name, device_id, model_id, api_attributes.first,
@@ -1214,16 +1258,17 @@ VideoCaptureFormats
 VideoCaptureDeviceFactoryWin::GetSupportedFormatsMediaFoundation(
     ComPtr<IMFMediaSource> source,
     const bool banned_for_d3d11,
-    const std::string& display_name) {
+    const std::string& display_name,
+    scoped_refptr<DXGIDeviceManager> dxgi_device_manager) {
   ComPtr<IMFAttributes> source_reader_attributes;
   const bool dxgi_device_manager_available =
-      (dxgi_device_manager_ != nullptr) && !banned_for_d3d11;
+      (dxgi_device_manager != nullptr) && !banned_for_d3d11;
   if (dxgi_device_manager_available) {
-    dxgi_device_manager_->RegisterWithMediaSource(source);
+    dxgi_device_manager->RegisterWithMediaSource(source);
 
     HRESULT hr = MFCreateAttributes(&source_reader_attributes, 1);
     if (SUCCEEDED(hr)) {
-      dxgi_device_manager_->RegisterInSourceReaderAttributes(
+      dxgi_device_manager->RegisterInSourceReaderAttributes(
           source_reader_attributes.Get());
     } else {
       DLOG(ERROR) << "MFCreateAttributes failed: "

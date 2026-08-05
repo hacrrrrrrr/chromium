@@ -786,7 +786,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerBrowserTest,
   PrefService* local_state = g_browser_process->local_state();
   static_cast<PrefRegistrySimple*>(local_state->DeprecatedGetPrefRegistry())
       ->RegisterIntegerPref(kRestoreIdPrefName, 0);
-  local_state->SetInteger(kRestoreIdPrefName, browser->session_id().id());
+  local_state->SetInteger(kRestoreIdPrefName, browser->GetSessionID().id());
   AddBlankTabAndShow(browser);
   aura::Window* window = browser->GetWindow()->GetNativeWindow();
   ASSERT_NE(kCurrentBounds, window->bounds());
@@ -954,11 +954,16 @@ class FullRestoreAppLaunchHandlerChromeAppBrowserTest
         std::make_unique<ScopedLaunchBrowserForTesting>());
     scoped_feature_list_.InitAndEnableFeature(
         apps::chrome_app_deprecation::kAllowUserInstalledChromeApps);
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove this.
+    webui_omnibox_feature_list_.InitFromCommandLine(
+        "", "WebUIOmniboxPopup,WebUIOmniboxAimPopup");
   }
   ~FullRestoreAppLaunchHandlerChromeAppBrowserTest() override = default;
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+  base::test::ScopedFeatureList webui_omnibox_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerChromeAppBrowserTest,

@@ -35,6 +35,7 @@
 #include "chrome/browser/glic/service/metrics/glic_instance_metrics.h"
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "components/autofill/core/browser/integrators/actor/actor_form_filling_types.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "components/tabs/public/tab_interface.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 
@@ -61,6 +62,10 @@ class GlicZeroStateSuggestionsManager;
 BASE_DECLARE_FEATURE(kGlicRemoveDaisyChainingWhenFreShowing);
 BASE_DECLARE_FEATURE(kGlicUnbindOnClose);
 BASE_DECLARE_FEATURE(kGlicRemoveBlankInstancesOnClose);
+
+struct TabGroupBinding {
+  tab_groups::TabGroupId id;
+};
 
 // A GlicInstance owns a single host keeping any state that must exist for the
 // lifetime of the host. When a host is showing, the GlicInstance creates a
@@ -92,6 +97,9 @@ class GlicInstanceImpl : public GlicInstance,
         mojom::WebClientHandler::SwitchConversationCallback callback) = 0;
 
     virtual void UnbindTabFromAnyInstance(tabs::TabInterface* tab) = 0;
+    virtual void UnbindTabGroupFromAnyInstance(
+        tab_groups::TabGroupId group_id,
+        GlicInstanceImpl* excluding_instance) = 0;
 
     // Called by an instance when user requests to undock to Floaty.
     virtual void OnWillCreateFloaty() = 0;
@@ -148,7 +156,13 @@ class GlicInstanceImpl : public GlicInstance,
   void Hibernate();
   void Shutdown();
   void CloseInstanceAndShutdown();
-
+  void UnbindTabGroup();
+  std::optional<tab_groups::TabGroupId> GetTabGroup() const;
+  void BindTabGroup(tab_groups::TabGroupId group_id);
+  void ShowForTabGroup(tab_groups::TabGroupId group_id,
+                       std::optional<ShowOptions> options);
+  void SwapGlicTabToPlaceholder();
+  void OnTabGroupingChanged(tabs::TabInterface* tab, bool is_added);
   void BindTabWithoutShowing(tabs::TabInterface* tab,
                              GlicPinTrigger pin_trigger,
                              bool pin_on_bind);
@@ -188,16 +202,13 @@ class GlicInstanceImpl : public GlicInstance,
   // Closes the embedder identified by `key`.
   // NOTE: This method may result in the deletion of `this`.
   void Close(EmbedderKey key, const CloseOptions& options = {});
-  // Returns true when toggle shows the instance and false when it is closed.
-  bool Toggle(ShowOptions&& options,
-              bool prevent_close,
-              glic::mojom::InvocationSource source,
-              std::unique_ptr<GlicWindowInvocationTracker> invocation_tracker =
-                  nullptr);
+
+  bool IsActiveEmbedder(EmbedderKey key) const;
 
   // NOTE: This method may result in the deletion of `this`.
   void UnbindEmbedder(EmbedderKey key);
   void UnbindTab(tabs::TabInterface* tab);
+  void ReclaimWebContents(std::unique_ptr<content::WebContents> web_contents);
   GlicUiEmbedder* GetEmbedderForTab(tabs::TabInterface* tab);
   bool ContextAccessIndicatorEnabled();
   void CloseAllEmbedders();
@@ -212,7 +223,10 @@ class GlicInstanceImpl : public GlicInstance,
   std::optional<std::string> conversation_id() const override;
   std::string conversation_title() const override;
   std::optional<int> task_id() const override;
+  std::optional<mojom::InvocationSource> GetInitialInvocationSource()
+      const override;
   std::vector<tabs::TabInterface*> GetBoundTabs() const;
+  tabs::TabInterface* GetGlicTab() const;
 
   // If the key corresponds to a tab-associated embedder (such as a side panel),
   // returns the corresponding TabInterface pointer. Otherwise (e.g., a floating
@@ -268,6 +282,7 @@ class GlicInstanceImpl : public GlicInstance,
       override;
 
   // GlicUiEmbedder::Delegate:
+
   void OnEmbedderWindowActivationChanged(bool has_focus) override;
   void SwitchConversation(
       const ShowOptions& options,
@@ -324,6 +339,7 @@ class GlicInstanceImpl : public GlicInstance,
     raw_ptr<tabs::TabInterface> tab;
     base::CallbackListSubscription destruction_subscription;
     base::CallbackListSubscription tab_activation_subscription;
+    base::CallbackListSubscription tab_detach_subscription;
     bool user_input_submitted_while_bound = false;
     base::Time last_active_time;
   };
@@ -332,6 +348,7 @@ class GlicInstanceImpl : public GlicInstance,
   void NotifyInstanceChanged();
 
   GlicUiEmbedder* GetEmbedderForKey(EmbedderKey key);
+  EmbedderKey GetEmbedderKeyForTab(tabs::TabInterface* tab) const;
   EmbedderEntry* GetEmbedderEntry(EmbedderKey key);
   void DeactivateCurrentEmbedder();
   void OnAllEmbeddersInactive();
@@ -341,6 +358,7 @@ class GlicInstanceImpl : public GlicInstance,
   GlicUiEmbedder* CreateActiveEmbedderForFloaty(
       const gfx::Rect& initial_bounds,
       tabs::TabInterface::Handle source_tab);
+  GlicUiEmbedder* CreateActiveEmbedderForTab(ShowOptions& options);
   void ShowInactiveSidePanelEmbedderFor(const SidePanelShowOptions& options);
   void SetActiveEmbedderAndNotifyVisibilityChange(
       std::optional<EmbedderKey> new_key);
@@ -357,6 +375,15 @@ class GlicInstanceImpl : public GlicInstance,
   void OnBoundTabDestroyed(tabs::TabInterface* tab);
   void OnBoundTabActivated(tabs::TabInterface* tab);
   void OnBoundTabActivatedAsync(base::WeakPtr<tabs::TabInterface> tab);
+  void OnGlicTabActivated(tabs::TabInterface* tab);
+  void OnGlicTabActivatedAsync(base::WeakPtr<tabs::TabInterface> tab);
+  void OnGlicTabWillDetach(tabs::TabInterface* tab,
+                           tabs::TabInterface::DetachReason reason);
+  void OnGlicTabClosedAsync(tabs::TabInterface::Handle tab_handle);
+  // Checks the associated tab group for any existing Glic-owned full tab.
+  // If one is found, registers/adopts it as this instance's full tab embedder
+  // and establishes observers for its lifetime and activation events.
+  void MaybeAdoptGlicTab();
   bool ShouldDoAutomaticActivation() const;
   void OnZeroStateSuggestionsFetched(
       mojom::ZeroStateSuggestionsPtr suggestions,
@@ -366,7 +393,6 @@ class GlicInstanceImpl : public GlicInstance,
   void MaybeDeactivateEmbedder(EmbedderKey key);
   void MaybeWarmZeroStateSuggestions(mojom::InvocationSource invocation_source);
 
-  bool IsActiveEmbedder(EmbedderKey key) const;
   void UpdateLastActiveTime(EmbedderKey key);
   bool ShouldShowInactiveSidePanel(const SidePanelShowOptions& options) const;
 
@@ -473,6 +499,10 @@ class GlicInstanceImpl : public GlicInstance,
 
   // True if we should suppress showing the panel when a tab is added to a task.
   bool suppress_show_on_tab_added_to_task_ = false;
+
+  std::optional<TabGroupBinding> tab_group_binding_;
+  bool is_contents_in_tab_ = false;
+  bool is_transitioning_full_tab_embedder_ = false;
 
   base::WeakPtrFactory<GlicInstanceImpl> weak_ptr_factory_{this};
 };

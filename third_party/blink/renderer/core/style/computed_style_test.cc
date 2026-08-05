@@ -62,6 +62,9 @@ class ComputedStyleTest : public testing::Test {
   }
 
   Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
+  Element* GetElementById(const StringView& id) {
+    return GetDocument().getElementById(AtomicString(id));
+  }
 
   const ComputedStyle* InitialComputedStyle() { return initial_style_; }
 
@@ -2437,6 +2440,11 @@ TEST_F(ComputedStyleTest, HasGapRule) {
         column-rule-style: solid;
         row-rule-style: solid;
       }
+      #grid-lanes {
+        display: grid-lanes;
+        column-rule-style: solid;
+        row-rule-style: solid;
+      }
       #no-rule {
         column-rule-style: solid;
         row-rule-style: solid;
@@ -2445,6 +2453,7 @@ TEST_F(ComputedStyleTest, HasGapRule) {
     <div id="multi-col"></div>
     <div id="grid"></div>
     <div id="flex"></div>
+    <div id="grid-lanes"></div>
     <div id="no-rule"></div>
   )HTML");
   document.View()->UpdateAllLifecyclePhasesForTest();
@@ -2460,6 +2469,10 @@ TEST_F(ComputedStyleTest, HasGapRule) {
   const auto& flex = StyleForElement("flex");
   EXPECT_TRUE(flex.HasColumnRule());
   EXPECT_TRUE(flex.HasRowRule());
+
+  const auto& grid_lanes = StyleForElement("grid-lanes");
+  EXPECT_TRUE(grid_lanes.HasColumnRule());
+  EXPECT_TRUE(grid_lanes.HasRowRule());
 
   const auto& no_rule = StyleForElement("no-rule");
   EXPECT_FALSE(no_rule.HasColumnRule());
@@ -2618,6 +2631,47 @@ TEST_F(ComputedStyleTest, ResolvedCaretTextColorCurrentcolor) {
   std::optional<Color> resolved = style->ResolvedCaretTextColor();
   ASSERT_TRUE(resolved.has_value());
   EXPECT_EQ(*resolved, green);
+}
+
+TEST_F(ComputedStyleTest, MaxContentSizingInheritance) {
+  Document& document = GetDocument();
+  document.body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
+    <div id="parent" style="max-content-sizing: shrink-to-fit;">
+      <div id="child1">
+        <div id="grandchild1"></div>
+      </div>
+      <div id="child2" style="max-content-sizing: auto;">
+        <div id="grandchild2"></div>
+      </div>
+    </div>
+  )HTML");
+  document.View()->UpdateAllLifecyclePhasesForTest();
+
+  auto* parent = GetElementById("parent")->GetComputedStyle();
+  auto* child1 = GetElementById("child1")->GetComputedStyle();
+  auto* grandchild1 = GetElementById("grandchild1")->GetComputedStyle();
+  auto* child2 = GetElementById("child2")->GetComputedStyle();
+  auto* grandchild2 = GetElementById("grandchild2")->GetComputedStyle();
+  ASSERT_TRUE(parent);
+  ASSERT_TRUE(child1);
+  ASSERT_TRUE(grandchild1);
+  ASSERT_TRUE(child2);
+  ASSERT_TRUE(grandchild2);
+
+  EXPECT_EQ(parent->MaxContentSizing(), EMaxContentSizing::kShrinkToFit);
+  EXPECT_TRUE(parent->IsInShrinkToFitSubtree());
+
+  EXPECT_EQ(child1->MaxContentSizing(), EMaxContentSizing::kAuto);
+  EXPECT_TRUE(child1->IsInShrinkToFitSubtree());
+
+  EXPECT_EQ(grandchild1->MaxContentSizing(), EMaxContentSizing::kAuto);
+  EXPECT_TRUE(grandchild1->IsInShrinkToFitSubtree());
+
+  EXPECT_EQ(child2->MaxContentSizing(), EMaxContentSizing::kAuto);
+  EXPECT_FALSE(child2->IsInShrinkToFitSubtree());
+
+  EXPECT_EQ(grandchild2->MaxContentSizing(), EMaxContentSizing::kAuto);
+  EXPECT_FALSE(grandchild2->IsInShrinkToFitSubtree());
 }
 
 }  // namespace blink

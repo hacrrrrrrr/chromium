@@ -30,9 +30,6 @@
 #include "chrome/browser/devtools/aida_client.h"
 #include "chrome/browser/devtools/devtools_availability_checker.h"
 #include "chrome/browser/devtools/devtools_eye_dropper.h"
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/devtools/devtools_policy_dialog.h"
-#endif
 #include "chrome/browser/devtools/features.h"
 #include "chrome/browser/devtools/process_sharing_infobar_delegate.h"
 #include "chrome/browser/file_select_helper.h"
@@ -46,6 +43,7 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
+#include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
@@ -111,6 +109,7 @@
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/android/chrome_jni_headers/DevToolsActivity_jni.h"
 #else
+#include "chrome/browser/devtools/devtools_policy_dialog.h"
 #include "chrome/browser/devtools/devtools_ui_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -729,8 +728,7 @@ void DevToolsWindow::OpenDevToolsWindow(
   std::string type = agent_host->GetType();
 
   bool is_worker = type == DevToolsAgentHost::kTypeServiceWorker ||
-                   type == DevToolsAgentHost::kTypeSharedWorker ||
-                   type == DevToolsAgentHost::kTypeSharedStorageWorklet;
+                   type == DevToolsAgentHost::kTypeSharedWorker;
 
   if (!agent_host->GetFrontendURL().empty()) {
     DevToolsWindow::OpenExternalFrontend(profile, agent_host->GetFrontendURL(),
@@ -804,8 +802,7 @@ void DevToolsWindow::OpenExternalFrontend(
                     /* browser_connection */ false, opened_by);
   } else {
     bool is_worker = type == DevToolsAgentHost::kTypeServiceWorker ||
-                     type == DevToolsAgentHost::kTypeSharedWorker ||
-                     type == DevToolsAgentHost::kTypeSharedStorageWorklet;
+                     type == DevToolsAgentHost::kTypeSharedWorker;
 
     FrontendType frontend_type =
         is_worker ? kFrontendRemoteWorker
@@ -1714,7 +1711,12 @@ void DevToolsWindow::Inspect(scoped_refptr<content::DevToolsAgentHost> host) {
 }
 
 void DevToolsWindow::SetInspectedPageBounds(const gfx::Rect& rect) {
-  DevToolsContentsResizingStrategy strategy(rect);
+  devtools::DockSide dock_side = devtools::DockSide::kNone;
+  if (is_docked_) {
+    dock_side = DevToolsSettings::GetDockSide(profile_);
+  }
+
+  DevToolsContentsResizingStrategy strategy(dock_side, rect);
   if (contents_resizing_strategy_.Equals(strategy)) {
     return;
   }
@@ -1796,14 +1798,16 @@ int DevToolsWindow::GetDockStateForLogging() {
     return kUndocked;
   }
 
-  gfx::Rect inspected_page_bounds = contents_resizing_strategy_.bounds();
-  if (inspected_page_bounds.x() > 0) {
-    return kLeft;
+  switch (contents_resizing_strategy_.dock_side()) {
+    case devtools::DockSide::kLeft:
+      return kLeft;
+    case devtools::DockSide::kBottom:
+      return kBottom;
+    case devtools::DockSide::kRight:
+      return kRight;
+    case devtools::DockSide::kNone:
+      return kUndocked;
   }
-  gfx::Rect devtools_bounds =
-      main_web_contents_->GetRenderWidgetHostView()->GetViewBounds();
-  return inspected_page_bounds.width() == devtools_bounds.width() ? kBottom
-                                                                  : kRight;
 }
 
 int DevToolsWindow::GetOpenedByForLogging() {
@@ -2041,7 +2045,7 @@ void DevToolsWindow::CreateDevToolsBrowser() {
 #if BUILDFLAG(IS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  if (Browser::GetCreationStatusForProfile(profile_) !=
+  if (GetBrowserWindowCreationStatusForProfile(*profile_) !=
       Browser::CreationStatus::kOk) {
     return;
   }

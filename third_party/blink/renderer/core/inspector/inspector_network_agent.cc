@@ -194,7 +194,7 @@ static std::unique_ptr<protocol::Network::Headers> BuildObjectForHeaders(
   return protocol::Network::Headers::fromValue(headers_object.get(), &errors);
 }
 
-String NetErrorToString(int net_error) {
+String NetErrorToProtocolEnum(int net_error) {
   switch (net_error) {
     case net::ERR_ABORTED:
       return protocol::Network::ErrorReasonEnum::Aborted;
@@ -836,8 +836,10 @@ InspectorNetworkAgent::URLPatternMatcher::Create(const String& pattern,
 
 void InspectorNetworkAgent::Init(CoreProbeSink* instrumenting_agents,
                                  protocol::UberDispatcher* dispatcher,
-                                 InspectorSessionState* session_state) {
-  InspectorBaseAgent::Init(instrumenting_agents, dispatcher, session_state);
+                                 InspectorSessionState* session_state,
+                                 V8SessionHolder v8_session) {
+  InspectorBaseAgent::Init(instrumenting_agents, dispatcher, session_state,
+                           v8_session);
   extra_request_headers_.clear();
   const auto* reattach_state = session_state->ReattachState();
   if (reattach_state && reattach_state->browser_originating_session_state) {
@@ -2260,7 +2262,7 @@ void InspectorNetworkAgent::DirectTCPSocketAborted(uint64_t identifier,
                                                    int net_error) {
   GetFrontend()->directTCPSocketAborted(
       IdentifiersFactory::SubresourceRequestId(identifier),
-      NetErrorToString(net_error),
+      NetErrorToProtocolEnum(net_error),
       base::TimeTicks::Now().since_origin().InSecondsF());
 }
 
@@ -2333,7 +2335,7 @@ void InspectorNetworkAgent::DirectUDPSocketAborted(uint64_t identifier,
                                                    int net_error) {
   GetFrontend()->directUDPSocketAborted(
       IdentifiersFactory::SubresourceRequestId(identifier),
-      NetErrorToString(net_error),
+      NetErrorToProtocolEnum(net_error),
       base::TimeTicks::Now().since_origin().InSecondsF());
 }
 
@@ -2811,7 +2813,7 @@ protocol::Response InspectorNetworkAgent::searchInResponseBody(
   if (!response.IsSuccess())
     return response;
 
-  auto results = v8_session_->searchInTextByLines(
+  auto results = V8Session()->searchInTextByLines(
       ToV8InspectorStringView(content), ToV8InspectorStringView(query),
       case_sensitive.value_or(false), is_regex.value_or(false));
   *matches = std::make_unique<
@@ -2877,11 +2879,9 @@ String InspectorNetworkAgent::NavigationInitiatorInfo(LocalFrame* frame) {
 
 InspectorNetworkAgent::InspectorNetworkAgent(
     InspectedFrames* inspected_frames,
-    WorkerOrWorkletGlobalScope* worker_or_worklet_global_scope,
-    v8_inspector::V8InspectorSession* v8_session)
+    WorkerOrWorkletGlobalScope* worker_or_worklet_global_scope)
     : inspected_frames_(inspected_frames),
       worker_or_worklet_global_scope_(worker_or_worklet_global_scope),
-      v8_session_(v8_session),
       resources_data_(MakeGarbageCollected<NetworkResourcesData>(
           kDefaultTotalBufferSize,
           kDefaultResourceBufferSize)),

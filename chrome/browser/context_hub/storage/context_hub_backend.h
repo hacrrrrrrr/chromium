@@ -9,16 +9,16 @@
 
 #include "base/containers/span.h"
 #include "base/functional/callback_forward.h"
-#include "chrome/browser/context_hub/memory_bank/memory_bank_entry.h"
-#include "components/keyed_service/core/keyed_service.h"
 
 namespace context_hub {
 
-// KeyedService interface for ContextHub central database storage.
+struct MemoryBankEntry;
+
+// Interface for ContextHub central database storage.
 // Provides data access for all ContextHub tables/stores.
-class ContextHubBackend : public KeyedService {
+class ContextHubBackend {
  public:
-  ~ContextHubBackend() override = default;
+  virtual ~ContextHubBackend() = default;
 
   // MemoryBankTable operations:
   using OperationCompleteCallback = base::OnceCallback<void(bool)>;
@@ -29,11 +29,15 @@ class ContextHubBackend : public KeyedService {
   // Deletes entries in the MemoryBankTable with the given ids.
   virtual void DeleteMemoryBankEntries(base::span<const int64_t> ids,
                                        OperationCompleteCallback callback) = 0;
-  using GetAllEntriesCallback =
+  using GetEntriesCallback =
       base::OnceCallback<void(std::vector<MemoryBankEntry>)>;
   // Returns all entries in the MemoryBankTable.
   virtual void GetAllMemoryBankEntries(
-      GetAllEntriesCallback callback) const = 0;
+      GetEntriesCallback callback) const = 0;
+  // Returns entries for the given IDs in the MemoryBankTable.
+  virtual void GetMemoryBankEntriesByIds(
+      base::span<const int64_t> ids,
+      GetEntriesCallback callback) const = 0;
 };
 
 }  // namespace context_hub

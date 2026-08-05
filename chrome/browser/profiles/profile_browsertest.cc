@@ -51,6 +51,7 @@
 #include "chrome/browser/profiles/profile_observer.h"
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_constants.h"
@@ -640,7 +641,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
   ASSERT_TRUE(embedded_test_server()->Start());
   StartActiveLoaderDuringProfileShutdownTest(
       browser()
-          ->profile()
+          ->GetProfile()
           ->GetDefaultStoragePartition()
           ->GetURLLoaderFactoryForBrowserProcess()
           .get());
@@ -737,7 +738,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DiskCacheDirOverride) {
 
 // Verifies the last selected directory has a default value.
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, LastSelectedDirectory) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   base::FilePath home;
   base::PathService::Get(base::DIR_HOME, &home);
   ASSERT_EQ(profile->last_selected_directory(), home);
@@ -748,7 +749,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, LastSelectedDirectory) {
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, CreateNonPrimaryOTR) {
   auto otr_profile_id = Profile::OTRProfileID::CreateUniqueForTesting();
 
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
   EXPECT_FALSE(regular_profile->HasAnyOffTheRecordProfile());
 
   EXPECT_FALSE(regular_profile->GetOffTheRecordProfile(
@@ -775,7 +776,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, CreateTwoNonPrimaryOTRs) {
   auto otr_profile_id1 = Profile::OTRProfileID::CreateUniqueForTesting();
   auto otr_profile_id2 = Profile::OTRProfileID::CreateUniqueForTesting();
 
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
 
   Profile* otr_profile1 = regular_profile->GetOffTheRecordProfile(
       otr_profile_id1, /*create_if_needed=*/true);
@@ -856,11 +857,11 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, DestroyOnOTRProfileAmongMany) {
   // Create 3 OTR profiles. The first is the "primary" OTR profile. It is used
   // to create a RenderProcessHost depending on it, holding it alive.
   Profile* otr_profile[3] = {
-      browser()->profile()->GetOffTheRecordProfile(
+      browser()->GetProfile()->GetOffTheRecordProfile(
           Profile::OTRProfileID::PrimaryID(), true),
-      browser()->profile()->GetOffTheRecordProfile(
+      browser()->GetProfile()->GetOffTheRecordProfile(
           Profile::OTRProfileID::CreateUniqueForTesting(), true),
-      browser()->profile()->GetOffTheRecordProfile(
+      browser()->GetProfile()->GetOffTheRecordProfile(
           Profile::OTRProfileID::CreateUniqueForTesting(), true),
   };
   Browser* incognito_browser =
@@ -928,7 +929,7 @@ class ProfileBrowserTestWithDestroyProfile : public ProfileBrowserTest {
 // Profile around.
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTestWithDestroyProfile,
                        OTRProfileKeepsRegularProfileAlive) {
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   EXPECT_FALSE(profile_manager->HasKeepAliveForTesting(
       regular_profile, ProfileKeepAliveOrigin::kOffTheRecordProfile));
@@ -970,7 +971,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestGetAllOffTheRecordProfiles) {
   auto otr_profile_id1 = Profile::OTRProfileID::CreateUniqueForTesting();
   auto otr_profile_id2 = Profile::OTRProfileID::CreateUniqueForTesting();
 
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
 
   Profile* otr_profile1 = regular_profile->GetOffTheRecordProfile(
       otr_profile_id1, /*create_if_needed=*/true);
@@ -992,7 +993,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestGetAllOffTheRecordProfiles) {
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestIsSameOrParent) {
   auto otr_profile_id = Profile::OTRProfileID::CreateUniqueForTesting();
 
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
   Profile* otr_profile = regular_profile->GetOffTheRecordProfile(
       otr_profile_id, /*create_if_needed=*/true);
   Profile* incognito_profile =
@@ -1012,26 +1013,26 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestIsSameOrParent) {
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
                        TestCreatingBrowserUsingNonPrimaryOffTheRecordProfile) {
   auto otr_profile_id = Profile::OTRProfileID::CreateUniqueForTesting();
-  Profile* otr_profile = browser()->profile()->GetOffTheRecordProfile(
+  Profile* otr_profile = browser()->GetProfile()->GetOffTheRecordProfile(
       otr_profile_id, /*create_if_needed=*/true);
 
   EXPECT_EQ(Browser::CreationStatus::kErrorProfileUnsuitable,
-            Browser::GetCreationStatusForProfile(otr_profile));
+            GetBrowserWindowCreationStatusForProfile(*otr_profile));
 }
 
 // Tests if profile type returned by |profile_metrics::GetBrowserProfileType| is
 // correct.
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestProfileTypes) {
-  Profile* regular_profile = browser()->profile();
+  Profile* regular_profile = browser()->GetProfile();
   EXPECT_EQ(profile_metrics::BrowserProfileType::kRegular,
             profile_metrics::GetBrowserProfileType(regular_profile));
 
   Profile* incognito_profile =
-      browser()->profile()->GetPrimaryOTRProfile(/*create_if_needed=*/true);
+      browser()->GetProfile()->GetPrimaryOTRProfile(/*create_if_needed=*/true);
   EXPECT_EQ(profile_metrics::BrowserProfileType::kIncognito,
             profile_metrics::GetBrowserProfileType(incognito_profile));
 
-  Profile* otr_profile = browser()->profile()->GetOffTheRecordProfile(
+  Profile* otr_profile = browser()->GetProfile()->GetOffTheRecordProfile(
       Profile::OTRProfileID::CreateUniqueForTesting(),
       /*create_if_needed=*/true);
   EXPECT_EQ(profile_metrics::BrowserProfileType::kOtherOffTheRecordProfile,
@@ -1073,7 +1074,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, OneHour) {
 
 IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
                        AiSubscriptionTierPreferencePropagation) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ProfileAttributesEntry* entry =
       g_browser_process->profile_manager()
           ->GetProfileAttributesStorage()

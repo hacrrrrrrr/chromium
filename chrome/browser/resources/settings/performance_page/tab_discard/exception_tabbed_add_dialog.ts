@@ -9,8 +9,6 @@ import 'chrome://resources/cr_elements/cr_tabs/cr_tabs.js';
 import './exception_add_input.js';
 import './exception_current_sites_list.js';
 
-import type {PrefsMixinInterface} from '/shared/settings/prefs/prefs_mixin.js';
-import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
 import type {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
 import type {CrTabsElement} from 'chrome://resources/cr_elements/cr_tabs/cr_tabs.js';
@@ -39,13 +37,7 @@ export interface ExceptionTabbedAddDialogElement {
   };
 }
 
-type Constructor<T> = new (...args: any[]) => T;
-const ExceptionTabbedAddDialogElementBase =
-    PrefsMixin(PolymerElement) as
-    Constructor<PrefsMixinInterface&PolymerElement>;
-
-export class ExceptionTabbedAddDialogElement extends
-    ExceptionTabbedAddDialogElementBase {
+export class ExceptionTabbedAddDialogElement extends PolymerElement {
   static get is() {
     return 'tab-discard-exception-tabbed-add-dialog';
   }
@@ -78,14 +70,6 @@ export class ExceptionTabbedAddDialogElement extends
   declare private tabNames_: string[];
   declare private submitDisabledList_: boolean;
   declare private submitDisabledManual_: boolean;
-
-  private onSelectedTabChanged_() {
-    // Asynchronously notify the list that its visibility has changed. This is
-    // necessary because the list has an iron-list child that needs to be
-    // manually notified of visibility changes that are triggered by any element
-    // that does not implement iron-resizable-behavior.
-    setTimeout(() => this.$.list.notifyResize(), 0);
-  }
 
   private onSitesPopulated_(e: CustomEvent<{length: number}>) {
     if (e.detail.length > 0) {

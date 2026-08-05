@@ -20,7 +20,6 @@
 #include "build/build_config.h"
 #include "components/autofill/core/common/autocomplete_parsing_util.h"
 #include "components/autofill/core/common/dense_set.h"
-#include "components/autofill/core/common/html_field_types.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
 #include "components/autofill/core/common/signatures.h"
 #include "components/autofill/core/common/unique_ids.h"
@@ -33,6 +32,15 @@ class PickleIterator;
 }  // namespace base
 
 namespace autofill {
+
+// Represents a form field modification performed by custom JavaScript autofill.
+struct JavaScriptFieldModification {
+  FieldGlobalId field_id;
+  mojom::JavaScriptModificationType modification_type;
+
+  friend bool operator==(const JavaScriptFieldModification&,
+                         const JavaScriptFieldModification&) = default;
+};
 
 class LogBuffer;
 

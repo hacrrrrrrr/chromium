@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/memory/raw_ptr.h"
+#include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/public/decorators/page_live_state_decorator.h"
 #include "components/performance_manager/public/execution_context/execution_context.h"
 #include "components/performance_manager/public/graph/graph.h"
@@ -133,6 +134,93 @@ TEST_F(GlicActuationPriorityVoterTest,
   PageLiveStateDecorator::Data::GetOrCreateForPageNode(page_node)
       ->SetGlicActuationStateForTesting(GlicActuationState::kNone);
   EXPECT_EQ(observer_.GetVoteCount(), 0u);
+}
+
+// Tests that we don't crash when a page has a fenced frame and the outermost
+// main frame is navigated.
+TEST_F(GlicActuationPriorityVoterTest, FencedFrameNavigationNoCrash) {
+  MockSinglePageWithMultipleProcessesGraph mock_graph(graph());
+  auto* page_node = mock_graph.page.get();
+  auto* main_frame_node = mock_graph.frame.get();
+
+  // Create a fenced frame root. It has no parent frame, but has an outer
+  // document (main_frame_node).
+  auto fenced_frame_node = TestNodeWrapper<FrameNodeImpl>::Create(
+      graph(), mock_graph.process.get(), page_node,
+      /*parent_frame_node=*/nullptr,
+      /*outer_document_for_inner_frame_root=*/main_frame_node,
+      performance_manager::NextTestFrameRoutingId());
+
+  // Initially no votes.
+  EXPECT_EQ(observer_.GetVoteCount(), 0u);
+
+  // Set to Glic actuating.
+  PageLiveStateDecorator::Data::GetOrCreateForPageNode(page_node)
+      ->SetGlicActuationStateForTesting(
+          GlicActuationState::kActuatingOnVisibleTab);
+
+  // Only the primary main frame should have a vote.
+  EXPECT_EQ(observer_.GetVoteCount(), 1u);
+  EXPECT_TRUE(
+      observer_.HasVote(voter_id(), GetExecutionContext(main_frame_node)));
+  EXPECT_FALSE(observer_.HasVote(voter_id(),
+                                 GetExecutionContext(fenced_frame_node.get())));
+
+  // Simulate navigation of the fenced frame root itself.
+  auto new_fenced_frame_node = TestNodeWrapper<FrameNodeImpl>::Create(
+      graph(), mock_graph.process.get(), page_node,
+      /*parent_frame_node=*/nullptr,
+      /*outer_document_for_inner_frame_root=*/main_frame_node,
+      performance_manager::NextTestFrameRoutingId(),
+      /*frame_token=*/blink::LocalFrameToken(),
+      /*browsing_instance_id=*/content::BrowsingInstanceId(0),
+      /*site_instance_group_id=*/content::SiteInstanceGroupId(0),
+      /*is_current=*/false,
+      /*is_active=*/true);
+  fenced_frame_node->SetIsActive(false);
+
+  // Transition: fenced_frame_node (current -> false), new_fenced_frame_node
+  // (current -> true). This triggers OnCurrentFrameChanged for a non-outermost
+  // main frame.
+  FrameNodeImpl::UpdateCurrentFrame(fenced_frame_node.get(),
+                                    new_fenced_frame_node.get(), graph());
+
+  // Vote should remain unaffected on the primary main frame.
+  EXPECT_EQ(observer_.GetVoteCount(), 1u);
+  EXPECT_TRUE(
+      observer_.HasVote(voter_id(), GetExecutionContext(main_frame_node)));
+  EXPECT_FALSE(observer_.HasVote(
+      voter_id(), GetExecutionContext(new_fenced_frame_node.get())));
+
+  // Simulate navigation of the outermost main frame.
+  // Create a new main frame that will replace main_frame_node.
+  auto new_main_frame_node = TestNodeWrapper<FrameNodeImpl>::Create(
+      graph(), mock_graph.process.get(), page_node,
+      /*parent_frame_node=*/nullptr,
+      /*outer_document_for_inner_frame_root=*/nullptr,
+      performance_manager::NextTestFrameRoutingId(),
+      /*frame_token=*/blink::LocalFrameToken(),
+      /*browsing_instance_id=*/content::BrowsingInstanceId(0),
+      /*site_instance_group_id=*/content::SiteInstanceGroupId(0),
+      /*is_current=*/false,
+      /*is_active=*/true);
+  main_frame_node->SetIsActive(false);
+
+  // Transition: main_frame_node (current -> false), new_main_frame_node
+  // (current -> true) This triggers OnCurrentFrameChanged.
+  FrameNodeImpl::UpdateCurrentFrame(main_frame_node, new_main_frame_node.get(),
+                                    graph());
+
+  // The vote should have moved to the new main frame.
+  EXPECT_EQ(observer_.GetVoteCount(), 1u);
+  EXPECT_TRUE(observer_.HasVote(
+      voter_id(), GetExecutionContext(new_main_frame_node.get())));
+  EXPECT_FALSE(
+      observer_.HasVote(voter_id(), GetExecutionContext(main_frame_node)));
+
+  // Clean up.
+  PageLiveStateDecorator::Data::GetOrCreateForPageNode(page_node)
+      ->SetGlicActuationStateForTesting(GlicActuationState::kNone);
 }
 
 }  // namespace performance_manager::execution_context_priority

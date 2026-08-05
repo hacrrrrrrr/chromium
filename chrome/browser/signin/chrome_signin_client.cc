@@ -40,9 +40,11 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
+#include "components/browser_actuator/public/features.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/metrics/metrics_service.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/plus_addresses/core/common/features.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/prefs/pref_service.h"
@@ -218,7 +220,7 @@ class ChromeOAuthConsumerRegistry : public signin::OAuthConsumerRegistry {
   }
 
   signin::OAuthConsumer GetOAuthConsumerForContextualTasks() const override {
-    CHECK(base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks));
+    CHECK(contextual_tasks::IsContextualTasksUIEnabled());
     signin::ScopeSet scopes = {
         GaiaConstants::kSearchResultsOAuth2Scope,
         kCalendarEventsOAuth2Scope,
@@ -247,6 +249,17 @@ class ChromeOAuthConsumerRegistry : public signin::OAuthConsumerRegistry {
         signin::oauth_consumer_name::kContextualTasksName, std::move(scopes));
   }
 
+  signin::OAuthConsumer GetOAuthConsumerForDrivePickerHost() const override {
+    if (base::FeatureList::IsEnabled(omnibox::kDrivePickerV2Scope)) {
+      return signin::OAuthConsumer(
+          signin::oauth_consumer_name::kDrivePickerHostName,
+          {"https://www.googleapis.com/auth/drive.file"});
+    }
+    return signin::OAuthConsumer(
+        signin::oauth_consumer_name::kDrivePickerHostName,
+        {"https://www.googleapis.com/auth/drive.readonly"});
+  }
+
   signin::OAuthConsumer GetOAuthConsumerForIndigo() const override {
     CHECK(base::FeatureList::IsEnabled(features::kIndigo));
     std::string scopes_str = features::kIndigoScopes.Get();
@@ -255,6 +268,14 @@ class ChromeOAuthConsumerRegistry : public signin::OAuthConsumerRegistry {
     signin::ScopeSet scopes(scopes_vec.begin(), scopes_vec.end());
     return signin::OAuthConsumer(signin::oauth_consumer_name::kIndigoName,
                                  std::move(scopes));
+  }
+
+  signin::OAuthConsumer GetOAuthConsumerForBrowserActuator() const override {
+    CHECK(base::FeatureList::IsEnabled(browser_actuator::kBrowserActuator));
+
+    return signin::OAuthConsumer(
+        signin::oauth_consumer_name::kBrowserActuatorName,
+        {browser_actuator::kBrowserActuatorOAuth2ScopeParam.Get()});
   }
 };
 

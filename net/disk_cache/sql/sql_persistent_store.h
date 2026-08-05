@@ -20,6 +20,7 @@
 #include "base/types/strong_alias.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_export.h"
+#include "net/base/network_isolation_key.h"
 #include "net/disk_cache/backend_cleanup_tracker.h"
 #include "net/disk_cache/buildflags.h"
 #include "net/disk_cache/disk_cache.h"
@@ -27,6 +28,8 @@
 #include "net/disk_cache/sql/entry_write_buffer.h"
 #include "net/disk_cache/sql/sql_backend_aliases.h"
 #include "net/disk_cache/sql/sql_persistent_store_in_memory_index.h"
+#include "net/disk_cache/sql/sql_read_cache_memory_monitor.h"
+#include "url/gurl.h"
 
 // This backend is experimental and only available when the build flag is set.
 static_assert(BUILDFLAG(ENABLE_DISK_CACHE_SQL_BACKEND));
@@ -39,6 +42,7 @@ class SequencedTaskRunner;
 namespace net {
 class GrowableIOBuffer;
 class IOBuffer;
+class HttpResponseInfo;
 }  // namespace net
 
 namespace disk_cache {
@@ -56,6 +60,35 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
  public:
   class BackendShard;
   class Backend;
+
+  // Holds metadata for a cache entry that is eligible to be copied into the
+  // shared cache.
+  struct NET_EXPORT_PRIVATE SharedCacheEligibleEntry {
+    SharedCacheEligibleEntry();
+    ~SharedCacheEligibleEntry();
+    SharedCacheEligibleEntry(const SharedCacheEligibleEntry&) = delete;
+    SharedCacheEligibleEntry& operator=(const SharedCacheEligibleEntry&) =
+        delete;
+    SharedCacheEligibleEntry(SharedCacheEligibleEntry&&);
+    SharedCacheEligibleEntry& operator=(SharedCacheEligibleEntry&&);
+    SharedCacheEligibleEntry(
+        CacheEntryKey key,
+        GURL url,
+        std::unique_ptr<net::HttpResponseInfo> response_info,
+        net::NetworkIsolationKey nik);
+
+    // The key identifying the cache entry.
+    CacheEntryKey key;
+    // The URL of the cache entry.
+    GURL url;
+    // The HTTP response information for the entry. This will be written to
+    // SqlSharedCacheIsolatedDatabase and made directly accessible from the
+    // renderer. Note that some fields are omitted compared to what is stored
+    // in the standard HTTP cache.
+    std::unique_ptr<net::HttpResponseInfo> response_info;
+    // The NetworkIsolationKey associated with the entry.
+    net::NetworkIsolationKey nik;
+  };
 
   // The primary key for resources managed in the SqlPersistentStore's resources
   // table.
@@ -95,7 +128,9 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
     kFailedToSetAutoVacuum = 22,
     kIncrementalVacuumDisabled = 23,
     kFailedToInitializeSharedCacheIndexDatabase = 24,
-    kMaxValue = kFailedToInitializeSharedCacheIndexDatabase
+    kFailedToSetSharedCacheEnabledMetadata = 25,
+    kSharedCacheEnabledMismatch = 26,
+    kMaxValue = kSharedCacheEnabledMismatch
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/net/enums.xml:SqlDiskCacheStoreError)
 
@@ -121,6 +156,9 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
     int64_t body_end = 0;
     // The entry's header data (stream 0).
     scoped_refptr<net::GrowableIOBuffer> head;
+    // The resource ID of the shared cache database where the blobs are stored.
+    std::optional<SqlSharedCacheResourceId> shared_cache_resource_id;
+
     // True if the entry was opened, false if it was newly created.
     bool opened = false;
   };
@@ -248,13 +286,17 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
 
   // The result of an eviction operation.
   struct EvictionResult {
-    EvictionResult(Error error, size_t evicted_entry_count);
+    EvictionResult(
+        Error error,
+        size_t evicted_entry_count,
+        std::vector<SqlSharedCacheResourceId> deleted_shared_cache_resources);
     ~EvictionResult();
     EvictionResult(EvictionResult&& other);
     EvictionResult& operator=(EvictionResult&& other);
 
     Error error;
     size_t evicted_entry_count;
+    std::vector<SqlSharedCacheResourceId> deleted_shared_cache_resources;
   };
 
   struct EvictionResultWithMetadata {
@@ -332,15 +374,42 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
   using ResIdOrErrorAndStoreStatus = ResultAndStoreStatus<ResIdOrError>;
   using HashAndResIdListOrErrorAndStoreStatus =
       ResultAndStoreStatus<HashAndResIdListOrError>;
+  struct HashAndSharedCacheResource {
+    CacheEntryKey::Hash hash;
+    std::optional<SqlSharedCacheResourceId> shared_cache_resource_id;
+  };
+  using HashAndSharedCacheResourceOrError =
+      base::expected<HashAndSharedCacheResource, Error>;
   using HashOrError = base::expected<CacheEntryKey::Hash, Error>;
   struct UsageAndHash {
     int64_t bytes_usage;
     CacheEntryKey::Hash hash;
+    std::optional<SqlSharedCacheResourceId> shared_cache_resource_id;
   };
   using UsageAndHashOrError = base::expected<UsageAndHash, Error>;
   using EvictionResultCallback = base::OnceCallback<void(EvictionResult)>;
   using EvictionResultWithMetadataCallback =
       base::OnceCallback<void(EvictionResultWithMetadata)>;
+  using DeletedSharedCacheResourceOrError =
+      base::expected<std::optional<SqlSharedCacheResourceId>, Error>;
+  using DeletedSharedCacheResourceOrErrorCallback =
+      base::OnceCallback<void(DeletedSharedCacheResourceOrError)>;
+  using DeletedSharedCacheResourcesOrError =
+      base::expected<std::vector<SqlSharedCacheResourceId>, Error>;
+  using DeletedSharedCacheResourcesOrErrorCallback =
+      base::OnceCallback<void(DeletedSharedCacheResourcesOrError)>;
+
+  struct DeleteLiveEntryResult {
+    HashAndResIdList deleted_hash_and_res_ids;
+    std::vector<SqlSharedCacheResourceId> deleted_shared_cache_resources;
+  };
+  using DeleteLiveEntryResultOrError =
+      base::expected<DeleteLiveEntryResult, Error>;
+  using DeleteLiveEntryResultOrErrorAndStoreStatus =
+      ResultAndStoreStatus<DeleteLiveEntryResultOrError>;
+  using DeleteLiveEntryResultOrErrorCallback =
+      base::OnceCallback<void(DeleteLiveEntryResultOrError)>;
+
   using InMemoryIndexAndDoomedResIdsOrError =
       base::expected<InMemoryIndexAndDoomedResIds, Error>;
 
@@ -491,7 +560,8 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
   // `buf_len` is the size of `buffer`.
   // `body_end` is the logical size of the entry's body.
   // If `sparse_reading` is true, the read will stop at the first gap in the
-  // stored data. If false, gaps will be filled with zeros.
+  // stored data. If false, gaps will be filled with zeros (meaning read_bytes
+  // will equal `buf_len` as long as offset + buf_len <= body_end).
   // `callback` is invoked with the number of bytes read on success, or an error
   // code on failure.
   void ReadEntryData(const CacheEntryKey& key,
@@ -502,6 +572,15 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
                      int64_t body_end,
                      bool sparse_reading,
                      ReadResultOrErrorCallback callback);
+
+  // Moves the entry's blob data to the shared cache.
+  // Deletes all blobs associated with `res_id` from the `blobs` table and
+  // updates the `resources` table entry with `shared_cache_resource_id`.
+  // `callback` will be invoked with `Error::kOk` on success, or an error code.
+  void MoveBlobsToSharedCache(const CacheEntryKey& key,
+                              ResId res_id,
+                              SqlSharedCacheResourceId shared_cache_resource_id,
+                              ErrorCallback callback);
 
   // Finds the available contiguous range of data for a given entry.
   // `res_id` identifies the entry.
@@ -611,6 +690,23 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
       scoped_refptr<base::RefCountedData<std::atomic_bool>> abort_flag,
       base::OnceCallback<void(bool)> callback);
 
+  // Notifies the SqlSharedCacheManager that the specified shared cache
+  // resources were deleted from the store shards, so that corresponding entries
+  // in the shared cache database can be cleaned up.
+  void OnSharedCacheResourcesDeleted(std::vector<SqlSharedCacheResourceId> ids);
+
+  // Wraps an ErrorCallback to handle deletion of a single shared cache
+  // resource. When the shard operation completes successfully, if a shared
+  // cache resource was deleted, triggers OnSharedCacheResourcesDeleted.
+  DeletedSharedCacheResourceOrErrorCallback
+  WrapCallbackWithSingleSharedCacheDelete(ErrorCallback callback);
+
+  // Wraps an ErrorCallback to handle deletion of multiple shared cache
+  // resources. When the shard operation completes successfully, if shared cache
+  // resources were deleted, triggers OnSharedCacheResourcesDeleted.
+  DeletedSharedCacheResourcesOrErrorCallback WrapCallbackWithSharedCacheDelete(
+      ErrorCallback callback);
+
   enum class IndexState {
     // The in-memory index is not available (e.g., not yet loaded or
     // invalidated).
@@ -680,7 +776,7 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
 
  private:
   // The result of a successful initialization.
-  struct InitResult {
+  struct NET_EXPORT_PRIVATE InitResult {
     InitResult(std::optional<int64_t> max_bytes,
                const StoreStatus& store_status,
                int64_t database_size,
@@ -710,6 +806,8 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
   static std::vector<std::unique_ptr<BackendShard>> CreateBackendShards(
       const base::FilePath& path,
       net::CacheType type,
+      bool shared_cache_enabled,
+      scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor,
       std::vector<scoped_refptr<base::SequencedTaskRunner>>
           background_task_runners,
       SqlAsyncTaskManager& async_task_manager,
@@ -761,6 +859,7 @@ class NET_EXPORT_PRIVATE SqlPersistentStore {
   const std::vector<scoped_refptr<base::SequencedTaskRunner>>
       background_task_runners_;
   const raw_ref<SqlAsyncTaskManager> async_task_manager_;
+  scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor_;
   std::unique_ptr<SqlSharedCacheManager> shared_cache_manager_;
   const std::vector<std::unique_ptr<BackendShard>> backend_shards_;
   const int64_t user_max_bytes_;

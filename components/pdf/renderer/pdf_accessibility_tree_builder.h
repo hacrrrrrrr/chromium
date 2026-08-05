@@ -49,6 +49,14 @@ class PdfAccessibilityTreeBuilder {
       delete;
   ~PdfAccessibilityTreeBuilder();
 
+  static bool AreStylesEquivalent(
+      const chrome_pdf::AccessibilityTextStyleInfo& style1,
+      const chrome_pdf::AccessibilityTextStyleInfo& style2);
+
+  static bool IsBoldStyle(const chrome_pdf::AccessibilityTextStyleInfo& style);
+  static float GetFontWeight(
+      const chrome_pdf::AccessibilityTextStyleInfo& style);
+
   void BuildPageTree();
 
   // Accessors for tree builders.
@@ -93,6 +101,9 @@ class PdfAccessibilityTreeBuilder {
                                       ax::mojom::Restriction restriction);
   ui::AXNodeData* CreateStaticTextNode(
       const chrome_pdf::PageCharacterIndex& page_char_index);
+  ui::AXNodeData* CreateStaticTextNodeWithStyle(
+      const chrome_pdf::PageCharacterIndex& page_char_index,
+      const chrome_pdf::AccessibilityTextStyleInfo& style);
   ui::AXNodeData* CreateInlineTextBoxNode(
       const chrome_pdf::AccessibilityTextRunInfo& text_run,
       const chrome_pdf::PageCharacterIndex& page_char_index);
@@ -114,6 +125,9 @@ class PdfAccessibilityTreeBuilder {
 #endif
 
  private:
+  void AddFontWeightAttributes(
+      const chrome_pdf::AccessibilityTextStyleInfo& style,
+      ui::AXNodeData* ax_node_data);
   void AddWordStartsAndEnds(ui::AXNodeData* inline_text_box);
   ui::AXNodeData* CreateStaticTextNode();
   ui::AXNodeData* CreateListboxOptionNode(

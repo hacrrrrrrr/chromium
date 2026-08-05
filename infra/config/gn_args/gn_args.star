@@ -410,6 +410,7 @@ gn_args.config(
     },
     configs = [
         "clang",
+        "enable_rust_clippy",
     ],
 )
 
@@ -1187,9 +1188,6 @@ gn_args.config(
     args = {
         "chrome_pgo_phase": 1,
     },
-    configs = [
-        "v8_release_branch",
-    ],
 )
 
 gn_args.config(
@@ -1487,14 +1485,6 @@ gn_args.config(
     ],
 )
 
-# V8 flag that disables v8_enable_runtime_call_stats on release branches.
-gn_args.config(
-    name = "v8_release_branch",
-    args = {
-        "v8_is_on_release_branch": True,
-    },
-)
-
 gn_args.config(
     name = "v8_sandbox_testing",
     args = {
@@ -1633,5 +1623,12 @@ gn_args.config(
     name = "use_typescript_go",
     args = {
         "use_typescript_go": True,
+    },
+)
+
+gn_args.config(
+    name = "separate_renderer",
+    args = {
+        "enable_separate_renderer_binary": True,
     },
 )

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/glic/host/glic_ui.h"
+
 #include <sstream>
 #include <utility>
 
@@ -14,13 +16,13 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
-#include "chrome/browser/glic/host/glic_ui.h"
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/optimization_guide/core/feature_registry/feature_registration.h"
@@ -326,10 +328,12 @@ IN_PROC_BROWSER_TEST_F(GlicUiConnectedUiTest, CanAttachWithBrowserWindow) {
 // TODO(crbug.com/454087646): Not reliable yet.
 IN_PROC_BROWSER_TEST_F(GlicUiConnectedUiTest,
                        CanNotAttachWithMinimizedBrowser) {
-  RunTestSequence(OpenGlic(GlicInstrumentMode::kHostAndContents), Detach(),
-                  WaitForMockElementChecked({"#canAttachCheckbox"}, true),
-                  Do([&]() { browser()->GetBrowserView().Minimize(); }),
-                  WaitForMockElementChecked({"#canAttachCheckbox"}, false));
+  RunTestSequence(
+      OpenGlic(GlicInstrumentMode::kHostAndContents), Detach(),
+      WaitForMockElementChecked({"#canAttachCheckbox"}, true), Do([&]() {
+        BrowserView::GetBrowserViewForBrowser(browser())->Minimize();
+      }),
+      WaitForMockElementChecked({"#canAttachCheckbox"}, false));
 }
 
 IN_PROC_BROWSER_TEST_F(GlicUiConnectedUiTest,
@@ -819,7 +823,7 @@ IN_PROC_BROWSER_TEST_F(GlicUiConnectedUiTest, AccessDeniedAdminWithoutLink) {
   }
   RunTestSequence(
       OpenGlic(GlicInstrumentMode::kHostOnly), InAnyContext(Do([&]() {
-        browser()->profile()->GetPrefs()->SetInteger(
+        browser()->GetProfile()->GetPrefs()->SetInteger(
             optimization_guide::prefs::kGeminiSettings,
             std::to_underlying(optimization_guide::prefs::
                                    GeminiSettingsPolicyState::kDisabled));

@@ -9,12 +9,14 @@
 #include <ranges>
 
 #include "base/feature_list.h"
-#include "base/location.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory_coordinator/async_memory_consumer_registration.h"
+#include "base/memory_coordinator/utils.h"
 #include "base/trace_event/typed_macros.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "net/base/load_flags.h"
 #include "net/shared_dictionary/shared_dictionary.h"
+#include "net/shared_dictionary/shared_dictionary_isolation_key.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/shared_dictionary/shared_dictionary_manager_in_memory.h"
 #include "services/network/shared_dictionary/shared_dictionary_manager_on_disk.h"
@@ -109,14 +111,32 @@ std::unique_ptr<SharedDictionaryManager> SharedDictionaryManager::CreateOnDisk(
       std::move(file_operations_factory));
 }
 
-SharedDictionaryManager::SharedDictionaryManager()
-    : cached_storages_(kCachedStorageMaxSize) {
-  memory_pressure_listener_registration_ =
-      std::make_unique<base::AsyncMemoryPressureListenerRegistration>(
-          FROM_HERE, base::MemoryPressureListenerTag::kSharedDictionaryManager,
-          this);
-}
+SharedDictionaryManager::SharedDictionaryManager(
+    std::string_view consumer_name,
+    const base::MemoryConsumerTraits& traits)
+    : cached_storages_(kCachedStorageMaxSize),
+      memory_consumer_registration_(
+          consumer_name,
+          traits,
+          this,
+          base::AsyncMemoryConsumerRegistration::CheckUnregister::kDisabled) {}
 SharedDictionaryManager::~SharedDictionaryManager() = default;
+
+scoped_refptr<SharedDictionaryStorage>
+SharedDictionaryManager::GetPervasiveStorage() {
+  if (!base::FeatureList::IsEnabled(features::kPervasiveSharedDictionaries) ||
+      !base::FeatureList::IsEnabled(
+          features::kCacheSharingForPervasiveResources)) {
+    return nullptr;
+  }
+  if (!pervasive_storage_) {
+    pervasive_storage_ = CreateStorage(
+        net::SharedDictionaryIsolationKey::GetPervasiveIsolationKey(),
+        SharedDictionaryStorageEvictionReason::kNotEvicted);
+    CHECK(pervasive_storage_);
+  }
+  return pervasive_storage_;
+}
 
 scoped_refptr<SharedDictionaryStorage> SharedDictionaryManager::GetStorage(
     const net::SharedDictionaryIsolationKey& isolation_key) {
@@ -142,7 +162,7 @@ scoped_refptr<SharedDictionaryStorage> SharedDictionaryManager::GetStorage(
       CreateStorage(isolation_key, previous_eviction_reason);
   CHECK(storage);
   storages_.emplace(isolation_key, storage.get());
-  if (memory_pressure_level_ == base::MEMORY_PRESSURE_LEVEL_NONE) {
+  if (memory_limit() > base::kModerateMemoryPressureThreshold) {
     if (cached_storages_.size() >= cached_storages_.max_size()) {
       // The cache is full. The last element will be evicted.
       previously_evicted_keys_[cached_storages_.rbegin()->first] =
@@ -155,30 +175,11 @@ scoped_refptr<SharedDictionaryStorage> SharedDictionaryManager::GetStorage(
 
 void SharedDictionaryManager::OnStorageDeleted(
     const net::SharedDictionaryIsolationKey& isolation_key) {
-  size_t removed_count = storages_.erase(isolation_key);
-  DCHECK_EQ(1U, removed_count);
+  storages_.erase(isolation_key);
 }
 
 base::WeakPtr<SharedDictionaryManager> SharedDictionaryManager::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
-}
-
-void SharedDictionaryManager::OnMemoryPressure(
-    base::MemoryPressureLevel level) {
-  memory_pressure_level_ = level;
-  if (memory_pressure_level_ != base::MEMORY_PRESSURE_LEVEL_NONE) {
-    SharedDictionaryStorageEvictionReason eviction_reason =
-        (memory_pressure_level_ == base::MEMORY_PRESSURE_LEVEL_CRITICAL)
-            ? SharedDictionaryStorageEvictionReason::kMemoryPressureCritical
-            : SharedDictionaryStorageEvictionReason::kMemoryPressureModerate;
-    for (const auto& it : cached_storages_) {
-      previously_evicted_keys_[it.first] = eviction_reason;
-    }
-    cached_storages_.Clear();
-    preloaded_dictionaries_set_.clear();
-  }
-
-  HandleMemoryPressure(level);
 }
 
 size_t SharedDictionaryManager::GetStorageCountForTesting() {
@@ -211,9 +212,18 @@ scoped_refptr<net::SharedDictionary> SharedDictionaryManager::GetDictionaryImpl(
   if (!isolation_key) {
     return nullptr;
   }
-  scoped_refptr<net::SharedDictionary> dict =
-      GetStorage(*isolation_key)
-          ->GetDictionarySync(request_url, request_destination);
+  scoped_refptr<net::SharedDictionary> dict;
+  // Check the pervasive dictionary storage for a match first and fall back
+  // to the partitioned dictionary storage.
+  if (scoped_refptr<SharedDictionaryStorage> pervasive_storage =
+          GetPervasiveStorage()) {
+    dict =
+        pervasive_storage->GetDictionarySync(request_url, request_destination);
+  }
+  if (!dict) {
+    dict = GetStorage(*isolation_key)
+               ->GetDictionarySync(request_url, request_destination);
+  }
 
   // Disable preloaded dictionary usage if the PreloadedDictionaryConditionalUse
   // feature is enabled and its binary is not yet loaded.
@@ -234,7 +244,7 @@ void SharedDictionaryManager::PreloadSharedDictionaryInfoForDocument(
     const std::vector<GURL>& urls,
     mojo::PendingReceiver<mojom::PreloadedSharedDictionaryInfoHandle>
         preload_handle) {
-  if (memory_pressure_level_ != base::MEMORY_PRESSURE_LEVEL_NONE) {
+  if (memory_limit() <= base::kModerateMemoryPressureThreshold) {
     return;
   }
   auto preloaded_dictionaries =
@@ -256,5 +266,22 @@ void SharedDictionaryManager::DeletePreloadedDictionaries(
 bool SharedDictionaryManager::HasPreloadedSharedDictionaryInfo() const {
   return !preloaded_dictionaries_set_.empty();
 }
+
+void SharedDictionaryManager::OnReleaseMemory() {
+  if (memory_limit() <= base::kModerateMemoryPressureThreshold) {
+    SharedDictionaryStorageEvictionReason eviction_reason =
+        (memory_limit() <= base::kCriticalMemoryPressureThreshold)
+            ? SharedDictionaryStorageEvictionReason::kMemoryPressureCritical
+            : SharedDictionaryStorageEvictionReason::kMemoryPressureModerate;
+    for (const auto& it : cached_storages_) {
+      previously_evicted_keys_[it.first] = eviction_reason;
+    }
+    cached_storages_.Clear();
+    preloaded_dictionaries_set_.clear();
+    pervasive_storage_.reset();
+  }
+}
+
+void SharedDictionaryManager::OnUpdateMemoryLimit() {}
 
 }  // namespace network

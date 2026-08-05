@@ -9,22 +9,28 @@ import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetPropert
 
 import android.content.Context;
 
+import androidx.annotation.DrawableRes;
 import androidx.annotation.IntDef;
+import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.build.annotations.NullMarked;
-import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.autofill.settings.PersonalContextSettingsLauncher;
-import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsFragment.AutofillOptionsReferrer;
-import org.chromium.chrome.browser.personal_context.first_run.PersonalContextFirstRunService;
+import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsReferrer;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.FlyoutProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.HomeProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.IllustrationCardItemProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.NoticeItemProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.ScreenId;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.TextWithClickableLinkProperties;
+import org.chromium.chrome.browser.ui.autofill.internal.R;
 import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.components.autofill.SuggestionType;
+import org.chromium.components.prefs.PrefService;
+import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -39,38 +45,57 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
     static final String NOTICE_INTERACTIONS_HISTOGRAM =
             "PersonalContext.AtMemory.NoticeInteractions";
 
+    // LINT.IfChange(FindAndFillWithGeminiSettings)
+    @VisibleForTesting
+    static final String FIND_AND_FILL_WITH_GEMINI_SETTINGS =
+            "autofill.personal_context.find_and_fill_with_gemini_settings";
+
+    // LINT.ThenChange(//components/optimization_guide/core/feature_registry/feature_registration.cc:FindAndFillWithGeminiSettings)
+
+    // LINT.IfChange(AllowLogging)
+    private static final int ALLOW_LOGGING = 0;
+
+    // LINT.ThenChange(//components/optimization_guide/core/model_execution/model_execution_prefs.h:ModelExecutionEnterprisePolicyValue)
+
     // Interactions with the AtMemory notice.
     // LINT.IfChange(NoticeInteraction)
-    @IntDef({NoticeInteraction.SHOWN, NoticeInteraction.ACKNOWLEDGED, NoticeInteraction.COUNT})
+    @IntDef({
+        NoticeInteraction.SHOWN,
+        NoticeInteraction.ACKNOWLEDGED,
+        NoticeInteraction.DISMISSED,
+        NoticeInteraction.LINK_BUTTON_CLICKED,
+        NoticeInteraction.COUNT
+    })
     @Retention(RetentionPolicy.SOURCE)
     @interface NoticeInteraction {
         int SHOWN = 0;
         int ACKNOWLEDGED = 1;
-        int COUNT = 2;
+        int DISMISSED = 2;
+        int LINK_BUTTON_CLICKED = 3;
+        int COUNT = 4;
     }
 
-    // LINT.ThenChange(//tools/metrics/histograms/metadata/personal_context/enums.xml:PersonalContextAtMemoryNoticeInteractions)
+    // LINT.ThenChange(//tools/metrics/histograms/metadata/personal_context/enums.xml:PopupNoticeInteractions)
 
     private final Context mContext;
-    private final Profile mProfile;
     private final PropertyModel mModel;
     private final PropertyModel mHomeModel;
     private final PropertyModel mFlyoutModel;
-    private @Nullable PropertyModel mSearchAffordanceModel;
     private final AtMemoryBottomSheetCoordinator.Delegate mDelegate;
     private final HomeProperties.SearchDelegate mSearchDelegate;
+    private final Profile mProfile;
 
     private boolean mWasNoticeShownRecorded;
 
     AtMemoryBottomSheetMediator(
             Context context,
-            Profile profile,
             AtMemoryBottomSheetCoordinator.Delegate delegate,
-            HomeProperties.SearchDelegate searchDelegate) {
+            HomeProperties.SearchDelegate searchDelegate,
+            Profile profile) {
         mContext = context;
-        mProfile = profile;
         mDelegate = delegate;
         mSearchDelegate = searchDelegate;
+        mProfile = profile;
 
         mModel = createModel();
         mHomeModel = createHomeModel();
@@ -92,14 +117,6 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
     void show(List<AutofillSuggestion> suggestions) {
         applyScreenState(getScreenState(suggestions), suggestions);
         mModel.set(VISIBLE, true);
-
-        if (mHomeModel.get(HomeProperties.IS_NOTICE_VISIBLE) && !mWasNoticeShownRecorded) {
-            RecordHistogram.recordEnumeratedHistogram(
-                    NOTICE_INTERACTIONS_HISTOGRAM,
-                    NoticeInteraction.SHOWN,
-                    NoticeInteraction.COUNT);
-            mWasNoticeShownRecorded = true;
-        }
     }
 
     void onDismissed() {
@@ -108,13 +125,107 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
         mDelegate.onDismissed();
     }
 
-    private void onNoticeAcknowledged() {
-        mHomeModel.set(HomeProperties.IS_NOTICE_VISIBLE, false);
+    private AtMemoryScreenState getScreenState(List<AutofillSuggestion> suggestions) {
+        if (mDelegate.isSearching()) {
+            return AtMemoryScreenState.LOADING;
+        }
+        if (suggestions.isEmpty()) {
+            return AtMemoryScreenState.ZERO_STATE;
+        }
+        return AtMemoryScreenState.SUGGESTIONS;
+    }
+
+    private void applyScreenState(
+            AtMemoryScreenState screenState, List<AutofillSuggestion> suggestions) {
+        mHomeModel.set(HomeProperties.IS_LOADING, screenState.isLoading);
+
+        ModelList sheetItems = mHomeModel.get(HomeProperties.SHEET_ITEMS);
+        sheetItems.clear();
+
+        boolean isNoticeVisible = hasNotice(suggestions);
+        if (screenState.showZeroState) {
+            sheetItems.add(
+                    new ListItem(
+                            HomeProperties.ItemType.ILLUSTRATION_CARD, createZeroStateModel()));
+        }
+        if (screenState.showAtMemorySuggestions) {
+            for (int i = 0; i < suggestions.size(); i++) {
+                if (shouldShowSuggestion(suggestions.get(i), isNoticeVisible)) {
+                    sheetItems.add(createListItemForSuggestion(suggestions.get(i), i));
+                }
+            }
+        }
+        if (screenState == AtMemoryScreenState.HIDDEN) {
+            mModel.set(VISIBLE, false);
+            mModel.set(CURRENT_SCREEN, ScreenId.HOME_SCREEN);
+            mFlyoutModel.set(FlyoutProperties.TITLE, "");
+            mFlyoutModel.set(FlyoutProperties.SUGGESTIONS, List.of());
+            sheetItems.clear();
+        }
+    }
+
+    private static boolean shouldShowSuggestion(
+            AutofillSuggestion suggestion, boolean isNoticeVisible) {
+        if (suggestion.getSuggestionType() == SuggestionType.SEPARATOR) {
+            return false;
+        }
+        // Do not show the fetching illustration card if the notice is visible to avoid displaying
+        // multiple card banners simultaneously.
+        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_FETCHING
+                && isNoticeVisible) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean hasNotice(List<AutofillSuggestion> suggestions) {
+        for (AutofillSuggestion suggestion : suggestions) {
+            if (suggestion.getSuggestionType() == SuggestionType.PERSONAL_CONTEXT_NOTICE) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ListItem createListItemForSuggestion(AutofillSuggestion suggestion, int position) {
+        if (suggestion.getSuggestionType() == SuggestionType.PERSONAL_CONTEXT_NOTICE) {
+            recordNoticeShown();
+            return new ListItem(HomeProperties.ItemType.NOTICE, createNoticeModel(position));
+        }
+        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_SEARCH_AFFORDANCE) {
+            return new ListItem(
+                    HomeProperties.ItemType.SUGGESTION_WITH_NO_BACKGROUND,
+                    createSuggestionModel(suggestion, position));
+        }
+        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_AI_DISCLOSURE) {
+            return new ListItem(
+                    HomeProperties.ItemType.TEXT_WITH_CLICKABLE_LINK, createAiDisclosureModel());
+        }
+        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_FETCHING) {
+            return new ListItem(
+                    HomeProperties.ItemType.ILLUSTRATION_CARD,
+                    createIllustrationCardModel(suggestion));
+        }
+        return new ListItem(
+                HomeProperties.ItemType.SUGGESTION, createSuggestionModel(suggestion, position));
+    }
+
+    private void recordNoticeShown() {
+        if (!mWasNoticeShownRecorded) {
+            RecordHistogram.recordEnumeratedHistogram(
+                    NOTICE_INTERACTIONS_HISTOGRAM,
+                    NoticeInteraction.SHOWN,
+                    NoticeInteraction.COUNT);
+            mWasNoticeShownRecorded = true;
+        }
+    }
+
+    private void onNoticeAcknowledged(int position) {
         RecordHistogram.recordEnumeratedHistogram(
                 NOTICE_INTERACTIONS_HISTOGRAM,
                 NoticeInteraction.ACKNOWLEDGED,
                 NoticeInteraction.COUNT);
-        PersonalContextFirstRunService.atMemoryNoticeAcknowledged(mProfile);
+        mDelegate.onSuggestionDismissed(position);
     }
 
     private void onNoticeSettingsClicked() {
@@ -123,84 +234,14 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
                 mContext, AutofillOptionsReferrer.PERSONAL_CONTEXT_ATMEMORY_NOTICE);
     }
 
-    private AtMemoryScreenState getScreenState(List<AutofillSuggestion> suggestions) {
-        if (isSearchAffordance(suggestions)) {
-            return AtMemoryScreenState.SEARCH_AFFORDANCE;
-        }
-        if (suggestions.isEmpty()) {
-            return mDelegate.isSearching()
-                    ? AtMemoryScreenState.LOADING
-                    : AtMemoryScreenState.ZERO_STATE;
-        }
-        return AtMemoryScreenState.SUGGESTIONS;
-    }
-
-    private void applyScreenState(
-            AtMemoryScreenState screenState, List<AutofillSuggestion> suggestions) {
-        mHomeModel.set(HomeProperties.IS_LOADING, screenState.isLoading);
-        mHomeModel.set(
-                HomeProperties.SHOW_SUGGESTIONS_BACKGROUND, screenState.showSuggestionsBackground);
-
-        ModelList sheetItems = mHomeModel.get(HomeProperties.SHEET_ITEMS);
-        if (screenState.showZeroState) {
-            applyZeroState(sheetItems);
-        }
-        if (screenState.showSearchAffordance) {
-            applySearchAffordance(suggestions.get(0), sheetItems);
-        }
-        if (screenState.showAtMemorySuggestions) {
-            applySuggestions(suggestions, sheetItems);
-        }
-        if (screenState == AtMemoryScreenState.HIDDEN) {
-            mModel.set(VISIBLE, false);
-            mModel.set(CURRENT_SCREEN, ScreenId.HOME_SCREEN);
-            mFlyoutModel.set(FlyoutProperties.TITLE, "");
-            mFlyoutModel.set(FlyoutProperties.SUGGESTIONS, List.of());
-            mSearchAffordanceModel = null;
-            sheetItems.clear();
-            return;
-        }
-    }
-
-    private void applyZeroState(ModelList sheetItems) {
-        if (sheetItems.size() == 1
-                && sheetItems.get(0).type == HomeProperties.ItemType.ZERO_STATE) {
-            return;
-        }
-        sheetItems.clear();
-        sheetItems.add(new ListItem(HomeProperties.ItemType.ZERO_STATE, new PropertyModel()));
-    }
-
-    private void applySearchAffordance(AutofillSuggestion affordance, ModelList sheetItems) {
-        if (mSearchAffordanceModel != null) {
-            mSearchAffordanceModel.set(SuggestionItemProperties.TITLE, affordance.getLabel());
-            return;
-        }
-
-        mSearchAffordanceModel = createSuggestionModel(affordance, 0);
-        sheetItems.clear();
-        sheetItems.add(new ListItem(HomeProperties.ItemType.SUGGESTION, mSearchAffordanceModel));
-    }
-
-    private void applySuggestions(List<AutofillSuggestion> suggestions, ModelList sheetItems) {
-        sheetItems.clear();
-        for (int i = 0; i < suggestions.size(); i++) {
-            sheetItems.add(
-                    new ListItem(
-                            HomeProperties.ItemType.SUGGESTION,
-                            createSuggestionModel(suggestions.get(i), i)));
-        }
-    }
-
     private void onSuggestionClicked(AutofillSuggestion suggestion, int position) {
         if (!suggestion.isAcceptable()) {
             return;
         }
 
-        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_SEARCH_AFFORDANCE
-                && mSearchAffordanceModel != null) {
+        if (suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_SEARCH_AFFORDANCE) {
             mSearchDelegate.hideKeyboardAndClearFocus();
-            String query = mSearchAffordanceModel.get(SuggestionItemProperties.TITLE);
+            String query = suggestion.getLabel();
             if (query != null) {
                 onQuerySubmitted(query);
             }
@@ -210,7 +251,8 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
     }
 
     private void onFlyoutClicked(AutofillSuggestion suggestion, int position) {
-        mFlyoutModel.set(FlyoutProperties.TITLE, suggestion.getLabel());
+        // Assumes the secondary label contains the data type name.
+        mFlyoutModel.set(FlyoutProperties.TITLE, suggestion.getSecondaryLabel());
         mFlyoutModel.set(FlyoutProperties.SUGGESTIONS, suggestion.getChildren());
         mFlyoutModel.set(
                 FlyoutProperties.ON_SUGGESTION_CLICKED,
@@ -218,10 +260,12 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
 
         mModel.set(CURRENT_SCREEN, ScreenId.FLYOUT_SCREEN);
         mDelegate.onChildSuggestionsShown(position);
+        mDelegate.requestExpandSheet(/* expandInFullHeight= */ false);
     }
 
     private void onFlyoutBackClicked() {
         mModel.set(CURRENT_SCREEN, ScreenId.HOME_SCREEN);
+        mDelegate.requestExpandSheet(/* expandInFullHeight= */ false);
     }
 
     private void onFlyoutSuggestionClicked(int parentPosition, int childPosition) {
@@ -231,8 +275,8 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
     @Override
     public void onQuerySubmitted(String query) {
         mHomeModel.set(HomeProperties.IS_LOADING, true);
-        mSearchAffordanceModel = null;
         mDelegate.onQuerySubmitted(query);
+        mDelegate.requestExpandSheet(/* expandInFullHeight= */ true);
     }
 
     @Override
@@ -242,13 +286,51 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
 
     @Override
     public void onSearchFocus(boolean hasFocus) {
-        mDelegate.onSearchFocus(hasFocus);
+        if (hasFocus) {
+            mDelegate.requestExpandSheet(/* expandInFullHeight= */ true);
+        }
     }
 
-    private boolean isSearchAffordance(List<AutofillSuggestion> suggestions) {
-        return suggestions.size() == 1
-                && suggestions.get(0).getSuggestionType()
-                        == SuggestionType.AT_MEMORY_SEARCH_AFFORDANCE;
+    private PropertyModel createIllustrationCardModel(AutofillSuggestion suggestion) {
+        return new PropertyModel.Builder(IllustrationCardItemProperties.ALL_KEYS)
+                .with(IllustrationCardItemProperties.TITLE, suggestion.getLabel())
+                .with(IllustrationCardItemProperties.SUBTITLE, suggestion.getSublabel())
+                .build();
+    }
+
+    private PropertyModel createZeroStateModel() {
+        return new PropertyModel.Builder(IllustrationCardItemProperties.ALL_KEYS)
+                .with(
+                        IllustrationCardItemProperties.TITLE,
+                        mContext.getString(R.string.autofill_at_memory_zero_state_title))
+                .with(
+                        IllustrationCardItemProperties.SUBTITLE,
+                        mContext.getString(R.string.autofill_at_memory_zero_state_subtitle))
+                .build();
+    }
+
+    private PropertyModel createAiDisclosureModel() {
+        String text = mContext.getString(R.string.at_memory_ai_disclosure);
+        return new PropertyModel.Builder(TextWithClickableLinkProperties.ALL_KEYS)
+                .with(TextWithClickableLinkProperties.TEXT, text)
+                .with(
+                        TextWithClickableLinkProperties.ON_LINK_CLICKED,
+                        this::onNoticeSettingsClicked)
+                .build();
+    }
+
+    private boolean isLoggingAllowedByPolicy() {
+        PrefService prefService = UserPrefs.get(mProfile);
+        if (prefService == null) return true;
+        return prefService.getInteger(FIND_AND_FILL_WITH_GEMINI_SETTINGS) == ALLOW_LOGGING;
+    }
+
+    private PropertyModel createNoticeModel(int position) {
+        return new PropertyModel.Builder(NoticeItemProperties.ALL_KEYS)
+                .with(NoticeItemProperties.IS_LOGGING_ALLOWED, isLoggingAllowedByPolicy())
+                .with(NoticeItemProperties.ON_OK_CLICKED, () -> onNoticeAcknowledged(position))
+                .with(NoticeItemProperties.ON_SETTINGS_CLICKED, this::onNoticeSettingsClicked)
+                .build();
     }
 
     private PropertyModel createSuggestionModel(AutofillSuggestion suggestion, int position) {
@@ -258,7 +340,10 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
                 .with(SuggestionItemProperties.DETAILS, suggestion.getSublabel())
                 .with(
                         SuggestionItemProperties.IS_FLYOUT_VISIBLE,
-                        suggestion.getSuggestionType() == SuggestionType.AT_MEMORY_SEARCH_RESULT)
+                        !suggestion.getChildren().isEmpty())
+                .with(
+                        SuggestionItemProperties.TRAILING_ICON_ID,
+                        getResIdForSuggestionType(suggestion.getSuggestionType()))
                 .with(
                         SuggestionItemProperties.APPLY_DEACTIVATED_STYLE,
                         suggestion.applyDeactivatedStyle())
@@ -279,16 +364,10 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
     }
 
     private PropertyModel createHomeModel() {
-        boolean shouldShowNotice =
-                PersonalContextFirstRunService.shouldShowAtMemoryNotice(mProfile);
         return new PropertyModel.Builder(HomeProperties.ALL_KEYS)
                 .with(HomeProperties.IS_LOADING, false)
-                .with(HomeProperties.SHOW_SUGGESTIONS_BACKGROUND, false)
                 .with(HomeProperties.SHEET_ITEMS, new ModelList())
                 .with(HomeProperties.SEARCH_BAR_DELEGATE, this)
-                .with(HomeProperties.IS_NOTICE_VISIBLE, shouldShowNotice)
-                .with(HomeProperties.NOTICE_OK_CLICK_LISTENER, this::onNoticeAcknowledged)
-                .with(HomeProperties.NOTICE_SETTINGS_CLICK_LISTENER, this::onNoticeSettingsClicked)
                 .build();
     }
 
@@ -299,5 +378,18 @@ class AtMemoryBottomSheetMediator implements AtMemorySearchBarView.Delegate {
                 .with(FlyoutProperties.ON_BACK_CLICKED, this::onFlyoutBackClicked)
                 .with(FlyoutProperties.ON_SUGGESTION_CLICKED, childPos -> {})
                 .build();
+    }
+
+    private @DrawableRes int getResIdForSuggestionType(int suggestionType) {
+        switch (suggestionType) {
+            case SuggestionType.OPEN_GEMINI:
+                return R.drawable.open_in_new;
+            case SuggestionType.AT_MEMORY_NO_CONNECTION:
+                return R.drawable.ic_north_west_24dp;
+            case SuggestionType.AT_MEMORY_SEARCH_AFFORDANCE:
+                return R.drawable.ic_north_west_24dp;
+            default:
+                return 0;
+        }
     }
 }

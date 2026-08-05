@@ -89,15 +89,13 @@ void FooterContextMenu::ExecuteCommand(int command_id, int event_flags) {
       new_tab_footer::RecordContextMenuClick(
           new_tab_footer::FooterContextMenuItem::kCustomizeChrome);
       actions::ActionManager::Get()
-          .FindAction(kActionSidePanelShowCustomizeChromeFooter,
-                      /*scope=*/browser_->GetActions()->root_action_item())
-          ->InvokeAction(
-              actions::ActionInvocationContext::Builder()
-                  .SetProperty(
-                      kSidePanelOpenTriggerKey,
-                      static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
-                          SidePanelOpenTrigger::kNewTabFooter))
-                  .Build());
+          .FindAction(
+              kActionSidePanelShowCustomizeChromeFooter,
+              /*scope=*/BrowserActions::From(browser_)->root_action_item())
+          ->InvokeAction(actions::ActionInvocationContext::Builder()
+                             .SetProperty(kSidePanelOpenTriggerKey,
+                                          SidePanelOpenTrigger::kNewTabFooter)
+                             .Build());
       break;
     }
   }

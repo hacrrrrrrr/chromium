@@ -9,6 +9,7 @@ import './searched_label.js';
 import './shared_icons.html.js';
 import '/strings.m.js';
 import 'chrome://resources/cr_elements/cr_checkbox/cr_checkbox.js';
+import 'chrome://resources/cr_elements/cr_collapse/cr_collapse.js';
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import 'chrome://resources/cr_elements/icons.html.js';
 import 'chrome://resources/cr_elements/policy/cr_tooltip_icon.js';
@@ -28,6 +29,14 @@ import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import {BrowserProxyImpl} from './browser_proxy.js';
 import {getCss} from './history_item.css.js';
 import {getHtml} from './history_item.html.js';
+
+export interface CriticalActionItem {
+  id: string;
+  label: string;
+  tooltip: string;
+  url: string;
+  ariaLabel?: string;
+}
 
 export interface HistoryItemElement {
   $: {
@@ -85,12 +94,24 @@ export class HistoryItemElement extends HistoryItemElementBase {
 
       // Search term used to obtain this history-item.
       searchTerm: {type: String},
+
+      isExpanded_: {
+        type: Boolean,
+        reflect: true,
+      },
+
+      isCriticalActionsEnabled_: {
+        type: Boolean,
+        reflect: true,
+      },
     };
   }
 
   private isShiftKeyDown_: boolean = false;
   protected accessor selectionNotAllowed_: boolean =
       !loadTimeData.getBoolean('allowDeletingHistory');
+  protected accessor isCriticalActionsEnabled_: boolean =
+      loadTimeData.getBoolean('isCriticalActionsEnabled');
   private eventTracker_: EventTracker = new EventTracker();
   accessor item: HistoryEntry|undefined;
   accessor hasTimeGap: boolean = false;
@@ -100,6 +121,7 @@ export class HistoryItemElement extends HistoryItemElementBase {
   accessor isCardEnd: boolean = false;
   accessor numberOfItems: number = 0;
   accessor selected: boolean = false;
+  accessor isExpanded_: boolean = false;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -121,6 +143,7 @@ export class HistoryItemElement extends HistoryItemElementBase {
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
     if (changedProperties.has('item')) {
+      this.isExpanded_ = false;
       this.itemChanged_();
       this.fire('iron-resize');
     }
@@ -149,7 +172,8 @@ export class HistoryItemElement extends HistoryItemElementBase {
     for (let i = 0; i < path.length; i++) {
       const elem = path[i] as HTMLElement;
       if (elem.id !== 'checkbox' &&
-          (elem.nodeName === 'A' || elem.nodeName === 'CR-ICON-BUTTON')) {
+          (elem.nodeName === 'A' || elem.nodeName === 'CR-ICON-BUTTON' ||
+           elem.id === 'collapse')) {
         return;
       }
 
@@ -167,6 +191,10 @@ export class HistoryItemElement extends HistoryItemElementBase {
       index: this.index,
       shiftKey: e.shiftKey,
     });
+  }
+
+  protected onCollapseClick_(e: Event) {
+    e.stopPropagation();
   }
 
   /**
@@ -232,8 +260,75 @@ export class HistoryItemElement extends HistoryItemElementBase {
         'title-and-domain';
   }
 
-  protected shouldShowActorTooltip_() {
-    return this.item?.isActorVisit;
+  protected shouldShowActorTooltip_(): boolean {
+    if (this.isCriticalActionsEnabled_) {
+      return false;
+    }
+    return !!this.item?.isActorVisit;
+  }
+
+  protected shouldShowActorIconNextToFavicon_(): boolean {
+    if (!this.isCriticalActionsEnabled_) {
+      return false;
+    }
+    return !!this.item?.isActorVisit;
+  }
+
+  protected isExpandable_(): boolean {
+    return this.isCriticalActionsEnabled_ && !!this.item?.isActorVisit;
+  }
+
+  protected getExpandIcon_(): string {
+    return this.isExpanded_ ? 'cr:expand-less' : 'cr:expand-more';
+  }
+
+  protected onExpandClick_(e: Event) {
+    e.stopPropagation();
+    this.isExpanded_ = !this.isExpanded_;
+  }
+
+  // TODO(b/531590118): Query critical actions dynamically from the database.
+  protected getCriticalActions_(): CriticalActionItem[] {
+    const url = this.item?.url || 'https://example.com';
+    return [
+      {
+        id: 'phone',
+        label: 'Phone number filled',
+        tooltip: 'Contact info',
+        url: url,
+        ariaLabel: 'Phone number filled, Contact info',
+      },
+      {
+        id: 'email',
+        label: 'Email filled',
+        tooltip: 'Contact info',
+        url: url,
+        ariaLabel: 'Email filled, Contact info',
+      },
+      {
+        id: 'payment',
+        label: 'Payment method filled',
+        tooltip: 'Payment methods',
+        url: url,
+        ariaLabel: 'Payment method filled, Payment methods',
+      },
+    ];
+  }
+
+  protected onCriticalActionClick_(e: Event) {
+    e.stopPropagation();
+    const index = Number((e.currentTarget as HTMLElement).dataset['index']);
+    const action = this.getCriticalActions_()[index];
+    if (action?.url) {
+      window.open(action.url, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  protected onCriticalActionKeydown_(e: KeyboardEvent) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      this.onCriticalActionClick_(e);
+    }
   }
 
   /**

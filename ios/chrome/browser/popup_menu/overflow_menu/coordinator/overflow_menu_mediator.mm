@@ -50,6 +50,7 @@
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_availability.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intents/model/intents_donation_helper.h"
@@ -77,6 +78,7 @@
 #import "ios/chrome/browser/reader_mode/model/constants.h"
 #import "ios/chrome/browser/reader_mode/model/features.h"
 #import "ios/chrome/browser/reader_mode/model/reader_mode_tab_helper.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_web_state_utils.h"
 #import "ios/chrome/browser/reading_list/ui_bundled/reading_list_utils.h"
 #import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/search_engines/model/search_engines_util.h"
@@ -245,7 +247,7 @@ void GetPresetNTPBackgroundPreview(
 @interface OverflowMenuMediator () <AuthenticationServiceObserving,
                                     BookmarkModelBridgeObserver,
                                     CRWWebStateObserver,
-                                    IdentityManagerObserverBridgeDelegate,
+                                    IdentityManagerObserving,
                                     IOSLanguageDetectionTabHelperObserving,
                                     OverflowMenuDestinationProvider,
                                     OverlayPresenterObserving,
@@ -446,7 +448,7 @@ void GetPresetNTPBackgroundPreview(
   }
   _baseViewController = baseViewController;
 
-  if (IsOverflowMenuHomeCustomizationEntrypointEnabled()) {
+  if (IsOverflowMenuHomeCustomizationEntrypointEnabled() && !self.incognito) {
     // Ensures the colors in the background preview are updated when
     // transitioning to light/dark mode.
     [_baseViewController
@@ -483,7 +485,7 @@ void GetPresetNTPBackgroundPreview(
     _customizeHomepageAction.symbolTintColor =
         [UIColor colorNamed:kTextQuaternaryColor];
     _customizeHomepageAction.fallbackPreviewImage =
-        DefaultSymbolWithConfiguration(kPencilSymbol, nil);
+        SymbolWithConfiguration(SymbolPencil, nil);
   }
   [self configureThemePreviewForCustomizeHomepageAction];
   return _customizeHomepageAction;
@@ -911,7 +913,7 @@ void GetPresetNTPBackgroundPreview(
     self.AIPrototypeAction = [self openAIPrototypeAction];
   }
 
-  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+  if (IsHideToolbarEnabled()) {
     self.hideToolbarsAction = [self collapseToolbars];
   }
 
@@ -919,9 +921,7 @@ void GetPresetNTPBackgroundPreview(
     self.askBWGAction = [self openAskBWGAction];
   }
 
-  if (IsReaderModeAvailable()) {
-    self.readerModeAction = [self toggleReaderModeAction];
-  }
+  self.readerModeAction = [self toggleReaderModeAction];
 
   if (send_tab_to_self::AreIOSTabRemindersEnabled()) {
     self.setTabReminderAction = [self newSetTabReminderAction];
@@ -990,7 +990,7 @@ void GetPresetNTPBackgroundPreview(
   OverflowMenuAction* action = [self
       createOverflowMenuActionWithNameID:nameID
                               actionType:overflow_menu::ActionType::ReaderMode
-                              symbolName:GetReaderModeSymbolName()
+                              symbolName:kReaderModeSymbol
                             systemSymbol:YES
                         monochromeSymbol:NO
                          accessibilityID:kToolsMenuReaderMode
@@ -1895,13 +1895,11 @@ void GetPresetNTPBackgroundPreview(
     self.lensOverlayAction.enabled = [self isLensOverlayEnabled];
   }
 
-  if (IsReaderModeAvailable()) {
-    self.readerModeAction.enabled = [self isReaderModeEnabled];
-  }
+  self.readerModeAction.enabled = [self isReaderModeEnabled];
 
   self.askBWGAction.enabled = [self isGeminiAvailable];
 
-  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+  if (IsHideToolbarEnabled()) {
     self.hideToolbarsAction.enabled = ![self isCurrentWebPageNTP];
   }
 }
@@ -1918,18 +1916,23 @@ void GetPresetNTPBackgroundPreview(
   NSMutableArray<OverflowMenuAction*>* appActions =
       [[NSMutableArray alloc] init];
 
-  if ((base::FeatureList::IsEnabled(kShareInOverflowMenu) ||
-       (IsChromeNextIaEnabled() && !IsChromeNextIaShareIconVisible())) &&
+  if (IsChromeNextIaEnabled() && !IsChromeNextIaShareIconVisible() &&
       [self isCurrentURLWebURL]) {
     base::UmaHistogramEnumeration("Mobile.ShareThisPage.Shown",
                                   ShareThisPageLocation::kOverflowMenu);
     [appActions addObject:self.shareAction];
   }
 
-  // The reload/stop action is only shown when the reload button is not in the
-  // toolbar. The reload button is shown in the toolbar when the toolbar is not
-  // split.
-  if (IsSplitToolbarMode(self.baseViewController)) {
+  BOOL showReloadStopAction;
+  if (IsChromeNextIaEnabled()) {
+    showReloadStopAction = !CanShowTabStrip(self.baseViewController);
+  } else {
+    // The reload/stop action is only shown when the reload button is not in the
+    // toolbar. The reload button is shown in the toolbar when the toolbar is
+    // not split.
+    showReloadStopAction = IsSplitToolbarMode(self.baseViewController);
+  }
+  if (showReloadStopAction) {
     OverflowMenuAction* reloadStopAction =
         ([self isPageLoading]) ? self.stopLoadAction : self.reloadAction;
     [appActions addObject:reloadStopAction];
@@ -1961,7 +1964,8 @@ void GetPresetNTPBackgroundPreview(
   NSMutableArray<OverflowMenuActionGroup*>* actionGroups =
       [[NSMutableArray alloc] init];
 
-  if (IsIdentityAwarenessEnabled() && self.authenticationService) {
+  if (IsIdentityAwarenessEnabled() && self.authenticationService &&
+      !self.incognito) {
     NSMutableArray<OverflowMenuAction*>* identityActions =
         [NSMutableArray array];
     if (self.authenticationService->GetPrimaryIdentity()) {
@@ -1991,6 +1995,7 @@ void GetPresetNTPBackgroundPreview(
 // background to be shown in the action to show the home customization menu.
 - (void)configureThemePreviewForCustomizeHomepageAction {
   CHECK(IsOverflowMenuHomeCustomizationEntrypointEnabled());
+  CHECK(!self.incognito);
   if (!self.backgroundCustomizationService) {
     // Do not show a preview for the current background.
     _customizeHomepageAction.previewImage = nil;
@@ -2072,7 +2077,7 @@ void GetPresetNTPBackgroundPreview(
 }
 
 - (void)updateIdentityAction {
-  if (!self.identityAction || !self.authenticationService ||
+  if (self.incognito || !self.identityAction || !self.authenticationService ||
       !self.authenticationService->HasPrimaryIdentity()) {
     return;
   }
@@ -2108,10 +2113,7 @@ void GetPresetNTPBackgroundPreview(
 
 // Returns whether translate is enabled on the current page.
 - (BOOL)isTranslateEnabled {
-  return
-      [self canManuallyTranslate:NO] && ![self isLensOverlayVisible] &&
-      (![self isReaderModeActive] ||
-       base::FeatureList::IsEnabled(kEnableReaderModeTranslationWithInfobar));
+  return [self canManuallyTranslate:NO] && ![self isLensOverlayVisible];
 }
 
 // Returns whether lens overlay is enabled on the current page.
@@ -2166,12 +2168,7 @@ void GetPresetNTPBackgroundPreview(
 
 // Whether Reader mode is active.
 - (BOOL)isReaderModeActive {
-  if (!self.webState) {
-    return NO;
-  }
-  ReaderModeTabHelper* helper =
-      ReaderModeTabHelper::FromWebState(self.webState);
-  return helper && helper->IsActive();
+  return IsReaderModeActiveInWebState(self.webState);
 }
 
 // Whether or not text zoom is enabled for this page.
@@ -2306,10 +2303,6 @@ void GetPresetNTPBackgroundPreview(
 // Returns whether the Ask Gemini feature is currently available for the web
 // state.
 - (BOOL)isGeminiAvailable {
-  if (!IsPageActionMenuEnabled()) {
-    return NO;
-  }
-
   if (!_webState) {
     return NO;
   }
@@ -2320,10 +2313,9 @@ void GetPresetNTPBackgroundPreview(
 
   ProfileIOS* profile =
       ProfileIOS::FromBrowserState(_webState->GetBrowserState());
-  GeminiService* geminiService = GeminiServiceFactory::GetForProfile(profile);
-  GeminiTabHelper* tabHelper = GeminiTabHelper::FromWebState(_webState);
-  return tabHelper && tabHelper->IsGeminiAvailableForWebState() &&
-         geminiService && geminiService->IsProfileEligibleForGemini();
+  return gemini::IsGeminiAvailable(gemini::EntryPoint::OverflowMenu, profile,
+                                   _webState)
+      .enabled;
 }
 
 #pragma mark - CRWWebStateObserver
@@ -2642,10 +2634,8 @@ void GetPresetNTPBackgroundPreview(
     actions.push_back(overflow_menu::ActionType::AskBWG);
   }
 
-  if (IsReaderModeAvailable()) {
-    actions.push_back(overflow_menu::ActionType::ReaderMode);
-  }
-  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+  actions.push_back(overflow_menu::ActionType::ReaderMode);
+  if (IsHideToolbarEnabled()) {
     actions.push_back(overflow_menu::ActionType::HideToolbars);
   }
 
@@ -3193,9 +3183,9 @@ void GetPresetNTPBackgroundPreview(
                                      actionSubtitle:subtitle];
 }
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
-- (void)onPrimaryAccountChanged:
+- (void)primaryAccountDidChange:
     (const signin::PrimaryAccountChangeEvent&)event {
   switch (event.GetEventTypeFor(signin::ConsentLevel::kSignin)) {
     case signin::PrimaryAccountChangeEvent::Type::kNone:
@@ -3207,7 +3197,7 @@ void GetPresetNTPBackgroundPreview(
   }
 }
 
-- (void)onExtendedAccountInfoUpdated:(const AccountInfo&)info {
+- (void)extendedAccountInfoDidUpdate:(const AccountInfo&)info {
   [self updateModel];
 }
 

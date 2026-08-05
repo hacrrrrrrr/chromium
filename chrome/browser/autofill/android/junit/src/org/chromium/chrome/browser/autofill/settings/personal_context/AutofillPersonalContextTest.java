@@ -4,15 +4,10 @@
 
 package org.chromium.chrome.browser.autofill.settings.personal_context;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
-import android.content.Intent;
-import android.net.Uri;
 
 import androidx.fragment.app.testing.FragmentScenario;
 import androidx.test.filters.SmallTest;
@@ -25,7 +20,6 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.RuntimeEnvironment;
-import org.robolectric.Shadows;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
@@ -37,6 +31,7 @@ import org.chromium.chrome.browser.autofill.autofill_ai.EntityDataManagerJni;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
+import org.chromium.components.browser_ui.settings.SettingsCustomTabLauncher;
 import org.chromium.components.browser_ui.settings.search.SettingsIndexData;
 
 /** Unit tests for {@link AutofillPersonalContextFragment}. */
@@ -53,6 +48,7 @@ public class AutofillPersonalContextTest {
     @Mock private EntityDataManager.Natives mMockEntityDataManagerJni;
     @Mock private Profile mProfile;
     @Mock private SettingsIndexData mSearchIndexDataMock;
+    @Mock private SettingsCustomTabLauncher mMockCustomTabLauncher;
 
     private AutofillPersonalContextFragment mFragment;
     private UserActionTester mActionTester;
@@ -69,7 +65,12 @@ public class AutofillPersonalContextTest {
                         AutofillPersonalContextFragment.class,
                         null,
                         R.style.Theme_BrowserUI_DayNight);
-        mScenario.onFragment(fragment -> mFragment = fragment);
+        mScenario.onFragment(
+                fragment -> {
+                    mFragment = fragment;
+                    mFragment.setCustomTabLauncher(mMockCustomTabLauncher);
+                    mFragment.setProfile(mProfile);
+                });
     }
 
     @Test
@@ -119,6 +120,22 @@ public class AutofillPersonalContextTest {
 
     @Test
     @SmallTest
+    public void testPersonalContextSwitchManagedByEnterprisePolicy() {
+        when(mMockEntityDataManagerJni.isPersonalContextEnabled(0L)).thenReturn(false);
+        when(mMockEntityDataManagerJni.isPersonalContextDisabledByEnterprisePolicy(0L))
+                .thenReturn(true);
+
+        AutofillPersonalContextCoordinator.createFor(
+                mFragment, mFragment.requireActivity(), mProfile);
+
+        var switchPref = mFragment.getAutofillPersonalContextSwitch();
+        var delegate = switchPref.getManagedPreferenceDelegate();
+        assertTrue(delegate.isPreferenceControlledByPolicy(switchPref));
+        assertTrue(delegate.isPreferenceClickDisabled(switchPref));
+    }
+
+    @Test
+    @SmallTest
     public void testPersonalContextManageConnectedAppsClick() {
         final String testUrl = "https://test.com/apps";
         when(mMockEntityDataManagerJni.getPersonalContextManageConnectedAppsUrl())
@@ -132,11 +149,7 @@ public class AutofillPersonalContextTest {
                 .getOnPreferenceClickListener()
                 .onPreferenceClick(mFragment.getAutofillPersonalContextManageConnectedApps());
 
-        Intent intent =
-                Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity();
-        assertNotNull(intent);
-        assertEquals(Intent.ACTION_VIEW, intent.getAction());
-        assertEquals(Uri.parse(testUrl), intent.getData());
+        verify(mMockCustomTabLauncher).openUrlInCct(mFragment.requireActivity(), testUrl);
         assertTrue(
                 mActionTester
                         .getActions()

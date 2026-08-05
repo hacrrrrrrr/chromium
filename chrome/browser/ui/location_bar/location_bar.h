@@ -19,13 +19,14 @@
 #include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
-class Browser;
+class BrowserWindowInterface;
 class ChipController;
 class CommandUpdater;
 class LocationBarModel;
 class LocationBarTesting;
 class OmniboxController;
 class OmniboxView;
+class OmniboxPopupPresenterDelegate;
 class OmniboxPopupView;
 class Profile;
 
@@ -66,6 +67,7 @@ class LocationBar {
     ~Observer() override;
 
     virtual void OnLocationBarBoundsChanged();
+    virtual void OnLocationBarFocusChanged();
   };
 
   explicit LocationBar(CommandUpdater* command_updater);
@@ -109,6 +111,8 @@ class LocationBar {
 
   virtual OmniboxPopupView* GetOmniboxPopupView() = 0;
 
+  virtual OmniboxPopupPresenterDelegate* GetPresenterDelegate();
+
   // Returns the OmniboxController owned by this LocationBar.
   virtual OmniboxController* GetOmniboxController() = 0;
 
@@ -129,6 +133,9 @@ class LocationBar {
   // Controls the chip in the LocationBar.
   virtual ChipController* GetChipController() = 0;
 
+  // Announces an alert for accessibility screen readers.
+  virtual void AnnounceAlert(const std::u16string& announcement) = 0;
+
   // Called when anything has changed that might affect the layout or contents
   // of the views around the edit, including the text of the edit and the
   // status of any keyword- or hint-related state.
@@ -136,6 +143,10 @@ class LocationBar {
 
   // Called when the edit should update itself without restoring any tab state.
   virtual void UpdateWithoutTabRestore() = 0;
+
+  // Called to notify the location bar (and its omnibox popup presenter)
+  // whether a permission prompt is currently showing.
+  virtual void SetPermissionPromptShowing(bool showing) {}
 
   CommandUpdater* command_updater() { return command_updater_; }
   const CommandUpdater* command_updater() const { return command_updater_; }
@@ -151,7 +162,7 @@ class LocationBar {
   // Returns the Browser object this is for. This may be nullptr sometimes;
   // known cases include captive portals on ChromeOS and
   // PresentationReceiverWindowView.
-  virtual Browser* GetBrowser() = 0;
+  virtual BrowserWindowInterface* GetBrowser() = 0;
 
   // Returns the profile this is for.
   virtual Profile* GetProfile() = 0;
@@ -216,6 +227,7 @@ class LocationBar {
   virtual ~LocationBar();
 
   void NotifyBoundsChanged();
+  void NotifyFocusChanged();
 
  private:
   NavigationParams navigation_params_;

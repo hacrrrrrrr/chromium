@@ -8,10 +8,16 @@
 
 #include "base/byte_size.h"
 #include "base/functional/bind.h"
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/dictation/logging.h"
 #include "chrome/browser/dictation/target.h"
+#include "chrome/browser/glic/host/guest_util.h"
 #include "chrome/browser/page_content_annotations/multi_source_page_context_fetcher.h"
+#include "chrome/browser/ui/tabs/page_context_eligibility_helper.h"
 #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
+#include "components/optimization_guide/content/browser/page_context_eligibility_observer.h"
 #include "components/page_content_annotations/content/page_context_fetcher_options.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom.h"
@@ -83,6 +89,19 @@ std::optional<std::string> GetSelectedText(
   return std::nullopt;
 }
 
+optimization_guide::PageContextEligibilityStatus GetPageContextEligibility(
+    content::WebContents* web_contents) {
+  auto* tab_interface = tabs::TabInterface::MaybeGetFromContents(web_contents);
+  if (!tab_interface) {
+    return optimization_guide::PageContextEligibilityStatus::kUnknown;
+  }
+  auto* helper = tabs::PageContextEligibilityHelper::From(tab_interface);
+  if (!helper) {
+    return optimization_guide::PageContextEligibilityStatus::kUnknown;
+  }
+  return helper->IsPageContextEligible();
+}
+
 }  // namespace
 
 DictationContextFetcher::DictationContextFetcher() = default;
@@ -99,6 +118,27 @@ void DictationContextFetcher::Fetch(const Target& target,
     return;
   }
 
+  if (glic::IsGlicGuest(web_contents)) {
+    // TODO(b/535731618): Straightforward context fetch appears to never return
+    // and needs more investigation. For now, just eliding context is better
+    // than breaking the feature. (Also, we probably want to include the web
+    // page content _in addition to_ the side panel content since that's likely
+    // relevant for speech biasing)
+    DictationContext context;
+    std::move(callback).Run(std::move(context));
+    return;
+  }
+
+  // If eligibility is kUnknown we'll try again when the fetch completes but if
+  // the page is known ineligible just bail now.
+  if (GetPageContextEligibility(web_contents) ==
+      optimization_guide::PageContextEligibilityStatus::kNotEligible) {
+    VT_LOG() << "Page not eligible for context";
+    DictationContext context;
+    std::move(callback).Run(std::move(context));
+    return;
+  }
+
   page_content_annotations::FetchPageContextOptions options;
   options.inner_text_bytes_limit = kInnerTextLimit.InBytes();
   options.annotated_page_content_options =
@@ -110,15 +150,26 @@ void DictationContextFetcher::Fetch(const Target& target,
       *web_contents, options,
       /*progress_listener=*/nullptr,
       base::BindOnce(&DictationContextFetcher::OnPageContextFetched,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+                     weak_ptr_factory_.GetWeakPtr(), web_contents->GetWeakPtr(),
+                     std::move(callback)));
 }
 
 void DictationContextFetcher::OnPageContextFetched(
+    base::WeakPtr<content::WebContents> web_contents,
     GetContextCallback callback,
     page_content_annotations::FetchPageContextResultCallbackArg result) {
   DictationContext context;
+
+  // Fail closed if the page is not explicitly eligible.
+  if (!web_contents ||
+      GetPageContextEligibility(web_contents.get()) !=
+          optimization_guide::PageContextEligibilityStatus::kEligible) {
+    VT_LOG() << "Page not eligible for context";
+    std::move(callback).Run(std::move(context));
+    return;
+  }
+
   // TODO(b/527240600): Handle errors
-  // TODO(b/525845074): Implement CSE/IRM protections
   if (result.has_value()) {
     auto& fetch_result = *result;
     if (fetch_result->annotated_page_content_result.has_value()) {

@@ -8,6 +8,7 @@
 
 #include "base/check.h"
 #include "base/functional/bind.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
@@ -202,12 +203,6 @@ std::string WebUIToolbarLayoutCssHelper::GenerateLayoutConstantsCss() {
     css_string.append("--touch-mode: 0;");
   }
 
-  if (gfx::Animation::ShouldRenderRichAnimation()) {
-    css_string.append("--animations-enabled: 1;");
-  } else {
-    css_string.append("--animations-enabled: 0;");
-  }
-
   // Add LayoutConstant values.
   for (int layout_constant_num = 0;
        layout_constant_num <= static_cast<int>(LayoutConstant::kLast);
@@ -234,6 +229,8 @@ std::string WebUIToolbarLayoutCssHelper::GenerateLayoutConstantsCss() {
             css_string);
   AddInsets("--toolbar-button-padding", GetLayoutInsets(TOOLBAR_BUTTON),
             css_string);
+  AddInsets("--toolbar-interior-margin",
+            GetLayoutInsets(TOOLBAR_INTERIOR_MARGIN), css_string);
   base::StrAppend(&css_string,
                   {"--avatar-chip-icon-label-spacing:",
                    base::NumberToString(kAvatarChipIconLabelSpacing), "px;"});
@@ -253,6 +250,9 @@ std::string WebUIToolbarLayoutCssHelper::GenerateLayoutConstantsCss() {
                    views::style::STYLE_PRIMARY, typography_provider,
                    css_string);
   AddFontVariables("--toolbar-button", CONTEXT_TOOLBAR_BUTTON,
+                   views::style::STYLE_PRIMARY, typography_provider,
+                   css_string);
+  AddFontVariables("--drag-template", views::style::CONTEXT_BUTTON,
                    views::style::STYLE_PRIMARY, typography_provider,
                    css_string);
 
@@ -383,10 +383,26 @@ void WebUIToolbarLayoutCssHelper::AddInsets(std::string_view prefix,
   base::StrAppend(
       &css_string,
       {prefix, "-bottom:", base::NumberToString(insets.bottom()), "px;"});
+  // TODO(crbug.com/538651978): Deprecate physical -left and -right variables
+  // in favor of logical -start and -end once all WebUI toolbar components
+  // adopt logical CSS properties.
   base::StrAppend(
       &css_string,
       {prefix, "-left:", base::NumberToString(insets.left()), "px;"});
   base::StrAppend(
       &css_string,
       {prefix, "-right:", base::NumberToString(insets.right()), "px;"});
+  // Output logical -start and -end variables so WebUI stylesheets can use
+  // logical CSS rules without relying on physical -left or -right variables,
+  // correctly accommodating both LTR and RTL layouts.
+  base::StrAppend(&css_string,
+                  {prefix, "-start:",
+                   base::NumberToString(base::i18n::IsRTL() ? insets.right()
+                                                            : insets.left()),
+                   "px;"});
+  base::StrAppend(&css_string,
+                  {prefix, "-end:",
+                   base::NumberToString(base::i18n::IsRTL() ? insets.left()
+                                                            : insets.right()),
+                   "px;"});
 }

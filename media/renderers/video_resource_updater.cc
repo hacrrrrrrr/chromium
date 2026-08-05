@@ -209,6 +209,7 @@ SupportedMultiPlaneChannelFormat(
             viz::SharedImageFormat::ChannelFormat::k8)) {
       return viz::SharedImageFormat::ChannelFormat::k8;
     }
+    return std::nullopt;
   }
   // TODO(https:/crbug.com/481590672): Checking `supports_r16_shared_images`
   // may be too pessimistic. Consider removing it.
@@ -839,7 +840,6 @@ VideoFrameExternalResource VideoResourceUpdater::CreateForHardwareFrame(
           : kUnpremul_SkAlphaType;
 
   viz::TransferableResource::MetadataOverride overrides = {
-      .is_overlay_candidate = video_frame->metadata().allow_overlay,
       .color_space = video_frame->ColorSpace(),
       .alpha_type = alpha_type,
   };
@@ -1089,6 +1089,7 @@ bool VideoResourceUpdater::WriteYUVPixelsForAllPlanesToTexture(
       }
 
       if (is_16bit_float) {
+        CHECK_GT(bits_per_channel, 8u);
         int max_value = 1 << bits_per_channel;
         // Use 1.0/max_value to be consistent with multiplanar shared images
         // which create TextureDrawQuads and don't take in a multiplier, offset.

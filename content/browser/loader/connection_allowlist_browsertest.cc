@@ -2,15 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "services/network/public/cpp/connection_allowlist.h"
+
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/run_loop.h"
+#include "base/strings/strcat.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
@@ -18,22 +24,36 @@
 #include "content/browser/preloading/prefetch/prefetch_service.h"
 #include "content/browser/preloading/prefetch/prefetch_status.h"
 #include "content/browser/preloading/prerender/prerender_features.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/storage_partition_impl.h"
+#include "content/browser/webid/fake_identity_request_dialog_controller.h"
+#include "content/browser/webid/request_service.h"
+#include "content/browser/webid/test/webid_test_content_browser_client.h"
+#include "content/browser/webid/webid_utils.h"
+#include "content/common/features.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/webid/email_verifier.h"
+#include "content/public/browser/webid/federated_identity_permission_context_delegate.h"
+#include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/page_type.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_content_browser_client.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/navigation_handle_observer.h"
 #include "content/public/test/prerender_test_util.h"
 #include "content/public/test/service_worker_test_helpers.h"
 #include "content/public/test/test_devtools_protocol_client.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/url_loader_monitor.h"
 #include "content/shell/browser/shell.h"
+#include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/connection_tracker.h"
@@ -46,25 +66,101 @@
 #include "services/network/public/cpp/connection_allowlist_metrics.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
+#include "third_party/abseil-cpp/absl/strings/str_format.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/notifications/platform_notification_data.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
+#include "third_party/blink/public/mojom/webid/email_verification_request.mojom.h"
+#include "third_party/blink/public/mojom/webid/federated_request.mojom.h"
 #include "url/gurl.h"
+#include "url/origin.h"
+#include "url/url_constants.h"
 
 namespace content {
 
 namespace {
+
+using blink::mojom::EmailVerificationRequestResult;
+using blink::mojom::FederatedRequestResult;
+using ::testing::AnyOf;
+using ::testing::Contains;
+using ::testing::Field;
+using ::testing::HasSubstr;
+using ::testing::Matcher;
+using ::testing::Not;
+using ::testing::ResultOf;
+
 constexpr char kSameOriginAllowlistedPage[] = "/response_origin.html";
 constexpr char kCrossOriginAllowlistedPage[] =
     "/response_and_cross_origin.html";
+
+// These variables are for FedCM API and Email Verification Protocol tests.
+constexpr char kFedCmScript[] = R"(navigator.credentials.get({
+  identity: {
+    providers: [{
+      configURL: $1,
+      clientId: '1234'
+    }]
+  }
+}).then(
+  token => 'success',
+  error => error.name + ': ' + error.message
+))";
+constexpr char kFedCmDisconnectScript[] = R"(IdentityCredential.disconnect({
+  configURL: $1,
+  clientId: '1234',
+  accountHint: '1234'
+}).then(
+  () => 'success',
+  error => error.name + ': ' + error.message
+))";
+constexpr char kIdpHost[] = "b.test";
+constexpr char kConfigPath[] = "/fedcm.json";
+constexpr char kWellKnownPath[] = "/.well-known/web-identity";
+constexpr char kTokenPath[] = "/token";
+constexpr char kAvatarPath[] = "/avatar.png";
+constexpr char kLoginPath[] = "/login";
+constexpr char kAccountPath[] = "/accounts";
+constexpr char kClientMetadataPath[] = "/client_metadata";
+constexpr char kDisconnectPath[] = "/disconnect";
+constexpr char kEmailVerificationWellKnownPath[] =
+    "/.well-known/email-verification";
+constexpr char kJwksPath[] = "/jwks";
+constexpr char kDnsPath[] = "/dns";
+constexpr char kAccountID[] = "1234";
+constexpr char kImageBytes[] = "01010101001010101010101010101";
+constexpr char kConfigFileStr[] = "config file";
+constexpr char kWellKnownFileStr[] = "well-known file";
+constexpr char kTokenStr[] = "id assertion endpoint";
+constexpr char kAccountStr[] = "accounts endpoint";
+constexpr char kRequestWillBeSent[] = "Network.requestWillBeSent";
+constexpr char kRequestIdTokenHistogram[] = "Blink.FedCm.Status.RequestIdToken";
+constexpr char kIdpSigninMatchHistogram[] = "Blink.FedCm.Status.IdpSigninMatch";
+constexpr char kDisconnectHistogram[] = "Blink.FedCm.Status.Disconnect";
+
+Matcher<WebContentsConsoleObserver::Message> HasConsoleMessage(
+    const std::string& expected_substr) {
+  return Field(
+      &WebContentsConsoleObserver::Message::message,
+      ResultOf([](const std::u16string& s) { return base::UTF16ToUTF8(s); },
+               HasSubstr(expected_substr)));
 }
 
 bool IsPrerender2FallbackPrefetchSpecRulesEnabled() {
   return base::FeatureList::IsEnabled(
       features::kPrerender2FallbackPrefetchSpecRules);
+}
+
+bool MatchesNetworkRequest(const std::string& expected_url,
+                           const std::string& expected_method,
+                           const base::DictValue& params) {
+  const std::string* url = params.FindStringByDottedPath("request.url");
+  const std::string* method = params.FindStringByDottedPath("request.method");
+  return url && *url == expected_url && method && *method == expected_method;
 }
 
 struct ResponseEntry {
@@ -91,9 +187,7 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
             base::BindRepeating(&ConnectionAllowlistTest::GetWebContents,
                                 base::Unretained(this))) {
     scoped_feature_list_.InitWithFeatures(
-        /*enabled_features=*/{network::features::kConnectionAllowlists,
-                              blink::features::
-                                  kOverrideConnectionAllowlistOriginTrial},
+        /*enabled_features=*/{network::features::kConnectionAllowlists},
         /*disabled_features=*/{});
   }
   ~ConnectionAllowlistTest() override { content_browser_client_.reset(); }
@@ -120,6 +214,10 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
   void RegisterResponse(const std::string& relative_url,
                         ResponseEntry&& entry) {
     response_map_[relative_url] = std::move(entry);
+  }
+
+  void UnregisterResponse(const std::string& relative_url) {
+    response_map_.erase(relative_url);
   }
 
   WebContents* GetWebContents() { return shell()->web_contents(); }
@@ -149,6 +247,27 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
     });
   }
 
+  void ExpectRequestsSucceeded(URLLoaderMonitor& monitor,
+                               const std::vector<GURL>& urls) {
+    for (const GURL& url : urls) {
+      EXPECT_EQ(monitor.WaitForRequestCompletion(url).error_code, net::OK);
+    }
+  }
+
+  void ResetNetworkState(net::test_server::ConnectionTracker& tracker) {
+    auto* network_context = shell()
+                                ->web_contents()
+                                ->GetBrowserContext()
+                                ->GetDefaultStoragePartition()
+                                ->GetNetworkContext();
+    base::RunLoop close_all_connections_loop;
+    network_context->CloseAllConnections(
+        close_all_connections_loop.QuitClosure());
+    close_all_connections_loop.Run();
+
+    tracker.ResetCounts();
+  }
+
  protected:
   std::unique_ptr<net::test_server::HttpResponse> ServeResponses(
       const net::test_server::HttpRequest& request) {
@@ -164,6 +283,17 @@ class ConnectionAllowlistTest : public ContentBrowserTest {
           response->set_content_type(value);
         } else {
           response->AddCustomHeader(key, value);
+        }
+      }
+
+      // Adding the required response headers for CORS requests.
+      auto origin_it = request.headers.find("origin");
+      if (origin_it != request.headers.end()) {
+        auto mode_it = request.headers.find("sec-fetch-mode");
+        if (mode_it != request.headers.end() && mode_it->second == "cors") {
+          response->AddCustomHeader("Access-Control-Allow-Origin",
+                                    origin_it->second);
+          response->AddCustomHeader("Access-Control-Allow-Credentials", "true");
         }
       }
 
@@ -406,18 +536,17 @@ class AlwaysPreconnectContentBrowserClient
   }
 };
 
-// TODO(https://crbug.com/497205155): Fix flakiness and enable this test.
 IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
-                       DISABLED_NavigationRequestPreconnectAllowed) {
+                       NavigationRequestPreconnectAllowed) {
   net::test_server::ConnectionTracker connection_tracker(
       &embedded_https_test_server());
   AlwaysPreconnectContentBrowserClient client;
 
   std::string_view title_page{"/title.html"};
-  RegisterResponse(
-      kSameOriginAllowlistedPage,
-      ResponseEntry("<html><body>Hello</body></html>",
-                    {{"Connection-Allowlist", "(response-origin)"}}));
+  RegisterResponse(kCrossOriginAllowlistedPage,
+                   ResponseEntry("<html><body>Hello</body></html>",
+                                 {{"Connection-Allowlist",
+                                   R"((response-origin "*://b.test:*/*"))"}}));
   RegisterResponse(
       std::string{title_page},
       ResponseEntry("<html><head><title>Title</title></head></html>", {}));
@@ -431,13 +560,16 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
 
   EXPECT_TRUE(
       NavigateToURL(shell(), embedded_https_test_server().GetURL(
-                                 "a.test", kSameOriginAllowlistedPage)));
+                                 "a.test", kCrossOriginAllowlistedPage)));
 
-  connection_tracker.ResetCounts();
-  // Navigation to url allowed by connection allowlist succeeds.
+  ResetNetworkState(connection_tracker);
+  // Navigation to url allowed by connection allowlist succeeds. Use a
+  // cross-origin url to avoid the keep-alive socket for "a.test" being reused.
+  // Otherwise, no new connection is made, then `connection_tracker` will not
+  // record the connection.
   EXPECT_TRUE(NavigateToURLFromRenderer(
       shell()->web_contents(),
-      embedded_https_test_server().GetURL("a.test", title_page)));
+      embedded_https_test_server().GetURL("b.test", title_page)));
 
   // Preconnect to the same url also succeeds.
   connection_tracker.WaitForAcceptedConnections(1u);
@@ -470,7 +602,7 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
       NavigateToURL(shell(), embedded_https_test_server().GetURL(
                                  "a.test", kSameOriginAllowlistedPage)));
 
-  connection_tracker.ResetCounts();
+  ResetNetworkState(connection_tracker);
   // Navigation to url blocked by connection allowlist fails.
   EXPECT_FALSE(NavigateToURLFromRenderer(
       shell()->web_contents(),
@@ -488,17 +620,17 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
 
   std::string_view title_page{"/title.html"};
   std::string_view nested_page{"/nested.html"};
-  RegisterResponse(
-      kSameOriginAllowlistedPage,
-      ResponseEntry(JsReplace(R"(
+  RegisterResponse(kCrossOriginAllowlistedPage,
+                   ResponseEntry(JsReplace(R"(
         <html>
           <body>
             <iframe id="iframe" src=$1>
           </body>
         </html>
       )",
-                              nested_page),
-                    {{"Connection-Allowlist", "(response-origin)"}}));
+                                           nested_page),
+                                 {{"Connection-Allowlist",
+                                   R"((response-origin "*://b.test:*/*"))"}}));
   RegisterResponse(
       std::string{nested_page},
       ResponseEntry("<html><head><title>Nested</title></head></html>",
@@ -516,21 +648,24 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
 
   EXPECT_TRUE(
       NavigateToURL(shell(), embedded_https_test_server().GetURL(
-                                 "a.test", kSameOriginAllowlistedPage)));
+                                 "a.test", kCrossOriginAllowlistedPage)));
 
   RenderFrameHost* child_frame =
       ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
   ASSERT_TRUE(child_frame);
 
-  connection_tracker.ResetCounts();
+  ResetNetworkState(connection_tracker);
 
   // Navigating the iframe to url allowed by the initiator connection allowlist
   // succeeds. Note the iframe document has an empty connection allowlist, which
   // blocks all network connections. However, it is the initiator connection
-  // allowlist that should be enforced.
+  // allowlist that should be enforced. Use a cross-origin url to avoid the
+  // keep-alive socket for "a.test" being reused. Otherwise, no new connection
+  // is made, then `connection_tracker` will not record the connection.
   EXPECT_TRUE(ExecJs(
       shell()->web_contents(),
-      JsReplace("document.getElementById('iframe').src = $1", title_page)));
+      JsReplace("document.getElementById('iframe').src = $1",
+                embedded_https_test_server().GetURL("b.test", title_page))));
 
   // Preconnect to the same url also succeeds.
   connection_tracker.WaitForAcceptedConnections(1u);
@@ -579,12 +714,14 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest,
       ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
   ASSERT_TRUE(child_frame);
 
-  connection_tracker.ResetCounts();
+  ResetNetworkState(connection_tracker);
 
   // Navigating the iframe to url blocked by the initiator connection allowlist
   // fails. Note the iframe document has a connection allowlist that matches the
   // navigation url. However, it is the initiator connection allowlist that
-  // should be enforced.
+  // should be enforced. Use a cross-origin url to avoid the keep-alive socket
+  // for "a.test" being reused. Otherwise, no new connection is made, then
+  // `connection_tracker` will not record the connection.
   EXPECT_TRUE(ExecJs(
       shell()->web_contents(),
       JsReplace("document.getElementById('iframe').src = $1",
@@ -3455,5 +3592,2577 @@ IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, GetConnectionAllowlists) {
                    ->GetConnectionAllowlists()
                    .report_only.has_value());
 }
+
+// Connection-Allowlist embedded enforcement (the `connectionallowlist` iframe
+// attribute). This fixture enables the runtime feature so the renderer delivers
+// the attribute. See https://github.com/WICG/connection-allowlists/issues/1.
+class ConnectionAllowlistEmbeddedEnforcementTest
+    : public ConnectionAllowlistTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    ConnectionAllowlistTest::SetUpCommandLine(command_line);
+    // The renderer only delivers the `connectionallowlist` attribute when the
+    // ConnectionAllowlistEmbeddedEnforcement runtime feature is enabled, which
+    // in turn depends on the ConnectionAllowlist feature.
+    command_line->AppendSwitchASCII(
+        switches::kEnableBlinkFeatures,
+        "ConnectionAllowlist,ConnectionAllowlistEmbeddedEnforcement");
+  }
+};
+
+// The renderer parses the `connectionallowlist` attribute into a
+// ConnectionAllowlist and delivers it to the browser's FrameTreeNode, and the
+// `connectionAllowlist` IDL attribute reflects the content attribute.
+// (Enforcement of the delivered value is added in a follow-up CL.)
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       AttributeDeliveredToBrowser) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  constexpr char kAllowlist[] = R"(("https://good.test/" response-origin))";
+
+  TestNavigationObserver observer(shell()->web_contents());
+  EXPECT_TRUE(
+      ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.id = 'test_iframe';
+        f.setAttribute('connectionallowlist', $1);
+        f.src = $2;
+        document.body.appendChild(f);
+      )",
+                                                kAllowlist, child_url)));
+  observer.Wait();
+
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+  FrameTreeNode* child =
+      static_cast<RenderFrameHostImpl*>(child_rfh)->frame_tree_node();
+
+  // The browser received the parsed ConnectionAllowlist on the child's
+  // FrameTreeNode. `response-origin` resolution is deferred (the browser
+  // resolves it against the frame's response origin later), so it sets
+  // `match_response_origin` rather than appearing in the allowlist.
+  ASSERT_TRUE(child->connection_allowlist_attribute().has_value());
+  const network::ConnectionAllowlist& parsed =
+      child->connection_allowlist_attribute().value();
+  EXPECT_EQ(parsed.allowlist, std::vector<std::string>({"https://good.test/"}));
+  EXPECT_TRUE(parsed.match_response_origin);
+
+  // The `connectionAllowlist` IDL attribute reflects the content attribute.
+  EXPECT_EQ(
+      kAllowlist,
+      EvalJs(shell()->web_contents(),
+             "document.getElementById('test_iframe').connectionAllowlist"));
+}
+
+// Once a valid `connectionallowlist` value has been delivered to the browser,
+// setting the attribute to an invalid value does not clear the browser's
+// requirement (fail closed): the invalid value is dropped in the renderer
+// without notifying the browser, so the last valid requirement stays in effect.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       InvalidAttributeKeepsPreviousRequirement) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  constexpr char kAllowlist[] = R"(("https://good.test/"))";
+
+  TestNavigationObserver observer(shell()->web_contents());
+  EXPECT_TRUE(
+      ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.id = 'test_iframe';
+        f.setAttribute('connectionallowlist', $1);
+        f.src = $2;
+        document.body.appendChild(f);
+      )",
+                                                kAllowlist, child_url)));
+  observer.Wait();
+
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+  FrameTreeNode* child =
+      static_cast<RenderFrameHostImpl*>(child_rfh)->frame_tree_node();
+  ASSERT_TRUE(child->connection_allowlist_attribute().has_value());
+  EXPECT_EQ(child->connection_allowlist_attribute().value().allowlist,
+            std::vector<std::string>({"https://good.test/"}));
+
+  // Set the attribute to an invalid (header-injecting) value. The renderer
+  // drops it and does not notify the browser, so the delivered requirement is
+  // unchanged.
+  constexpr char kInvalidAllowlist[] = "(response-origin)\nX-Injected: evil";
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
+      document.getElementById('test_iframe').setAttribute(
+          'connectionallowlist', $1);
+  )",
+                                                        kInvalidAllowlist)));
+  // Round-trip through the main frame's renderer to flush any would-be IPC.
+  EXPECT_EQ(true, EvalJs(shell()->web_contents(), "true"));
+
+  ASSERT_TRUE(child->connection_allowlist_attribute().has_value());
+  EXPECT_EQ(child->connection_allowlist_attribute().value().allowlist,
+            std::vector<std::string>({"https://good.test/"}));
+}
+
+// Tests network requests made by FedCM API are checked against the initiator
+// frame's connection allowlist.
+//
+// The tests exercise the FedCM flow for the following requests:
+// - Fetch of the well-known file (and possible redirect).
+// - Fetch of the config file.
+// - Token.
+// - Images (e.g., account avatar).
+// - Top-level navigation triggered by the "redirect_to" in the token endpoint
+//   response.
+// - Client metadata.
+// - Accounts.
+// - Disconnect.
+//
+// For each request, the tests verify the request is allowed when the URL
+// matches the connection allowlist URL patterns, otherwise the request is
+// blocked.
+
+class ConnectionAllowlistFedCmTest : public ConnectionAllowlistTest,
+                                     public TestDevToolsProtocolClient {
+ public:
+  ConnectionAllowlistFedCmTest() = default;
+  ~ConnectionAllowlistFedCmTest() override = default;
+
+  void SetUpOnMainThread() override {
+    ConnectionAllowlistTest::SetUpOnMainThread();
+
+    test_browser_client_ =
+        std::make_unique<webid::WebIdTestContentBrowserClient>();
+    SetTestIdentityRequestDialogController(kAccountID);
+  }
+
+  void SetTestIdentityRequestDialogController(
+      std::optional<std::string> dialog_selected_account) {
+    auto controller = std::make_unique<FakeIdentityRequestDialogController>(
+        std::move(dialog_selected_account), /*web_contents=*/nullptr);
+    test_browser_client_->SetIdentityRequestDialogController(
+        std::move(controller));
+  }
+
+  // Register the required responses by the FedCM API.
+  void RegisterFedCmResponses() {
+    ASSERT_TRUE(embedded_https_test_server().Start());
+
+    GURL config_url =
+        embedded_https_test_server().GetURL(kIdpHost, kConfigPath);
+    GURL avatar_url =
+        embedded_https_test_server().GetURL(kIdpHost, kAvatarPath);
+
+    RegisterResponse(
+        kWellKnownPath,
+        ResponseEntry(
+            absl::StrFormat(R"({"provider_urls": ["%s"]})", config_url.spec()),
+            {{"Content-Type", "application/json"}}));
+    RegisterResponse(kConfigPath,
+                     ResponseEntry(R"({
+      "accounts_endpoint": "/accounts",
+      "id_assertion_endpoint": "/token",
+      "login_url": "/login",
+      "client_metadata_endpoint": "/client_metadata",
+      "disconnect_endpoint": "/disconnect"
+    })",
+                                   {{"Content-Type", "application/json"}}));
+
+    RegisterResponse(
+        kAccountPath,
+        ResponseEntry(absl::StrFormat(R"({
+          "accounts": [{
+            "id": "%s",
+            "given_name": "Jane",
+            "name": "Jane Doe",
+            "email": "jane@example.com",
+            "picture": "%s"
+          }]
+        })",
+                                      kAccountID, avatar_url.spec()),
+                      {{"Content-Type", "application/json"}}));
+    RegisterResponse(kTokenPath,
+                     ResponseEntry(R"({"token": "fake_token"})",
+                                   {{"Content-Type", "application/json"}}));
+    RegisterResponse(kLoginPath, ResponseEntry("login", {}));
+
+    RegisterResponse(
+        kClientMetadataPath,
+        ResponseEntry("{}", {{"Content-Type", "application/json"}}));
+    RegisterResponse(
+        kAvatarPath,
+        ResponseEntry(kImageBytes, {{"Content-Type", "image/png"},
+                                    {"Cache-Control", "max-age=3600"}}));
+
+    RegisterResponse(
+        kDisconnectPath,
+        ResponseEntry(absl::StrFormat(R"({"account_id": "%s"})", kAccountID),
+                      {{"Content-Type", "application/json"}}));
+  }
+
+  GURL MainURL() const {
+    return embedded_https_test_server().GetURL("a.test",
+                                               kSameOriginAllowlistedPage);
+  }
+
+  GURL IdpURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost,
+                                               kSameOriginAllowlistedPage);
+  }
+
+  GURL ConfigURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kConfigPath);
+  }
+
+  GURL WellKnownURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kWellKnownPath);
+  }
+
+  GURL AccountsURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kAccountPath);
+  }
+
+  GURL TokenURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kTokenPath);
+  }
+
+  GURL AvatarURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kAvatarPath);
+  }
+
+  GURL ClientMetadataURL() const {
+    return embedded_https_test_server().GetURL(
+        kIdpHost,
+        base::StrCat({kClientMetadataPath, "?client_id=", kAccountID}));
+  }
+
+  GURL DisconnectURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kDisconnectPath);
+  }
+
+  void RegisterConnectionAllowlistResponse(std::string_view allowlist) {
+    RegisterResponse(
+        kSameOriginAllowlistedPage,
+        ResponseEntry("<html><body>Hello</body></html>",
+                      {{"Connection-Allowlist", std::string(allowlist)}}));
+  }
+
+  std::string RunFedCmScript(const ToRenderFrameHost& execution_target) {
+    return EvalJs(execution_target, JsReplace(kFedCmScript, ConfigURL()))
+        .ExtractString();
+  }
+
+  std::string RunFedCmDisconnectScript() {
+    return EvalJs(shell()->web_contents(),
+                  JsReplace(kFedCmDisconnectScript, ConfigURL()))
+        .ExtractString();
+  }
+
+  std::unique_ptr<WebContentsConsoleObserver> CreateConsoleObserver(
+      std::string_view expected_substr) {
+    auto observer =
+        std::make_unique<WebContentsConsoleObserver>(shell()->web_contents());
+    observer->SetPattern(base::StrCat({"*", expected_substr, "*"}));
+    return observer;
+  }
+
+ private:
+  base::test::ScopedFeatureList fedcm_feature_list_{
+      features::kFedCmPreservePortsForTesting};
+  std::unique_ptr<webid::WebIdTestContentBrowserClient> test_browser_client_;
+};
+
+// FedCM API's fetch of the well-known file is blocked by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmWellKnownBlocked) {
+  base::HistogramTester histogram_tester;
+  // FedCM API initiates the fetch of well-known file and the config file in
+  // parallel. The connection allowlist allows the config file URL but not the
+  // well-known file URL. This ensures the console error from the fetch of
+  // well-known file does not get overridden.
+  RegisterConnectionAllowlistResponse(R"(("*://*:*/fedcm.json"))");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  AttachToWebContents(shell()->web_contents());
+  SendCommandSync("Network.enable");
+
+  std::optional<std::string> well_known_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kWellKnownFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(well_known_response_error);
+
+  // Observe the console errors.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kWellKnownBlockedByConnectionAllowlist));
+  auto network_console_observer =
+      CreateConsoleObserver(well_known_response_error.value());
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Because FedCM avoids exposing specific errors to the website, all failures
+  // lead to "Error retrieving a token".
+  EXPECT_THAT(RunFedCmScript(shell()->web_contents()),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Verify that DevTools received Network.requestWillBeSent for the blocked
+  // well-known request and that its method is "GET".
+  auto matches_well_known_get = [](const std::string& expected_url,
+                                   const base::DictValue& params) {
+    const std::string* url = params.FindStringByDottedPath("request.url");
+    const std::string* method = params.FindStringByDottedPath("request.method");
+    return url && *url == expected_url && method && *method == "GET";
+  };
+  EXPECT_FALSE(
+      WaitForMatchingNotification(
+          kRequestWillBeSent,
+          base::BindRepeating(matches_well_known_get, WellKnownURL().spec()))
+          .empty());
+
+  DetachProtocolClient();
+
+  // Verify the config file request completed successfully.
+  ExpectRequestsSucceeded(monitor, {ConfigURL()});
+
+  // The request to well-known should be blocked, then accounts and token will
+  // not be requested.
+  EXPECT_FALSE(monitor.GetRequestInfo(WellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the fetch of the well-known file.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kWellKnownBlockedByConnectionAllowlist, 1);
+}
+
+// Similar to the test `FedCmWellKnownBlocked`, but runs the FedCM API in a
+// cross-origin iframe. FedCM API's fetch of the well-known file initiated from
+// the iframe is blocked by the connection allowlist associated with the iframe,
+// which does not allow the request URL.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmCrossOriginIframeWellKnownBlocked) {
+  base::HistogramTester histogram_tester;
+  // FedCM API initiates the fetch of well-known file and the config file in
+  // parallel. The connection allowlist allows the config file URL but not the
+  // well-known file URL. This ensures the console error from the fetch of
+  // well-known file does not get overridden.
+  // Note in this test, it is the cross-origin iframe that will receive the
+  // response that contains the connection allowlist.
+  RegisterConnectionAllowlistResponse(R"(("*://*:*/fedcm.json"))");
+
+  RegisterResponse(
+      "/iframe.html",
+      ResponseEntry("<html><body><iframe id='child' "
+                    "allow='identity-credentials-get'></iframe></body></html>",
+                    {}));
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(
+      shell(), embedded_https_test_server().GetURL("c.test", "/iframe.html")));
+  EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "child", MainURL()));
+
+  // The child frame should be cross origin to the main frame.
+  RenderFrameHost* main_frame = shell()->web_contents()->GetPrimaryMainFrame();
+  RenderFrameHost* iframe = ChildFrameAt(main_frame, 0);
+  ASSERT_TRUE(iframe);
+  ASSERT_FALSE(main_frame->GetLastCommittedOrigin().IsSameOriginWith(
+      iframe->GetLastCommittedOrigin()));
+
+  std::optional<std::string> well_known_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kWellKnownFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(well_known_response_error);
+
+  // Observe the console errors.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kWellKnownBlockedByConnectionAllowlist));
+  auto network_console_observer =
+      CreateConsoleObserver(well_known_response_error.value());
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Because FedCM avoids exposing specific errors to the website, all failures
+  // lead to "Error retrieving a token".
+  EXPECT_THAT(RunFedCmScript(iframe),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Verify the config file request completed successfully.
+  ExpectRequestsSucceeded(monitor, {ConfigURL()});
+
+  // The request to well-known should be blocked, then accounts and token will
+  // not be requested.
+  EXPECT_FALSE(monitor.GetRequestInfo(WellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the fetch of the well-known file.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kWellKnownBlockedByConnectionAllowlist, 1);
+}
+
+// FedCM API's fetch of the well-known file is redirected, and redirects are
+// allowed by the connection allowlist (`redirects=allow`). Note: The well-known
+// file request is the only request that can follow redirect. All other requests
+// by FedCM API do not follow redirects.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmWellKnownRedirectAllowed) {
+  net::test_server::ControllableHttpResponse controllable_response(
+      &embedded_https_test_server(), kWellKnownPath);
+
+  // The connection allowlist allows the initial request URL of the well-known
+  // file fetch and the redirect target. It also allows redirects as it has
+  // `redirects=allow`.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/another/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/token"
+               );redirects=allow
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  // Unregister the response registered by the setup helper function because the
+  // redirect needs to be done using a ControllableHttpResponse.
+  UnregisterResponse(kWellKnownPath);
+  RegisterResponse("/another/.well-known/web-identity",
+                   ResponseEntry(absl::StrFormat(R"({"provider_urls": ["%s"]})",
+                                                 ConfigURL().spec()),
+                                 {{"Content-Type", "application/json"}}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Trigger FedCM request and save the promise.
+  // ExecuteScriptAsync is used because the request will hang waiting for the
+  // ControllableHttpResponse to respond.
+  ExecuteScriptAsync(shell()->web_contents(),
+                     base::StrCat({"window.fed_cm_promise = ",
+                                   JsReplace(kFedCmScript, ConfigURL())}));
+  controllable_response.WaitForRequest();
+
+  // Redirect to the target URL.
+  GURL target_url = embedded_https_test_server().GetURL(
+      kIdpHost, "/another/.well-known/web-identity");
+  controllable_response.Send(
+      "HTTP/1.1 302 Found\r\n"
+      "Location: " +
+      target_url.spec() + "\r\n\r\n");
+  controllable_response.Done();
+
+  // Wait for the FedCM's fetch of the well-known file to succeed because the
+  // redirect is allowed by connection allowlist (`redirects=allow`).
+  EXPECT_EQ(
+      EvalJs(shell()->web_contents(), "window.fed_cm_promise").ExtractString(),
+      "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // There should not be any console error on the fetch of the well-known file.
+  std::optional<std::string> well_known_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kWellKnownFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(well_known_response_error);
+  EXPECT_THAT(
+      console_observer.messages(),
+      Not(Contains(AnyOf(
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kWellKnownNoResponse)),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kWellKnownBlockedByConnectionAllowlist)),
+          HasConsoleMessage(well_known_response_error.value())))));
+}
+
+// FedCM API's fetch of the well-known file is redirected, but redirects are
+// blocked by the connection allowlist. Note: The well-known file request is the
+// only request that can follow redirect. All other requests by FedCM API do not
+// follow redirects.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmWellKnownRedirectBlocked) {
+  base::HistogramTester histogram_tester;
+  net::test_server::ControllableHttpResponse controllable_response(
+      &embedded_https_test_server(), kWellKnownPath);
+
+  // The connection allowlist patterns match both the initial request URL and
+  // the redirected URL of the well-known file. But it does not allow any
+  // redirect as it has `redirects=block`.
+  RegisterConnectionAllowlistResponse(
+      R"(
+          (
+            "*://b.test:*/.well-known/web-identity"
+            "*://b.test:*/another/.well-known/web-identity"
+            "*://b.test:*/fedcm.json"
+            "*://b.test:*/accounts"
+            "*://b.test:*/token"
+          );redirects=block
+      )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  // Unregister the response registered by the setup helper function because the
+  // redirect needs to be done using a ControllableHttpResponse.
+  UnregisterResponse(kWellKnownPath);
+  RegisterResponse("/another/.well-known/web-identity",
+                   ResponseEntry(absl::StrFormat(R"({"provider_urls": ["%s"]})",
+                                                 ConfigURL().spec()),
+                                 {{"Content-Type", "application/json"}}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  std::optional<std::string> well_known_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(kWellKnownFileStr,
+                                                      net::ERR_FAILED);
+  ASSERT_TRUE(well_known_response_error);
+
+  // Observe the console errors. Note for redirects, the connection allowlist
+  // blocks with the error code `net::ERR_FAILED` instead of
+  // `net::ERR_NETWORK_ACCESS_REVOKED`. So the `FederatedRequestResult` will be
+  // the generic `kWellKnownNoResponse` instead of
+  // `kWellKnownBlockedByConnectionAllowlist` which is specific to connection
+  // allowlist.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kWellKnownNoResponse));
+  auto network_console_observer =
+      CreateConsoleObserver(well_known_response_error.value());
+
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL()});
+
+  // Trigger FedCM request and save the promise.
+  // ExecuteScriptAsync is used because the request will hang waiting for the
+  // ControllableHttpResponse to respond.
+  ExecuteScriptAsync(shell()->web_contents(),
+                     base::StrCat({"window.fed_cm_promise = ",
+                                   JsReplace(kFedCmScript, ConfigURL())}));
+
+  controllable_response.WaitForRequest();
+
+  // Redirect to the target URL.
+  GURL target_url = embedded_https_test_server().GetURL(
+      kIdpHost, "/another/.well-known/web-identity");
+  controllable_response.Send(
+      "HTTP/1.1 302 Found\r\n"
+      "Location: " +
+      target_url.spec() + "\r\n\r\n");
+  controllable_response.Done();
+
+  // Wait for the FedCM's fetch of the well-known file to fail because the
+  // redirect is not allowed by connection allowlist.
+  EXPECT_THAT(
+      EvalJs(shell()->web_contents(), "window.fed_cm_promise").ExtractString(),
+      HasSubstr(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kError)));
+
+  // The initial request to the `well_known_url` was allowed by the connection
+  // allowlist, so it should be observed by the URLLoaderMonitor. But it should
+  // fail due to the redirect being blocked with the error code net::ERR_FAILED.
+  EXPECT_EQ(monitor.WaitForRequestCompletion(WellKnownURL()).error_code,
+            net::ERR_FAILED);
+
+  // Even though the config file fetch succeeds, since well-known file fetch is
+  // blocked by connection allowlist, accounts and token will not be requested.
+  ExpectRequestsSucceeded(monitor, {ConfigURL()});
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the fetch of the well-known file.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kWellKnownNoResponse, 1);
+}
+
+// FedCM API's fetch of the config file is blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmConfigBlocked) {
+  base::HistogramTester histogram_tester;
+  // FedCM API initiates the fetch of well-known file and the config file in
+  // parallel. The connection allowlist allows the well-known file URL but not
+  // the config file URL. This ensures the console error from the fetch of
+  // config file does not get overridden.
+  RegisterConnectionAllowlistResponse(
+      R"(("*://*:*/.well-known/web-identity"))");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  std::optional<std::string> config_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kConfigFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(config_response_error);
+
+  // Observe the console errors.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kConfigBlockedByConnectionAllowlist));
+  auto network_console_observer =
+      CreateConsoleObserver(config_response_error.value());
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Because FedCM avoids exposing specific errors to the website, all failures
+  // lead to "Error retrieving a token".
+  EXPECT_THAT(RunFedCmScript(shell()->web_contents()),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Verify the well-known file request completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL()});
+
+  // The request to config should be blocked, then accounts and token will not
+  // be requested.
+  EXPECT_FALSE(monitor.GetRequestInfo(ConfigURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the fetch of the config file.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kConfigBlockedByConnectionAllowlist, 1);
+}
+
+// FedCM API's fetch of the well-known file and the config file are allowed by
+// the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmWellKnownAndConfigAllowed) {
+  // Both the well-known file URL and the config file URL are allowed by the
+  // connection allowlist.
+  RegisterConnectionAllowlistResponse(
+      R"(("*://*:*/fedcm.json" "*://*:*/.well-known/web-identity"))");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The FedCM script still fails because the connection allowlist does not
+  // allow subsequent requests to fetch the accounts. Because FedCM avoids
+  // exposing specific errors to the website, all failures lead to "Error
+  // retrieving a token".
+  EXPECT_THAT(RunFedCmScript(shell()->web_contents()),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Both requests to the `well_known_url` and the `config_url` are allowed by
+  // the connection allowlist.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL()});
+
+  // The requests to accounts and token are not allowed by the connection
+  // allowlist.
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should not be any console error on the fetch of the well-known file
+  // and the config file.
+  std::optional<std::string> well_known_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kWellKnownFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  std::optional<std::string> config_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kConfigFileStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(well_known_response_error);
+  ASSERT_TRUE(config_response_error);
+  EXPECT_THAT(
+      console_observer.messages(),
+      Not(Contains(AnyOf(
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kWellKnownNoResponse)),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kWellKnownBlockedByConnectionAllowlist)),
+          HasConsoleMessage(well_known_response_error.value()),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kConfigNoResponse)),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kConfigBlockedByConnectionAllowlist)),
+          HasConsoleMessage(config_response_error.value())))));
+}
+
+// FedCM API's fetch of the accounts is allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmAccountsAllowed) {
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/token"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/login"
+                 "*://b.test:*/accounts"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Trigger FedCM.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // There should not be any console error on the request to the accounts URL.
+  std::optional<std::string> accounts_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kAccountStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(accounts_response_error);
+  EXPECT_THAT(
+      console_observer.messages(),
+      Not(Contains(AnyOf(
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kAccountsNoResponse)),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kAccountsBlockedByConnectionAllowlist)),
+          HasConsoleMessage(accounts_response_error.value())))));
+}
+
+// FedCM API's fetch of the accounts file is blocked by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmAccountsBlocked) {
+  base::HistogramTester histogram_tester;
+  // Allow required request URLs but not accounts.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/token"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  std::optional<std::string> accounts_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kAccountStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(accounts_response_error);
+
+  // Observe the console errors.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kAccountsBlockedByConnectionAllowlist));
+  auto network_console_observer =
+      CreateConsoleObserver(accounts_response_error.value());
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Trigger FedCM. It should fail because `accounts_url` is blocked by the
+  // connection allowlist.
+  EXPECT_THAT(RunFedCmScript(shell()->web_contents()),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Verify the requests to the well-known and config completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL()});
+
+  // The request to accounts should be blocked, then the token will not be
+  // requested.
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the request to the accounts URL.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kAccountsBlockedByConnectionAllowlist, 1);
+  histogram_tester.ExpectUniqueSample(
+      kIdpSigninMatchHistogram,
+      webid::IdpSigninMatchStatus::kUnknownStatusWithoutAccounts, 1);
+}
+
+// Same as test `FedCmAccountsBlocked`, but invokes `SetIdpSigninStatus` and
+// verifies histogram `Blink.FedCm.Status.IdpSigninMatch`.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmAccountsBlockedWithSigninStatus) {
+  base::HistogramTester histogram_tester;
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/token"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  FederatedIdentityPermissionContextDelegate* delegate =
+      shell()
+          ->web_contents()
+          ->GetBrowserContext()
+          ->GetFederatedIdentityPermissionContext();
+  ASSERT_TRUE(delegate);
+  delegate->SetIdpSigninStatus(url::Origin::Create(ConfigURL()), true,
+                               std::nullopt);
+
+  std::optional<std::string> accounts_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kAccountStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(accounts_response_error);
+
+  auto network_console_observer =
+      CreateConsoleObserver(accounts_response_error.value());
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The failure dialog will remain open. The promise never resolves or rejects.
+  // So here `ExecuteScriptAsync` is used.
+  ExecuteScriptAsync(shell()->web_contents(),
+                     JsReplace(kFedCmScript, ConfigURL()));
+
+  // The request to accounts should be blocked, then the token will not be
+  // requested.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL()});
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the request to the accounts URL.
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  // Since IDP sign-in status is true but the account fetch failed with
+  // `ParseStatus::kBlockedByConnectionAllowlist`, a mismatch is logged to the
+  // histogram.
+  histogram_tester.ExpectUniqueSample(
+      kIdpSigninMatchHistogram,
+      webid::IdpSigninMatchStatus::kMismatchWithConnectionAllowlistBlock, 1);
+}
+
+// FedCM API's fetch of the token is allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmTokenAllowed) {
+  RegisterConnectionAllowlistResponse(R"(
+              (
+                response-origin
+                "*://b.test:*/fedcm.json"
+                "*://b.test:*/.well-known/web-identity"
+                "*://b.test:*/accounts"
+                "*://b.test:*/login"
+                "*://b.test:*/token"
+              )
+            )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The script should return "success" because the token request is allowed by
+  // the connection allowlist.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // There should not be any console error on the fetch of the token.
+  std::optional<std::string> token_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kTokenStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(token_response_error);
+  EXPECT_THAT(
+      console_observer.messages(),
+      Not(Contains(AnyOf(
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kIdTokenNoResponse)),
+          HasConsoleMessage(webid::GetConsoleErrorMessageFromResult(
+              FederatedRequestResult::kIdTokenBlockedByConnectionAllowlist)),
+          HasConsoleMessage(token_response_error.value())))));
+}
+
+// FedCM API's fetch of the token is blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmTokenBlocked) {
+  base::HistogramTester histogram_tester;
+  RegisterConnectionAllowlistResponse(R"(
+              (
+                response-origin
+                "*://b.test:*/fedcm.json"
+                "*://b.test:*/.well-known/web-identity"
+                "*://b.test:*/accounts"
+                "*://b.test:*/login"
+              )
+            )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  AttachToWebContents(shell()->web_contents());
+  SendCommandSync("Network.enable");
+
+  std::optional<std::string> token_response_error =
+      webid::ComputeConsoleMessageForHttpResponseCode(
+          kTokenStr, net::ERR_NETWORK_ACCESS_REVOKED);
+  ASSERT_TRUE(token_response_error);
+
+  // Observe the console errors.
+  auto fedcm_console_observer =
+      CreateConsoleObserver(webid::GetConsoleErrorMessageFromResult(
+          FederatedRequestResult::kIdTokenBlockedByConnectionAllowlist));
+  auto network_console_observer =
+      CreateConsoleObserver(token_response_error.value());
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Because FedCM avoids exposing specific errors to the website, all failures
+  // lead to "Error retrieving a token".
+  EXPECT_THAT(RunFedCmScript(shell()->web_contents()),
+              HasSubstr(webid::GetConsoleErrorMessageFromResult(
+                  FederatedRequestResult::kError)));
+
+  // Verify that DevTools received Network.requestWillBeSent for the blocked
+  // token request and that its method is "POST".
+  auto matches_token_post = [](const std::string& expected_url,
+                               const base::DictValue& params) {
+    const std::string* url = params.FindStringByDottedPath("request.url");
+    const std::string* method = params.FindStringByDottedPath("request.method");
+    return url && *url == expected_url && method && *method == "POST";
+  };
+  EXPECT_FALSE(WaitForMatchingNotification(
+                   kRequestWillBeSent,
+                   base::BindRepeating(matches_token_post, TokenURL().spec()))
+                   .empty());
+
+  DetachProtocolClient();
+
+  // The requests to well-known, config, and accounts should be allowed.
+  ExpectRequestsSucceeded(monitor,
+                          {WellKnownURL(), ConfigURL(), AccountsURL()});
+
+  // The request to token should be blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+
+  // There should be console errors on the fetch of the token.
+  EXPECT_TRUE(fedcm_console_observer->Wait());
+  EXPECT_TRUE(network_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kRequestIdTokenHistogram,
+      webid::RequestIdTokenStatus::kIdTokenBlockedByConnectionAllowlist, 1);
+}
+
+// FedCM API's fetch of the account picture is allowed by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmImageAllowed) {
+  RegisterConnectionAllowlistResponse(R"(
+              (
+                response-origin
+                "*://b.test:*/fedcm.json"
+                "*://b.test:*/.well-known/web-identity"
+                "*://b.test:*/accounts"
+                "*://b.test:*/token"
+                "*://b.test:*/login"
+                "*://b.test:*/avatar.png"
+              )
+            )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL(), AvatarURL()});
+
+  // Trigger FedCM. The script should return "success".
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL(), AccountsURL(),
+                                    TokenURL(), AvatarURL()});
+}
+
+// FedCM API's fetch of the account picture is blocked by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmImageBlocked) {
+  RegisterConnectionAllowlistResponse(R"(
+              (
+                response-origin
+                "*://b.test:*/fedcm.json"
+                "*://b.test:*/.well-known/web-identity"
+                "*://b.test:*/accounts"
+                "*://b.test:*/token"
+                "*://b.test:*/login"
+              )
+            )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL(), AvatarURL()});
+
+  // Trigger FedCM. The script should return "success" because the image failure
+  // is non-fatal.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify other requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The request to avatar should be blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(AvatarURL()).has_value());
+}
+
+// The FedCM `redirect_to` initiates a top-level navigation. The navigation URL
+// is allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmRedirectToAllowed) {
+  // Allow all required FedCM requests and the redirect_to target.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+                 "*://b.test:*/target.html"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  GURL target_url =
+      embedded_https_test_server().GetURL(kIdpHost, "/target.html");
+
+  // Token response: returns redirect_to to target.html.
+  RegisterResponse(kTokenPath,
+                   ResponseEntry(absl::StrFormat(R"({"redirect_to": "%s"})",
+                                                 target_url.spec()),
+                                 {{"Content-Type", "application/json"}}));
+  RegisterResponse("/target.html", ResponseEntry("target", {}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Force allow redirect_to for testing.
+  webid::RequestService::GetOrCreateForCurrentDocument(
+      shell()->web_contents()->GetPrimaryMainFrame())
+      ->SetForceAllowRedirectToForTesting(true);
+
+  TestNavigationObserver navigation_observer(shell()->web_contents(), 1);
+
+  // Trigger FedCM. Because there is a top-level navigation by `redirect_to`,
+  // the script resolves to "success" immediately.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify FedCM requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Wait for the top-level navigation triggered by `redirect_to`. It should be
+  // allowed.
+  navigation_observer.Wait();
+  EXPECT_TRUE(navigation_observer.last_navigation_succeeded());
+  EXPECT_EQ(navigation_observer.last_net_error_code(), net::OK);
+  EXPECT_EQ(navigation_observer.last_navigation_url(), target_url);
+  EXPECT_EQ(shell()->web_contents()->GetLastCommittedURL(), target_url);
+  NavigationEntry* entry =
+      shell()->web_contents()->GetController().GetLastCommittedEntry();
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->GetPageType(), PAGE_TYPE_NORMAL);
+}
+
+// The FedCM `redirect_to` initiates a top-level navigation. The navigation URL
+// is not allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmRedirectToBlocked) {
+  // Allow all required FedCM requests, but not the redirect_to target.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  GURL target_url =
+      embedded_https_test_server().GetURL(kIdpHost, "/target.html");
+
+  // Token response: returns redirect_to to target.html.
+  RegisterResponse(kTokenPath,
+                   ResponseEntry(absl::StrFormat(R"({"redirect_to": "%s"})",
+                                                 target_url.spec()),
+                                 {{"Content-Type", "application/json"}}));
+  RegisterResponse("/target.html", ResponseEntry("target", {}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(
+      {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Force allow redirect_to for testing.
+  webid::RequestService::GetOrCreateForCurrentDocument(
+      shell()->web_contents()->GetPrimaryMainFrame())
+      ->SetForceAllowRedirectToForTesting(true);
+
+  TestNavigationObserver navigation_observer(shell()->web_contents(), 1);
+
+  // Trigger FedCM. Because there is a top-level navigation by `redirect_to`,
+  // the script resolves to "success" immediately.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify FedCM requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // Wait for the top-level navigation triggered by `redirect_to`. It should end
+  // up being an error page because it is blocked by the connection allowlist.
+  navigation_observer.Wait();
+  EXPECT_FALSE(navigation_observer.last_navigation_succeeded());
+  EXPECT_EQ(navigation_observer.last_net_error_code(),
+            net::ERR_NETWORK_ACCESS_REVOKED);
+  EXPECT_EQ(navigation_observer.last_navigation_url(), target_url);
+  EXPECT_EQ(shell()->web_contents()->GetLastCommittedURL(), target_url);
+  NavigationEntry* entry =
+      shell()->web_contents()->GetController().GetLastCommittedEntry();
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->GetPageType(), PAGE_TYPE_ERROR);
+}
+
+// FedCM API's fetch of the client metadata file is allowed by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmClientMetadataAllowed) {
+  // Allow all required FedCM request URLs explicitly.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/token"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/login"
+                 "*://b.test:*/client_metadata*"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AccountsURL(),
+                            TokenURL(), ClientMetadataURL()});
+
+  // Trigger FedCM. It should succeed.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL(), AccountsURL(),
+                                    TokenURL(), ClientMetadataURL()});
+}
+
+// FedCM API's fetch of the client metadata file is blocked by the connection
+// allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest,
+                       FedCmClientMetadataBlocked) {
+  // Allow required request URLs but not client_metadata.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/token"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AccountsURL(),
+                            TokenURL(), ClientMetadataURL()});
+
+  // Trigger FedCM. It should succeed because client metadata failure is
+  // non-fatal.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify other requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The request to client metadata should be blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(ClientMetadataURL()).has_value());
+}
+
+// FedCM API's disconnect request is allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmDisconnectAllowed) {
+  // Allow all required FedCM requests explicitly.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+                 "*://b.test:*/disconnect"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  WebContentsConsoleObserver console_observer(shell()->web_contents());
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AccountsURL(),
+                            TokenURL(), DisconnectURL()});
+
+  // Sign in.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Disconnect. It should succeed.
+  EXPECT_EQ(RunFedCmDisconnectScript(), "success");
+
+  // Verify all requests completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL(), AccountsURL(),
+                                    TokenURL(), DisconnectURL()});
+
+  // There should not be any console error on the disconnect request.
+  EXPECT_THAT(
+      console_observer.messages(),
+      Not(Contains(HasConsoleMessage(webid::GetDisconnectConsoleErrorMessage(
+          webid::DisconnectStatus::kDisconnectBlockedByConnectionAllowlist)))));
+}
+
+// FedCM API's disconnect request is blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmTest, FedCmDisconnectBlocked) {
+  base::HistogramTester histogram_tester;
+  // Allow login flow, but not disconnect.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/avatar.png"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  // Observe the console errors.
+  auto disconnect_console_observer =
+      CreateConsoleObserver(webid::GetDisconnectConsoleErrorMessage(
+          webid::DisconnectStatus::kDisconnectBlockedByConnectionAllowlist));
+
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AccountsURL(),
+                            TokenURL(), DisconnectURL()});
+
+  // Sign in.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Try to disconnect. It should fail because the disconnect URL is blocked.
+  EXPECT_NE(RunFedCmDisconnectScript(), "success");
+
+  // Verify other requests completed successfully.
+  ExpectRequestsSucceeded(
+      monitor, {WellKnownURL(), ConfigURL(), AccountsURL(), TokenURL()});
+
+  // The request to disconnect should be blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(DisconnectURL()).has_value());
+
+  // There should be a console error on the disconnect request.
+  EXPECT_TRUE(disconnect_console_observer->Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      kDisconnectHistogram,
+      webid::DisconnectStatus::kDisconnectBlockedByConnectionAllowlist, 1);
+}
+
+// The request for cached account pictures requires enabling FedCM lightweight
+// mode feature.
+class ConnectionAllowlistFedCmLightweightModeTest
+    : public ConnectionAllowlistFedCmTest {
+ public:
+  ConnectionAllowlistFedCmLightweightModeTest() = default;
+  ~ConnectionAllowlistFedCmLightweightModeTest() override = default;
+
+ private:
+  base::test::ScopedFeatureList lightweight_mode_feature_list_{
+      features::kFedCmLightweightMode};
+};
+
+// FedCM API's request for cached account pictures is labelled with load flag:
+// `LOAD_ONLY_FROM_CACHE`. Even though it is a request for HTTP cache entries,
+// the connection allowlist should still apply.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmLightweightModeTest,
+                       FedCmCacheAccountPicturesAllowed) {
+  // Note this connection allowlist will be applied to both the `main_url` and
+  // the `idp_url`. They have different origins so `response-origin` will be
+  // evaluated differently.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+                 "*://b.test:*/avatar.png"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  // Navigate to IDP (b.test) and store the account via setStatus.
+  // On IDP, the account image URL "b.test/avatar.png" matches the allowlist
+  // pattern (response-origin) and is successfully downloaded and stored in the
+  // HTTP cache.
+  EXPECT_TRUE(NavigateToURL(shell(), IdpURL()));
+
+  {
+    URLLoaderMonitor url_loader_monitor({AvatarURL()});
+
+    // The account image URL is stored.
+    EXPECT_EQ(
+        EvalJs(shell()->web_contents(), JsReplace(R"((async () => {
+                 await navigator.login.setStatus("logged-in", {
+                   accounts: [{
+                     id: $1,
+                     name: "Jane Doe",
+                     email: "jane@example.com",
+                     picture: $2
+                   }]
+                 });
+                 return true;
+               })())",
+                                                  kAccountID, AvatarURL())),
+        true);
+
+    EXPECT_EQ(
+        url_loader_monitor.WaitForRequestCompletion(AvatarURL()).error_code,
+        net::OK);
+  }
+
+  // Navigate to RP (a.test) and trigger FedCM API.
+  // The cached account picture request to "b.test/avatar.png" succeeds because
+  // it matches the connection allowlist pattern ("*://b.test:*/avatar.png").
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AvatarURL()});
+
+  // Trigger FedCM. The script should return "success".
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify FedCM requests completed successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL(), AvatarURL()});
+  EXPECT_TRUE(monitor.GetRequestInfo(AvatarURL())->load_flags &
+              net::LOAD_ONLY_FROM_CACHE);
+}
+
+// FedCM API's request for cached account pictures is labelled with load flag:
+// `LOAD_ONLY_FROM_CACHE`. Even though it is a request for HTTP cache entries,
+// the connection allowlist should still apply.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistFedCmLightweightModeTest,
+                       FedCmCacheAccountPicturesBlocked) {
+  // Note this connection allowlist will be applied to both the `main_url` and
+  // the `idp_url`. They have different origins so `response-origin` will be
+  // evaluated differently.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/fedcm.json"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/client_metadata*"
+                 "*://b.test:*/token"
+                 "*://b.test:*/login"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterFedCmResponses());
+
+  // Navigate to IDP (b.test) and store the account via setStatus.
+  // On IDP, the account image URL "b.test/avatar.png" matches the allowlist
+  // pattern (response-origin) and is successfully downloaded and stored in the
+  // HTTP cache.
+  EXPECT_TRUE(NavigateToURL(shell(), IdpURL()));
+
+  {
+    URLLoaderMonitor url_loader_monitor({AvatarURL()});
+
+    // The account image URL is stored.
+    EXPECT_EQ(
+        EvalJs(shell()->web_contents(), JsReplace(R"((async () => {
+                 await navigator.login.setStatus("logged-in", {
+                   accounts: [{
+                     id: $1,
+                     name: "Jane Doe",
+                     email: "jane@example.com",
+                     picture: $2
+                   }]
+                 });
+                 return true;
+               })())",
+                                                  kAccountID, AvatarURL())),
+        true);
+
+    EXPECT_EQ(
+        url_loader_monitor.WaitForRequestCompletion(AvatarURL()).error_code,
+        net::OK);
+  }
+
+  // Navigate to RP (a.test) and trigger FedCM API.
+  // The cached account picture request to "b.test/avatar.png" fails because it
+  // is not allowed by the connection allowlist. Note the allowlist allows
+  // requests that are same-origin with "a.test" and those paths explicitly
+  // specified. None of them matches the cached account picture URL.
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+  URLLoaderMonitor monitor({WellKnownURL(), ConfigURL(), AvatarURL()});
+
+  // Trigger FedCM. It should succeed because the failure to fetch cached
+  // account pictures is non-fatal.
+  EXPECT_EQ(RunFedCmScript(shell()->web_contents()), "success");
+
+  // Verify FedCM requests to well-known URL and config URL completed
+  // successfully.
+  ExpectRequestsSucceeded(monitor, {WellKnownURL(), ConfigURL()});
+
+  // The request for cached account picture should be blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(AvatarURL()).has_value());
+}
+
+class EmailVerificationTestContentBrowserClient
+    : public webid::WebIdTestContentBrowserClient {
+ public:
+  EmailVerificationTestContentBrowserClient() = default;
+  ~EmailVerificationTestContentBrowserClient() override = default;
+
+  // This allows DNS lookups to the embedded test server.
+  std::string GetDnsTxtResolverUrlPrefix() override {
+    return dns_txt_resolver_url_prefix_;
+  }
+
+  void SetDnsTxtResolverUrlPrefix(std::string prefix) {
+    dns_txt_resolver_url_prefix_ = std::move(prefix);
+  }
+
+ private:
+  std::string dns_txt_resolver_url_prefix_;
+};
+
+// Tests for the connection allowlist checks applied to network requests made by
+// the Email Verification Protocol (EVP) API.
+//
+// The EVP API can make the following network requests:
+// - DNS query.
+// - Email verification well-known file (".well-known/email-verification").
+// - ID token request ("issuance_endpoint").
+// - JWKS URI fetch ("jwks_uri").
+// - WebID well-known file ("/.well-known/web-identity").
+// - Accounts endpoint ("/accounts").
+//
+// For each request, the tests verify the request is allowed when the URL
+// matches the connection allowlist URL patterns, otherwise the request is
+// blocked.
+// For redirect, one test case is added for verifying the redirect is either
+// allowed or blocked, depending on the value of connection allowlist's redirect
+// directive.
+class ConnectionAllowlistEmailVerificationTest
+    : public ConnectionAllowlistTest,
+      public TestDevToolsProtocolClient {
+ public:
+  ConnectionAllowlistEmailVerificationTest() {
+    email_verification_feature_list_.InitWithFeatures(
+        {features::kEmailVerificationProtocol,
+         features::kFedCmPreservePortsForTesting},
+        {});
+  }
+  ~ConnectionAllowlistEmailVerificationTest() override = default;
+
+  void SetUpOnMainThread() override {
+    ConnectionAllowlistTest::SetUpOnMainThread();
+
+    test_browser_client_ =
+        std::make_unique<EmailVerificationTestContentBrowserClient>();
+  }
+
+  void RegisterEmailVerificationResponses() {
+    ASSERT_TRUE(embedded_https_test_server().Start());
+
+    test_browser_client_->SetDnsTxtResolverUrlPrefix(
+        embedded_https_test_server()
+            .GetURL(kIdpHost, std::string(kDnsPath) + "?name=")
+            .spec());
+
+    RegisterResponse(
+        kDnsPath,
+        ResponseEntry(absl::StrFormat(R"(
+          {
+            "Status": 0,
+            "Answer": [
+              {
+                "type": 16,
+                "data": "iss=b.test:%d"
+              }
+            ]
+          })",
+                                      embedded_https_test_server().port()),
+                      {{"Content-Type", "application/json"}}));
+
+    RegisterResponse(
+        kEmailVerificationWellKnownPath,
+        ResponseEntry(absl::StrFormat(R"(
+          {
+            "issuance_endpoint": "%s",
+            "jwks_uri": "%s",
+            "signing_alg_values_supported": [
+              "RS256"
+            ]
+          })",
+                                      TokenURL().spec(), JwksURL().spec()),
+                      {{"Content-Type", "application/json"}}));
+
+    RegisterResponse(
+        kWellKnownPath,
+        ResponseEntry(
+            R"({"accounts_endpoint": "/accounts","login_url": "/login"})",
+            {{"Content-Type", "application/json"}}));
+
+    RegisterResponse(
+        kAccountPath,
+        ResponseEntry(
+            R"({"accounts": [{"id": "1234","email": "jane@example.com"}]})",
+            {{"Content-Type", "application/json"}}));
+    RegisterResponse(
+        kTokenPath,
+        ResponseEntry(
+            R"({"issuance_token": "e30.e30.sig~","token": "e30.e30.sig~"})",
+            {{"Content-Type", "application/json"}}));
+
+    RegisterResponse(kJwksPath,
+                     ResponseEntry(R"({"keys": []})",
+                                   {{"Content-Type", "application/json"}}));
+  }
+
+  GURL MainURL() const {
+    return embedded_https_test_server().GetURL("a.test",
+                                               kSameOriginAllowlistedPage);
+  }
+
+  GURL DnsURL() const {
+    return embedded_https_test_server().GetURL(
+        kIdpHost,
+        std::string(kDnsPath) + "?name=_email-verification.example.com");
+  }
+
+  GURL EmailVerificationWellKnownURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost,
+                                               kEmailVerificationWellKnownPath);
+  }
+
+  GURL WebIdentityWellKnownURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kWellKnownPath);
+  }
+
+  GURL AccountsURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kAccountPath);
+  }
+
+  GURL TokenURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kTokenPath);
+  }
+
+  // The JWKS (JSON Web Key Set) URI (`jwks_uri`) endpoint (`/jwks`) returns
+  // the public keys of the email verification issuer, which are used to verify
+  // the signature of the issued Email Verification Token during
+  // `EmailVerifier::Verify()`.
+  GURL JwksURL() const {
+    return embedded_https_test_server().GetURL(kIdpHost, kJwksPath);
+  }
+
+  void RegisterConnectionAllowlistResponse(std::string_view allowlist) {
+    RegisterResponse(
+        kSameOriginAllowlistedPage,
+        ResponseEntry("<html><body>Hello</body></html>",
+                      {{"Connection-Allowlist", std::string(allowlist)}}));
+  }
+
+  std::optional<webid::EmailVerifier::Result> RunCheckIfVerifiable(
+      const std::string& email = "jane@example.com") {
+    base::test::TestFuture<std::optional<webid::EmailVerifier::Result>> future;
+    webid::EmailVerifier::GetOrCreateForFrame(
+        shell()->web_contents()->GetPrimaryMainFrame())
+        ->CheckIfVerifiable(email, future.GetCallback());
+    return future.Get();
+  }
+
+  std::optional<std::string> RunVerify(
+      const webid::EmailVerifier::Result& result,
+      const std::string& nonce = "test_nonce") {
+    base::test::TestFuture<std::optional<std::string>> future;
+    webid::EmailVerifier::GetOrCreateForFrame(
+        shell()->web_contents()->GetPrimaryMainFrame())
+        ->Verify(result, nonce, future.GetCallback());
+    return future.Get();
+  }
+
+  // Returns the request URLs that are expected once `RunCheckIfVerifiable` is
+  // run.
+  std::vector<GURL> GetCheckIfVerifiableURLs() const {
+    return {DnsURL(), EmailVerificationWellKnownURL(),
+            WebIdentityWellKnownURL(), AccountsURL()};
+  }
+
+  // Returns the request URLs that are expected for the entire Email
+  // Verification flow.
+  std::vector<GURL> GetAllRequestURLs() const {
+    return {DnsURL(),
+            EmailVerificationWellKnownURL(),
+            WebIdentityWellKnownURL(),
+            AccountsURL(),
+            TokenURL(),
+            JwksURL()};
+  }
+
+  static std::set<GURL> ToSet(const std::vector<GURL>& urls) {
+    return {urls.begin(), urls.end()};
+  }
+
+ private:
+  base::test::ScopedFeatureList email_verification_feature_list_;
+  std::unique_ptr<EmailVerificationTestContentBrowserClient>
+      test_browser_client_;
+};
+
+// Email Verification Protocol API's requests during `CheckIfVerifiable` (dns,
+// .well-known/email-verification, .well-known/web-identity, and accounts) are
+// allowed by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       CheckIfVerifiableAllowed) {
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+  base::HistogramTester histogram_tester;
+
+  // `RunCheckIfVerifiable()` checks if the email address is verifiable, which
+  // initiates requests to the above 4 URLs.
+  auto result = RunCheckIfVerifiable();
+  EXPECT_TRUE(result.has_value());
+
+  histogram_tester.ExpectUniqueSample("Blink.Evp.Status.IsVerifiable",
+                                      EmailVerificationRequestResult::kSuccess,
+                                      1);
+
+  // All 4 URLs are allowed by the connection allowlist.
+  ExpectRequestsSucceeded(monitor, GetCheckIfVerifiableURLs());
+}
+
+// Email Verification Protocol API's fetch of the DNS record is blocked by the
+// connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       DnsRequestBlocked) {
+  // Allow all required request URLs except the DNS endpoint.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+  base::HistogramTester histogram_tester;
+
+  // `RunCheckIfVerifiable()` checks if the email address is verifiable, which
+  // initiates requests to the above 4 URLs. It fails because the DNS request
+  // URL is not allowed by the connection allowlist.
+  EXPECT_FALSE(RunCheckIfVerifiable().has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.IsVerifiable",
+      EmailVerificationRequestResult::kDnsFetchFailed, 1);
+  EXPECT_FALSE(monitor.GetRequestInfo(DnsURL()).has_value());
+
+  // The DNS request is blocked, so no subsequent requests should be made.
+  EXPECT_FALSE(
+      monitor.GetRequestInfo(EmailVerificationWellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(WebIdentityWellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+}
+
+// Email Verification Protocol API's fetch of the DNS record is redirected,
+// and redirects are allowed by the connection allowlist (`redirects=allow`).
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       DnsRequestRedirectAllowed) {
+  net::test_server::ControllableHttpResponse controllable_response(
+      &embedded_https_test_server(), kDnsPath, /*relative_url_is_prefix=*/true);
+
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/another/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+               );redirects=allow
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+
+  // Unregister the default response to `kDnsPath` registered by
+  // `RegisterEmailVerificationResponses()`. This is because this test requires
+  // a response that redirects the request, which uses the
+  // `ControllableHttpResponse`.
+  UnregisterResponse(kDnsPath);
+  RegisterResponse(
+      "/another/dns",
+      ResponseEntry(absl::StrFormat(R"(
+                    {
+                      "Status": 0,
+                      "Answer": [
+                      {
+                        "type": 16,
+                        "data": "iss=b.test:%d"
+                      }
+                    ]
+                  })",
+                                    embedded_https_test_server().port()),
+                    {{"Content-Type", "application/json"}}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  GURL target_url =
+      embedded_https_test_server().GetURL(kIdpHost, "/another/dns");
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+
+  // Check if the email address is verifiable, which initiates requests to the
+  // above 4 URLs.
+  base::test::TestFuture<std::optional<webid::EmailVerifier::Result>> future;
+  webid::EmailVerifier::GetOrCreateForFrame(
+      shell()->web_contents()->GetPrimaryMainFrame())
+      ->CheckIfVerifiable("jane@example.com", future.GetCallback());
+
+  // Redirect the request from `kDnsPath` to "/another/dns".
+  controllable_response.WaitForRequest();
+  controllable_response.Send(
+      "HTTP/1.1 302 Found\r\nLocation: " + target_url.spec() + "\r\n\r\n");
+  controllable_response.Done();
+
+  // All 4 URLs are allowed by the connection allowlist, including the DNS
+  // request which has been redirected.
+  EXPECT_TRUE(future.Get().has_value());
+
+  ExpectRequestsSucceeded(monitor, GetCheckIfVerifiableURLs());
+}
+
+// Email Verification Protocol API's fetch of the DNS record is redirected,
+// but redirects are blocked by the connection allowlist (`redirects=block`).
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       DnsRequestRedirectBlocked) {
+  net::test_server::ControllableHttpResponse controllable_response(
+      &embedded_https_test_server(), kDnsPath, /*relative_url_is_prefix=*/true);
+
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/another/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+               );redirects=block
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+
+  // Unregister the default response to `kDnsPath` registered by
+  // `RegisterEmailVerificationResponses()`. This is because this test requires
+  // a response that redirects the request, which uses the
+  // `ControllableHttpResponse`.
+  UnregisterResponse(kDnsPath);
+  RegisterResponse(
+      "/another/dns",
+      ResponseEntry(absl::StrFormat(R"(
+                    {
+                      "Status": 0,
+                      "Answer": [
+                      {
+                        "type": 16,
+                        "data": "iss=b.test:%d"
+                      }
+                    ]
+                  })",
+                                    embedded_https_test_server().port()),
+                    {{"Content-Type", "application/json"}}));
+
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  GURL target_url =
+      embedded_https_test_server().GetURL(kIdpHost, "/another/dns");
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+
+  base::test::TestFuture<std::optional<webid::EmailVerifier::Result>> future;
+  base::HistogramTester histogram_tester;
+  webid::EmailVerifier::GetOrCreateForFrame(
+      shell()->web_contents()->GetPrimaryMainFrame())
+      ->CheckIfVerifiable("jane@example.com", future.GetCallback());
+
+  // Redirect the request from `kDnsPath` to "/another/dns".
+  controllable_response.WaitForRequest();
+  controllable_response.Send(
+      "HTTP/1.1 302 Found\r\nLocation: " + target_url.spec() + "\r\n\r\n");
+  controllable_response.Done();
+
+  // The redirect is blocked by the connection allowlist.
+  EXPECT_FALSE(future.Get().has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.IsVerifiable",
+      EmailVerificationRequestResult::kDnsFetchFailed, 1);
+
+  EXPECT_EQ(monitor.WaitForRequestCompletion(DnsURL()).error_code,
+            net::ERR_FAILED);
+
+  // The DNS request is blocked, so no subsequent requests should be made.
+  EXPECT_FALSE(
+      monitor.GetRequestInfo(EmailVerificationWellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(WebIdentityWellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+}
+
+// Email Verification Protocol API's fetch of the email verification well-known
+// file is blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       EmailVerificationWellKnownBlocked) {
+  // Allow all required request URLs except the email verification well-known
+  // endpoint.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  AttachToWebContents(shell()->web_contents());
+  SendCommandSync("Network.enable");
+
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+  base::HistogramTester histogram_tester;
+
+  auto result = RunCheckIfVerifiable();
+  EXPECT_FALSE(result.has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.IsVerifiable",
+      EmailVerificationRequestResult::kEmailVerificationWellKnownNoResponse, 1);
+
+  // Verify that DevTools received Network.requestWillBeSent for the blocked
+  // email verification well-known request and that its method is "GET".
+  base::DictValue notification = WaitForMatchingNotification(
+      kRequestWillBeSent,
+      base::BindRepeating(&MatchesNetworkRequest,
+                          EmailVerificationWellKnownURL().spec(), "GET"));
+  EXPECT_FALSE(notification.empty());
+
+  DetachProtocolClient();
+
+  // Verify the initial DNS request (`DnsURL()`) and the WebID well-known and
+  // accounts requests (`WebIdentityWellKnownURL()` and `AccountsURL()`)
+  // completed successfully.
+  ExpectRequestsSucceeded(monitor,
+                          {DnsURL(), WebIdentityWellKnownURL(), AccountsURL()});
+
+  // The email verification well-known request is blocked.
+  EXPECT_FALSE(
+      monitor.GetRequestInfo(EmailVerificationWellKnownURL()).has_value());
+}
+
+// Email Verification Protocol API's fetch of the WebID well-known file is
+// blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       WebIdentityWellKnownBlocked) {
+  // Allow all required request URLs except the WebID well-known endpoint.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/accounts"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+  base::HistogramTester histogram_tester;
+
+  auto result = RunCheckIfVerifiable();
+  EXPECT_FALSE(result.has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.IsVerifiable",
+      EmailVerificationRequestResult::kWellKnownNoResponse, 1);
+
+  // Verify the initial DNS request (`DnsURL()`) and email verification
+  // well-known request (`EmailVerificationWellKnownURL()`) completed
+  // successfully.
+  ExpectRequestsSucceeded(monitor, {DnsURL(), EmailVerificationWellKnownURL()});
+
+  // The WebID well-known request is blocked, so the accounts endpoint should
+  // not be requested.
+  EXPECT_FALSE(monitor.GetRequestInfo(WebIdentityWellKnownURL()).has_value());
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+}
+
+// Email Verification Protocol API's fetch of the accounts endpoint is blocked
+// by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       AccountsRequestBlocked) {
+  // Allow all required request URLs except the accounts endpoint.
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetCheckIfVerifiableURLs()));
+  base::HistogramTester histogram_tester;
+
+  auto result = RunCheckIfVerifiable();
+  EXPECT_FALSE(result.has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.IsVerifiable",
+      EmailVerificationRequestResult::kAccountsNoResponse, 1);
+
+  // Verify the initial DNS request (`DnsURL()`), the well-known requests
+  // (`EmailVerificationWellKnownURL()` and `WebIdentityWellKnownURL()`)
+  // completed successfully.
+  ExpectRequestsSucceeded(monitor, {DnsURL(), EmailVerificationWellKnownURL(),
+                                    WebIdentityWellKnownURL()});
+
+  // The accounts request is blocked because it is not allowed by the connection
+  // allowlist.
+  EXPECT_FALSE(monitor.GetRequestInfo(AccountsURL()).has_value());
+}
+
+// Email Verification Protocol API's requests during `Verify`
+// (`issuance_endpoint` and `jwks_uri`) are allowed by the connection allowlist.
+// Note this requires the requests in the preceding `CheckIfVerifiable` (dns,
+// .well-known/email-verification, .well-known/web-identity, and accounts) also
+// being allowed.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       VerifyAllowed) {
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/token"
+                 "*://b.test:*/jwks"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetAllRequestURLs()));
+  base::HistogramTester histogram_tester;
+
+  // `RunCheckIfVerifiable()` checks if the email address is verifiable, which
+  // initiates requests to dns, .well-known/email-verification,
+  // .well-known/web-identity, and accounts. All 4 are allowed by the connection
+  // allowlist.
+  auto result = RunCheckIfVerifiable();
+  ASSERT_TRUE(result.has_value());
+
+  histogram_tester.ExpectUniqueSample("Blink.Evp.Status.IsVerifiable",
+                                      EmailVerificationRequestResult::kSuccess,
+                                      1);
+
+  ExpectRequestsSucceeded(monitor, GetCheckIfVerifiableURLs());
+  auto verify_result = RunVerify(result.value());
+  // `verify_result` is `std::nullopt` because the test server returns a dummy
+  // "e30.e30.sig~" string that does not verify as a valid SD-JWT. The network
+  // requests to `TokenURL()` and `JwksURL()` are verified below to complete
+  // successfully (`net::OK`), proving they were allowed by the allowlist.
+  EXPECT_FALSE(verify_result.has_value());
+
+  ExpectRequestsSucceeded(monitor, {TokenURL(), JwksURL()});
+}
+
+// Email Verification Protocol API's fetch of the ID token (`issuance_endpoint`)
+// is blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       TokenRequestBlocked) {
+  // Allow all required request URLs except the ID token endpoint (`/token`).
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/jwks"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  AttachToWebContents(shell()->web_contents());
+  SendCommandSync("Network.enable");
+
+  URLLoaderMonitor monitor(ToSet(GetAllRequestURLs()));
+
+  // `RunCheckIfVerifiable()` checks if the email address is verifiable, which
+  // initiates requests to dns, .well-known/email-verification,
+  // .well-known/web-identity, and accounts. All 4 are allowed by the connection
+  // allowlist.
+  auto result = RunCheckIfVerifiable();
+  ASSERT_TRUE(result.has_value());
+
+  ExpectRequestsSucceeded(monitor, GetCheckIfVerifiableURLs());
+
+  base::HistogramTester histogram_tester;
+
+  auto verify_result = RunVerify(result.value());
+  EXPECT_FALSE(verify_result.has_value());
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.Verify",
+      EmailVerificationRequestResult::kTokenNoResponse, 1);
+
+  // Verify that DevTools received Network.requestWillBeSent for the blocked
+  // token request and that its method is "POST".
+  base::DictValue notification = WaitForMatchingNotification(
+      kRequestWillBeSent,
+      base::BindRepeating(&MatchesNetworkRequest, TokenURL().spec(), "POST"));
+  EXPECT_FALSE(notification.empty());
+
+  DetachProtocolClient();
+
+  // The JWKS request is allowed.
+  ExpectRequestsSucceeded(monitor, {JwksURL()});
+
+  // The token request is blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(TokenURL()).has_value());
+}
+
+// Email Verification Protocol API's fetch of the JWKS URI (`jwks_uri`) is
+// blocked by the connection allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmailVerificationTest,
+                       JwksRequestBlocked) {
+  // Allow all required request URLs except the JWKS endpoint (`/jwks`).
+  RegisterConnectionAllowlistResponse(R"(
+               (
+                 response-origin
+                 "*://b.test:*/dns*"
+                 "*://b.test:*/.well-known/email-verification"
+                 "*://b.test:*/.well-known/web-identity"
+                 "*://b.test:*/accounts"
+                 "*://b.test:*/token"
+               )
+             )");
+
+  ASSERT_NO_FATAL_FAILURE(RegisterEmailVerificationResponses());
+  EXPECT_TRUE(NavigateToURL(shell(), MainURL()));
+
+  URLLoaderMonitor monitor(ToSet(GetAllRequestURLs()));
+
+  // `RunCheckIfVerifiable()` checks if the email address is verifiable, which
+  // initiates requests to dns, .well-known/email-verification,
+  // .well-known/web-identity, and accounts. All 4 are allowed by the connection
+  // allowlist.
+  auto result = RunCheckIfVerifiable();
+  ASSERT_TRUE(result.has_value());
+
+  ExpectRequestsSucceeded(monitor, GetCheckIfVerifiableURLs());
+
+  base::HistogramTester histogram_tester;
+  auto verify_result = RunVerify(result.value());
+  EXPECT_FALSE(verify_result.has_value());
+  // For Jwks failures, they share the same error code: `kJwksHttpNotFound`,
+  // whether due to the connection allowlist, an HTTP 404 error, or an invalid
+  // JSON.
+  histogram_tester.ExpectUniqueSample(
+      "Blink.Evp.Status.Verify",
+      EmailVerificationRequestResult::kJwksHttpNotFound, 1);
+
+  // The token request is allowed.
+  ExpectRequestsSucceeded(monitor, {TokenURL()});
+
+  // The JWKS request is blocked.
+  EXPECT_FALSE(monitor.GetRequestInfo(JwksURL()).has_value());
+}
+
+// When the framed document opts into blanket enforcement via
+// `Allow-Connection-Allowlist-From: *`, the embedder's required allowlist (with
+// the `response-origin` token resolved against the frame's origin) is installed
+// as the frame's enforced allowlist and actually restricts its connections.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       BlanketOptInEnforcesEmbedderAllowlist) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  TestNavigationManager manager(shell()->web_contents(), child_url);
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', '(response-origin)');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                                        child_url)));
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
+  EXPECT_TRUE(manager.was_successful());
+
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+
+  // The required allowlist (the embedder's requirement, with `response-origin`
+  // resolved against the frame's origin) is propagated to the committed frame.
+  auto* child_impl = static_cast<RenderFrameHostImpl*>(child_rfh);
+  ASSERT_TRUE(child_impl->required_connection_allowlist().has_value());
+  EXPECT_EQ(
+      child_impl->required_connection_allowlist()->allowlist,
+      std::vector<std::string>({url::Origin::Create(child_url).Serialize()}));
+
+  // The installed allowlist is actually enforced on the frame's connections: a
+  // same-origin WebSocket is allowed, a cross-origin one is blocked.
+  GURL allowed_ws_url = net::test_server::GetWebSocketURL(
+      embedded_https_test_server(), "a.test", "/echo-with-no-extension");
+  EXPECT_EQ("open", EvalJs(child_rfh, JsReplace(R"(
+    new Promise(resolve => {
+      const ws = new WebSocket($1);
+      ws.onopen = () => { ws.close(); resolve('open'); };
+      ws.onerror = () => resolve('error');
+    });
+  )",
+                                                allowed_ws_url)));
+
+  GURL denied_ws_url = net::test_server::GetWebSocketURL(
+      embedded_https_test_server(), "b.test", "/echo-with-no-extension");
+  EXPECT_EQ("error", EvalJs(child_rfh, JsReplace(R"(
+    new Promise(resolve => {
+      const ws = new WebSocket($1);
+      ws.onopen = () => { ws.close(); resolve('open'); };
+      ws.onerror = () => resolve('error');
+    });
+  )",
+                                                 denied_ws_url)));
+}
+
+// A frame that neither opts in nor delivers a satisfying Connection-Allowlist
+// is blocked with net::ERR_BLOCKED_BY_RESPONSE.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       NoOptInNoAllowlistBlockedWithErrorCode) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>", {}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  NavigationHandleObserver handle_observer(shell()->web_contents(), child_url);
+  TestNavigationManager manager(shell()->web_contents(), child_url);
+  EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', '(response-origin)');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                                        child_url)));
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
+  EXPECT_FALSE(manager.was_successful());
+  EXPECT_TRUE(handle_observer.is_error());
+  EXPECT_EQ(net::ERR_BLOCKED_BY_RESPONSE, handle_observer.net_error_code());
+}
+
+// A descendant frame with no `connectionallowlist` attribute inherits its
+// ancestor's required allowlist.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       InheritedRequirementEnforcedWithoutAttribute) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  RegisterResponse("/grandchild.html",
+                   ResponseEntry("<html><body>grandchild</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  GURL grandchild_url =
+      embedded_https_test_server().GetURL("a.test", "/grandchild.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  // Level 1: a frame whose embedder requires `(response-origin)` and which opts
+  // in. It now requires that allowlist of any document it frames.
+  {
+    TestNavigationManager manager(shell()->web_contents(), child_url);
+    EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', '(response-origin)');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                                          child_url)));
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
+    ASSERT_TRUE(manager.was_successful());
+  }
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+
+  // Wait for the child document to finish loading so its <body> exists before
+  // creating the nested frame inside it below (the navigation having committed
+  // does not guarantee the body has been parsed yet).
+  ASSERT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // Level 2: a frame created by the level-1 frame with no `connectionallowlist`
+  // attribute. It inherits the level-1 frame's requirement.
+  {
+    TestNavigationManager manager(shell()->web_contents(), grandchild_url);
+    EXPECT_TRUE(ExecJs(child_rfh, JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                            grandchild_url)));
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
+    ASSERT_TRUE(manager.was_successful());
+  }
+  RenderFrameHost* grandchild_rfh = ChildFrameAt(child_rfh, 0);
+  ASSERT_TRUE(grandchild_rfh);
+
+  auto* grandchild_impl = static_cast<RenderFrameHostImpl*>(grandchild_rfh);
+  ASSERT_TRUE(grandchild_impl->required_connection_allowlist().has_value());
+  EXPECT_EQ(
+      grandchild_impl->required_connection_allowlist()->allowlist,
+      std::vector<std::string>({url::Origin::Create(child_url).Serialize()}));
+}
+
+// A descendant frame whose `connectionallowlist` attribute would loosen the
+// inherited requirement (it additionally lists https://extra.test/) has its
+// attribute discarded in favor of the stricter inherited requirement. This also
+// guards against the bypass where an attribute's unresolved `response-origin`
+// token leaves an empty allowlist that would trivially subsume any requirement.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       NeverLoosenInheritedRequirement) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/child.html",
+                   ResponseEntry("<html><body>child</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  RegisterResponse("/grandchild.html",
+                   ResponseEntry("<html><body>grandchild</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL child_url = embedded_https_test_server().GetURL("a.test", "/child.html");
+  GURL grandchild_url =
+      embedded_https_test_server().GetURL("a.test", "/grandchild.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  // Level 1: requires `(response-origin)` and opts in.
+  {
+    TestNavigationManager manager(shell()->web_contents(), child_url);
+    EXPECT_TRUE(ExecJs(shell()->web_contents(), JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', '(response-origin)');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                                          child_url)));
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
+    ASSERT_TRUE(manager.was_successful());
+  }
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+
+  // Wait for the child document to finish loading so its <body> exists before
+  // creating the nested frame inside it below (the navigation having committed
+  // does not guarantee the body has been parsed yet).
+  ASSERT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // Level 2: its attribute additionally lists https://extra.test/, which would
+  // loosen the inherited requirement. The navigation still commits (it opts
+  // in), but the looser attribute is discarded.
+  {
+    TestNavigationManager manager(shell()->web_contents(), grandchild_url);
+    EXPECT_TRUE(ExecJs(child_rfh,
+                       JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', $1);
+        f.src = $2;
+        document.body.appendChild(f);
+      )",
+                                 R"(("https://extra.test/" response-origin))",
+                                 grandchild_url)));
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
+    ASSERT_TRUE(manager.was_successful());
+  }
+  RenderFrameHost* grandchild_rfh = ChildFrameAt(child_rfh, 0);
+  ASSERT_TRUE(grandchild_rfh);
+
+  // Only the inherited embedder origin is required; https://extra.test/ (from
+  // the discarded attribute) is not present.
+  auto* grandchild_impl = static_cast<RenderFrameHostImpl*>(grandchild_rfh);
+  ASSERT_TRUE(grandchild_impl->required_connection_allowlist().has_value());
+  EXPECT_EQ(
+      grandchild_impl->required_connection_allowlist()->allowlist,
+      std::vector<std::string>({url::Origin::Create(child_url).Serialize()}));
+}
+
+// A frame with a local-scheme URL (about:srcdoc, about:blank) inherits its
+// origin from its initiator rather than deriving one from its URL. Resolving
+// its embedder's `(response-origin)` token against `about:srcdoc` would produce
+// an opaque origin, which would then be propagated to the frame's descendants
+// as their requirement. The token must resolve to the inherited origin instead.
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistEmbeddedEnforcementTest,
+                       ResponseOriginResolvesToInheritedOriginForLocalScheme) {
+  RegisterResponse("/embedder.html",
+                   ResponseEntry("<html><body></body></html>", {}));
+  RegisterResponse("/grandchild.html",
+                   ResponseEntry("<html><body>grandchild</body></html>",
+                                 {{"Allow-Connection-Allowlist-From", "*"}}));
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL embedder_url =
+      embedded_https_test_server().GetURL("a.test", "/embedder.html");
+  GURL grandchild_url =
+      embedded_https_test_server().GetURL("a.test", "/grandchild.html");
+  EXPECT_TRUE(NavigateToURL(shell(), embedder_url));
+
+  // Level 1: an `about:srcdoc` frame whose embedder requires
+  // `(response-origin)`. Local schemes allow blanket enforcement, so the
+  // requirement is installed on the frame and cascades to its descendants.
+  {
+    TestNavigationObserver observer(shell()->web_contents());
+    EXPECT_TRUE(ExecJs(shell()->web_contents(), R"(
+        const f = document.createElement('iframe');
+        f.setAttribute('connectionallowlist', '(response-origin)');
+        f.srcdoc = '<html><body>child</body></html>';
+        document.body.appendChild(f);
+      )"));
+    observer.Wait();
+    ASSERT_TRUE(observer.last_navigation_succeeded());
+    ASSERT_EQ(GURL(url::kAboutSrcdocURL), observer.last_navigation_url());
+  }
+  RenderFrameHost* child_rfh =
+      ChildFrameAt(shell()->web_contents()->GetPrimaryMainFrame(), 0);
+  ASSERT_TRUE(child_rfh);
+
+  // The token resolves to the origin the srcdoc frame actually inherits (its
+  // embedder's), not an opaque origin derived from "about:srcdoc".
+  auto* child_impl = static_cast<RenderFrameHostImpl*>(child_rfh);
+  ASSERT_TRUE(child_impl->required_connection_allowlist().has_value());
+  EXPECT_EQ(child_impl->required_connection_allowlist()->allowlist,
+            std::vector<std::string>(
+                {url::Origin::Create(embedder_url).Serialize()}));
+
+  // Wait for the srcdoc document to finish loading so its <body> exists before
+  // creating the nested frame inside it below (the navigation having committed
+  // does not guarantee the body has been parsed yet).
+  ASSERT_TRUE(WaitForLoadStop(shell()->web_contents()));
+
+  // Level 2: a frame created by the srcdoc frame inherits that requirement, so
+  // it must see the inherited origin rather than an opaque one.
+  {
+    TestNavigationManager manager(shell()->web_contents(), grandchild_url);
+    EXPECT_TRUE(ExecJs(child_rfh, JsReplace(R"(
+        const f = document.createElement('iframe');
+        f.src = $1;
+        document.body.appendChild(f);
+      )",
+                                            grandchild_url)));
+    ASSERT_TRUE(manager.WaitForNavigationFinished());
+    ASSERT_TRUE(manager.was_successful());
+  }
+  RenderFrameHost* grandchild_rfh = ChildFrameAt(child_rfh, 0);
+  ASSERT_TRUE(grandchild_rfh);
+
+  auto* grandchild_impl = static_cast<RenderFrameHostImpl*>(grandchild_rfh);
+  ASSERT_TRUE(grandchild_impl->required_connection_allowlist().has_value());
+  EXPECT_EQ(grandchild_impl->required_connection_allowlist()->allowlist,
+            std::vector<std::string>(
+                {url::Origin::Create(embedder_url).Serialize()}));
+}
+
+IN_PROC_BROWSER_TEST_F(ConnectionAllowlistTest, SandboxedIframeOpaqueOrigin) {
+  ASSERT_TRUE(embedded_https_test_server().Start());
+
+  GURL main_url = embedded_https_test_server().GetURL("a.test", "/main.html");
+  GURL iframe_url =
+      embedded_https_test_server().GetURL("a.test", "/iframe.html");
+  GURL allowed_url = embedded_https_test_server().GetURL("a.test", "/allow.js");
+  GURL denied_url = embedded_https_test_server().GetURL("b.test", "/deny.js");
+
+  RegisterResponse(
+      "/main.html",
+      ResponseEntry(
+          JsReplace("<html><body>"
+                    "<iframe id='test_iframe' sandbox='allow-scripts' "
+                    "src=$1></iframe></body></html>",
+                    iframe_url),
+          {}));
+
+  RegisterResponse(
+      "/iframe.html",
+      ResponseEntry("<html><body>Hello from iframe</body></html>",
+                    {{"Connection-Allowlist", "(response-origin)"}}));
+  RegisterResponse("/allow.js",
+                   ResponseEntry("console.log('allow');",
+                                 {{"Access-Control-Allow-Origin", "*"}}));
+  RegisterResponse("/deny.js",
+                   ResponseEntry("console.log('deny');",
+                                 {{"Access-Control-Allow-Origin", "*"}}));
+
+  URLLoaderMonitor monitor;
+
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  RenderFrameHost* main_frame = shell()->web_contents()->GetPrimaryMainFrame();
+  RenderFrameHost* iframe = ChildFrameAt(main_frame, 0);
+  ASSERT_TRUE(iframe);
+  EXPECT_TRUE(iframe->GetLastCommittedOrigin().opaque());
+
+  // Run fetch from the iframe.
+  EXPECT_EQ("blocked", EvalJs(iframe, content::JsReplace(R"(
+      fetch($1, {mode: 'no-cors'}).then(() => 'allowed').catch(() => 'blocked');
+    )",
+                                                         denied_url)));
+
+  EXPECT_EQ("allowed", EvalJs(iframe, content::JsReplace(R"(
+      fetch($1, {mode: 'no-cors'}).then(() => 'allowed').catch(() => 'blocked');
+    )",
+                                                         allowed_url)));
+
+  monitor.WaitForUrls({allowed_url, denied_url});
+  EXPECT_EQ(monitor.WaitForRequestCompletion(denied_url).error_code,
+            net::ERR_NETWORK_ACCESS_REVOKED);
+  EXPECT_EQ(monitor.WaitForRequestCompletion(allowed_url).error_code, net::OK);
+}
+
+}  // namespace
 
 }  // namespace content

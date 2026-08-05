@@ -20,6 +20,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/strings/strcat.h"
 #include "base/task/current_thread.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
@@ -347,6 +348,7 @@
 #if BUILDFLAG(CHROME_FOR_TESTING)
 #include "chrome/browser/chrome_for_testing/chrome_browser_main_extra_parts_cft.h"
 #include "chrome/browser/chrome_for_testing/config.h"
+#include "chrome/browser/optimization_guide/model_execution/optimization_guide_global_state.h"
 #include "components/component_updater/component_updater_service.h"
 #endif
 
@@ -362,6 +364,41 @@ void DeleteMediaHistoryDatabase(const base::FilePath& profile_path) {
   base::UmaHistogramBoolean("Media.MediaHistory.DatabaseExists",
                             base::PathExists(db_path));
   sql::Database::Delete(db_path);
+}
+
+void DeleteDeprecatedPrivacySandboxData(const base::FilePath& profile_path) {
+  // Delete the deprecated Privacy Sandbox databases.
+  static constexpr struct {
+    base::FilePath::StringViewType db_name;
+    std::string_view histogram_name;
+  } kDatabases[] = {
+      {FILE_PATH_LITERAL("SharedStorage"), "SharedStorage"},
+      {FILE_PATH_LITERAL("Conversions"), "Conversions"},
+      {FILE_PATH_LITERAL("AggregationService"), "AggregationService"},
+      {FILE_PATH_LITERAL("PrivateAggregation"), "PrivateAggregation"},
+      {FILE_PATH_LITERAL("InterestGroups"), "InterestGroups"},
+      {FILE_PATH_LITERAL("BrowsingTopicsSiteData"), "BrowsingTopicsSiteData"},
+  };
+
+  for (const auto& db : kDatabases) {
+    base::FilePath db_path = profile_path.Append(db.db_name);
+    bool exists = base::PathExists(db_path);
+    base::UmaHistogramBoolean(
+        base::StrCat(
+            {"Storage.DeprecatedPrivacySandboxAPIs.DatabaseStillExisted.",
+             db.histogram_name}),
+        exists);
+    if (exists) {
+      sql::Database::Delete(db_path);
+    }
+  }
+
+  // Delete the BrowsingTopicsState file.
+  base::FilePath topics_state_path =
+      profile_path.Append(FILE_PATH_LITERAL("BrowsingTopicsState"));
+  if (base::PathExists(topics_state_path)) {
+    base::DeleteFile(topics_state_path);
+  }
 }
 #endif
 
@@ -1573,6 +1610,14 @@ void ChromeBrowserMainParts::PostProfileInit(Profile* profile,
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&DeleteMediaHistoryDatabase, profile->GetPath()));
+
+  // Delete the deprecated Privacy Sandbox data if they still exist.
+  // TODO(crbug.com/462465887): Remove this in August 2028.
+  base::ThreadPool::PostTask(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(&DeleteDeprecatedPrivacySandboxData, profile->GetPath()));
 #endif
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -1685,7 +1730,8 @@ void ChromeBrowserMainParts::PostBrowserStart() {
 
 #if !BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(features::kImprovedStartupBestEffortDelay)) {
-    first_idle_ref_ = AfterStartupTaskUtils::RegisterStartupInProgressRef();
+    first_idle_ref_ = AfterStartupTaskUtils::RegisterStartupInProgressRef(
+        StartupIsCompleteReason::kFirstIdle);
   }
 #endif
   AfterStartupTaskUtils::BeginMonitoringStartupCompletion();
@@ -2040,9 +2086,14 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 #endif
 
 #if BUILDFLAG(CHROME_FOR_TESTING)
-  // Delay browser startup until all components required by the Chrome for
-  // Testing configuration are installed and up to date.
   if (g_browser_process->component_updater()) {
+    // Initialize OptimizationGuideGlobalState early so that ManifestMonitor is
+    // available to parse the Optimization Guide manifest and register any
+    // required on-device model components during startup blocking.
+    optimization_guide::OptimizationGuideGlobalState::CreateOrGet();
+
+    // Delay browser startup until all components required by the Chrome for
+    // Testing configuration are installed and up to date.
     g_browser_process->component_updater()->EnsureRequiredComponentsReady(
         chrome_for_testing::GetRequiredComponentsUpdateTimeout());
   }

@@ -26,6 +26,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
 #include "chrome/browser/ui/tabs/tab_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_selection_state.h"
 #include "chrome/browser/ui/tabs/tab_strip_scrubbing_metrics.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
@@ -193,8 +194,8 @@ class TabStripModel {
  public:
   using TabIterator = tabs::TabCollection::TabIterator;
 
-  // TODO(crbug.com/40881446): Remove this, and use std::optional<size_t> (or at
-  // least std::optional<int>) in its place.
+  // TODO(crbug.com/540829277): Remove this, and use std::optional<size_t> (or
+  // at least std::optional<int>) in its place.
   static constexpr int kNoTab = -1;
 
   TabStripModel() = delete;
@@ -318,7 +319,7 @@ class TabStripModel {
   // Closes the WebContents at the specified index. This causes the
   // WebContents to be destroyed, but it may not happen immediately.
   // |close_types| is a bitmask of CloseTypes.
-  // TODO(crbug.com/392950857): Currently many call sites of CloseWebContentsAt
+  // TODO(crbug.com/540843679): Currently many call sites of CloseWebContentsAt
   // convert a tab/webcontents to an index, which gets converted back to a
   // webcontents within this function. Provide a CloseWebContents function that
   // directly closes a web contents so that we don't have to convert back and
@@ -445,8 +446,9 @@ class TabStripModel {
   int GetIndexOfWebContents(const content::WebContents* contents) const;
 
   // Notify any observers that the tab has changed in some way. See
-  // TabChangeType for details of |change_type|.'
-  void NotifyTabChanged(tabs::TabInterface* tab, TabChangeType change_type);
+  // TabChangeType for details of |change_type|.
+  void NotifyTabChanged(tabs::TabInterface* tab,
+                        TabChangeType change_type);
 
   // Notify any observers that the WebContents at the specified index has
   // changed in some way. See TabChangeType for details of |change_type|.
@@ -898,8 +900,6 @@ class TabStripModel {
   std::vector<tabs::TabInterface*> GetTabsAtIndices(
       const std::vector<int>& indices) const;
 
-  // TODO(349161508) remove this method once tabs dont need to be converted
-  // into webcontents.
   tabs::TabInterface* GetTabForWebContents(
       const content::WebContents* contents) const;
 
@@ -936,6 +936,10 @@ class TabStripModel {
   // and notify observers.
   void OnChange(const TabStripModelChange& change,
                 const TabStripSelectionChange& selection);
+
+  // Notify observers if the focused tab group has changed.
+  void NotifyTabGroupFocusChanged(
+      const std::optional<tab_groups::TabGroupId>& old_focused_group);
 
   // Notify observers that a `group` was created.
   void NotifyTabGroupVisualsChanged(const tab_groups::TabGroupId& group_id,
@@ -1167,7 +1171,8 @@ class TabStripModel {
   TabStripSelectionChange SetSelection(
       const tabs::TabStripModelSelectionState& new_model,
       TabStripModelObserver::ChangeReason reason,
-      bool triggered_by_other_operation);
+      bool triggered_by_other_operation,
+      bool notify_focus_change = true);
 
   // Close all tabs in the given |group| at once.
   void CloseAllTabsInGroupImpl(const tab_groups::TabGroupId& group);
@@ -1472,9 +1477,6 @@ class TabStripModel {
 
   // Tracks whether a modal UI is showing.
   bool showing_modal_ui_ = false;
-
-  // The focused group. If no group is focused, this is nullopt.
-  std::optional<tab_groups::TabGroupId> focused_group_;
 
   base::WeakPtrFactory<TabStripModel> weak_factory_{this};
 };

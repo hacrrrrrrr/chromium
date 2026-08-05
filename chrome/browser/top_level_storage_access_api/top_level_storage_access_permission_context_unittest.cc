@@ -13,6 +13,7 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/permissions/permission_request_id.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/permissions/permission_util.h"
@@ -24,6 +25,7 @@
 #include "content/public/browser/permission_result.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
+#include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/web_contents_tester.h"
@@ -69,7 +71,7 @@ class TopLevelStorageAccessPermissionContextTest
 
   void SetUp() override {
     features_.InitAndEnableFeature(
-        blink::features::kStorageAccessAPIRelatedWebsiteSets);
+        content_settings::features::kStorageAccessAPIRelatedWebsiteSets);
     ChromeRenderViewHostTestHarness::SetUp();
 
     // Ensure we are navigated to some page so that the proper views get setup.
@@ -231,6 +233,20 @@ TEST_F(TopLevelStorageAccessPermissionContextTest,
               /*render_frame_host=*/nullptr, GetRequesterURL(),
               GetDummyEmbeddingUrl())
           .status);
+}
+
+TEST_F(TopLevelStorageAccessPermissionContextTest, SameSiteDisallowed) {
+  TopLevelStorageAccessPermissionContext permission_context(profile());
+  NavigateAndCommit(GetTopLevelURL());
+
+  EXPECT_EQ(
+      DecidePermissionSync(&permission_context, /*user_gesture=*/true,
+                           GetDummyEmbeddingUrl(), GetDummyEmbeddingUrl()),
+      PermissionStatus::DENIED);
+
+  EXPECT_EQ(1, static_cast<content::MockRenderProcessHost*>(
+                   web_contents()->GetPrimaryMainFrame()->GetProcess())
+                   ->bad_msg_count());
 }
 
 class TopLevelStorageAccessPermissionContextAPIWithFirstPartySetsTest
@@ -426,7 +442,7 @@ class TopLevelStorageAccessPermissionContextFeatureDisabledTest
 
   void SetUp() override {
     features_.InitAndDisableFeature(
-        blink::features::kStorageAccessAPIRelatedWebsiteSets);
+        content_settings::features::kStorageAccessAPIRelatedWebsiteSets);
     ChromeRenderViewHostTestHarness::SetUp();
     NavigateAndCommit(GetTopLevelURL());
     permissions::PermissionRequestManager::CreateForWebContents(web_contents());

@@ -408,6 +408,8 @@ public class WebViewChromiumAwInit {
         CallSite.PROFILE_CLEAR_ALL_ORIGIN_MATCHED_HEADERS,
         CallSite.PROFILE_ADD_QUIC_HINTS,
         CallSite.PROFILE_GET_HTTP_CACHE_MANAGER,
+        CallSite.PROFILE_SET_CROSS_ORIGIN_ISOLATED_ALLOW_LIST,
+        CallSite.PROFILE_GET_CROSS_ORIGIN_ISOLATED_ALLOW_LIST,
         CallSite.COUNT,
     })
     public @interface CallSite {
@@ -553,43 +555,13 @@ public class WebViewChromiumAwInit {
         int PROFILE_CLEAR_ALL_ORIGIN_MATCHED_HEADERS = 140;
         int PROFILE_ADD_QUIC_HINTS = 141;
         int PROFILE_GET_HTTP_CACHE_MANAGER = 142;
+        int PROFILE_SET_CROSS_ORIGIN_ISOLATED_ALLOW_LIST = 143;
+        int PROFILE_GET_CROSS_ORIGIN_ISOLATED_ALLOW_LIST = 144;
         // Remember to update WebViewStartupCallSite in enums.xml when adding new values here.
-        int COUNT = 143;
+        int COUNT = 145;
     };
 
     // LINT.ThenChange(//tools/metrics/histograms/metadata/android/enums.xml:WebViewStartupCallSite)
-
-    // These values are persisted to logs. Entries should not be renumbered and
-    // numeric values should never be reused.
-    @IntDef({
-        CookieManagerThreadingCondition.NOT_CALLED_BEFORE_UI_THREAD_SET,
-        CookieManagerThreadingCondition.CALLED_ON_NON_LOOPER_THREAD,
-        CookieManagerThreadingCondition.CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER,
-        CookieManagerThreadingCondition
-                .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER,
-        CookieManagerThreadingCondition
-                .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER,
-        CookieManagerThreadingCondition.CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER,
-        CookieManagerThreadingCondition.CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER,
-    })
-    private @interface CookieManagerThreadingCondition {
-        int NOT_CALLED_BEFORE_UI_THREAD_SET = 0;
-        int CALLED_ON_NON_LOOPER_THREAD = 1;
-        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER = 2;
-        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER = 3;
-        int CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER = 4;
-        int CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER = 5;
-        int CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER = 6;
-        int COUNT = 7;
-    };
-
-    private static void logCookieManagerThreadingCondition(
-            @CookieManagerThreadingCondition int condition) {
-        RecordHistogram.recordEnumeratedHistogram(
-                "Android.WebView.Startup.CookieManagerThreadingCondition",
-                condition,
-                CookieManagerThreadingCondition.COUNT);
-    }
 
     WebViewChromiumAwInit(WebViewChromiumFactoryProvider factory) {
         mFactory = factory;
@@ -813,16 +785,6 @@ public class WebViewChromiumAwInit {
                     }
 
                     AwCrashyClassUtils.maybeCrashIfEnabled();
-                    // This must happen before `mStartupFinished.countDown()`. Otherwise, a method
-                    // called on the background thread that calls into the run queue would crash if
-                    // the run queue is not notified that Chromium has started. See b/520483584.
-                    // This must also happen before we set `mInitState` to `INIT_FINISHED`,
-                    // otherwise it's possible for the method call on the background thread to
-                    // happen at the same time that the UI thread is setting the state to
-                    // INIT_FINISHED, so the background thread may see that init is done, not block
-                    // on the latch and then call into `runOnUiThreadBlocking` before the run queue
-                    // has been notified, which would still crash.
-                    mFactory.getRunQueue().notifyChromiumStarted();
                     // Must happen right after Chromium initialization is complete.
                     mInitState.set(INIT_FINISHED);
                     mStartupFinished.countDown();
@@ -839,9 +801,8 @@ public class WebViewChromiumAwInit {
                     }
 
                     // This runs all the pending tasks queued for after Chromium init is
-                    // finished, so should run after `mInitState` is `INIT_FINISHED` and after
-                    // notifying the run queue.
-                    mFactory.getRunQueue().drainQueue();
+                    // finished, so should run after `mInitState` is `INIT_FINISHED`.
+                    mFactory.getRunQueue().notifyChromiumStarted();
                     if (mRunStartupTasksAsync) {
                         // Re-enables the taskrunners
                         PostTask.disablePreNativeUiTasks(false);
@@ -922,7 +883,6 @@ public class WebViewChromiumAwInit {
         mWebViewStartUpDiagnostics.setMaxTimePerTaskUiThreadChromiumInitMillis(
                 longestUiBlockingTaskTimeMs);
         mWebViewStartUpCallbackRunQueue.notifyChromiumStarted();
-        mWebViewStartUpCallbackRunQueue.drainQueue();
 
         // Record histograms
         String startupModeString =
@@ -1147,45 +1107,6 @@ public class WebViewChromiumAwInit {
                             + looper);
             RecordHistogram.recordBooleanHistogram(
                     "Android.WebView.Startup.IsUiThreadMainLooper", isUiThreadMainLooper);
-
-            // Temporary metric collection for different threading conditions related to
-            // CookieManager.
-            boolean cookieManagerCalled = mGetDefaultCookieManagerCalled.get();
-            if (cookieManagerCalled) {
-                Looper cookieManagerLooper = mFirstGetDefaultCookieManagerLooper.get();
-                if (cookieManagerLooper == null) {
-                    logCookieManagerThreadingCondition(
-                            CookieManagerThreadingCondition.CALLED_ON_NON_LOOPER_THREAD);
-                } else if (!mainLooper.equals(cookieManagerLooper)) {
-                    if (isUiThreadMainLooper) {
-                        logCookieManagerThreadingCondition(
-                                CookieManagerThreadingCondition
-                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER);
-                    } else if (looper.equals(cookieManagerLooper)) {
-                        logCookieManagerThreadingCondition(
-                                CookieManagerThreadingCondition
-                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_SAME_BACKGROUND_LOOPER);
-                    } else {
-                        logCookieManagerThreadingCondition(
-                                CookieManagerThreadingCondition
-                                        .CALLED_FROM_BACKGROUND_LOOPER_AND_UI_THREAD_IS_DIFFERENT_BACKGROUND_LOOPER);
-                    }
-                } else if (mainLooper.equals(cookieManagerLooper)) {
-                    if (isUiThreadMainLooper) {
-                        logCookieManagerThreadingCondition(
-                                CookieManagerThreadingCondition
-                                        .CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_MAIN_LOOPER);
-                    } else {
-                        logCookieManagerThreadingCondition(
-                                CookieManagerThreadingCondition
-                                        .CALLED_FROM_MAIN_LOOPER_AND_UI_THREAD_IS_BACKGROUND_LOOPER);
-                    }
-                }
-            } else {
-                logCookieManagerThreadingCondition(
-                        CookieManagerThreadingCondition.NOT_CALLED_BEFORE_UI_THREAD_SET);
-            }
-
             ThreadUtils.setUiThread(looper);
             mThreadIsSet = true;
         }

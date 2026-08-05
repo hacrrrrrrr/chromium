@@ -85,7 +85,7 @@ public class PersonalDataManager implements Destroyable {
         // Note that while some of these fields are numbers, they're predominantly read,
         // marshaled and compared as strings. To save conversions, we sometimes use strings.
         private String mGUID;
-        private String mOrigin;
+        private boolean mIsUserConfirmed;
         private final boolean mIsLocal;
         private final boolean mIsVirtual;
         private String mName;
@@ -116,7 +116,7 @@ public class PersonalDataManager implements Destroyable {
         @CalledByNative
         public static CreditCard create(
                 @JniType("std::string") String guid,
-                @JniType("std::string") String origin,
+                boolean isUserConfirmed,
                 boolean isLocal,
                 boolean isVirtual,
                 @JniType("std::u16string") String name,
@@ -142,7 +142,7 @@ public class PersonalDataManager implements Destroyable {
                 GURL productTermsUrl) {
             return new CreditCard(
                     guid,
-                    origin,
+                    isUserConfirmed,
                     isLocal,
                     isVirtual,
                     name,
@@ -170,7 +170,7 @@ public class PersonalDataManager implements Destroyable {
 
         public CreditCard(
                 String guid,
-                String origin,
+                boolean isUserConfirmed,
                 boolean isLocal,
                 String name,
                 String number,
@@ -183,7 +183,7 @@ public class PersonalDataManager implements Destroyable {
                 String serverId) {
             this(
                     guid,
-                    origin,
+                    isUserConfirmed,
                     isLocal,
                     /* isVirtual= */ false,
                     name,
@@ -211,7 +211,7 @@ public class PersonalDataManager implements Destroyable {
 
         public CreditCard(
                 String guid,
-                String origin,
+                boolean isUserConfirmed,
                 boolean isLocal,
                 boolean isVirtual,
                 String name,
@@ -236,7 +236,7 @@ public class PersonalDataManager implements Destroyable {
                 String benefitSource,
                 @Nullable GURL productTermsUrl) {
             mGUID = guid;
-            mOrigin = origin;
+            mIsUserConfirmed = isUserConfirmed;
             mIsLocal = isLocal;
             mIsVirtual = isVirtual;
             mName = name;
@@ -265,7 +265,7 @@ public class PersonalDataManager implements Destroyable {
         public CreditCard() {
             this(
                     /* guid= */ "",
-                    /* origin= */ AutofillEditorBase.SETTINGS_ORIGIN,
+                    /* isUserConfirmed= */ true,
                     /* isLocal= */ true,
                     /* name= */ "",
                     /* number= */ "",
@@ -284,8 +284,8 @@ public class PersonalDataManager implements Destroyable {
         }
 
         @CalledByNative
-        public @JniType("std::string") String getOrigin() {
-            return mOrigin;
+        public boolean getIsUserConfirmed() {
+            return mIsUserConfirmed;
         }
 
         @CalledByNative
@@ -416,8 +416,8 @@ public class PersonalDataManager implements Destroyable {
             mGUID = guid;
         }
 
-        public void setOrigin(String origin) {
-            mOrigin = origin;
+        public void setIsUserConfirmed(boolean isUserConfirmed) {
+            mIsUserConfirmed = isUserConfirmed;
         }
 
         public void setName(String name) {
@@ -1025,6 +1025,54 @@ public class PersonalDataManager implements Destroyable {
     }
 
     /**
+     * @return The list of email addresses that have verification state.
+     */
+    public List<String> getEmailVerificationAddresses() {
+        ThreadUtils.assertOnUiThread();
+        return PersonalDataManagerJni.get()
+                .getEmailVerificationAddresses(mPersonalDataManagerAndroid);
+    }
+
+    /**
+     * @param email The email address to get the issuer for.
+     * @return The issuer site for the verified email address, or empty/null if not found.
+     */
+    public String getEmailVerificationIssuer(String email) {
+        ThreadUtils.assertOnUiThread();
+        return PersonalDataManagerJni.get()
+                .getEmailVerificationIssuer(mPersonalDataManagerAndroid, email);
+    }
+
+    /**
+     * Removes the email address from the email verification state.
+     *
+     * @param email The email address to remove.
+     */
+    public void removeEmailVerificationAddress(String email) {
+        ThreadUtils.assertOnUiThread();
+        PersonalDataManagerJni.get()
+                .removeEmailVerificationAddress(mPersonalDataManagerAndroid, email);
+    }
+
+    /**
+     * @return Whether email verification is enabled.
+     */
+    public boolean isEmailVerificationEnabled() {
+        return mPrefService.getBoolean(Pref.AUTOFILL_EMAIL_VERIFICATION_ENABLED);
+    }
+
+    /**
+     * @param enabled Whether email verification should be enabled.
+     */
+    public void setEmailVerificationEnabled(boolean enabled) {
+        mPrefService.setBoolean(Pref.AUTOFILL_EMAIL_VERIFICATION_ENABLED, enabled);
+    }
+
+    public boolean isEmailVerificationManaged() {
+        return mPrefService.isManagedPreference(Pref.AUTOFILL_EMAIL_VERIFICATION_ENABLED);
+    }
+
+    /**
      * Enables or disables the Autofill feature for Credit Cards.
      *
      * @param enable True to disable credit card Autofill, false otherwise.
@@ -1299,5 +1347,15 @@ public class PersonalDataManager implements Destroyable {
                 long nativePersonalDataManagerAndroid);
 
         BnplIssuerForSettings[] getBnplIssuersForSettings(long nativePersonalDataManagerAndroid);
+
+        @JniType("std::vector<std::string>")
+        List<String> getEmailVerificationAddresses(long nativePersonalDataManagerAndroid);
+
+        @JniType("std::string")
+        String getEmailVerificationIssuer(
+                long nativePersonalDataManagerAndroid, @JniType("std::string") String email);
+
+        void removeEmailVerificationAddress(
+                long nativePersonalDataManagerAndroid, @JniType("std::string") String email);
     }
 }

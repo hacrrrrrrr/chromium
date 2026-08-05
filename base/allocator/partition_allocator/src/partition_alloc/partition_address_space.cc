@@ -5,6 +5,7 @@
 #include "partition_alloc/partition_address_space.h"
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -95,7 +96,7 @@ MetadataInnerOffset(pool_handle pool) {
 
 }  // namespace
 
-PA_CONSTINIT PartitionAddressSpace::PoolSetup PartitionAddressSpace::setup_;
+constinit PartitionAddressSpace::PoolSetup PartitionAddressSpace::setup_;
 
 #if PA_CONFIG(ENABLE_USER_SPACE_ZERO_SEGMENT)
 size_t PartitionAddressSpace::zero_segment_size_ = 0;
@@ -337,7 +338,7 @@ void PartitionAddressSpace::InitConfigurablePool(uintptr_t pool_base,
   PA_CHECK(pool_base);
   PA_CHECK(size <= kConfigurablePoolMaxSize);
   PA_CHECK(size >= kConfigurablePoolMinSize);
-  PA_CHECK(base::bits::HasSingleBit(size));
+  PA_CHECK(std::has_single_bit(size));
   PA_CHECK(pool_base % size == 0);
 
   setup_.configurable_pool_base_address_ = pool_base;

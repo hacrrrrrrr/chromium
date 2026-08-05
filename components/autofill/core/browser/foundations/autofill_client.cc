@@ -28,6 +28,7 @@
 #include "components/autofill/core/browser/integrators/identity_credential/identity_credential_delegate.h"
 #include "components/autofill/core/browser/integrators/password_form_classification.h"
 #include "components/autofill/core/browser/integrators/password_manager/password_manager_delegate.h"
+#include "components/autofill/core/browser/integrators/touch_to_fill/touch_to_fill_autofill_delegate.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/studies/autofill_ablation_study.h"
 #include "components/autofill/core/browser/studies/autofill_experiments.h"
@@ -122,17 +123,10 @@ AutofillClient::GetPasswordManagerFieldClassificationModelHandler() {
   return nullptr;
 }
 
-bool AutofillClient::ShouldShowPersonalContextAmbientAutofillNotice() const {
-  return false;
+personal_context::PersonalContextFirstRunService*
+AutofillClient::GetPersonalContextFirstRunService() {
+  return nullptr;
 }
-
-void AutofillClient::MarkPersonalContextAmbientAutofillNoticeAsAcknowledged() {}
-
-bool AutofillClient::ShouldShowPersonalContextAtMemoryNotice() const {
-  return false;
-}
-
-void AutofillClient::MarkPersonalContextAtMemoryNoticeAsAcknowledged() {}
 
 AutofillComposeDelegate* AutofillClient::GetComposeDelegate() {
   return nullptr;
@@ -259,9 +253,12 @@ bool AutofillClient::IsAndroidLargeFormFactor() const {
 }
 
 #if BUILDFLAG(IS_ANDROID)
-void AutofillClient::ShowAtMemoryBottomSheet(
-    base::span<const Suggestion> suggestions,
-    base::WeakPtr<AutofillSuggestionDelegate> delegate) {}
+bool AutofillClient::ShowAmbientAutoFillNotice(
+    base::WeakPtr<TouchToFillAutofillDelegate> delegate) {
+  return false;
+}
+
+void AutofillClient::HideAmbientAutoFillNotice() {}
 
 AutofillSnackbarControllerImpl*
 AutofillClient::GetAutofillSnackbarController() {
@@ -287,12 +284,6 @@ void AutofillClient::TriggerAutofillAiFillingJourneySurvey(
   NOTIMPLEMENTED();
 }
 
-void AutofillClient::TriggerAutofillAiSavePromptSurvey(
-    bool prompt_accepted,
-    EntityType entity_type,
-    const base::flat_set<EntityTypeName>& saved_entities) {
-  NOTIMPLEMENTED();
-}
 
 bool AutofillClient::IsTabInActorMode() const {
   return false;
@@ -405,7 +396,11 @@ void AutofillClient::ShowAutofillAiSaveToWalletFailureNotification() {
   NOTIMPLEMENTED();
 }
 
-void AutofillClient::ShowAutofillAiFetchFromWalletFailureNotification() {
+void AutofillClient::ShowAutofillAiFetchEntityFailureNotification() {
+  NOTIMPLEMENTED();
+}
+
+void AutofillClient::ShowAtMemoryFetchFailureNotification() {
   NOTIMPLEMENTED();
 }
 

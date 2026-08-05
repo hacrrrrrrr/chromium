@@ -6,10 +6,12 @@
 #define COMPONENTS_VARIATIONS_SERVICE_VARIATIONS_SERVICE_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/feature.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -20,6 +22,8 @@
 #include "base/types/pass_key.h"
 #include "components/variations/client_filterable_state.h"
 #include "components/variations/entropy_provider.h"
+#include "components/variations/metrics.h"
+#include "components/variations/processed_study.h"
 #include "components/variations/service/safe_seed_manager.h"
 #include "components/variations/service/variations_field_trial_creator.h"
 #include "components/variations/service/variations_service_client.h"
@@ -63,6 +67,10 @@ namespace variations {
 #if BUILDFLAG(IS_CHROMEOS)
 class DeviceVariationsRestrictionByPolicyApplicator;
 #endif
+
+// When enabled, runtime mutable field trials from the periodically fetched
+// seeds will be applied to the current session.
+BASE_DECLARE_FEATURE(kVariationsRuntimeMutability);
 
 // Used to (a) set up field trials based on stored variations seed data and (b)
 // fetch new seed data from the variations server.
@@ -171,6 +179,10 @@ class VariationsService
   // br, in.
   std::string GetLatestCountry() const;
 
+  // Returns what variations will consider to be the latest administrative area
+  // code. Returns empty if it is not available. Example: us-ca, us-ny.
+  std::string GetLatestGeoLevel1() const;
+
   // Ensures the locale that was used for evaluating variations matches the
   // passed |locale|. This is used to ensure that the locale determined after
   // loading the resource bundle (which is passed here) corresponds to what
@@ -259,6 +271,13 @@ class VariationsService
   // Returns true if variations seed fetching is paused.
   bool IsSeedFetchingPaused() const;
 
+  // Wrapper for SimulateAndApplyRuntimeMutableChanges.
+  void SimulateAndApplyUploadedSeed(
+      base::PassKey<metrics::RuntimeMutableFeaturesHandlerBase> pass_key,
+      const VariationsSeed& seed) {
+    SimulateAndApplyRuntimeMutableChanges(seed);
+  }
+
   // Cancels the currently pending fetch request.
   void CancelCurrentRequestForTesting();
 
@@ -292,10 +311,11 @@ class VariationsService
   // the response. This calls DoFetchToURL with the set url.
   virtual void DoActualFetch();
 
-  // Attempts a seed fetch from the set |url|. Returns true if the fetch was
-  // started successfully, false otherwise. |is_http_retry| should be true if
-  // this is a retry over HTTP, false otherwise.
-  virtual bool DoFetchFromURL(const GURL& url, bool is_http_retry);
+  // Attempts a seed fetch from the set |url|. |header_serial_number| is the
+  // value to be sent in the "If-None-Match" header (plaintext for HTTPS
+  // requests, and encrypted for HTTP retries).
+  virtual void DoFetchFromURL(const GURL& url,
+                              std::string header_serial_number);
 
   // Stores the seed to prefs. Set as virtual and protected so that it can be
   // overridden by tests.
@@ -354,6 +374,12 @@ class VariationsService
   // date and client fetch time.
   void RecordSuccessfulFetchSeedNotModified(base::Time response_date);
 
+  // Performs a simulation of the given `seed` to find any runtime mutable
+  // changes that need to be applied to the current session, and apply them.
+  // Virtual and protected for testing.
+  virtual void SimulateAndApplyRuntimeMutableChanges(
+      const VariationsSeed& seed);
+
  private:
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, Observer);
   FRIEND_TEST_ALL_PREFIXES(VariationsServiceTest, SeedStoredWhenOKStatus);
@@ -396,6 +422,18 @@ class VariationsService
   // imply the actual fetch was successful.
   bool MaybeRetryOverHTTP();
 
+  // Fetches the seed over HTTPS.
+  void FetchSeedOverHTTPS();
+
+  // Fetches the seed over HTTP, encrypting the serial number in the background.
+  void FetchSeedOverHTTP();
+
+  // Continuation of FetchSeedOverHTTP() after the serial number has been
+  // encrypted in the background.
+  void ContinueRetryOverHTTP(
+      const GURL& url,
+      std::optional<std::string> encrypted_serial_number);
+
   // ResourceRequestAllowedNotifier::Observer implementation:
   void OnResourceRequestsAllowed() override;
 
@@ -404,11 +442,11 @@ class VariationsService
   void PerformSimulationWithVersion(const VariationsSeed& seed,
                                     const base::Version& version);
 
-  // Encrypts a string using the encrypted_messages component, input is passed
-  // in as |plaintext|, outputs a serialized EncryptedMessage protobuf as
-  // |encrypted|. Returns true on success, false on failure. The encryption can
-  // be done in-place.
-  bool EncryptString(const std::string& plaintext, std::string* encrypted);
+  // Applies the runtime mutable changes of the `trial`'s selected group to the
+  // current session.
+  ApplyRuntimeMutableChangesResult ApplyRuntimeMutableChanges(
+      base::FieldTrial* simulated_trial,
+      const ProcessedStudy& processed_study);
 
   // Calls `done_callback` with the studies and their groups which could
   // possibly be forced from the given `seed`.
@@ -438,6 +476,11 @@ class VariationsService
   // Contains the current seed request. Will only have a value while a request
   // is pending, and will be reset by |OnURLFetchComplete|.
   std::unique_ptr<network::SimpleURLLoader> pending_seed_request_;
+
+  // Tracks whether a seed fetch is in progress. This covers the entire
+  // duration of the process, including the initial HTTPS request, the
+  // asynchronous encryption phase, and the HTTP retry if applicable.
+  bool is_fetching_seed_ = false;
 
   // The value of the "restrict" URL param to the variations server that has
   // been specified via |SetRestrictMode|. If empty, the URL param will be set

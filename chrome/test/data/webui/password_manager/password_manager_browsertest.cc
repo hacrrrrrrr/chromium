@@ -73,6 +73,10 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, PasskeyDetailsCard) {
   RunTest("password_manager/passkey_details_card_test.js", "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, PasswordChangeDetails) {
+  RunTest("password_manager/password_change_details_test.js", "mocha.run()");
+}
+
 IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, PasswordDetailsCard) {
   RunTest("password_manager/password_details_card_test.js", "mocha.run()");
 }
@@ -157,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, UserUtilsMixin) {
 }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, PromoCards) {
-  RunTest("password_manager/promo_cards_test.js", "mocha.run()");
+IN_PROC_BROWSER_TEST_F(PasswordManagerUITest, NotificationCards) {
+  RunTest("password_manager/notification_cards_test.js", "mocha.run()");
 }
 #endif

@@ -330,6 +330,8 @@ HostContentSettingsMap::HostContentSettingsMap(PrefService* prefs,
   for (const auto* info : *registry) {
     DeleteNearlyExpiredSettingsAndMaybeScheduleNextRun(info->type());
   }
+
+  DeleteStorageAccessRwsGrantsIfFeatureDisabled();
 }
 
 // static
@@ -1385,8 +1387,6 @@ void HostContentSettingsMap::DeleteNearlyExpiredSettingsAndMaybeScheduleNextRun(
 
     if (setting.metadata.expiration() <= (clock_->Now() + kEagerExpiryBuffer)) {
       expired_entries.emplace_back(setting);
-      content_settings_uma_util::RecordActiveExpiryEvent(setting.source,
-                                                         content_setting_type);
     } else {
       next_expiry = std::min(next_expiry, setting.metadata.expiration());
     }
@@ -1432,4 +1432,19 @@ void HostContentSettingsMap::EnsureSettingsUpToDate(
   for (auto&& provider : user_modifiable_providers_) {
     provider->EnsureUpdatedSettings(barrier_closure);
   }
+}
+
+void HostContentSettingsMap::DeleteStorageAccessRwsGrantsIfFeatureDisabled() {
+  if (is_off_the_record_) {
+    return;
+  }
+  if (base::FeatureList::IsEnabled(
+          content_settings::features::kStorageAccessAPIRelatedWebsiteSets)) {
+    return;
+  }
+  ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::STORAGE_ACCESS,
+      [](const ContentSettingPatternSource& setting) {
+        return setting.metadata.decided_by_related_website_sets();
+      });
 }

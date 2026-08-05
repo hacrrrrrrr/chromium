@@ -9,6 +9,8 @@
 
 #include <string>
 
+#import "ios/chrome/browser/shared/ui/symbols/symbols.h"
+
 @protocol GREYMatcher;
 class GURL;
 
@@ -95,6 +97,11 @@ id<GREYMatcher> ImageViewWithImageNamed(NSString* imageName);
 // point size in the main bundle.
 id<GREYMatcher> ImageViewWithCustomSymbolNameAndPointSize(NSString* symbolName,
                                                           CGFloat pointSize);
+
+// Returns a matcher for an element with a symbol defined by `symbol` and
+// `pointSize`.
+id<GREYMatcher> ImageViewWithSymbolAndPointSize(Symbol symbol,
+                                                CGFloat pointSize);
 
 // Returns a matcher for element with an image corresponding to `image_id` and
 // accessibility trait UIAccessibilityTraitButton.
@@ -628,9 +635,6 @@ id<GREYMatcher> TabGroupActivityLabelOnGridCellAtIndex(unsigned int index);
 // Returns a matcher for the button that closes the tab grid.
 id<GREYMatcher> TabGridDoneButton();
 
-// Returns a matcher for the button that reverts the close all tabs action
-// in the tab grid.
-id<GREYMatcher> TabGridUndoCloseAllButton();
 
 // Returns a matcher for the cell that opens History in Recent Tabs.
 id<GREYMatcher> TabGridSelectShowHistoryCell();
@@ -831,12 +835,6 @@ id<GREYMatcher> SettingsActionButton();
 
 // Returns a matcher for the tab grid overflow menu button.
 id<GREYMatcher> TabGridOverflowMenuButton();
-
-// Returns a matcher for the legacy edit button.
-id<GREYMatcher> TabGridEditButton();
-
-// Returns a matcher for the legacy edit menu button to close all tabs.
-id<GREYMatcher> TabGridEditMenuCloseAllButton();
 
 // Returns a matcher for the overflow menu button to close all tabs.
 id<GREYMatcher> TabGridOverflowMenuCloseAllButton();

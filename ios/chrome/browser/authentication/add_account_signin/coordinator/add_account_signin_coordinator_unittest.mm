@@ -29,15 +29,13 @@ namespace {
 class AddAccountSigninCoordinatorTest : public PlatformTest {
  public:
   AddAccountSigninCoordinatorTest() {
-    // The profile state will receive UI blocker request. They are not tested
-    // here, so it’s a non-strict mock.
-    profile_state_ = OCMClassMock([ProfileState class]);
-    scene_state_ = [[SceneState alloc] initWithAppState:nil];
+    profile_state_ = [[ProfileState alloc] initWithAppState:nil];
+    scene_state_ = [[SceneState alloc] init];
     scene_state_.profileState = profile_state_;
     TestProfileIOS::Builder builder = TestProfileIOS::Builder();
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));

@@ -13,8 +13,11 @@
 #include "chrome/browser/autofill/autofill_uitest_util.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/autofill/payments/omnibox_autofill_bubble_controller.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_actions.h"
+#include "chrome/browser/ui/views/autofill/payments/omnibox_autofill_suggestion_view.h"
 #include "chrome/browser/ui/views/autofill/payments/payments_view_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/core/browser/data_manager/personal_data_manager.h"
@@ -36,16 +39,18 @@ namespace autofill {
 namespace {
 
 std::vector<views::Button*> GetSuggestions(views::View* view) {
-  std::vector<views::Button*> buttons;
+  std::vector<views::Button*> suggestions;
   for (views::View* child : view->children()) {
-    if (auto* button = views::AsViewClass<views::Button>(child)) {
-      buttons.push_back(button);
+    if (auto* suggestion =
+            views::AsViewClass<OmniboxAutofillSuggestion>(child)) {
+      suggestions.push_back(suggestion);
     } else {
-      auto child_buttons = GetSuggestions(child);
-      buttons.insert(buttons.end(), child_buttons.begin(), child_buttons.end());
+      auto child_suggestions = GetSuggestions(child);
+      suggestions.insert(suggestions.end(), child_suggestions.begin(),
+                         child_suggestions.end());
     }
   }
-  return buttons;
+  return suggestions;
 }
 
 class OmniboxAutofillBubbleViewBrowserTest : public InProcessBrowserTest {
@@ -182,34 +187,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxAutofillBubbleViewBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(OmniboxAutofillBubbleViewBrowserTest,
-                       FocusesFirstSuggestion) {
-  auto* controller = GetBubbleController();
-  ASSERT_TRUE(controller);
-
-  // Add two suggestions.
-  std::vector<Suggestion> suggestions;
-  suggestions.emplace_back(u"Visa •••• 1111", SuggestionType::kCreditCardEntry);
-  suggestions.emplace_back(u"Visa •••• 1112", SuggestionType::kCreditCardEntry);
-
-  controller->Initialize(suggestions, base::DoNothing(), base::DoNothing(),
-                         base::DoNothing(), base::DoNothing(),
-                         base::DoNothing());
-
-  controller->QueueOrShowBubble();
-
-  auto* bubble_view = GetBubbleView();
-  ASSERT_TRUE(bubble_view);
-
-  // Verify suggestions are shown.
-  std::vector<views::Button*> buttons = GetSuggestions(bubble_view);
-  ASSERT_EQ(buttons.size(), 2u);
-
-  // Verify the first button has focus.
-  EXPECT_TRUE(buttons[0]->HasFocus());
-  EXPECT_FALSE(buttons[1]->HasFocus());
-}
-
-IN_PROC_BROWSER_TEST_F(OmniboxAutofillBubbleViewBrowserTest,
                        CloseBubbleTriggersOnSuggestionsHidden) {
   OmniboxAutofillBubbleController* controller = GetBubbleController();
   ASSERT_TRUE(controller);
@@ -259,10 +236,41 @@ IN_PROC_BROWSER_TEST_F(OmniboxAutofillBubbleViewBrowserTest,
   std::vector<views::Button*> buttons = GetSuggestions(bubble_view);
   ASSERT_EQ(buttons.size(), 1u);
 
+  // Select the suggestion.
+  buttons[0]->RequestFocus();
+  ASSERT_TRUE(buttons[0]->HasFocus());
+
   // Expect the callback to run once when the bubble is hidden.
   EXPECT_CALL(did_deselect_suggestion_callback, Run()).Times(1);
 
   bubble_view->Hide();
+}
+
+IN_PROC_BROWSER_TEST_F(OmniboxAutofillBubbleViewBrowserTest,
+                       ActionItemUpdatedWithBubbleVisibility) {
+  auto* controller = GetBubbleController();
+  ASSERT_TRUE(controller);
+
+  actions::ActionItem* action = actions::ActionManager::Get().FindAction(
+      kActionAutofillPayment,
+      BrowserActions::From(browser())->root_action_item());
+  ASSERT_NE(action, nullptr);
+  EXPECT_FALSE(action->GetIsShowingBubble());
+
+  // Initialize and show bubble.
+  controller->Initialize(
+      {Suggestion(u"Visa •••• 1111", SuggestionType::kCreditCardEntry)},
+      base::DoNothing(), base::DoNothing(), base::DoNothing(),
+      base::DoNothing(), base::DoNothing());
+  controller->QueueOrShowBubble();
+
+  auto* bubble_view = GetBubbleView();
+  ASSERT_NE(bubble_view, nullptr);
+  EXPECT_TRUE(action->GetIsShowingBubble());
+
+  // Close bubble.
+  bubble_view->Hide();
+  EXPECT_FALSE(action->GetIsShowingBubble());
 }
 
 }  // namespace

@@ -58,6 +58,7 @@ BASE_DECLARE_FEATURE(kDocumentProvider);
 BASE_DECLARE_FEATURE(kDocumentProviderPrimaryAccountRequirement);
 BASE_DECLARE_FEATURE(kDocumentProviderEnterpriseEligibility);
 BASE_DECLARE_FEATURE(kDocumentProviderEnterpriseEligibilityWhenUnknown);
+BASE_DECLARE_FEATURE(kDrivePickerV2Scope);
 
 // Suggestions UI - these affect the UI or function of the suggestions popup.
 BASE_DECLARE_FEATURE(kShowPopupOnMouseReleased);
@@ -116,6 +117,9 @@ BASE_DECLARE_FEATURE(kUrlScoringModel);
 // suggestions and only controls whether the signal is sent.
 BASE_DECLARE_FEATURE(kOmniboxTouchDownTriggerForPrefetch);
 
+// Enables simultaneous prefetch and navigation on Enter KeyDown in Omnibox.
+BASE_DECLARE_FEATURE(kOmniboxSearchPrefetchOnEnterKeyDown);
+
 // Site search/Keyword mode related features.
 BASE_DECLARE_FEATURE(kOmniboxSiteSearch);
 BASE_DECLARE_FEATURE(kStarterPackExpansion);
@@ -134,7 +138,6 @@ BASE_DECLARE_FEATURE(kUseFusedLocationProvider);
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdate);
 BASE_DECLARE_FEATURE(kOmniboxMobileParityUpdateV2);
 BASE_DECLARE_FEATURE(kOmniboxXGeoPermissionGranularity);
-BASE_DECLARE_FEATURE(kOmniboxItemDecoration);
 BASE_DECLARE_FEATURE(kExactMatchFavicons);
 BASE_DECLARE_FEATURE(kOmniboxAimImageDownscaling);
 
@@ -222,7 +225,7 @@ BASE_DECLARE_FEATURE(kSuppressIntermediateACUpdatesOnLowEndDevices);
 // Delay focusTab to prioritize navigation (https://crbug.com/374852568).
 BASE_DECLARE_FEATURE(kPostDelayedTaskFocusTab);
 BASE_DECLARE_FEATURE(kResetSuggestionsScroll);
-BASE_DECLARE_FEATURE(kOmniboxListMenuContextMenu);
+BASE_DECLARE_FEATURE(kOmniboxSessionlessVoiceSearch);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 // If enabled, X-Geo headers are sent for all search navigations on all
@@ -249,6 +252,26 @@ extern const base::FeatureParam<InlineLocationSignalingDisplayOrder>
 extern const base::FeatureParam<InlineLocationSignalingWording>
     kInlineLocationSignalingWording;
 
+// If enabled, the "Ask Google about this page" action will route to cobrowse.
+BASE_DECLARE_FEATURE(kWebUIOmniboxAskGAboutThisPage);
+// Whether to open the next panel with cobrowse.
+extern const base::FeatureParam<bool> kAskGCoBrowse;
+// Whether to open the next panel with cobrowse and visual selection.
+extern const base::FeatureParam<bool> kAskGCoBrowseWithVisualSelection;
+// Whether to open the composebox for AskG.
+extern const base::FeatureParam<bool> kAskGComposeBox;
+// Determines how to route the lens chip.
+extern const base::FeatureParam<bool> kAskGLensChipRoute;
+// Whether to swap the icon to spark loupe for the AskG button.
+extern const base::FeatureParam<bool> kAskGSwapIcon;
+// Whether to show the current tab chip.
+extern const base::FeatureParam<bool> kAskGCurrentTabChip;
+// Whether to show the Lens icon.
+extern const base::FeatureParam<bool> kAskGLensIcon;
+// Whether to use alternate text for Lens chip.
+extern const base::FeatureParam<bool> kAskGLensSearchHintText;
+// Whether to show the lens chip in omnibox composebox.
+extern const base::FeatureParam<bool> kAskGComposeboxLensChip;
 // Note: no new flags beyond this point.
 
 namespace flag_descriptions {

@@ -73,6 +73,7 @@ source_set("web") {
     "browser_state_utils.mm",
     "browser_url_rewriter_impl.h",
     "browser_url_rewriter_impl.mm",
+    "content_type_util.cc",
     "network_context_owner.cc",
     "web_client.mm",
   ]
@@ -237,6 +238,7 @@ source_set("ios_web_general_unittests") {
 
   sources = [
     "browser_state_unittest.mm",
+    "content_type_util_unittest.cc",
     "history_state_util_unittest.mm",
     "network_context_owner_unittest.cc",
     "test/web_test_unittest.mm",
@@ -611,6 +613,14 @@ bundle_data("navigation_resources") {
 
 grit("resources") {
   source = "ios_web_resources.grd"
+
+  inputs = [
+    "${root_gen_dir}/mojo/public/js/mojo_bindings.js",
+    "${root_gen_dir}/ui/webui/resources/tsc/mojo/url/mojom/url.mojom-webui.js",
+    "${root_gen_dir}/ui/webui/resources/tsc/mojo/url/mojom/origin.mojom-webui.js",
+    "${root_gen_dir}/ui/webui/resources/tsc/mojo/ui/base/mojom/window_open_disposition.mojom-webui.js",
+    "${root_gen_dir}/ui/webui/resources/tsc/mojo/ui/base/mojom/ui_base_types.mojom-webui.js",
+  ]
 
   outputs = [
     "grit/ios_web_resources.h",

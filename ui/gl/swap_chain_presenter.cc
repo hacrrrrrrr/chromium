@@ -455,6 +455,23 @@ int SwapChainPresenter::PresentationHistory::composed_count() const {
   return composed_count_;
 }
 
+SwapChainPresenter::ColorSpaceSupportedKey::ColorSpaceSupportedKey(
+    DXGI_FORMAT format,
+    DXGI_COLOR_SPACE_TYPE color_space,
+    IDXGIOutput* dxgi_output)
+    : format(format), color_space(color_space), output(dxgi_output) {}
+
+SwapChainPresenter::ColorSpaceSupportedKey::ColorSpaceSupportedKey(
+    const ColorSpaceSupportedKey&) = default;
+
+SwapChainPresenter::ColorSpaceSupportedKey::~ColorSpaceSupportedKey() = default;
+
+bool SwapChainPresenter::ColorSpaceSupportedKey::operator==(
+    const ColorSpaceSupportedKey& other) const {
+  return format == other.format && color_space == other.color_space &&
+         output == other.output;
+}
+
 SwapChainPresenter::SwapChainPresenter(
     DCLayerTree* layer_tree,
     Microsoft::WRL::ComPtr<ID3D11Device> d3d11_device,
@@ -480,7 +497,8 @@ SwapChainPresenter::~SwapChainPresenter() {
 DXGI_FORMAT SwapChainPresenter::GetSwapChainFormat(
     gfx::ProtectedVideoType protected_video_type,
     bool use_hdr_swap_chain,
-    bool use_p010_for_sdr_swap_chain) {
+    bool use_p010_for_sdr_swap_chain,
+    const gfx::ColorSpace& input_color_space) {
   // Prefer RGB10A2 swapchain when playing HDR content and system HDR being
   // enabled. Another scenario is that AutoHDR is enabled even with SDR
   // content, RGB10A2 is also preferred.
@@ -489,17 +507,50 @@ DXGI_FORMAT SwapChainPresenter::GetSwapChainFormat(
     return DXGI_FORMAT_R10G10B10A2_UNORM;
   }
 
-  if (failed_to_create_yuv_swapchain_ ||
-      !DirectCompositionHardwareOverlaysSupported()) {
+  // Runtime fallback: a prior YUV swap-chain creation actually failed. Latches,
+  // so it gates protected too and prevents per-frame reallocation thrash.
+  if (failed_to_create_yuv_swapchain_) {
     return DXGI_FORMAT_B8G8R8A8_UNORM;
   }
+
+  gfx::ColorSpace output_color_space =
+      GetOutputColorSpace(input_color_space, /*is_yuv_swapchain=*/true);
+  DXGI_COLOR_SPACE_TYPE output_dxgi_color_space =
+      gfx::ColorSpaceWin::GetDXGIColorSpace(output_color_space,
+                                            /*force_yuv=*/true);
 
   DXGI_FORMAT sdr_yuv_overlay_format =
       use_p010_for_sdr_swap_chain ? DXGI_FORMAT_P010
                                   : GetDirectCompositionSDROverlayFormat();
-  // Always prefer YUV swap chain for hardware protected video for now.
+
   if (protected_video_type == gfx::ProtectedVideoType::kHardwareProtected) {
     return sdr_yuv_overlay_format;
+  }
+
+  // Coarse, cached, workaround-aware system gate.
+  if (!DirectCompositionHardwareOverlaysSupported()) {
+    return DXGI_FORMAT_B8G8R8A8_UNORM;
+  }
+
+  // Query color space overlay support, using a per-presenter cache keyed on
+  // (format, color_space, output). DCLayerTree keeps current_output() fresh
+  // and already handles factory staleness and monitor changes.
+  IDXGIOutput* current_output = layer_tree_->current_output();
+  if (!current_output) {
+    return DXGI_FORMAT_B8G8R8A8_UNORM;
+  }
+  const ColorSpaceSupportedKey key(sdr_yuv_overlay_format,
+                                   output_dxgi_color_space, current_output);
+  const bool cache_miss = !color_space_supported_cache_ ||
+                          !(color_space_supported_cache_->first == key);
+  if (cache_miss) {
+    bool supported = DirectCompositionColorSpaceOverlaySupported(
+        sdr_yuv_overlay_format, output_dxgi_color_space, current_output);
+    color_space_supported_cache_ = std::make_pair(key, supported);
+  }
+
+  if (!color_space_supported_cache_->second) {
+    return DXGI_FORMAT_B8G8R8A8_UNORM;
   }
 
   if (!presentation_history_.Valid() || IsSwapChainYuvFormatForced()) {
@@ -1046,9 +1097,9 @@ bool SwapChainPresenter::SetupPresentToSwapChain(DCLayerOverlayParams& params) {
       !DirectCompositionMonitorHDREnabled(layer_tree_->window()) &&
       params.video_params.is_p010_content;
 
-  DXGI_FORMAT swap_chain_format =
-      GetSwapChainFormat(params.video_params.protected_video_type,
-                         use_hdr_swap_chain, use_p010_for_sdr_swap_chain);
+  DXGI_FORMAT swap_chain_format = GetSwapChainFormat(
+      params.video_params.protected_video_type, use_hdr_swap_chain,
+      use_p010_for_sdr_swap_chain, input_color_space);
 
   bool swap_chain_format_changed = swap_chain_format != swap_chain_format_;
   bool toggle_protected_video = swap_chain_protected_video_type_ !=
@@ -1461,7 +1512,7 @@ bool SwapChainPresenter::VideoProcessorBlt(
   if (!video_processor_wrapper)
     return false;
 
-  Microsoft::WRL::ComPtr<ID3D11VideoContext> video_context =
+  Microsoft::WRL::ComPtr<ID3D11VideoContext1> video_context =
       video_processor_wrapper->video_context;
   Microsoft::WRL::ComPtr<ID3D11VideoProcessor> video_processor =
       video_processor_wrapper->video_processor;
@@ -1474,48 +1525,27 @@ bool SwapChainPresenter::VideoProcessorBlt(
   bool driver_supports_vp_auto_hdr =
       video_processor_wrapper->GetDriverSupportsVpAutoHdr();
 
-  Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3;
-  Microsoft::WRL::ComPtr<ID3D11VideoContext1> context1;
-  if (SUCCEEDED(swap_chain_.As(&swap_chain3)) &&
-      SUCCEEDED(video_context.As(&context1))) {
-    DCHECK(swap_chain3);
-    DCHECK(context1);
-    // Set input color space.
-    context1->VideoProcessorSetStreamColorSpace1(
-        video_processor.Get(), 0,
-        gfx::ColorSpaceWin::GetDXGIColorSpace(src_color_space));
-    // Set output color space.
-    DXGI_COLOR_SPACE_TYPE output_dxgi_color_space =
-        gfx::ColorSpaceWin::GetDXGIColorSpace(output_color_space,
-                                              /*force_yuv=*/is_yuv_swapchain);
-    DXGI_COLOR_SPACE_TYPE swap_dxgi_color_space =
-        use_vp_auto_hdr ? gfx::ColorSpaceWin::GetDXGIColorSpace(
-                              gfx::ColorSpace::CreateHDR10())
-                        : output_dxgi_color_space;
+  video_context->VideoProcessorSetStreamColorSpace1(
+      video_processor.Get(), 0,
+      gfx::ColorSpaceWin::GetDXGIColorSpace(src_color_space));
+  DXGI_COLOR_SPACE_TYPE output_dxgi_color_space =
+      gfx::ColorSpaceWin::GetDXGIColorSpace(output_color_space,
+                                            /*force_yuv=*/is_yuv_swapchain);
+  video_context->VideoProcessorSetOutputColorSpace1(video_processor.Get(),
+                                                    output_dxgi_color_space);
+  DXGI_COLOR_SPACE_TYPE swap_dxgi_color_space =
+      use_vp_auto_hdr ? gfx::ColorSpaceWin::GetDXGIColorSpace(
+                            gfx::ColorSpace::CreateHDR10())
+                      : output_dxgi_color_space;
 
-    // Can fail with E_INVALIDARG if the swap chain does not support the
-    // DXGI color space. We should still set the output color space as
-    // best effort.
-    HRESULT hr = swap_chain3->SetColorSpace1(swap_dxgi_color_space);
-    if (FAILED(hr)) {
-      DLOG(ERROR) << "SetColorSpace1 failed: "
-                  << logging::SystemErrorCodeToString(hr);
-    }
-    context1->VideoProcessorSetOutputColorSpace1(video_processor.Get(),
-                                                 output_dxgi_color_space);
-  } else {
-    // This can't handle as many different types of color spaces, so use it
-    // only if ID3D11VideoContext1 isn't available.
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE src_d3d11_color_space =
-        gfx::ColorSpaceWin::GetD3D11ColorSpace(src_color_space);
-    video_context->VideoProcessorSetStreamColorSpace(video_processor.Get(), 0,
-                                                     &src_d3d11_color_space);
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE output_d3d11_color_space =
-        gfx::ColorSpaceWin::GetD3D11ColorSpace(output_color_space);
-    video_context->VideoProcessorSetOutputColorSpace(video_processor.Get(),
-                                                     &output_d3d11_color_space);
+  // Can fail with E_INVALIDARG if the swap chain does not support the
+  // DXGI color space. We should still set the output color space as
+  // best effort.
+  HRESULT hr = swap_chain_->SetColorSpace1(swap_dxgi_color_space);
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "SetColorSpace1 failed: "
+                << logging::SystemErrorCodeToString(hr);
   }
-
   Microsoft::WRL::ComPtr<ID3D11VideoContext2> context2;
   std::optional<DXGI_HDR_METADATA_HDR10> display_metadata =
       layer_tree_->GetHDRMetadataHelper()->GetDisplayMetadata(
@@ -1533,7 +1563,7 @@ bool SwapChainPresenter::VideoProcessorBlt(
   }
 
   {
-    Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device =
+    Microsoft::WRL::ComPtr<ID3D11VideoDevice1> video_device =
         video_processor_wrapper->video_device;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator>
         video_processor_enumerator =
@@ -1544,7 +1574,7 @@ bool SwapChainPresenter::VideoProcessorBlt(
     input_desc.Texture2D.ArraySlice = input_level;
 
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorInputView> input_view;
-    HRESULT hr = video_device->CreateVideoProcessorInputView(
+    hr = video_device->CreateVideoProcessorInputView(
         input_texture.Get(), video_processor_enumerator.Get(), &input_desc,
         &input_view);
     if (FAILED(hr)) {
@@ -1595,8 +1625,8 @@ bool SwapChainPresenter::VideoProcessorBlt(
       if (FAILED(hr)) {
         if (use_vp_auto_hdr) {
           if (!RevertSwapChainToSDR(video_device, video_processor,
-                                    video_processor_enumerator, swap_chain3,
-                                    context1, src_color_space)) {
+                                    video_processor_enumerator, video_context,
+                                    src_color_space)) {
             return false;
           }
 
@@ -1654,8 +1684,8 @@ bool SwapChainPresenter::VideoProcessorBlt(
                       video_context.Get(), video_processor.Get(), false);
 
       if (!RevertSwapChainToSDR(video_device, video_processor,
-                                video_processor_enumerator, swap_chain3,
-                                context1, src_color_space)) {
+                                video_processor_enumerator, video_context,
+                                src_color_space)) {
         return false;
       }
 
@@ -1770,13 +1800,15 @@ bool SwapChainPresenter::ReallocateSwapChain(
       "GPU.DirectComposition.SwapChainCreationResult3.";
   const std::string protected_video_type_string =
       ProtectedVideoTypeToString(protected_video_type);
+  Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain;
 
   if (use_yuv_swap_chain) {
     TRACE_EVENT1("gpu", "SwapChainPresenter::ReallocateSwapChain::YUV",
                  "format", DxgiFormatToString(swap_chain_format));
+    Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain1;
     hr = media_factory->CreateSwapChainForCompositionSurfaceHandle(
         d3d11_device_.Get(), swap_chain_handle.Get(), &desc, nullptr,
-        &swap_chain_);
+        &swap_chain1);
     failed_to_create_yuv_swapchain_ = FAILED(hr);
 
     base::UmaHistogramSparse(kSwapChainCreationResultByVideoTypeUmaPrefix +
@@ -1792,6 +1824,9 @@ bool SwapChainPresenter::ReallocateSwapChain(
       use_yuv_swap_chain = false;
       swap_chain_format = DXGI_FORMAT_B8G8R8A8_UNORM;
     } else {
+      // IDXGISwapChain3 is supported on all Windows versions >= 10. Windows 10
+      // which is the minimum Windows version Chromium supports.
+      CHECK_EQ(swap_chain1.As(&swap_chain), S_OK);
       DVLOG(2) << "Update visual's content (yuv). " << __func__ << "(" << this
                << ")";
     }
@@ -1815,9 +1850,10 @@ bool SwapChainPresenter::ReallocateSwapChain(
       desc.Flags |= DXGI_SWAP_CHAIN_FLAG_HW_PROTECTED;
     }
 
+    Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain1;
     hr = media_factory->CreateSwapChainForCompositionSurfaceHandle(
         d3d11_device_.Get(), swap_chain_handle.Get(), &desc, nullptr,
-        &swap_chain_);
+        &swap_chain1);
 
     base::UmaHistogramSparse(kSwapChainCreationResultByVideoTypeUmaPrefix +
                                  protected_video_type_string,
@@ -1834,17 +1870,16 @@ bool SwapChainPresenter::ReallocateSwapChain(
       return false;
     }
 
+    CHECK_EQ(swap_chain1.As(&swap_chain), S_OK);
     DVLOG(2) << "Update visual's content. " << __func__ << "(" << this << ")";
   }
 
+  swap_chain_ = std::move(swap_chain);
   if (DXGIWaitableSwapChainEnabled()) {
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3;
-    if (SUCCEEDED(swap_chain_.As(&swap_chain3))) {
-      hr = swap_chain3->SetMaximumFrameLatency(
-          GetDXGIWaitableSwapChainMaxQueuedFrames());
-      DCHECK(SUCCEEDED(hr)) << "SetMaximumFrameLatency failed: "
-                            << logging::SystemErrorCodeToString(hr);
-    }
+    hr = swap_chain_->SetMaximumFrameLatency(
+        GetDXGIWaitableSwapChainMaxQueuedFrames());
+    DCHECK(SUCCEEDED(hr)) << "SetMaximumFrameLatency failed: "
+                          << logging::SystemErrorCodeToString(hr);
   }
 
   LabelSwapChainAndBuffers(swap_chain_.Get(), "SwapChainPresenter");
@@ -1911,15 +1946,14 @@ SwapChainPresenter::GetSwapChainMedia() const {
 }
 
 bool SwapChainPresenter::RevertSwapChainToSDR(
-    Microsoft::WRL::ComPtr<ID3D11VideoDevice> video_device,
+    Microsoft::WRL::ComPtr<ID3D11VideoDevice1> video_device,
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> video_processor,
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator>
         video_processor_enumerator,
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3,
     Microsoft::WRL::ComPtr<ID3D11VideoContext1> context1,
     const gfx::ColorSpace& input_color_space) {
   if (!video_device || !video_processor || !video_processor_enumerator ||
-      !swap_chain3 || !context1) {
+      !context1) {
     return false;
   }
 
@@ -1928,7 +1962,8 @@ bool SwapChainPresenter::RevertSwapChainToSDR(
           gfx::Size(swap_chain_size_),
           GetSwapChainFormat(swap_chain_protected_video_type_,
                              /*use_hdr_swap_chain=*/false,
-                             /*use_p010_for_sdr_swap_chain=*/false),
+                             /*use_p010_for_sdr_swap_chain=*/false,
+                             input_color_space),
           swap_chain_protected_video_type_)) {
     ReleaseSwapChainResources();
     return false;
@@ -1958,7 +1993,7 @@ bool SwapChainPresenter::RevertSwapChainToSDR(
                                             is_yuv_swapchain);
   context1->VideoProcessorSetOutputColorSpace1(video_processor.Get(),
                                                output_dxgi_color_space);
-  hr = swap_chain3->SetColorSpace1(output_dxgi_color_space);
+  hr = swap_chain_->SetColorSpace1(output_dxgi_color_space);
   if (FAILED(hr)) {
     LOG(ERROR) << "SetColorSpace1 failed: "
                << logging::SystemErrorCodeToString(hr);

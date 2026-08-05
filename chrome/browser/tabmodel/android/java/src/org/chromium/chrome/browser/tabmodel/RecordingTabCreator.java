@@ -4,10 +4,12 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
+import org.chromium.base.Token;
 import org.chromium.build.annotations.EnsuresNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabId;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabState;
 import org.chromium.chrome.browser.tab.TabStateStorageFlagHelper;
@@ -16,7 +18,9 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.url.GURL;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -31,21 +35,33 @@ public class RecordingTabCreator implements TabCreator {
         public final int id;
         public final @Nullable String url;
         public final long timestampMillis;
+        public final boolean isPinned;
+        public final @Nullable Token tabGroupId;
 
         /**
          * @param id The ID of the tab (if frozen, otherwise Tab.INVALID_TAB_ID).
          * @param url The URL spec of the tab.
          * @param timestampMillis The timestamp of the tab in milliseconds (if frozen, otherwise 0).
+         * @param isPinned Whether the tab is pinned.
+         * @param tabGroupId The group ID of the tab if in a group.
          */
-        public TabCreationData(int id, @Nullable String url, long timestampMillis) {
+        public TabCreationData(
+                int id,
+                @Nullable String url,
+                long timestampMillis,
+                boolean isPinned,
+                @Nullable Token tabGroupId) {
             this.id = id;
             this.url = url;
             this.timestampMillis = timestampMillis;
+            this.isPinned = isPinned;
+            this.tabGroupId = tabGroupId;
         }
     }
 
     private final List<TabCreationData> mFrozenTabCreationData = new ArrayList<>();
     private final List<TabCreationData> mNewTabCreationData = new ArrayList<>();
+    private final Map<@TabId Integer, String> mRegularFallbackTabs = new HashMap<>();
     private @Nullable TabCreator mDelegate;
     private int mTabCount;
     private boolean mIsRecording = true;
@@ -87,7 +103,9 @@ public class RecordingTabCreator implements TabCreator {
         if (mIsRecording && TabStateStorageFlagHelper.isTabStorageEnabled()) {
             mTabCount++;
             String urlSpec = state.url != null ? state.url.getSpec() : null;
-            mFrozenTabCreationData.add(new TabCreationData(id, urlSpec, state.timestampMillis));
+            mFrozenTabCreationData.add(
+                    new TabCreationData(
+                            id, urlSpec, state.timestampMillis, state.isPinned, state.tabGroupId));
         }
         return mDelegate.createFrozenTab(state, id, index);
     }
@@ -143,6 +161,23 @@ public class RecordingTabCreator implements TabCreator {
         return mNewTabCreationData;
     }
 
+    /** Returns the map of regular fallback tab IDs to URLs. */
+    public Map<@TabId Integer, String> getRegularFallbackTabs() {
+        return mRegularFallbackTabs;
+    }
+
+    /**
+     * Records a fallback tab created with the given ID and URL.
+     *
+     * @param id The ID of the fallback tab.
+     * @param url The URL string of the fallback tab.
+     */
+    public void recordFallbackTab(@TabId int id, String url) {
+        if (mIsRecording) {
+            mRegularFallbackTabs.put(id, url);
+        }
+    }
+
     /** Sets the delegate {@link TabCreator} to use. */
     public void setDelegate(TabCreator delegate) {
         mDelegate = delegate;
@@ -162,7 +197,12 @@ public class RecordingTabCreator implements TabCreator {
         if (mIsRecording && TabStateStorageFlagHelper.isTabStorageEnabled()) {
             mTabCount++;
             mNewTabCreationData.add(
-                    new TabCreationData(Tab.INVALID_TAB_ID, urlSpec, /* timestampMillis= */ 0));
+                    new TabCreationData(
+                            Tab.INVALID_TAB_ID,
+                            urlSpec,
+                            /* timestampMillis= */ 0,
+                            /* isPinned= */ false,
+                            /* tabGroupId= */ null));
         }
     }
 }

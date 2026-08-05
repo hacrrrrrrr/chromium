@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_DIALOG_CONTROLLER_H_
 #include <string>
 
+#include "base/time/time.h"
 #include "content/public/browser/web_contents.h"
 
 namespace autofill {
@@ -19,6 +20,12 @@ class AutofillDialogController {
                     const std::u16string& description,
                     const std::u16string& button_text,
                     base::OnceClosure on_positive_button_clicked_callback) = 0;
+
+  virtual void ShowLoadingDialog(const std::u16string& title,
+                                 base::TimeDelta min_time) = 0;
+
+  // Dismisses the dialog if it is showing.
+  virtual void Dismiss() = 0;
 
   // User clicked the positive button on the dialog.
   virtual void OnPositiveButtonClicked() = 0;

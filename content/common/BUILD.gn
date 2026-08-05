@@ -140,6 +140,8 @@ source_set("common") {
     "input/synthetic_touchpad_pinch_gesture.h",
     "input/synthetic_touchscreen_pinch_gesture.cc",
     "input/synthetic_touchscreen_pinch_gesture.h",
+    "lazy_shared_url_loader_factory.cc",
+    "lazy_shared_url_loader_factory.h",
     "media/cdm_info.cc",
     "memory_coordinator/constants.h",
     "memory_coordinator/memory_consumer_group_controller.h",
@@ -248,6 +250,7 @@ source_set("common") {
     "//net",
     "//sandbox",
     "//sandbox:sandbox_buildflags",
+    "//services/data_decoder/public/cpp",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
     "//services/resource_coordinator/public/cpp/memory_instrumentation",
@@ -425,10 +428,7 @@ component("main_frame_counter") {
 
 # See comment at the top of //content/BUILD.gn for how this works.
 group("for_content_tests") {
-  visibility = [
-    "//content/services/auction_worklet:tests",
-    "//content/test/*",
-  ]
+  visibility = [ "//content/test/*" ]
   if (!is_component_build) {
     public_deps = [ ":common" ]
   }

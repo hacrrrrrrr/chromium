@@ -6,10 +6,12 @@
 
 #include "base/callback_list.h"
 #include "base/feature_list.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/commerce/shopping_service_factory.h"
 #include "chrome/browser/glic/host/glic.mojom-shared.h"
 #include "chrome/browser/glic/host/glic_features.mojom.h"
+#include "chrome/browser/glic/public/glic_invoke_options.h"
 #include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/glic/public/service/glic_instance_coordinator.h"
@@ -17,6 +19,7 @@
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
+#include "chrome/browser/sync/send_tab_to_self_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
@@ -45,6 +48,11 @@
 #include "components/optimization_guide/core/model_execution/model_execution_features.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/send_tab_to_self/fake_send_tab_to_self_model.h"
+#include "components/send_tab_to_self/features.h"
+#include "components/send_tab_to_self/send_tab_to_self_model.h"
+#include "components/send_tab_to_self/stub_send_tab_to_self_sync_service.h"
+#include "components/send_tab_to_self/target_device_info.h"
 #include "components/tabs/public/split_tab_data.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -58,7 +66,7 @@
 class TabMenuModelBrowserTest : public MenuModelTest,
                                 public InProcessBrowserTest {
  public:
-  Profile* profile() { return browser()->profile(); }
+  Profile* profile() { return browser()->GetProfile(); }
 
   void ActivateSwapWithSplitSubmenuCommand(
       int tab_index,
@@ -619,6 +627,13 @@ class TabMenuModelGlicMultiTabTest : public TabMenuModelBrowserTest {
         ->active_instance_sharing_manager();
   }
 
+  glic::GlicSharingManagerInternal& sharing_manager(
+      glic::GlicInstance* instance) {
+    CHECK(instance);
+    return *static_cast<glic::GlicSharingManagerInternal*>(
+        instance->GetSharingManager());
+  }
+
   tabs::TabHandle TabHandleAtIndex(int index) {
     return tab_strip()->GetTabAtIndex(index)->GetHandle();
   }
@@ -651,8 +666,9 @@ IN_PROC_BROWSER_TEST_F(TabMenuModelGlicMultiTabTest, SomeShared) {
   auto* instance =
       service->GetInstanceForTab(browser()->GetActiveTabInterface());
   ASSERT_TRUE(instance);
-  service->instance_coordinator().ShowInstanceForTabs(
-      {tab_strip()->GetTabAtIndex(0)}, instance->id());
+  sharing_manager(instance).PinTabs(
+      {tab_strip()->GetTabAtIndex(0)->GetHandle()},
+      glic::GlicPinTrigger::kContextMenu);
 
   TabMenuModel model(&delegate_,
                      browser()->GetFeatures().tab_menu_model_delegate(),
@@ -670,15 +686,93 @@ IN_PROC_BROWSER_TEST_F(TabMenuModelGlicMultiTabTest, TooManyShared) {
   auto* instance =
       service->GetInstanceForTab(browser()->GetActiveTabInterface());
   ASSERT_TRUE(instance);
-  const int limit = sharing_manager().GetMaxPinnedTabs();
+  const int limit = sharing_manager(instance).GetMaxPinnedTabs();
   for (int i = 0; i < limit; ++i) {
     chrome::NewTab(browser(), NewTabTypes::kNoUserAction);
-    service->instance_coordinator().ShowInstanceForTabs(
-        {tab_strip()->GetTabAtIndex(i)}, instance->id());
+    sharing_manager(instance).PinTabs(
+        {tab_strip()->GetTabAtIndex(i)->GetHandle()},
+        glic::GlicPinTrigger::kContextMenu);
   }
   chrome::NewTab(browser(), NewTabTypes::kNoUserAction);
   tab_strip()->SelectTabAt(limit);
-  service->instance_coordinator().ShowInstanceForTabs(
-      {tab_strip()->GetTabAtIndex(limit)}, instance->id());
-  EXPECT_FALSE(sharing_manager().IsTabPinned(TabHandleAtIndex(limit)));
+  sharing_manager(instance).PinTabs(
+      {tab_strip()->GetTabAtIndex(limit)->GetHandle()},
+      glic::GlicPinTrigger::kContextMenu);
+  EXPECT_FALSE(sharing_manager(instance).IsTabPinned(TabHandleAtIndex(limit)));
+}
+
+class TabMenuModelSendTabToSelfBrowserTest : public TabMenuModelBrowserTest {
+ public:
+  TabMenuModelSendTabToSelfBrowserTest() {
+    feature_list_.InitAndEnableFeature(
+        send_tab_to_self::kSendTabToSelfEnhancedDesktopUI);
+  }
+
+  void SetUpBrowserContextKeyedServices(
+      content::BrowserContext* context) override {
+    TabMenuModelBrowserTest::SetUpBrowserContextKeyedServices(context);
+    SendTabToSelfSyncServiceFactory::GetInstance()->SetTestingFactory(
+        context, base::BindRepeating([](content::BrowserContext* context)
+                                         -> std::unique_ptr<KeyedService> {
+          return std::make_unique<
+              send_tab_to_self::StubSendTabToSelfSyncService>();
+        }));
+  }
+
+  send_tab_to_self::FakeSendTabToSelfModel* model() {
+    return static_cast<send_tab_to_self::StubSendTabToSelfSyncService*>(
+               SendTabToSelfSyncServiceFactory::GetForProfile(profile()))
+        ->GetFakeSendTabToSelfModel();
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(TabMenuModelSendTabToSelfBrowserTest,
+                       SendMultipleSelectedTabs) {
+  std::vector<send_tab_to_self::TargetDeviceInfo> devices;
+  devices.emplace_back("Device 0", "guid0",
+                       syncer::DeviceInfo::FormFactor::kDesktop,
+                       base::Time::Now());
+  model()->SetTargetDeviceInfoSortedList(devices);
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  const GURL url1 = embedded_test_server()->GetURL("/title1.html");
+  const GURL url2 = embedded_test_server()->GetURL("/title2.html");
+  const GURL url3 = embedded_test_server()->GetURL("/title3.html");
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url1));
+  ASSERT_TRUE(AddTabAtIndex(1, url2, ui::PAGE_TRANSITION_TYPED));
+  ASSERT_TRUE(AddTabAtIndex(2, url3, ui::PAGE_TRANSITION_TYPED));
+
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  ASSERT_EQ(tab_strip->count(), 3);
+
+  // Multi-select tabs 1 and 2
+  tab_strip->ActivateTabAt(1);
+  tab_strip->AddSelectionFromAnchorTo(2);
+
+  TabMenuModel menu(&delegate_,
+                    browser()->GetFeatures().tab_menu_model_delegate(),
+                    tab_strip, 2);
+
+  size_t submenu_index =
+      menu.GetIndexOfCommandId(TabStripModel::CommandSendTabToSelf).value();
+  ui::SimpleMenuModel* submenu =
+      static_cast<ui::SimpleMenuModel*>(menu.GetSubmenuModelAt(submenu_index));
+
+  // Trigger send to device 0.
+  submenu->ActivatedAt(0);
+
+  // Wait for async SendTabToDevice requests (scroll position generation) to
+  // complete.
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return model()->GetAllGuids().size() == 2u; }));
+
+  std::vector<GURL> sent_urls;
+  for (const std::string& guid : model()->GetAllGuids()) {
+    sent_urls.push_back(model()->GetEntryByGUID(guid)->GetURL());
+  }
+  EXPECT_THAT(sent_urls, testing::UnorderedElementsAre(url2, url3));
 }

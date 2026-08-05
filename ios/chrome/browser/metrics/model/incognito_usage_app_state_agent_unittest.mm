@@ -26,9 +26,7 @@
 
 class IncognitoUsageAppStateAgentTest : public PlatformTest {
  public:
-  void AdvanceClock(const base::TimeDelta& delay) {
-    scoped_clock_.Advance(delay);
-  }
+  void AdvanceClock(base::TimeDelta delay) { scoped_clock_.Advance(delay); }
 
  protected:
   void SetUp() override {
@@ -36,11 +34,11 @@ class IncognitoUsageAppStateAgentTest : public PlatformTest {
     incognito_agent_ = [[IncognitoUsageAppStateAgent alloc] init];
     app_state_ = [[FakeAppState alloc] initWithStartupInformation:nil];
 
-    scene_state1_ = [[SceneState alloc] initWithAppState:nil];
+    scene_state1_ = [[SceneState alloc] init];
     scene_state1_.incognitoState.incognitoContentVisible = NO;
     scene_state1_.activationLevel = SceneActivationLevelBackground;
 
-    scene_state2_ = [[SceneState alloc] initWithAppState:nil];
+    scene_state2_ = [[SceneState alloc] init];
     scene_state2_.incognitoState.incognitoContentVisible = NO;
     scene_state2_.activationLevel = SceneActivationLevelBackground;
 

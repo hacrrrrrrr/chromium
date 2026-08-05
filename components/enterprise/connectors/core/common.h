@@ -5,15 +5,15 @@
 #ifndef COMPONENTS_ENTERPRISE_CONNECTORS_CORE_COMMON_H_
 #define COMPONENTS_ENTERPRISE_CONNECTORS_CORE_COMMON_H_
 
-#include <map>
 #include <optional>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "base/containers/fixed_flat_map.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/supports_user_data.h"
@@ -161,8 +161,8 @@ struct ReportingSettings {
   ReportingSettings& operator=(ReportingSettings&&);
   ~ReportingSettings();
 
-  std::set<std::string> enabled_event_names;
-  std::map<std::string, std::vector<std::string>> enabled_opt_in_events;
+  base::flat_set<std::string> enabled_event_names;
+  base::flat_map<std::string, std::vector<std::string>> enabled_opt_in_events;
   std::string dm_token;
 
   // Indicates if the report should be made for the profile, or the browser if
@@ -238,18 +238,18 @@ enum class FinalContentAnalysisResult {
   // Show that DLP checks failed, but that the user can proceed if they want.
   WARNING = 4,
 
-  // Show that no issue was found and that the user may proceed.
-  SUCCESS = 5,
-
   // Show that the download is blocked and may proceed to cloud storage.
-  FORCE_SAVE_TO_CLOUD = 6,
+  FORCE_SAVE_TO_CLOUD = 5,
 
   // Show that the user cancelled the scan.
-  CANCELLED = 7,
+  CANCELLED = 6,
 
   // Show that the copy operation is allowed within managed Chrome, but
   // blocked from the OS clipboard.
-  KEPT_IN_MANAGED_CHROME = 8,
+  KEPT_IN_MANAGED_CHROME = 7,
+
+  // Show that no issue was found and that the user may proceed.
+  SUCCESS = 8,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/enterprise/histograms.xml)
 

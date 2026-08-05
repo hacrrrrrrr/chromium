@@ -33,7 +33,7 @@ ExtensionsToolbarUITest::ExtensionsToolbarUITest() = default;
 ExtensionsToolbarUITest::~ExtensionsToolbarUITest() = default;
 
 Profile* ExtensionsToolbarUITest::profile() {
-  return browser()->profile();
+  return browser()->GetProfile();
 }
 
 scoped_refptr<const extensions::Extension>
@@ -149,7 +149,9 @@ ExtensionsToolbarDesktop* ExtensionsToolbarUITest::GetExtensionsToolbarDesktop()
 ExtensionsToolbarDesktop*
 ExtensionsToolbarUITest::GetExtensionsToolbarDesktopForBrowser(
     Browser* browser) const {
-  return browser->GetBrowserView().toolbar()->extensions_container();
+  return BrowserView::GetBrowserViewForBrowser(browser)
+      ->toolbar()
+      ->extensions_container();
 }
 
 std::vector<ToolbarActionView*> ExtensionsToolbarUITest::GetToolbarActionViews()

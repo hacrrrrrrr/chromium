@@ -12,6 +12,7 @@
 #include "base/strings/to_string.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/traced_value.h"
+#include "base/unguessable_token.h"
 #include "components/download/public/common/download_create_info.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_url_parameters.h"
@@ -191,6 +192,10 @@ FederatedRequestResultToProtocol(blink::mojom::FederatedRequestResult result) {
     case FederatedRequestResult::kWellKnownHttpNotFound: {
       return FederatedAuthRequestIssueReasonEnum::WellKnownHttpNotFound;
     }
+    // TODO(crbug.com/535664990): When request is blocked by connection
+    // allowlist, surface a separate devtools issue, rather than reusing the
+    // general no response one.
+    case FederatedRequestResult::kWellKnownBlockedByConnectionAllowlist:
     case FederatedRequestResult::kWellKnownNoResponse: {
       return FederatedAuthRequestIssueReasonEnum::WellKnownNoResponse;
     }
@@ -212,6 +217,10 @@ FederatedRequestResultToProtocol(blink::mojom::FederatedRequestResult result) {
     case FederatedRequestResult::kConfigHttpNotFound: {
       return FederatedAuthRequestIssueReasonEnum::ConfigHttpNotFound;
     }
+    // TODO(crbug.com/535664990): When request is blocked by connection
+    // allowlist, surface a separate devtools issue, rather than reusing the
+    // general no response one.
+    case FederatedRequestResult::kConfigBlockedByConnectionAllowlist:
     case FederatedRequestResult::kConfigNoResponse: {
       return FederatedAuthRequestIssueReasonEnum::ConfigNoResponse;
     }
@@ -224,6 +233,10 @@ FederatedRequestResultToProtocol(blink::mojom::FederatedRequestResult result) {
     case FederatedRequestResult::kAccountsHttpNotFound: {
       return FederatedAuthRequestIssueReasonEnum::AccountsHttpNotFound;
     }
+    // TODO(crbug.com/535664990): When request is blocked by connection
+    // allowlist, surface a separate devtools issue, rather than reusing the
+    // general no response one.
+    case FederatedRequestResult::kAccountsBlockedByConnectionAllowlist:
     case FederatedRequestResult::kAccountsNoResponse: {
       return FederatedAuthRequestIssueReasonEnum::AccountsNoResponse;
     }
@@ -239,6 +252,10 @@ FederatedRequestResultToProtocol(blink::mojom::FederatedRequestResult result) {
     case FederatedRequestResult::kIdTokenHttpNotFound: {
       return FederatedAuthRequestIssueReasonEnum::IdTokenHttpNotFound;
     }
+    // TODO(crbug.com/535664990): When request is blocked by connection
+    // allowlist, surface a separate devtools issue, rather than reusing the
+    // general no response one.
+    case FederatedRequestResult::kIdTokenBlockedByConnectionAllowlist:
     case FederatedRequestResult::kIdTokenNoResponse: {
       return FederatedAuthRequestIssueReasonEnum::IdTokenNoResponse;
     }
@@ -1597,29 +1614,30 @@ void ApplyNetworkRequestOverrides(
 
 }  // namespace
 
-void ApplyExtraHeadersForWebSocket(const GlobalRenderFrameHostId& frame_id,
-                                   net::HttpRequestHeaders* headers) {
-  auto* frame = RenderFrameHostImpl::FromID(frame_id);
-  if (!frame) {
-    return;
+void ApplyExtraHeadersForWebSocket(
+    const GlobalRenderFrameHostId& frame_id,
+    const std::optional<base::UnguessableToken>& devtools_worker_token,
+    net::HttpRequestHeaders* headers) {
+  auto apply_overrides = [headers](DevToolsAgentHostImpl* agent_host) {
+    if (!agent_host) {
+      return;
+    }
+    bool disable_cache = false;
+    bool skip_service_worker = false;
+    ApplyNetworkRequestOverrides(agent_host, headers, &disable_cache, nullptr,
+                                 &skip_service_worker, nullptr, nullptr,
+                                 nullptr, nullptr);
+  };
+  if (RenderFrameHostImpl* frame = RenderFrameHostImpl::FromID(frame_id)) {
+    if (FrameTreeNode* ftn = frame->frame_tree_node()) {
+      apply_overrides(GetDevToolsAgentHostForNetworkOverrides(ftn));
+    }
   }
-
-  FrameTreeNode* ftn = frame->frame_tree_node();
-  if (!ftn) {
-    return;
+  if (devtools_worker_token && !devtools_worker_token->is_empty()) {
+    scoped_refptr<DevToolsAgentHostImpl> worker_agent_host =
+        DevToolsAgentHostImpl::GetForId(devtools_worker_token->ToString());
+    apply_overrides(worker_agent_host.get());
   }
-
-  DevToolsAgentHostImpl* agent_host =
-      GetDevToolsAgentHostForNetworkOverrides(ftn);
-  if (!agent_host) {
-    return;
-  }
-
-  bool disable_cache = false;
-  bool skip_service_worker = false;
-  ApplyNetworkRequestOverrides(agent_host, headers, &disable_cache, nullptr,
-                               &skip_service_worker, nullptr, nullptr, nullptr,
-                               nullptr);
 }
 
 void ApplyAuctionNetworkRequestOverrides(
@@ -1763,18 +1781,14 @@ bool WillCreateURLLoaderFactoryParams::Run(
       factory_override && *factory_override ? factory_override->get()
                                             : &devtools_override;
 
-  // Order of targets and sessions matters -- the latter proxy is created,
-  // the closer it is to the network. So start with frame's NetworkHandler,
-  // then process frame's FetchHandler and then browser's FetchHandler.
+  // Order of targets and sessions matters -- the later proxy is created,
+  // the closer it is to the network. So process frame's FetchHandler
+  // and then browser's FetchHandler.
   // Within the target, the agents added earlier are closer to network.
   bool had_interceptors =
-      MaybeCreateProxyForInterception<protocol::NetworkHandler>(
+      MaybeCreateProxyForInterception<protocol::FetchHandler>(
           agent_host_, process_id_, storage_partition_, devtools_token_,
           is_navigation, is_download, handler_override, header_client);
-
-  had_interceptors |= MaybeCreateProxyForInterception<protocol::FetchHandler>(
-      agent_host_, process_id_, storage_partition_, devtools_token_,
-      is_navigation, is_download, handler_override, header_client);
 
   // TODO(caseq): assure deterministic order of browser agents (or sessions).
   for (auto* browser_agent_host : BrowserDevToolsAgentHost::Instances()) {
@@ -2156,33 +2170,6 @@ std::unique_ptr<protocol::Array<protocol::String>> BuildWarningReasons(
                                   WARN_SAMESITE_UNSPECIFIED_LAX_ALLOW_UNSAFE)) {
     warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
                                    WarnSameSiteUnspecifiedLaxAllowUnsafe);
-  }
-
-  // There can only be one of the following warnings.
-  if (status.HasWarningReason(net::CookieInclusionStatus::WarningReason::
-                                  WARN_STRICT_LAX_DOWNGRADE_STRICT_SAMESITE)) {
-    warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
-                                   WarnSameSiteStrictLaxDowngradeStrict);
-  } else if (status.HasWarningReason(
-                 net::CookieInclusionStatus::WarningReason::
-                     WARN_STRICT_CROSS_DOWNGRADE_STRICT_SAMESITE)) {
-    warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
-                                   WarnSameSiteStrictCrossDowngradeStrict);
-  } else if (status.HasWarningReason(
-                 net::CookieInclusionStatus::WarningReason::
-                     WARN_STRICT_CROSS_DOWNGRADE_LAX_SAMESITE)) {
-    warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
-                                   WarnSameSiteStrictCrossDowngradeLax);
-  } else if (status.HasWarningReason(
-                 net::CookieInclusionStatus::WarningReason::
-                     WARN_LAX_CROSS_DOWNGRADE_STRICT_SAMESITE)) {
-    warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
-                                   WarnSameSiteLaxCrossDowngradeStrict);
-  } else if (status.HasWarningReason(
-                 net::CookieInclusionStatus::WarningReason::
-                     WARN_LAX_CROSS_DOWNGRADE_LAX_SAMESITE)) {
-    warning_reasons->push_back(protocol::Audits::CookieWarningReasonEnum::
-                                   WarnSameSiteLaxCrossDowngradeLax);
   }
 
   if (status.HasWarningReason(

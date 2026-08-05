@@ -210,6 +210,7 @@ source_set("impl") {
     "//chrome/browser/plus_addresses",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/signin",
+    "//chrome/browser/ssl",
     "//chrome/browser/strike_database",
     "//chrome/browser/subscription_eligibility",
     "//chrome/browser/sync",
@@ -268,12 +269,12 @@ source_set("impl") {
       "//chrome/browser/autofill/android:jni_headers",
       "//chrome/browser/keyboard_accessory/android",
       "//chrome/browser/keyboard_accessory/android:impl",
+      "//chrome/browser/touch_to_fill/autofill/android",
       "//chrome/browser/touch_to_fill/autofill/android:public",
       "//chrome/browser/ui/android/autofill",
       "//components/android_autofill/browser:android",
       "//components/messages/android:feature_flags",
       "//components/password_manager/core/browser/features:password_features",
-      "//components/plus_addresses/core/browser/resources/strings",
     ]
   } else {
     sources += [
@@ -313,7 +314,6 @@ source_set("impl") {
       "//components/autofill/core/browser",
       "//components/desktop_to_mobile_promos",
       "//components/password_manager/core/browser/features:password_features",
-      "//components/plus_addresses/core/browser/resources/strings",
       "//extensions/browser",
     ]
 
@@ -421,6 +421,7 @@ source_set("unit_tests") {
       "autofill_field_promo_controller_impl_unittest.cc",
       "autofill_popup_controller_impl_unittest.cc",
       "bubble_manager_impl_unittest.cc",
+      "edit_address_profile_dialog_controller_impl_unittest.cc",
       "save_address_bubble_controller_unittest.cc",
       "update_address_bubble_controller_unittest.cc",
     ]
@@ -503,6 +504,7 @@ if (!is_android && !is_chromeos_device) {
       "//chrome/browser/sync:factories",
       "//chrome/browser/ui",
       "//chrome/browser/ui:ui_features",
+      "//chrome/browser/ui/browser_web_contents_delegate",
       "//chrome/browser/ui/browser_window",
       "//chrome/browser/ui/user_education",
       "//chrome/common:constants",
@@ -597,7 +599,6 @@ if (!is_android) {
       "autofill_ai/autofill_ai_import_data_controller_impl_browsertest.cc",
       "autofill_context_menu_manager_browsertest.cc",
       "delete_address_profile_dialog_controller_impl_browsertest.cc",
-      "edit_address_profile_dialog_controller_impl_browsertest.cc",
     ]
 
     deps = [
@@ -614,6 +615,7 @@ if (!is_android) {
       "//chrome/browser/password_manager/factories",
       "//chrome/browser/plus_addresses",
       "//chrome/browser/signin",
+      "//chrome/browser/signin:signin_browser_test_base",
       "//chrome/browser/sync",
       "//chrome/browser/ui",
       "//chrome/browser/ui/browser_window",
@@ -637,7 +639,6 @@ if (!is_android) {
       "//components/password_manager/core/common",
       "//components/personal_context/core:test_support",
       "//components/plus_addresses/core/browser:test_support",
-      "//components/plus_addresses/core/browser/resources/strings",
       "//components/signin/public/base",
       "//components/signin/public/identity_manager:test_support",
       "//components/strings:components_strings",

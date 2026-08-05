@@ -96,6 +96,8 @@ const char kFirstRunPromoActionHistogram[] = "IOS.Gemini.FRE.PromoAction";
 
 const char kFirstRunConsentActionHistogram[] = "IOS.Gemini.FRE.ConsentAction";
 
+const char kGeminiLiveFREOutcomeHistogram[] = "IOS.Gemini.Live.FREOutcome";
+
 const char kGeminiInvocationPageTypeHistogram[] =
     "IOS.Gemini.InvocationPageType";
 
@@ -147,11 +149,24 @@ const char kPromptLongPressImageIncludedHistogram[] =
 const char kPromptContextAttachmentHistogram[] =
     "IOS.Gemini.Prompt.ContextAttachment";
 
+const char kPromptTabsAttachedCountHistogram[] =
+    "IOS.Gemini.Prompt.TabsAttachedCount";
+
+const char kPromptMultiTabUsedHistogram[] = "IOS.Gemini.Prompt.MultiTabUsed";
+
 const char kResponseGeneratedImageIncluded[] =
     "IOS.Gemini.Response.GeneratedImage.Included";
 
 const char kRegenerateButtonTappedHistogram[] =
     "IOS.Gemini.RegenerateButton.Tapped";
+
+const char kResponseLatencyHistogram[] = "IOS.Gemini.Response.Latency";
+
+const char kResponseLatencyMultiTabUsedHistogram[] =
+    "IOS.Gemini.Response.Latency.MultiTabUsed";
+
+const char kResponseLatencyMultiTabNotUsedHistogram[] =
+    "IOS.Gemini.Response.Latency.MultiTabNotUsed";
 
 const char kResponseLatencyWithContextHistogram[] =
     "IOS.Gemini.Response.Latency.WithContext";
@@ -168,6 +183,9 @@ const char kResponseLatencyWithoutGeneratedImageHistogram[] =
 const char kSessionPromptCountHistogram[] = "IOS.Gemini.Session.PromptCount";
 
 const char kSessionFirstPromptHistogram[] = "IOS.Gemini.Session.FirstPrompt";
+
+const char kSessionTabSwitchCountHistogram[] =
+    "IOS.Gemini.Session.TabSwitchCount";
 
 const char kGeminiLiveDormantReasonHistogram[] =
     "IOS.Gemini.Live.DormantReason";
@@ -249,6 +267,63 @@ void RecordFirstRunConsentAction(IOSGeminiFirstRunAction action) {
       break;
   }
   base::UmaHistogramEnumeration(kFirstRunConsentActionHistogram, action);
+}
+
+void RecordLiveFREOutcome(IOSGeminiLiveFREOutcome outcome) {
+  base::UmaHistogramEnumeration(kGeminiLiveFREOutcomeHistogram, outcome);
+}
+
+void RecordLiveButtonTapped() {
+  base::RecordAction(base::UserMetricsAction("MobileGeminiLiveButtonTapped"));
+}
+
+void RecordLiveSessionStarted() {
+  base::RecordAction(base::UserMetricsAction("MobileGeminiLiveSessionStarted"));
+}
+
+void RecordLiveOSMicPromptShown() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveOSMicPromptShown"));
+}
+
+void RecordLiveOSMicPromptAllowed() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveOSMicPromptAllowed"));
+}
+
+void RecordLiveOSMicPromptDenied() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveOSMicPromptDenied"));
+}
+
+void RecordLiveChromeMicPromptShown() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveChromeMicPromptShown"));
+}
+
+void RecordLiveChromeMicPromptAllowed() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveChromeMicPromptAllowed"));
+}
+
+void RecordLiveChromeMicPromptDenied() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveChromeMicPromptDenied"));
+}
+
+void RecordLiveSettingsRedirectShown() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveSettingsRedirectShown"));
+}
+
+void RecordLiveSettingsRedirectOpenSettings() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveSettingsRedirectOpenSettings"));
+}
+
+void RecordLiveSettingsRedirectCancel() {
+  base::RecordAction(
+      base::UserMetricsAction("MobileGeminiLiveSettingsRedirectCancel"));
 }
 
 void RecordGeminiInvocationPageType(IOSGeminiInvocationPageType page_type) {
@@ -401,9 +476,28 @@ void RecordFirstRunConsentLinkClick() {
       base::UserMetricsAction("MobileGeminiFREConsentLinkClick"));
 }
 
+void RecordGeminiTabPickerOpened() {
+  base::RecordAction(base::UserMetricsAction("MobileGeminiTabPickerOpened"));
+}
+
+void RecordGeminiTabPickerDismissed() {
+  base::RecordAction(base::UserMetricsAction("MobileGeminiTabPickerDismissed"));
+}
+
 void RecordResponseLatency(base::TimeDelta latency,
                            bool had_page_context,
-                           bool had_generated_image) {
+                           bool had_generated_image,
+                           bool was_multi_tab_used) {
+  base::UmaHistogramMediumTimes(kResponseLatencyHistogram, latency);
+
+  if (was_multi_tab_used) {
+    base::UmaHistogramMediumTimes(kResponseLatencyMultiTabUsedHistogram,
+                                  latency);
+  } else {
+    base::UmaHistogramMediumTimes(kResponseLatencyMultiTabNotUsedHistogram,
+                                  latency);
+  }
+
   if (had_page_context) {
     base::UmaHistogramMediumTimes(kResponseLatencyWithContextHistogram,
                                   latency);
@@ -427,6 +521,11 @@ void RecordSessionPromptCount(int prompt_count) {
 
 void RecordSessionFirstPrompt(bool had_first_prompt) {
   base::UmaHistogramBoolean(kSessionFirstPromptHistogram, had_first_prompt);
+}
+
+void RecordSessionTabSwitchCount(int tab_switch_count) {
+  base::UmaHistogramCounts100(kSessionTabSwitchCountHistogram,
+                              tab_switch_count);
 }
 
 void RecordFloatyExpandedToCollapsed() {
@@ -539,7 +638,9 @@ void RecordAIHubIconTapped() {
 void RecordGeminiPromptSent(bool is_nano_banana_enabled,
                             int images_attached_count,
                             bool long_press_image_included,
-                            bool has_page_context) {
+                            bool has_page_context,
+                            int tabs_attached_count,
+                            bool was_multi_tab_used) {
   base::RecordAction(base::UserMetricsAction("MobileGeminiPromptSent"));
   base::UmaHistogramBoolean(kPromptImageRemixEnabledHistogram,
                             is_nano_banana_enabled);
@@ -549,6 +650,9 @@ void RecordGeminiPromptSent(bool is_nano_banana_enabled,
                             long_press_image_included);
   base::UmaHistogramBoolean(kPromptContextAttachmentHistogram,
                             has_page_context);
+  base::UmaHistogramCounts100(kPromptTabsAttachedCountHistogram,
+                              tabs_attached_count);
+  base::UmaHistogramBoolean(kPromptMultiTabUsedHistogram, was_multi_tab_used);
 }
 
 void RecordGeminiFeedback(IOSGeminiFeedback feedback) {

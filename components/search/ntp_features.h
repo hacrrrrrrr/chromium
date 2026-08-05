@@ -25,6 +25,17 @@ BASE_DECLARE_FEATURE(kCustomizeChromeSidePanelExtensionsCard);
 BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearch);
 BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchButton);
 BASE_DECLARE_FEATURE(kCustomizeChromeWallpaperSearchInspirationCard);
+enum class EnergyEffectVariant {
+  // Default (M149 / 12% shadow)
+  kEnergyEffectOriginal = 0,
+  // Variant 1 (20% shadow)
+  kEnergyEffectDarkerShadow = 1,
+  // Variant 2 (reduced original shadow + darker border)
+  kPreEnergyEffectWithBorder = 2,
+  // Variant 4 (Fusebox shadow @ 16%)
+  kEnergyEffectFusebox = 3,
+};
+
 BASE_DECLARE_FEATURE(kEnergyEffect);
 BASE_DECLARE_FEATURE(kEnergyEffectAnimation);
 BASE_DECLARE_FEATURE(kRealboxCr23Theming);
@@ -45,6 +56,7 @@ BASE_DECLARE_FEATURE(kNtpDriveModuleSegmentation);
 BASE_DECLARE_FEATURE(kNtpDummyModules);
 #endif
 BASE_DECLARE_FEATURE(kNtpComprehensiveTheming);
+BASE_DECLARE_FEATURE(kNtpGoogleLogo26);
 BASE_DECLARE_FEATURE(kNtpLogo);
 BASE_DECLARE_FEATURE(kNtpMiddleSlotPromo);
 BASE_DECLARE_FEATURE(kNtpMiddleSlotPromoDismissal);
@@ -55,6 +67,8 @@ BASE_DECLARE_FEATURE(kNtpModulesLoad);
 BASE_DECLARE_FEATURE(kNtpModuleSignInRequirement);
 BASE_DECLARE_FEATURE(kNtpOutlookCalendarModule);
 BASE_DECLARE_FEATURE(kNtpOneGoogleBar);
+BASE_DECLARE_FEATURE(kNtpScaledActionChips);
+BASE_DECLARE_FEATURE(kNtpScaledActionChipsSmall);
 BASE_DECLARE_FEATURE(kNtpSharepointModule);
 enum class NtpSharepointModuleDataType {
   kTrendingInsights,
@@ -265,6 +279,9 @@ extern const base::FeatureParam<bool> kNtpNextDisablementParam;
 // added from an action chip.
 extern const base::FeatureParam<bool> kAddTabUploadDelayOnActionChipClick;
 
+// Parameter determining the maximum number of small action chips to show.
+extern const base::FeatureParam<int> kNtpMaxSmallChips;
+
 // Parameter determining the minimum amount of time that must pass before
 // shortcuts staleness counters will be incremented.
 extern const base::FeatureParam<base::TimeDelta>
@@ -343,6 +360,8 @@ int GetMaxEnterpriseShortcuts();
 base::TimeDelta GetBookmarkBarMinStalenessTimeInterval();
 
 int GetBookmarkBarCountThreshold();
+
+extern const base::FeatureParam<EnergyEffectVariant> kEnergyEffectVariantParam;
 
 }  // namespace ntp_features
 

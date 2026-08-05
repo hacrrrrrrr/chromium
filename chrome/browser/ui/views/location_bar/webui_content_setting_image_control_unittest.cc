@@ -9,11 +9,13 @@
 
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
+#include "base/test/test_future.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/content_settings/content_setting_image_view_delegate.h"
 #include "chrome/browser/ui/views/toolbar/mock_webui_toolbar_control_delegate.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+#include "content/public/browser/page.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -27,7 +29,7 @@ class TestDelegate : public ContentSettingImageViewDelegate {
   TestDelegate() = default;
   ~TestDelegate() override = default;
 
-  bool ShouldHideContentSettingImage() override { return false; }
+  bool ShouldHideContentSettingImage() override { return should_hide_; }
   content::WebContents* GetContentSettingWebContents() override {
     return web_contents_;
   }
@@ -40,7 +42,11 @@ class TestDelegate : public ContentSettingImageViewDelegate {
     web_contents_ = web_contents;
   }
 
+  void set_should_hide(bool v) { should_hide_ = v; }
+
  private:
+  bool should_hide_ = false;
+
   // Safe, this delegate is destroyed in TearDown(), before the WebContents.
   raw_ptr<content::WebContents> web_contents_ = nullptr;
 };
@@ -80,9 +86,11 @@ class MockContentSettingImageModel : public FakeContentSettingImageModel {
 
   MOCK_METHOD(std::unique_ptr<ContentSettingBubbleModel>,
               CreateBubbleModelImpl,
-              (ContentSettingBubbleModel::Delegate*, content::WebContents*),
+              (ContentSettingBubbleModel::Delegate*, content::Page&),
               (override));
 };
+
+}  // namespace
 
 class WebUIContentSettingImageControlTest
     : public ChromeRenderViewHostTestHarness {
@@ -100,6 +108,11 @@ class WebUIContentSettingImageControlTest
     control_.reset();
     delegate_.reset();
     ChromeRenderViewHostTestHarness::TearDown();
+  }
+
+  void CloseBubble() { control_->bubble_reopen_suppressor_.CloseForTesting(); }
+  void SetCurrentBubbleType(std::optional<ImageType> type) {
+    control_->last_tracked_bubble_type_ = type;
   }
 
  protected:
@@ -147,6 +160,11 @@ TEST_F(WebUIContentSettingImageControlTest,
             cookie_state->explanatory_string);
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_BLOCKED_POPUPS_TOOLTIP),
             cookie_state->accessibility_string);
+
+  // Turn off via delegate.
+  delegate_->set_should_hide(true);
+  state = control_->ProcessContentSettingState(web_contents());
+  ASSERT_EQ(0u, state.size());
 }
 
 TEST_F(WebUIContentSettingImageControlTest,
@@ -212,7 +230,7 @@ TEST_F(WebUIContentSettingImageControlTest, ShowContentSettingsBubble) {
   EXPECT_CALL(
       *cookies_model,
       CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
-                            web_contents()))
+                            testing::Ref(web_contents()->GetPrimaryPage())))
       .WillOnce(testing::Return(
           testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
 
@@ -220,7 +238,8 @@ TEST_F(WebUIContentSettingImageControlTest, ShowContentSettingsBubble) {
   EXPECT_CALL(*popups_model, CreateBubbleModelImpl(testing::_, testing::_))
       .Times(0);
 
-  control_->ShowContentSettingsBubble(ImageType::kCookies, base::DoNothing());
+  control_->ShowContentSettingsBubble(
+      ImageType::kCookies, /*is_pointer_interaction=*/true, base::DoNothing());
 }
 
 TEST_F(WebUIContentSettingImageControlTest, AutoOpenBubble) {
@@ -244,7 +263,7 @@ TEST_F(WebUIContentSettingImageControlTest, AutoOpenBubble) {
   EXPECT_CALL(
       *cookies_model,
       CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
-                            web_contents()))
+                            testing::Ref(web_contents()->GetPrimaryPage())))
       .WillOnce(testing::Return(
           testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
 
@@ -300,7 +319,134 @@ TEST_F(WebUIContentSettingImageControlTest, AnimationAnnouncement) {
 
   auto state = control_->ProcessContentSettingState(web_contents());
   ASSERT_EQ(1u, state.size());
-  EXPECT_TRUE(state[0]->should_run_animation);
+  EXPECT_EQ(expected_announcement, state[0]->explanatory_string);
 }
 
-}  // namespace
+TEST_F(WebUIContentSettingImageControlTest,
+       NoAnimationAnnounceOnSubsequentUpdates) {
+  std::vector<std::unique_ptr<ContentSettingImageModel>> models;
+  auto popups_model_ptr = std::make_unique<FakeContentSettingImageModel>(
+      ImageType::kPopups, ContentSettingsType::POPUPS,
+      /*image_type_should_notify_accessibility=*/false);
+  auto* popups_model = popups_model_ptr.get();
+  popups_model->set_visible(true);
+  popups_model->set_explanatory_string_id(IDS_BLOCKED_POPUPS_EXPLANATORY_TEXT);
+  models.push_back(std::move(popups_model_ptr));
+
+  testing::StrictMock<MockWebUIToolbarControlDelegate> webui_delegate;
+  control_->InitForTesting(std::move(models), &webui_delegate);
+
+  std::u16string expected_announcement =
+      l10n_util::GetStringUTF16(IDS_BLOCKED_POPUPS_EXPLANATORY_TEXT);
+
+  // The alert should only be announced once during the first update when the
+  // animation actually runs.
+  EXPECT_CALL(webui_delegate, AnnounceAlert(expected_announcement)).Times(1);
+
+  auto state1 = control_->ProcessContentSettingState(web_contents());
+  ASSERT_EQ(1u, state1.size());
+
+  // Second update: animation has already run, so AnnounceAlert should not be
+  // called again.
+  auto state2 = control_->ProcessContentSettingState(web_contents());
+  ASSERT_EQ(1u, state2.size());
+}
+
+TEST_F(WebUIContentSettingImageControlTest, MouseClickSuppression) {
+  std::vector<std::unique_ptr<ContentSettingImageModel>> models;
+  auto cookies_model_ptr = std::make_unique<MockContentSettingImageModel>(
+      ImageType::kCookies, ContentSettingsType::COOKIES);
+  auto* cookies_model = cookies_model_ptr.get();
+  cookies_model->set_visible(true);
+  models.push_back(std::move(cookies_model_ptr));
+
+  auto popups_model_ptr = std::make_unique<MockContentSettingImageModel>(
+      ImageType::kPopups, ContentSettingsType::POPUPS);
+  auto* popups_model = popups_model_ptr.get();
+  popups_model->set_visible(true);
+  models.push_back(std::move(popups_model_ptr));
+
+  control_->InitForTesting(std::move(models));
+  control_->SetSuppressionThresholdForTesting(base::Seconds(1));
+
+  // A mouse press on the chip should NOT suppress if the bubble wasn't just
+  // closed.
+  control_->OnContentSettingImagePointerDown(ImageType::kCookies);
+
+  // Show the bubble for Cookies.
+  EXPECT_CALL(
+      *cookies_model,
+      CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
+                            testing::Ref(web_contents()->GetPrimaryPage())))
+      .WillOnce(testing::Return(
+          testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
+
+  control_->ShowContentSettingsBubble(
+      ImageType::kCookies, /*is_pointer_interaction=*/true, base::DoNothing());
+
+  // A mouse press immediately after closing should trigger suppression.
+  // We mock last_tracked_bubble_type_ because in the pure test environment
+  // lacking a native window, ShowContentSettingsBubbleImpl won't successfully
+  // spawn a Widget, thus failing to set last_tracked_bubble_type_ organically.
+  SetCurrentBubbleType(ImageType::kCookies);
+  CloseBubble();
+  control_->OnContentSettingImagePointerDown(ImageType::kCookies);
+
+  // A non-mouse click (e.g., keyboard Enter) should NOT consume the suppression
+  // flag and should successfully open the bubble (since keyboard interactions
+  // always open the bubble and never trigger suppression).
+  EXPECT_CALL(
+      *cookies_model,
+      CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
+                            testing::Ref(web_contents()->GetPrimaryPage())))
+      .WillOnce(testing::Return(
+          testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
+  control_->ShowContentSettingsBubble(
+      ImageType::kCookies, /*is_pointer_interaction=*/false, base::DoNothing());
+
+  // A true mouse click SHOULD consume the suppression flag and return early,
+  // without calling CreateBubbleModelImpl.
+  SetCurrentBubbleType(ImageType::kCookies);
+  CloseBubble();
+  control_->OnContentSettingImagePointerDown(ImageType::kCookies);
+  EXPECT_CALL(*cookies_model, CreateBubbleModelImpl(testing::_, testing::_))
+      .Times(0);
+  base::test::TestFuture<
+      base::expected<std::monostate, mojo_base::mojom::ErrorPtr>>
+      future;
+  control_->ShowContentSettingsBubble(ImageType::kCookies,
+                                      /*is_pointer_interaction=*/true,
+                                      future.GetCallback());
+  // The callback should immediately complete with std::monostate without
+  // showing anything.
+  EXPECT_TRUE(future.IsReady());
+  EXPECT_TRUE(future.Get().has_value());
+
+  // Clicking on a DIFFERENT chip should NOT suppress the new chip's bubble,
+  // even if the previous chip's bubble was just closed.
+  // We simulate opening kCookies, closing it, and then clicking kPopups.
+  EXPECT_CALL(
+      *cookies_model,
+      CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
+                            testing::Ref(web_contents()->GetPrimaryPage())))
+      .WillOnce(testing::Return(
+          testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
+  control_->ShowContentSettingsBubble(
+      ImageType::kCookies, /*is_pointer_interaction=*/true, base::DoNothing());
+  SetCurrentBubbleType(ImageType::kCookies);
+  CloseBubble();
+
+  // Mouse press on kPopups. Since last_tracked_bubble_type_ is kCookies, it
+  // should NOT suppress.
+  control_->OnContentSettingImagePointerDown(ImageType::kPopups);
+
+  // And the popups chip should successfully open.
+  EXPECT_CALL(
+      *popups_model,
+      CreateBubbleModelImpl(delegate_->GetContentSettingBubbleModelDelegate(),
+                            testing::Ref(web_contents()->GetPrimaryPage())))
+      .WillOnce(testing::Return(
+          testing::ByMove(std::unique_ptr<ContentSettingBubbleModel>())));
+  control_->ShowContentSettingsBubble(
+      ImageType::kPopups, /*is_pointer_interaction=*/true, base::DoNothing());
+}

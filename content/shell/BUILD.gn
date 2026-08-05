@@ -537,7 +537,6 @@ repack("pak") {
     "$root_gen_dir/content/content_resources.pak",
     "$root_gen_dir/content/gpu_resources.pak",
     "$root_gen_dir/content/histograms_resources.pak",
-    "$root_gen_dir/content/private_aggregation_internals_resources.pak",
     "$root_gen_dir/content/process_resources.pak",
     "$root_gen_dir/content/quota_internals_resources.pak",
     "$root_gen_dir/content/service_worker_resources.pak",
@@ -645,6 +644,9 @@ if (is_android) {
     deps = [
       ":content_shell_framework_bundle_data",
       ":content_shell_resources_bundle_data",
+
+      # This target contains only macros. No C++ declarations/definitions.
+      "//base:compiler_specific",
 
       # Despite its path, this does not add a //base dependency, see comments in
       # the .cc file.
@@ -990,6 +992,8 @@ if (is_mac) {
         "CONTENT_SHELL_HELPER_BUNDLE_ID_SUFFIX=${invoker.helper_bundle_id_suffix}",
       ]
       deps = [
+        # This target contains only macros. No C++ declarations/definitions.
+        "//base:compiler_specific",
         "//base/allocator:early_zone_registration_apple",
         "//sandbox/mac:seatbelt",
       ]

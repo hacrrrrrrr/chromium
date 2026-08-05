@@ -726,7 +726,7 @@ class GLES2DecoderImpl : public GLES2Decoder,
   friend class ScopedFramebufferCopyBinder;
   friend class BackFramebuffer;
   friend class BackTexture;
-  friend class ScopedDepthStencilReattacher;
+  friend class ScopedBufferReattacher;
 
   enum FramebufferOperation {
     kFramebufferDiscard,
@@ -1884,6 +1884,9 @@ class GLES2DecoderImpl : public GLES2Decoder,
                             const volatile GLint* params);
 
   // Wrappers for glTexParameter functions.
+  bool CheckTexParameterBaseLevel(TextureRef* texture,
+                                  GLenum pname,
+                                  GLint param);
   void DoTexParameterf(GLenum target, GLenum pname, GLfloat param);
   void DoTexParameteri(GLenum target, GLenum pname, GLint param);
   void DoTexParameterfv(GLenum target,
@@ -2551,13 +2554,11 @@ ScopedGLErrorSuppressor::~ScopedGLErrorSuppressor() {
   ERRORSTATE_CLEAR_REAL_GL_ERRORS(error_state_, function_name_);
 }
 
-class ScopedDepthStencilReattacher {
+class ScopedBufferReattacher {
  public:
-  ScopedDepthStencilReattacher(GLES2DecoderImpl* decoder,
-                               TextureRef* texture_ref);
-  ScopedDepthStencilReattacher(GLES2DecoderImpl* decoder,
-                               Renderbuffer* renderbuffer);
-  ~ScopedDepthStencilReattacher();
+  ScopedBufferReattacher(GLES2DecoderImpl* decoder, TextureRef* texture_ref);
+  ScopedBufferReattacher(GLES2DecoderImpl* decoder, Renderbuffer* renderbuffer);
+  ~ScopedBufferReattacher();
 
  private:
   struct SavedAttachmentInfo {
@@ -2581,22 +2582,25 @@ class ScopedDepthStencilReattacher {
   scoped_refptr<Framebuffer> old_draw_fbo_;
 };
 
-ScopedDepthStencilReattacher::ScopedDepthStencilReattacher(
-    GLES2DecoderImpl* decoder,
-    TextureRef* texture_ref)
+ScopedBufferReattacher::ScopedBufferReattacher(GLES2DecoderImpl* decoder,
+                                               TextureRef* texture_ref)
     : decoder_(decoder), texture_ref_(texture_ref) {
   Initialize();
 }
 
-ScopedDepthStencilReattacher::ScopedDepthStencilReattacher(
-    GLES2DecoderImpl* decoder,
-    Renderbuffer* renderbuffer)
+ScopedBufferReattacher::ScopedBufferReattacher(GLES2DecoderImpl* decoder,
+                                               Renderbuffer* renderbuffer)
     : decoder_(decoder), renderbuffer_(renderbuffer) {
   Initialize();
 }
 
-void ScopedDepthStencilReattacher::Initialize() {
-  if (!decoder_->workarounds().reattach_fbo_depth_stencil_on_reallocation) {
+void ScopedBufferReattacher::Initialize() {
+  const bool reattach_depth_stencil =
+      decoder_->workarounds().reattach_fbo_depth_stencil_on_reallocation;
+  const bool reattach_layer_increase =
+      decoder_->workarounds().reattach_texture_to_fbo_after_layer_increase &&
+      texture_ref_ && texture_ref_->texture()->target() == GL_TEXTURE_2D_ARRAY;
+  if (!reattach_depth_stencil && !reattach_layer_increase) {
     return;
   }
 
@@ -2604,7 +2608,7 @@ void ScopedDepthStencilReattacher::Initialize() {
   if (texture_ref_) {
     detached_fbos =
         decoder_->framebuffer_manager()->GetBindingFramebuffersForTexture(
-            texture_ref_);
+            texture_ref_, reattach_layer_increase);
   } else if (renderbuffer_) {
     detached_fbos =
         decoder_->framebuffer_manager()->GetBindingFramebuffersForRenderbuffer(
@@ -2648,8 +2652,14 @@ void ScopedDepthStencilReattacher::Initialize() {
     // Detach in driver.
     decoder_->api()->glBindFramebufferEXTFn(GL_FRAMEBUFFER, fbo->service_id());
     if (info.is_texture) {
-      decoder_->api()->glFramebufferTexture2DEXTFn(
-          GL_FRAMEBUFFER, attachment_point, info.texture_target, 0, 0);
+      if (info.texture_target == GL_TEXTURE_2D_ARRAY ||
+          info.texture_target == GL_TEXTURE_3D) {
+        decoder_->api()->glFramebufferTextureLayerFn(GL_FRAMEBUFFER,
+                                                     attachment_point, 0, 0, 0);
+      } else {
+        decoder_->api()->glFramebufferTexture2DEXTFn(
+            GL_FRAMEBUFFER, attachment_point, info.texture_target, 0, 0);
+      }
     } else if (info.is_renderbuffer) {
       decoder_->api()->glFramebufferRenderbufferEXTFn(
           GL_FRAMEBUFFER, attachment_point, GL_RENDERBUFFER, 0);
@@ -2657,7 +2667,7 @@ void ScopedDepthStencilReattacher::Initialize() {
   }
 }
 
-ScopedDepthStencilReattacher::~ScopedDepthStencilReattacher() {
+ScopedBufferReattacher::~ScopedBufferReattacher() {
   if (saved_attachments_.empty()) {
     return;
   }
@@ -2667,7 +2677,8 @@ ScopedDepthStencilReattacher::~ScopedDepthStencilReattacher() {
     Framebuffer* fbo = info.framebuffer.get();
     decoder_->api()->glBindFramebufferEXTFn(GL_FRAMEBUFFER, fbo->service_id());
     if (info.is_texture) {
-      if (info.texture_layer == 0) {
+      if (info.texture_target != GL_TEXTURE_2D_ARRAY &&
+          info.texture_target != GL_TEXTURE_3D) {
         if (info.texture_samples == 0) {
           decoder_->api()->glFramebufferTexture2DEXTFn(
               GL_FRAMEBUFFER, info.attachment_point, info.texture_target,
@@ -3719,7 +3730,9 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
               : 0;
       break;
     case CONTEXT_TYPE_OPENGLES2:
-      shader_spec = SH_GLES2_SPEC;
+      // Map OpenGLES contexts to WebGL shader specs to enforce WebGL-specific
+      // safety mitigations and shader sanitization.
+      shader_spec = SH_WEBGL_SPEC;
       resources.OES_standard_derivatives =
           features().oes_standard_derivatives ? 1 : 0;
       resources.ARB_texture_rectangle =
@@ -3740,7 +3753,9 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
           features().ext_blend_func_extended ? 1 : 0;
       break;
     case CONTEXT_TYPE_OPENGLES3:
-      shader_spec = SH_GLES3_SPEC;
+      // Map OpenGLES contexts to WebGL shader specs to enforce WebGL-specific
+      // safety mitigations and shader sanitization.
+      shader_spec = SH_WEBGL2_SPEC;
       resources.ARB_texture_rectangle =
           features().arb_texture_rectangle ? 1 : 0;
       resources.OES_EGL_image_external =
@@ -3754,12 +3769,12 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
       NOTREACHED();
   }
 
-  if (shader_spec == SH_WEBGL_SPEC || shader_spec == SH_WEBGL2_SPEC) {
+  if (feature_info_->IsWebGLContext()) {
     resources.ANGLE_multi_draw =
         multi_draw_explicitly_enabled_ && features().webgl_multi_draw;
   }
 
-  if (shader_spec == SH_WEBGL2_SPEC) {
+  if (feature_info_->context_type() == CONTEXT_TYPE_WEBGL2) {
     // The gl_BaseVertex/BaseInstance shader builtins is disabled in ANGLE for
     // WebGL As they are removed in
     // https://github.com/KhronosGroup/WebGL/pull/3278
@@ -3773,7 +3788,7 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
          features().webgl_multi_draw_instanced_base_vertex_base_instance);
   }
 
-  if (((shader_spec == SH_WEBGL_SPEC || shader_spec == SH_WEBGL2_SPEC) &&
+  if ((feature_info_->IsWebGLContext() &&
        features().enable_shader_name_hashing) ||
       force_shader_name_hashing_for_test) {
     // TODO(crbug.com/40601370): In theory, it should be OK to change this
@@ -3798,6 +3813,9 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
     driver_bug_workarounds.removeDynamicIndexingOfSwizzledVector = true;
   if (workarounds().validate_max_per_stage_uniform_blocks_at_compile_time) {
     driver_bug_workarounds.validatePerStageMaxUniformBlocks = true;
+  }
+  if (workarounds().limit_output_varyings_at_compile_time) {
+    driver_bug_workarounds.limitOutputVaryingsTo256 = true;
   }
 
   // Initialize uninitialized locals and shared variables by default
@@ -4143,6 +4161,12 @@ bool GLES2DecoderImpl::CheckFramebufferValid(
     if (surfaceless_)
       return false;
     if (backbuffer_needs_clear_bits_) {
+      // glClear and glDrawBuffers operate on GL_DRAW_FRAMEBUFFER, so make
+      // sure the backbuffer is bound there before clearing it.
+      Framebuffer* draw_framebuffer = GetBoundDrawFramebuffer();
+      if (draw_framebuffer) {
+        BindFramebuffer(GL_DRAW_FRAMEBUFFER, GetBackbufferServiceId());
+      }
       api()->glClearColorFn(0, 0, 0, 1.0f);
       state_.SetDeviceColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
       api()->glClearStencilFn(0);
@@ -4172,6 +4196,10 @@ bool GLES2DecoderImpl::CheckFramebufferValid(
       }
       backbuffer_needs_clear_bits_ = 0;
       RestoreClearState();
+      // Restore any previously bound GL_DRAW_FRAMEBUFFER.
+      if (draw_framebuffer) {
+        BindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_framebuffer->service_id());
+      }
     }
     return true;
   }
@@ -8158,8 +8186,7 @@ void GLES2DecoderImpl::RenderbufferStorageMultisampleWithWorkaround(
     GLsizei width,
     GLsizei height,
     ForcedMultisampleMode mode) {
-  ScopedDepthStencilReattacher reattacher(this,
-                                          state_.bound_renderbuffer.get());
+  ScopedBufferReattacher reattacher(this, state_.bound_renderbuffer.get());
   RegenerateRenderbufferIfNeeded(state_.bound_renderbuffer.get());
   EnsureRenderbufferBound();
   RenderbufferStorageMultisampleHelper(target, samples, internal_format, width,
@@ -8559,12 +8586,36 @@ void GLES2DecoderImpl::DoSamplerParameteriv(GLuint client_id,
                                    sampler, pname, params[0]);
 }
 
+bool GLES2DecoderImpl::CheckTexParameterBaseLevel(TextureRef* texture,
+                                                  GLenum pname,
+                                                  GLint param) {
+  if (pname == GL_TEXTURE_BASE_LEVEL &&
+      workarounds().dont_change_base_level_for_npot_immutable_textures) {
+    Texture* tex = texture->texture();
+    if (tex->base_level() != param && tex->target() == GL_TEXTURE_2D &&
+        tex->IsImmutable()) {
+      GLsizei width = 0, height = 0, depth = 0;
+      if (tex->GetLevelSize(tex->target(), 0, &width, &height, &depth) &&
+          (GLES2Util::IsNPOT(width) || GLES2Util::IsNPOT(height))) {
+        MarkContextLost(error::kGuilty);
+        group_->LoseContexts(error::kUnknown);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 void GLES2DecoderImpl::DoTexParameterf(
     GLenum target, GLenum pname, GLfloat param) {
   TextureRef* texture = texture_manager()->GetTextureInfoForTarget(
       &state_, target);
   if (!texture) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glTexParameterf", "unknown texture");
+    return;
+  }
+
+  if (!CheckTexParameterBaseLevel(texture, pname, static_cast<GLint>(param))) {
     return;
   }
 
@@ -8578,6 +8629,10 @@ void GLES2DecoderImpl::DoTexParameteri(
       &state_, target);
   if (!texture) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glTexParameteri", "unknown texture");
+    return;
+  }
+
+  if (!CheckTexParameterBaseLevel(texture, pname, param)) {
     return;
   }
 
@@ -8595,6 +8650,11 @@ void GLES2DecoderImpl::DoTexParameterfv(GLenum target,
     return;
   }
 
+  if (!CheckTexParameterBaseLevel(texture, pname,
+                                  static_cast<GLint>(*params))) {
+    return;
+  }
+
   texture_manager()->SetParameterf("glTexParameterfv", error_state_.get(),
                                    texture, pname, *params);
 }
@@ -8607,6 +8667,10 @@ void GLES2DecoderImpl::DoTexParameteriv(GLenum target,
   if (!texture) {
     LOCAL_SET_GL_ERROR(
         GL_INVALID_VALUE, "glTexParameteriv", "unknown texture");
+    return;
+  }
+
+  if (!CheckTexParameterBaseLevel(texture, pname, *params)) {
     return;
   }
 
@@ -8711,7 +8775,8 @@ bool GLES2DecoderImpl::ValidateUniformBlockBackings(const char* func_name) {
     uniform_block_sizes[ii] = 0;
   for (auto info : state_.current_program->uniform_block_size_info()) {
     uint32_t index = info.binding;
-    uniform_block_sizes[index] = static_cast<GLsizeiptr>(info.data_size);
+    uniform_block_sizes[index] = std::max(
+        uniform_block_sizes[index], static_cast<GLsizeiptr>(info.data_size));
   }
   return buffer_manager()->RequestBuffersAccess(
       error_state_.get(), state_.indexed_uniform_buffer_bindings.get(),
@@ -11592,6 +11657,13 @@ error::Error GLES2DecoderImpl::HandleReadPixels(uint32_t immediate_data_size,
         uint32_t leading_bytes = static_cast<uint32_t>(-x) * group_size;
         UNSAFE_TODO(pixels += leading_bytes);
       }
+      bool large_row_length_workaround =
+          pixels_shm_id == 0 &&
+          workarounds().pack_large_row_length_separately_pack_buffer &&
+          padded_row_size >= 0x10000000u;
+      if (large_row_length_workaround) {
+        api()->glPixelStoreiFn(GL_PACK_ROW_LENGTH, 0);
+      }
       for (GLint iy = rect.y(); iy < rect.bottom(); ++iy) {
         bool reset_row_length = false;
         if (iy + 1 == max_y && pixels_shm_id == 0 &&
@@ -11608,6 +11680,9 @@ error::Error GLES2DecoderImpl::HandleReadPixels(uint32_t immediate_data_size,
           api()->glPixelStoreiFn(GL_PACK_ROW_LENGTH, state_.pack_row_length);
         }
         UNSAFE_TODO(pixels += padded_row_size);
+      }
+      if (large_row_length_workaround) {
+        api()->glPixelStoreiFn(GL_PACK_ROW_LENGTH, state_.pack_row_length);
       }
     }
   } else {
@@ -11654,7 +11729,17 @@ error::Error GLES2DecoderImpl::HandleReadPixels(uint32_t immediate_data_size,
       }
     }
     if (pixels_shm_id == 0 &&
-        workarounds().pack_parameters_workaround_with_pack_buffer) {
+        workarounds().pack_large_row_length_separately_pack_buffer &&
+        padded_row_size >= 0x10000000u) {
+      api()->glPixelStoreiFn(GL_PACK_ROW_LENGTH, 0);
+      for (GLint iy = y; iy < max_y; ++iy) {
+        api()->glReadPixelsFn(x, iy, width, 1, format, type, pixels);
+        // SAFETY: maximum bounds were validated to be in-range above.
+        UNSAFE_BUFFERS(pixels += padded_row_size);
+      }
+      api()->glPixelStoreiFn(GL_PACK_ROW_LENGTH, state_.pack_row_length);
+    } else if (pixels_shm_id == 0 &&
+               workarounds().pack_parameters_workaround_with_pack_buffer) {
       // If we ever have a device that needs both of these workarounds, we'll
       // need to do some extra work to implement that correctly here.
       DCHECK(
@@ -13153,7 +13238,7 @@ error::Error GLES2DecoderImpl::HandleTexImage2D(uint32_t immediate_data_size,
   }
   TextureRef* texture_ref =
       texture_manager()->GetTextureInfoForTarget(&state_, target);
-  ScopedDepthStencilReattacher reattacher(this, texture_ref);
+  ScopedBufferReattacher reattacher(this, texture_ref);
   GLint level = static_cast<GLint>(c.level);
   GLenum internal_format = static_cast<GLenum>(c.internalformat);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -13253,7 +13338,7 @@ error::Error GLES2DecoderImpl::HandleTexImage3D(uint32_t immediate_data_size,
   }
   TextureRef* texture_ref =
       texture_manager()->GetTextureInfoForTarget(&state_, target);
-  ScopedDepthStencilReattacher reattacher(this, texture_ref);
+  ScopedBufferReattacher reattacher(this, texture_ref);
   GLint level = static_cast<GLint>(c.level);
   GLenum internal_format = static_cast<GLenum>(c.internalformat);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -13576,7 +13661,7 @@ void GLES2DecoderImpl::DoCopyTexImage2D(
         GL_INVALID_OPERATION, func_name, "unknown texture for target");
     return;
   }
-  ScopedDepthStencilReattacher reattacher(this, texture_ref);
+  ScopedBufferReattacher reattacher(this, texture_ref);
   Texture* texture = texture_ref->texture();
   if (texture->IsImmutable()) {
     LOCAL_SET_GL_ERROR(
@@ -16172,7 +16257,7 @@ void GLES2DecoderImpl::TexStorageImpl(GLenum target,
                        "unknown texture for target");
     return;
   }
-  ScopedDepthStencilReattacher reattacher(this, texture_ref);
+  ScopedBufferReattacher reattacher(this, texture_ref);
   Texture* texture = texture_ref->texture();
   // The glTexStorage entry points require width, height, and depth to be
   // at least 1, but the other texture entry points (those which use

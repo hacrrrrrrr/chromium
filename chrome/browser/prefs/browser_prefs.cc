@@ -67,7 +67,6 @@
 #include "chrome/browser/preloading/preloading_prefs.h"
 #include "chrome/browser/preloading/search_preload/search_preload_service.h"
 #include "chrome/browser/printing/print_preview_sticky_settings.h"
-#include "chrome/browser/privacy_sandbox/notice/notice_storage.h"
 #include "chrome/browser/profiles/chrome_version_service.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
@@ -92,7 +91,7 @@
 #include "chrome/browser/ui/performance_controls/performance_controls_metrics.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/safety_hub/safety_hub_prefs.h"
-#include "chrome/browser/ui/tabs/projects/projects_prefs.h"
+#include "chrome/browser/ui/tabs/organizer/organizer_prefs.h"
 #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
 #include "chrome/browser/ui/toolbar/chrome_labs/chrome_labs_prefs.h"
 #include "chrome/browser/ui/toolbar/chrome_location_bar_model_delegate.h"
@@ -268,9 +267,7 @@
 #include "chrome/browser/pdf/pdf_pref_names.h"
 #endif  // BUILDFLAG(ENABLE_PDF)
 
-#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 #include "chrome/browser/ui/webui/management/management_ui.h"
-#endif
 
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/accessibility/accessibility_prefs/android/accessibility_prefs_controller.h"
@@ -318,6 +315,7 @@
 #include "chrome/browser/themes/theme_syncable_service.h"
 #include "chrome/browser/ui/commerce/commerce_ui_tab_helper.h"
 #include "chrome/browser/ui/hats/hats_service_desktop.h"
+#include "chrome/browser/ui/omnibox/omnibox_everywhere/omnibox_everywhere_prefs.h"
 #include "chrome/browser/ui/read_anything/read_anything_prefs.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
 #include "chrome/browser/ui/side_panel/side_panel_prefs.h"
@@ -502,6 +500,7 @@
 #include "components/account_manager_core/chromeos/account_manager.h"
 #include "components/onc/onc_pref_names.h"  // nogncheck
 #include "components/quirks/quirks_manager.h"
+#include "components/user_manager/multi_user/multi_user_sign_in_policy_controller.h"
 #include "components/user_manager/user_manager_impl.h"
 #if BUILDFLAG(USE_CUPS)
 #include "chrome/browser/extensions/api/printing/printing_api_handler.h"
@@ -587,85 +586,6 @@ namespace {
 
 // Please keep the list of deprecated prefs in chronological order. i.e. Add to
 // the bottom of the list, not here at the top.
-
-
-#if BUILDFLAG(IS_ANDROID)
-// Deprecated 07/2025.
-constexpr char kObsoletePasswordAccessLossWarningShownAtStartupTimestamp[] =
-    "password_access_loss_warning_shown_at_startup_timestamp";
-constexpr char kObsoletePasswordAccessLossWarningShownTimestamp[] =
-    "password_access_loss_warning_shown_timestamp";
-constexpr char kObsoleteTimeOfLastMigrationAttempt[] =
-    "time_of_last_migration_attempt";
-constexpr char kObsoleteSettingsMigratedToUPMLocal[] =
-    "profile.settings_migrated_to_upm_local";
-constexpr char kObsoleteShouldShowPostPasswordMigrationSheetAtStartup[] =
-    "should_show_post_password_migration_sheet_at_startup";
-constexpr char kObsoleteUnenrolledFromGoogleMobileServicesDueToErrors[] =
-    "unenrolled_from_google_mobile_services_due_to_errors";
-constexpr char kObsoleteCurrentMigrationVersionToGoogleMobileServices[] =
-    "current_migration_version_to_google_mobile_services";
-#endif  // BUILDFLAG(IS_ANDROID)
-
-// Deprecated 07/2025.
-inline constexpr char kFirstSyncCompletedInFullSyncMode[] =
-    "sync.first_full_sync_completed";
-inline constexpr char kGoogleServicesSecondLastSyncingGaiaId[] =
-    "google.services.second_last_gaia_id";
-
-#if BUILDFLAG(IS_CHROMEOS)
-// Deprecated 07/2025.
-inline constexpr char kAssistantNumSessionsWhereOnboardingShown[] =
-    "ash.assistant.num_sessions_where_onboarding_shown";
-inline constexpr char kAssistantTimeOfLastInteraction[] =
-    "ash.assistant.time_of_last_interaction";
-
-// Deprecated 07/2025.
-inline constexpr char kAssistantConsentStatus[] =
-    "settings.voice_interaction.activity_control.consent_status";
-inline constexpr char kAssistantContextEnabled[] =
-    "settings.voice_interaction.context.enabled";
-inline constexpr char kAssistantDisabledByPolicy[] =
-    "settings.assistant.disabled_by_policy";
-inline constexpr char kAssistantEnabled[] =
-    "settings.voice_interaction.enabled";
-inline constexpr char kAssistantHotwordAlwaysOn[] =
-    "settings.voice_interaction.hotword.always_on";
-inline constexpr char kAssistantHotwordEnabled[] =
-    "settings.voice_interaction.hotword.enabled";
-inline constexpr char kAssistantLaunchWithMicOpen[] =
-    "settings.voice_interaction.launch_with_mic_open";
-inline constexpr char kAssistantNotificationEnabled[] =
-    "settings.voice_interaction.notification.enabled";
-inline constexpr char kAssistantOnboardingMode[] =
-    "settings.assistant.onboarding_mode";
-inline constexpr char kAssistantVoiceMatchEnabledDuringOobe[] =
-    "settings.voice_interaction.oobe_voice_match.enabled";
-inline constexpr char kAssistantNumFailuresSinceLastServiceRun[] =
-    "ash.assistant.num_failures_since_last_service_run";
-#endif
-
-// Deprecated 07/2025
-constexpr char kOptGuideModelFetcherLastFetchAttempt[] =
-    "optimization_guide.predictionmodelfetcher.last_fetch_attempt";
-constexpr char kOptGuideModelFetcherLastFetchSuccess[] =
-    "optimization_guide.predictionmodelfetcher.last_fetch_success";
-
-// Deprecated 07/2025
-inline constexpr char kSodaScheduledDeletionTime[] =
-    "accessibility.captions.soda_scheduled_deletion_time";
-
-#if BUILDFLAG(IS_CHROMEOS)
-// Deprecated 07/2025.
-inline constexpr char kTimeOfFirstFilesAppChipPress[] =
-    "ash.holding_space.time_of_first_files_app_chip_press";
-#endif  // BUILDFLAG(IS_CHROMEOS)
-
-// Deprecated 07/2025.
-inline constexpr char kSyncPromoIdentityPillShownCount[] =
-    "ChromeSigninSyncPromoIdentityPillShownCount";
-inline constexpr char kSyncPromoIdentityPillUsedCount[] =
-    "ChromeSigninSyncPromoIdentityPillUsedCount";
 
 // Deprecated 08/2025.
 inline constexpr char kInvalidationClientIDCache[] =
@@ -1012,6 +932,15 @@ inline constexpr char kObsoleteManagementPlatformLastLogTime[] =
 inline constexpr char kObsoleteManagementProfileLastLogTime[] =
     "management.profile.last_log_time";
 
+// Deprecated 07/2026.
+constexpr char kMetricsReportingMigrationDone[] =
+    "user_experience_metrics.consent_migration_done";
+constexpr char kMetricsConsentRestructureFeatureState[] =
+    "user_experience_metrics.consent_restructure_feature_state";
+
+// Deprecated 08/2026.
+constexpr char kPrivacySandboxNotices[] = "privacy_sandbox.notices";
+
 // Register local state used only for migration (clearing or moving to a new
 // key).
 void RegisterLocalStatePrefsForMigration(PrefRegistrySimple* registry) {
@@ -1114,6 +1043,8 @@ void RegisterLocalStatePrefsForMigration(PrefRegistrySimple* registry) {
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
   registry->RegisterBooleanPref(kProxyOverrideRulesAffiliation, true);
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+  registry->RegisterBooleanPref(kMetricsReportingMigrationDone, false);
+  registry->RegisterBooleanPref(kMetricsConsentRestructureFeatureState, false);
 
   // Deprecated 07/2026.
   registry->RegisterTimePref(kObsoleteManagementPlatformLastLogTime,
@@ -1123,60 +1054,7 @@ void RegisterLocalStatePrefsForMigration(PrefRegistrySimple* registry) {
 // Register prefs used only for migration (clearing or moving to a new key).
 void RegisterProfilePrefsForMigration(
     user_prefs::PrefRegistrySyncable* registry) {
-#if BUILDFLAG(IS_ANDROID)
-  // Deprecated 07/2025.
-  registry->RegisterTimePref(
-      kObsoletePasswordAccessLossWarningShownAtStartupTimestamp, base::Time());
-  registry->RegisterTimePref(kObsoletePasswordAccessLossWarningShownTimestamp,
-                             base::Time());
-  registry->RegisterDoublePref(kObsoleteTimeOfLastMigrationAttempt, 0.0);
-  registry->RegisterBooleanPref(kObsoleteSettingsMigratedToUPMLocal, false);
-  registry->RegisterBooleanPref(
-      kObsoleteShouldShowPostPasswordMigrationSheetAtStartup, false);
-  registry->RegisterBooleanPref(
-      kObsoleteUnenrolledFromGoogleMobileServicesDueToErrors, false);
-  registry->RegisterIntegerPref(
-      kObsoleteCurrentMigrationVersionToGoogleMobileServices, 0);
-#endif  // BUILDFLAG(IS_ANDROID)
 
-  // Deprecated 07/2025.
-  registry->RegisterBooleanPref(kFirstSyncCompletedInFullSyncMode, false);
-  registry->RegisterStringPref(kGoogleServicesSecondLastSyncingGaiaId,
-                               std::string());
-
-#if BUILDFLAG(IS_CHROMEOS)
-  // Deprecated 07/2025.
-  registry->RegisterIntegerPref(kAssistantNumSessionsWhereOnboardingShown, 0);
-  registry->RegisterTimePref(kAssistantTimeOfLastInteraction, base::Time());
-
-  // Deprecated 07/2025.
-  registry->RegisterIntegerPref(kAssistantConsentStatus, 0);
-  registry->RegisterBooleanPref(kAssistantContextEnabled, false);
-  registry->RegisterBooleanPref(kAssistantDisabledByPolicy, false);
-  registry->RegisterBooleanPref(kAssistantEnabled, false);
-  registry->RegisterBooleanPref(kAssistantHotwordAlwaysOn, false);
-  registry->RegisterBooleanPref(kAssistantHotwordEnabled, false);
-  registry->RegisterBooleanPref(kAssistantLaunchWithMicOpen, false);
-  registry->RegisterBooleanPref(kAssistantNotificationEnabled, false);
-  registry->RegisterBooleanPref(kAssistantVoiceMatchEnabledDuringOobe, false);
-  registry->RegisterStringPref(kAssistantOnboardingMode, std::string());
-  registry->RegisterIntegerPref(kAssistantNumFailuresSinceLastServiceRun, 0);
-#endif
-
-  // Deprecated 07/2025
-  registry->RegisterInt64Pref(kOptGuideModelFetcherLastFetchAttempt, 0);
-  registry->RegisterInt64Pref(kOptGuideModelFetcherLastFetchSuccess, 0);
-
-  // Deprecated 07/2025
-  registry->RegisterTimePref(kSodaScheduledDeletionTime, base::Time());
-
-#if BUILDFLAG(IS_CHROMEOS)
-  // Deprecated 07/2025.
-  registry->RegisterTimePref(kTimeOfFirstFilesAppChipPress, base::Time());
-#endif  // BUILDFLAG(IS_CHROMEOS)
-
-  registry->RegisterIntegerPref(kSyncPromoIdentityPillShownCount, 0);
-  registry->RegisterIntegerPref(kSyncPromoIdentityPillUsedCount, 0);
 
   // Deprecated 08/2025.
   registry->RegisterDictionaryPref(kInvalidationClientIDCache);
@@ -1382,6 +1260,15 @@ void RegisterProfilePrefsForMigration(
   // Deprecated 07/2026.
   registry->RegisterTimePref(kObsoleteManagementProfileLastLogTime,
                              base::Time());
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Deprecated 07/2026.
+  registry->RegisterBooleanPref(prefs::kProjectsPanelEntrypointEnabled, true);
+  registry->RegisterBooleanPref(prefs::kProjectsPanelPinnedToTabstrip, true);
+#endif
+
+  // Deprecated 08/2026.
+  registry->RegisterDictionaryPref(kPrivacySandboxNotices);
 }
 
 }  // namespace
@@ -1431,10 +1318,12 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   language::UlpLanguageCodeLocator::RegisterLocalStatePrefs(registry);
   memory::EnterpriseMemoryLimitPrefObserver::RegisterPrefs(registry);
   metrics::RegisterDemographicsLocalStatePrefs(registry);
-  metrics::MetricsReportingChoiceService::RegisterPrefs(registry);
   metrics::TabStatsTracker::RegisterPrefs(registry);
   network_time::NetworkTimeTracker::RegisterPrefs(registry);
   omnibox::RegisterLocalStatePrefs(registry);
+#if !BUILDFLAG(IS_ANDROID)
+  omnibox_everywhere::prefs::RegisterLocalStatePrefs(registry);
+#endif
   optimization_guide::prefs::RegisterLocalStatePrefs(registry);
   optimization_guide::model_execution::prefs::RegisterLocalStatePrefs(registry);
   password_manager::PasswordManager::RegisterLocalPrefs(registry);
@@ -1541,6 +1430,7 @@ void RegisterLocalState(PrefRegistrySimple* registry) {
   ash::ManagedCellularPrefHandler::RegisterLocalStatePrefs(registry);
   ash::ChromeSessionManager::RegisterPrefs(registry);
   user_manager::UserManagerImpl::RegisterPrefs(registry);
+  user_manager::MultiUserSignInPolicyController::RegisterPrefs(registry);
   ash::CupsPrintersManager::RegisterLocalStatePrefs(registry);
   ash::bluetooth_config::BluetoothPowerControllerImpl::RegisterLocalStatePrefs(
       registry);
@@ -1774,6 +1664,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   MediaEngagementService::RegisterProfilePrefs(registry);
   MediaStorageIdSalt::RegisterProfilePrefs(registry);
   metrics::RegisterDemographicsProfilePrefs(registry);
+  metrics::MetricsReportingChoiceService::RegisterProfilePrefs(registry);
   NotificationDisplayServiceImpl::RegisterProfilePrefs(registry);
   NotifierStateTracker::RegisterProfilePrefs(registry);
   ntp_tiles::CustomLinksManagerImpl::RegisterProfilePrefs(registry);
@@ -1800,7 +1691,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   PrefsTabHelper::RegisterProfilePrefs(registry, locale);
   personal_context::prefs::RegisterProfilePrefs(registry);
   privacy_sandbox::RegisterProfilePrefs(registry);
-  privacy_sandbox::PrivacySandboxNoticeStorage::RegisterProfilePrefs(registry);
   Profile::RegisterProfilePrefs(registry);
   ProfileImpl::RegisterProfilePrefs(registry);
   ProfileNetworkContextService::RegisterProfilePrefs(registry);
@@ -1815,6 +1705,8 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   registry->RegisterIntegerPref(prefs::kVoiceTypingSettings, 0);
   registry->RegisterBooleanPref(prefs::kPrefDictationOnboardingCompleted,
                                 false);
+  registry->RegisterStringPref(prefs::kVoiceTypingHotkey, "");
+
 #if !BUILDFLAG(IS_ANDROID)
   indigo::prefs::RegisterProfilePrefs(registry);
 #endif
@@ -1924,6 +1816,10 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   MostRelevantTabResumptionPageHandler::RegisterProfilePrefs(registry);
   DriveService::RegisterProfilePrefs(registry);
   GoogleCalendarPageHandler::RegisterProfilePrefs(registry);
+#else
+  // Registered here because it is still accessed on Android (which doesn't use
+  // WebUI NTP).
+  registry->RegisterBooleanPref(ntp_prefs::kNtpShortcutsVisible, true);
 #endif  // BUILDFLAG(ENABLE_WEBUI_NTP)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -1978,9 +1874,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
   toolbar::RegisterProfilePrefs(registry);
 #endif  // BUILDFLAG(IS_ANDROID)
 
-#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   ManagementUI::RegisterProfilePrefs(registry);
-#endif
 
 #if BUILDFLAG(ENABLE_DEVTOOLS_FRONTEND)
   DevToolsWindow::RegisterProfilePrefs(registry);
@@ -2168,7 +2062,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry,
 
   actor::ui::RegisterProfilePrefs(registry);
 
-  projects::RegisterProfilePrefs(registry);
+  organizer::RegisterProfilePrefs(registry);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   registry->RegisterBooleanPref(webauthn::pref_names::kAllowWithBrokenCerts,
@@ -2406,6 +2300,8 @@ void MigrateObsoleteLocalStatePrefs(PrefService* local_state) {
   // Added 07/2026.
   local_state->ClearPref(kProxyOverrideRulesAffiliation);
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+  local_state->ClearPref(kMetricsReportingMigrationDone);
+  local_state->ClearPref(kMetricsConsentRestructureFeatureState);
 
   // Added 07/2026.
   local_state->ClearPref(kObsoleteManagementPlatformLastLogTime);
@@ -2451,55 +2347,7 @@ void MigrateObsoleteProfilePrefs(PrefService* profile_prefs,
   autofill::prefs::MigrateDeprecatedAutofillPrefs(profile_prefs);
 
 
-#if BUILDFLAG(IS_ANDROID)
-  // Deprecated 07/2025.
-  profile_prefs->ClearPref(
-      kObsoletePasswordAccessLossWarningShownAtStartupTimestamp);
-  profile_prefs->ClearPref(kObsoletePasswordAccessLossWarningShownTimestamp);
-  profile_prefs->ClearPref(kObsoleteTimeOfLastMigrationAttempt);
-  profile_prefs->ClearPref(kObsoleteSettingsMigratedToUPMLocal);
-  profile_prefs->ClearPref(
-      kObsoleteShouldShowPostPasswordMigrationSheetAtStartup);
-  profile_prefs->ClearPref(
-      kObsoleteUnenrolledFromGoogleMobileServicesDueToErrors);
-  profile_prefs->ClearPref(
-      kObsoleteCurrentMigrationVersionToGoogleMobileServices);
-#endif  // BUILDFLAG(IS_ANDROID)
 
-  // Added 07/2025.
-  profile_prefs->ClearPref(kFirstSyncCompletedInFullSyncMode);
-  profile_prefs->ClearPref(kGoogleServicesSecondLastSyncingGaiaId);
-
-#if BUILDFLAG(IS_CHROMEOS)
-  // Added 07/2025.
-  profile_prefs->ClearPref(kAssistantNumSessionsWhereOnboardingShown);
-  profile_prefs->ClearPref(kAssistantTimeOfLastInteraction);
-
-  // Added 07/2025.
-  profile_prefs->ClearPref(kAssistantConsentStatus);
-  profile_prefs->ClearPref(kAssistantContextEnabled);
-  profile_prefs->ClearPref(kAssistantDisabledByPolicy);
-  profile_prefs->ClearPref(kAssistantEnabled);
-  profile_prefs->ClearPref(kAssistantHotwordAlwaysOn);
-  profile_prefs->ClearPref(kAssistantHotwordEnabled);
-  profile_prefs->ClearPref(kAssistantLaunchWithMicOpen);
-  profile_prefs->ClearPref(kAssistantNotificationEnabled);
-  profile_prefs->ClearPref(kAssistantVoiceMatchEnabledDuringOobe);
-  profile_prefs->ClearPref(kAssistantOnboardingMode);
-  profile_prefs->ClearPref(kAssistantNumFailuresSinceLastServiceRun);
-#endif
-
-  // Added 07/2025
-  profile_prefs->ClearPref(kOptGuideModelFetcherLastFetchAttempt);
-  profile_prefs->ClearPref(kOptGuideModelFetcherLastFetchSuccess);
-
-#if BUILDFLAG(IS_CHROMEOS)
-  // Added 07/2025.
-  profile_prefs->ClearPref(kTimeOfFirstFilesAppChipPress);
-#endif  // BUILDFLAG(IS_CHROMEOS)
-
-  profile_prefs->ClearPref(kSyncPromoIdentityPillShownCount);
-  profile_prefs->ClearPref(kSyncPromoIdentityPillUsedCount);
 
   // Added 08/2025.
   profile_prefs->ClearPref(kInvalidationClientIDCache);
@@ -2697,6 +2545,15 @@ void MigrateObsoleteProfilePrefs(PrefService* profile_prefs,
 
   // Added 07/2026.
   profile_prefs->ClearPref(kObsoleteManagementProfileLastLogTime);
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Added 07/2026.
+  profile_prefs->ClearPref(prefs::kProjectsPanelEntrypointEnabled);
+  profile_prefs->ClearPref(prefs::kProjectsPanelPinnedToTabstrip);
+#endif
+
+  // Added 08/2026.
+  profile_prefs->ClearPref(kPrivacySandboxNotices);
 
   // Please don't delete the following line. It is used by PRESUBMIT.py.
   // END_MIGRATE_OBSOLETE_PROFILE_PREFS

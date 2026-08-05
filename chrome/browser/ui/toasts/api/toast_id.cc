@@ -23,8 +23,6 @@ std::string_view GetToastName(ToastId toast_id) {
       return "NonMilestoneUpdate";
     case ToastId::kClearBrowsingData:
       return "ClearBrowsingData";
-    case ToastId::kPlusAddressOverride:
-      return "PlusAddressOverride";
     case ToastId::kSyncEsbOn:
       return "SyncEsbOn";
     case ToastId::kSyncEsbOnWithoutActionButton:
@@ -59,8 +57,8 @@ std::string_view GetToastName(ToastId toast_id) {
       return "CopiedToClipboard";
     case ToastId::kEnhancedBundledSecuritySettings:
       return "EnhancedBundledSecuritySettings";
-    case ToastId::kAutofillAiFetchFromWalletErrorMessage:
-      return "AutofillAiFetchFromWalletErrorMessage";
+    case ToastId::kAutofillAiFetchEntityErrorMessage:
+      return "AutofillAiFetchEntityErrorMessage";
     case ToastId::kTranslate:
       return "Translate";
     case ToastId::kAutofillAiSaveToWalletErrorMessage:
@@ -113,6 +111,12 @@ std::string_view GetToastName(ToastId toast_id) {
       return "EnterpriseCopyWarning";
     case ToastId::kEnterpriseCopyBlocked:
       return "EnterpriseCopyBlocked";
+    case ToastId::kIndigoDeleteError:
+      return "IndigoDeleteError";
+    case ToastId::kIndigoDeleteSuccess:
+      return "IndigoDeleteSuccess";
+    case ToastId::kAtMemorySpiiFetchErrorMessage:
+      return "AtMemorySpiiFetchErrorMessage";
   }
 
   NOTREACHED();

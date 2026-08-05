@@ -12,8 +12,10 @@ import static org.mockito.Mockito.when;
 
 import android.app.Activity;
 import android.transition.Transition;
+import android.view.InputDevice;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
@@ -155,9 +157,22 @@ public class ActorOverlayCoordinatorTest {
         event.recycle();
     }
 
+    private void dispatchTouch(ActorOverlayView view, int action, float x, float y) {
+        MotionEvent event = MotionEvent.obtain(0, 0, action, x, y, 0);
+        view.dispatchTouchEvent(event);
+        event.recycle();
+    }
+
     private boolean hasStateHovered(int[] state) {
         for (int attr : state) {
             if (attr == android.R.attr.state_hovered) return true;
+        }
+        return false;
+    }
+
+    private boolean hasStatePressed(int[] state) {
+        for (int attr : state) {
+            if (attr == android.R.attr.state_pressed) return true;
         }
         return false;
     }
@@ -755,8 +770,108 @@ public class ActorOverlayCoordinatorTest {
         Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
 
         // Exiting hover completely.
-        dispatchHover(mView, MotionEvent.ACTION_HOVER_EXIT, buttonX, buttonY);
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_EXIT, -1f, -1f);
         Assert.assertFalse(hasStateHovered(mView.getDrawableState()));
+    }
+
+    @Test
+    public void testHoverExitDuringMousePress() {
+        mView.measure(
+                View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY));
+        mView.layout(0, 0, 800, 600);
+
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_ENTER, 100f, 100f);
+        Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
+
+        // ACTION_HOVER_EXIT inside view bounds (e.g. trackpad tap/click) should retain hover state.
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_EXIT, 100f, 100f);
+        Assert.assertTrue(mView.isHovered());
+        Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
+
+        // ACTION_HOVER_EXIT outside view bounds (e.g. mouse cursor moved away) should exit hover.
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_EXIT, -10f, -10f);
+        Assert.assertFalse(mView.isHovered());
+        Assert.assertFalse(hasStateHovered(mView.getDrawableState()));
+    }
+
+    @Test
+    public void testClickAndDragOutClearsHover() {
+        mView.measure(
+                View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY));
+        mView.layout(0, 0, 800, 600);
+
+        // Hover enter
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_ENTER, 100f, 100f);
+        Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
+
+        // Start click inside bounds (ACTION_HOVER_EXIT inside, then ACTION_DOWN)
+        dispatchHover(mView, MotionEvent.ACTION_HOVER_EXIT, 100f, 100f);
+        dispatchTouch(mView, MotionEvent.ACTION_DOWN, 100f, 100f);
+        Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
+
+        // Drag out (ACTION_MOVE outside view bounds)
+        dispatchTouch(mView, MotionEvent.ACTION_MOVE, -10f, -10f);
+        Assert.assertTrue(hasStateHovered(mView.getDrawableState()));
+
+        // Release outside (ACTION_UP outside) -> should clear hover state.
+        dispatchTouch(mView, MotionEvent.ACTION_UP, -10f, -10f);
+        Assert.assertFalse(hasStateHovered(mView.getDrawableState()));
+    }
+
+    @Test
+    public void testPressedState() {
+        mView.setPressed(false);
+        mView.refreshDrawableState();
+        Assert.assertFalse(hasStatePressed(mView.getDrawableState()));
+
+        mView.setPressed(true);
+        mView.refreshDrawableState();
+        Assert.assertTrue(hasStatePressed(mView.getDrawableState()));
+
+        mView.setPressed(false);
+        mView.refreshDrawableState();
+        Assert.assertFalse(hasStatePressed(mView.getDrawableState()));
+    }
+
+    @Test
+    public void testInputInterception() {
+        MotionEvent.PointerProperties pp = new MotionEvent.PointerProperties();
+        pp.id = 0;
+        pp.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+
+        MotionEvent.PointerCoords pc = new MotionEvent.PointerCoords();
+        pc.x = 100f;
+        pc.y = 100f;
+
+        MotionEvent mouseEvent =
+                MotionEvent.obtain(
+                        0,
+                        0,
+                        MotionEvent.ACTION_SCROLL,
+                        1,
+                        new MotionEvent.PointerProperties[] {pp},
+                        new MotionEvent.PointerCoords[] {pc},
+                        0,
+                        0,
+                        1.0f,
+                        1.0f,
+                        0,
+                        0,
+                        InputDevice.SOURCE_MOUSE,
+                        0);
+
+        Assert.assertTrue(mView.onGenericMotionEvent(mouseEvent));
+        mouseEvent.recycle();
+
+        PointerIcon expectedIcon =
+                PointerIcon.getSystemIcon(mView.getContext(), PointerIcon.TYPE_NO_DROP);
+        Assert.assertEquals(expectedIcon, mView.getPointerIcon());
+
+        PointerIcon expectedButtonIcon =
+                PointerIcon.getSystemIcon(mView.getContext(), PointerIcon.TYPE_HAND);
+        Assert.assertEquals(expectedButtonIcon, mView.getTakeOverButton().getPointerIcon());
     }
 
     @Test

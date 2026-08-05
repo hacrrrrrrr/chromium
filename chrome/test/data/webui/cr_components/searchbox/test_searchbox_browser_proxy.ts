@@ -4,7 +4,7 @@
 
 import type {WindowOpenDisposition} from '//resources/mojo/ui/base/mojom/window_open_disposition.mojom-webui.js';
 import type {NavigationPredictor} from 'chrome://resources/mojo/components/omnibox/browser/omnibox.mojom-webui.js';
-import type {InputMethod, OmniboxPopupSelection, PageHandlerInterface, PageRemote, PlaceholderConfig, SelectedFileInfo, SmartComposeStats, SuggestInventory} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {ActionModifiers, InputMethod, OmniboxPopupSelection, PageHandlerInterface, PageRemote, PlaceholderConfig, SelectedFileInfo, SmartComposeStats, SuggestInventory} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import {DriveDisclaimerStatus, PageCallbackRouter} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {ModelMode, ToolMode} from 'chrome://resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import type {BigBuffer} from 'chrome://resources/mojo/mojo/public/mojom/base/big_buffer.mojom-webui.js';
@@ -36,10 +36,10 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
       'deleteContext',
       'deleteTabContext',
       'executeAction',
+      'getCyclingPlaceholderConfig',
       'getDriveDisclaimerStatus',
       'getInputState',
       'getPageClassification',
-      'getPlaceholderConfig',
       'getRecentTabs',
       'getSmartTabSharingActive',
       'getTabPreview',
@@ -53,8 +53,8 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
       'openAutocompleteMatch',
       'openLensSearch',
       'openPopupSelection',
+      'openProfilePicker',
       'queryAutocomplete',
-      'queryAutocompleteWithSuggestInventory',
       'recordModelSelectionAction',
       'recordToolSelectionAction',
       'setActiveModelMode',
@@ -117,17 +117,13 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
 
   openAutocompleteMatch(
       line: number, url: Url, areMatchesShowing: boolean, mouseButton: number,
-      altKey: boolean, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean,
-      viaKeyboard: boolean) {
+      modifiers: ActionModifiers, viaKeyboard: boolean) {
     this.methodCalled('openAutocompleteMatch', {
       line,
       url,
       areMatchesShowing,
       mouseButton,
-      altKey,
-      ctrlKey,
-      metaKey,
-      shiftKey,
+      modifiers,
       viaKeyboard,
     });
   }
@@ -151,23 +147,16 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
 
   queryAutocomplete(
       queryId: number, input: String16, preventInlineAutocomplete: boolean,
-      cursorPosition: number, isOnFocus: boolean) {
-    this.methodCalled(
-        'queryAutocomplete',
-        {queryId, input, preventInlineAutocomplete, cursorPosition, isOnFocus});
-  }
-
-  queryAutocompleteWithSuggestInventory(
-      queryId: number, input: String16, preventInlineAutocomplete: boolean,
       cursorPosition: number, suggestInventory: SuggestInventory,
-      isOnFocus: boolean) {
-    this.methodCalled('queryAutocompleteWithSuggestInventory', {
+      isOnFocus: boolean, keyword: string) {
+    this.methodCalled('queryAutocomplete', {
       queryId,
       input,
       preventInlineAutocomplete,
       cursorPosition,
       suggestInventory,
       isOnFocus,
+      keyword,
     });
   }
 
@@ -179,8 +168,8 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
     this.methodCalled('toggleSuggestionGroupIdVisibility', {suggestionGroupId});
   }
 
-  getPlaceholderConfig(): Promise<{config: PlaceholderConfig}> {
-    this.methodCalled('getPlaceholderConfig');
+  getCyclingPlaceholderConfig(): Promise<{config: PlaceholderConfig}> {
+    this.methodCalled('getCyclingPlaceholderConfig');
     return Promise.resolve({
       config: {
         texts: [],
@@ -272,6 +261,10 @@ class FakePageHandler extends TestBrowserProxy implements PageHandlerInterface {
 
   openLensSearch() {
     this.methodCalled('openLensSearch');
+  }
+
+  openProfilePicker() {
+    this.methodCalled('openProfilePicker');
   }
 
   setActiveToolMode(tool: ToolMode) {

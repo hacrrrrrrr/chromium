@@ -11,6 +11,7 @@ import androidx.test.filters.MediumTest;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
@@ -24,6 +25,8 @@ import org.chromium.chrome.browser.permissions.RuntimePermissionTestUtils.TestAn
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
 import org.chromium.components.permissions.DismissalType;
 import org.chromium.content_public.browser.NavigationHandle;
@@ -33,7 +36,13 @@ import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class PermissionNavigationTest {
-    @Rule public PermissionTestRule mPermissionRule = new PermissionTestRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
+    public PermissionTestRule mPermissionRule =
+            new PermissionTestRule(mActivityTestRule.getActivityTestRule());
+
+    @Rule
+    public RuleChain mRuleChain = RuleChain.outerRule(mActivityTestRule).around(mPermissionRule);
 
     private static final String TEST_FILE = "/content/test/data/android/permission_navigation.html";
 
@@ -63,7 +72,8 @@ public class PermissionNavigationTest {
     @Feature({"Permissions"})
     public void testNavigationDismissesModalPermissionPrompt() throws Exception {
         mPermissionRule.setUpUrl(TEST_FILE);
-        mPermissionRule.runJavaScriptCodeInCurrentTab("requestGeolocationPermission()");
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
+                "requestGeolocationPermission()");
         mPermissionRule.waitForDialogShownState(true);
 
         Tab tab = mPermissionRule.getActivityTab();
@@ -92,7 +102,8 @@ public class PermissionNavigationTest {
     public void testUmaMetricsForDismissalReasonsNavigateBackAndTouchOutsideTheScrim()
             throws Exception {
         mPermissionRule.setUpUrl(TEST_FILE);
-        mPermissionRule.runJavaScriptCodeInCurrentTab("requestGeolocationPermission()");
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
+                "requestGeolocationPermission()");
         mPermissionRule.waitForDialogShownState(true);
 
         // Verify dismissing by pressing back is recorded in UMA
@@ -111,7 +122,8 @@ public class PermissionNavigationTest {
                 "Should record tapping back to dismiss permission prompt in UMA");
 
         // Verify touching outside the scrim is recorded in UMA
-        mPermissionRule.runJavaScriptCodeInCurrentTab("requestGeolocationPermission()");
+        mPermissionRule.runJavaScriptCodeWithUserGestureInCurrentTab(
+                "requestGeolocationPermission()");
         mPermissionRule.waitForDialogShownState(true);
 
         histogramExpectation =

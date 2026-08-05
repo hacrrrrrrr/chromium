@@ -6,6 +6,7 @@
 #include <memory>
 #include <string_view>
 
+#include "base/cfi_buildflags.h"
 #include "base/containers/adapters.h"
 #include "base/containers/map_util.h"
 #include "base/containers/span.h"
@@ -22,6 +23,7 @@
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/types/optional_util.h"
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/net/storage_test_utils.h"
@@ -29,6 +31,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/storage_access_api/storage_access_grant_permission_context.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/webid/federated_identity_permission_context.h"
 #include "chrome/browser/webid/federated_identity_permission_context_factory.h"
@@ -409,7 +412,7 @@ class StorageAccessAPIBaseBrowserTest : public policy::PolicyTest {
   // TODO(crbug.com/381856829): Update SetBlockThirdPartyCookies to use sync
   // interface once implemented.
   void SetBlockThirdPartyCookies(bool value) {
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         prefs::kCookieControlsMode,
         static_cast<int>(
             value ? content_settings::CookieControlsMode::kBlockThirdParty
@@ -680,10 +683,15 @@ class StorageAccessAPIOriginIsolationBrowserTest
   }
 
   std::vector<base::test::FeatureRef> GetDisabledFeatures() override {
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // enabled and then remove the two omnibox Features below.
     if (!GetParam()) {
-      return {features::kOriginKeyedProcessesByDefault};
+      return {features::kOriginKeyedProcessesByDefault,
+              omnibox::internal::kWebUIOmniboxPopup,
+              omnibox::internal::kWebUIOmniboxAimPopup};
     }
-    return {};
+    return {omnibox::internal::kWebUIOmniboxPopup,
+            omnibox::internal::kWebUIOmniboxAimPopup};
   }
 };
 
@@ -1063,8 +1071,18 @@ IN_PROC_BROWSER_TEST_F(StorageAccessAPIBrowserTest,
   EXPECT_FALSE(content::ExecJs(nested_frame, fetch_blob_url_js));
 }
 
+// TODO(https://crbug.com/540611509): Fails on Linux CFI.
+#if BUILDFLAG(IS_LINUX) &&                                      \
+    (BUILDFLAG(CFI_CAST_CHECK) || BUILDFLAG(CFI_ICALL_CHECK) || \
+     BUILDFLAG(CFI_ENFORCEMENT_TRAP) || BUILDFLAG(CFI_ENFORCEMENT_DIAGNOSTIC))
+#define MAYBE_AccessGranted_DoesNotConsumeUserInteraction \
+  DISABLED_AccessGranted_DoesNotConsumeUserInteraction
+#else
+#define MAYBE_AccessGranted_DoesNotConsumeUserInteraction \
+  AccessGranted_DoesNotConsumeUserInteraction
+#endif
 IN_PROC_BROWSER_TEST_F(StorageAccessAPIBrowserTest,
-                       AccessGranted_DoesNotConsumeUserInteraction) {
+                       MAYBE_AccessGranted_DoesNotConsumeUserInteraction) {
   SetBlockThirdPartyCookies(true);
   prompt_factory()->set_response_type(
       permissions::PermissionRequestManager::ACCEPT_ALL);
@@ -1492,7 +1510,7 @@ IN_PROC_BROWSER_TEST_F(StorageAccessAPIBrowserTest,
   // are propagated to the network service.
   base::RunLoop().RunUntilIdle();
   browser()
-      ->profile()
+      ->GetProfile()
       ->GetDefaultStoragePartition()
       ->FlushNetworkInterfaceForTesting();
 
@@ -1525,7 +1543,7 @@ IN_PROC_BROWSER_TEST_F(StorageAccessAPIBrowserTest,
   // are propagated to the network service.
   base::RunLoop().RunUntilIdle();
   browser()
-      ->profile()
+      ->GetProfile()
       ->GetDefaultStoragePartition()
       ->FlushNetworkInterfaceForTesting();
 
@@ -2512,14 +2530,14 @@ class StorageAccessAPIWithFirstPartySetsBrowserTest
     std::vector<base::test::FeatureRefAndParams> enabled =
         StorageAccessAPIBaseBrowserTest::GetEnabledFeatures();
     enabled.push_back(
-        {blink::features::kStorageAccessAPIRelatedWebsiteSets, {}});
+        {content_settings::features::kStorageAccessAPIRelatedWebsiteSets, {}});
     return enabled;
   }
 
   void SetUpOnMainThread() override {
     StorageAccessAPIBaseBrowserTest::SetUpOnMainThread();
     // Explicitly enable Related Website Sets (formerly First Party Sets).
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         prefs::kPrivacySandboxRelatedWebsiteSetsEnabled, true);
   }
 
@@ -2805,7 +2823,7 @@ class StorageAccessAPIWithFirstPartySetsAndImplicitGrantsBrowserTest
     std::vector<base::test::FeatureRefAndParams> enabled =
         StorageAccessAPIBaseBrowserTest::GetEnabledFeatures();
     enabled.push_back(
-        {blink::features::kStorageAccessAPIRelatedWebsiteSets, {}});
+        {content_settings::features::kStorageAccessAPIRelatedWebsiteSets, {}});
     return enabled;
   }
 

@@ -37,7 +37,8 @@
                 "builder": "GPU FYI Android arm64 Builder",
                 "project": "chromium"
               },
-              "run_tests_serially": true
+              "run_tests_serially": true,
+              "use_test_trigger_cas": true
             }
           },
           {
@@ -82,6 +83,10 @@
       ],
       "mirroring_builder_group_and_names": [
         {
+          "builder": "gpu-fyi-cq-android-arm64",
+          "group": "tryserver.chromium.android"
+        },
+        {
           "builder": "gpu-fyi-try-android-pixel-10-64",
           "group": "tryserver.chromium.android"
         }
@@ -97,6 +102,12 @@
     ]
   },
   "builder_group": "chromium.gpu.fyi",
+  "gardener_rotations": [
+    "chromium.gpu"
+  ],
   "perf_dashboard_machine_group": "ChromiumGPUFYI",
-  "recipe": "chromium"
+  "recipe": "chromium",
+  "sheriff_rotations": [
+    "chromium.gpu"
+  ]
 }

@@ -510,9 +510,14 @@ void AddSignedInChipToProfileMenuItem(
   // single container view. The Profile MenuItemView has a title and multiple
   // views. As a result, the accessible name must be manually computed to
   // account for the profile chip.
-  item->GetViewAccessibility().SetName(
+  std::u16string accessible_name =
       views::MenuItemView::GetAccessibleNameForMenuItem(
-          item->title(), GetSigninStatusChipString(profile), std::nullopt));
+          item->title(), GetSigninStatusChipString(profile), std::nullopt);
+  if (ShouldShowAvatarGradientRing(profile)) {
+    accessible_name = l10n_util::GetStringFUTF16(
+        IDS_PROFILE_AVATAR_NAME_WITH_AI_MEMBERSHIP, accessible_name);
+  }
+  item->GetViewAccessibility().SetName(accessible_name);
 }
 
 // AppMenuView is a view that can contain label buttons.
@@ -916,21 +921,21 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
       decrement_button_->SetEnabled(zoom > contents->GetMinimumZoomPercent());
     }
     zoom_label_->SetText(base::FormatPercent(zoom));
+    zoom_label_max_width_.reset();
     if (!on_construction) {
       // An alert notification will ensure that the zoom label is always
       // announced even if is not focusable.
       zoom_label_->NotifyAccessibilityEventDeprecated(ax::mojom::Event::kAlert,
                                                       true);
     }
-    zoom_label_max_width_.reset();
   }
 
   void UpdateFullScreenButton() {
     const bool is_fullscreen = menu()->browser_->GetWindow() &&
                                menu()->browser_->GetWindow()->IsFullscreen();
     const bool can_fullscreen = menu()
-                                    ->browser_->browser_window_features()
-                                    ->exclusive_access_manager()
+                                    ->browser_->GetFeatures()
+                                    .exclusive_access_manager()
                                     ->context()
                                     ->CanUserEnterFullscreen();
     fullscreen_button_->UpdateState(is_fullscreen, can_fullscreen);
@@ -1300,9 +1305,6 @@ bool AppMenu::IsCommandEnabled(int command_id) const {
     return true;
   }
 
-  if (command_id == IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL) {
-    return true;
-  }
 
   if (IsTabGroupsCommand(command_id)) {
     return stg_everything_menu_->ShouldEnableCommand(command_id);
@@ -1370,10 +1372,6 @@ void AppMenu::ExecuteCommand(int command_id, int mouse_event_flags) {
     return;
   }
 
-  if (command_id == IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL) {
-    base::RecordAction(
-        base::UserMetricsAction("TabGroups_NewTabGroup_AppMenu"));
-  }
 
   const Entry& entry = command_id_to_entry_.find(command_id)->second;
   return entry.first->ActivatedAt(entry.second, mouse_event_flags);
@@ -1394,13 +1392,6 @@ bool AppMenu::GetAccelerator(int command_id,
     return false;
   }
 
-  if (command_id == IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL) {
-    // Same as 'Create new tab group' except the menu item is at the top level
-    // of the app menu instead of in the tab groups submenu.
-    return browser_->browser_window_features()
-        ->accelerator_provider()
-        ->GetAcceleratorForCommandId(IDC_CREATE_NEW_TAB_GROUP, accelerator);
-  }
 
   if (IsTabGroupsCommand(command_id)) {
     return false;

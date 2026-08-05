@@ -222,7 +222,6 @@
       break;
     }
     case InProductHelpType::kReaderModeOptions: {
-      CHECK(IsReaderModeAvailable());
       [_presenter presentReaderModeOptionsBubble];
       break;
     }
@@ -230,6 +229,15 @@
       CHECK(gemini::IsFeatureAvailable(gemini::Feature::kImageRemix,
                                        self.profile));
       CHECK(IsPageActionMenuEnabled());
+      // Early exit if PageActionMenuEntryPointCommands is not registered on
+      // the command dispatcher, as presenting the Image Remix Tool tip
+      // triggers asynchronously via a posted task and the handler may not be
+      // registered yet.
+      if (![commandDispatcher
+              dispatchingForProtocol:@protocol(
+                                         PageActionMenuEntryPointCommands)]) {
+        break;
+      }
       id<GeminiCommands> geminiHandler =
           HandlerForProtocol(commandDispatcher, GeminiCommands);
       id<PageActionMenuEntryPointCommands> pageActionMenuEntryPointHandler =

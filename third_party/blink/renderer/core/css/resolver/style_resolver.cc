@@ -440,7 +440,7 @@ void ApplyLengthConversionFlags(StyleResolverState& state) {
     builder.SetHasEmUnits();
   }
   if (flags & static_cast<Flags>(Flag::kRootFontRelative)) {
-    builder.SetHasRootFontRelativeUnits();
+    builder.SetHasRootRelativeUnits();
   }
   if (flags & static_cast<Flags>(Flag::kGlyphRelative)) {
     builder.SetHasGlyphRelativeUnits();
@@ -488,6 +488,7 @@ void ApplyLengthConversionFlags(StyleResolverState& state) {
   }
   if (flags & static_cast<Flags>(Flag::kRlhRelative)) {
     builder.SetHasLineHeightRelativeUnits();
+    builder.SetHasRootRelativeUnits();
     UseCounter::Count(state.GetDocument(), WebFeature::kHasRlhUnits);
   }
   if (flags & static_cast<Flags>(Flag::kChRelative)) {
@@ -1463,7 +1464,7 @@ const ComputedStyle* StyleResolver::ResolveStyle(
 
   GetDocument().AddViewportUnitFlags(state.StyleBuilder().ViewportUnitFlags());
 
-  if (state.StyleBuilder().HasRootFontRelativeUnits()) {
+  if (state.StyleBuilder().HasRootRelativeUnits()) {
     GetDocument().GetStyleEngine().SetUsesRootRelativeUnits(true);
   }
 
@@ -1910,8 +1911,8 @@ void StyleResolver::ApplyBaseStyleNoCache(
   if (match_result.DependsOnDynamicViewportUnits()) {
     builder.SetHasDynamicViewportUnits();
   }
-  if (match_result.DependsOnRootFontContainerQueries()) {
-    builder.SetHasRootFontRelativeUnits();
+  if (match_result.DependsOnRootUnitContainerQueries()) {
+    builder.SetHasRootRelativeUnits();
   }
   if (match_result.ConditionallyAffectsAnimations()) {
     state.SetConditionallyAffectsAnimations();
@@ -2476,7 +2477,8 @@ Element* StyleResolver::FindContainerForElement(
   Element* start_candidate = FlatTreeTraversal::ParentElement(*element);
   if (PseudoElement* pseudo_element = DynamicTo<PseudoElement>(element)) {
     if (pseudo_element->IsLayoutSiblingOfOriginatingElement() &&
-        container_selector.SelectsSizeContainers()) {
+        (container_selector.SelectsSizeContainers() ||
+         pseudo_element->GetPseudoId() == kPseudoIdSkeleton)) {
       start_candidate = FlatTreeTraversal::ParentElement(*start_candidate);
     }
   }

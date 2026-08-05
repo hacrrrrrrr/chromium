@@ -162,6 +162,8 @@ chromium-metrics-reviews@google.com.
                platform APIs. Only reported on Android, if the value hasn't
                been collected in the last 5 minutes (otherwise Android
                produces a stale value, which is not emitted in Chrome)."/>
+  <variant name=".ANGLEMetal"
+      summary="Memory allocated by ANGLE Metal device, on macOS."/>
   <variant name=".BlinkGC" summary="Only counting Blink GC memory."/>
   <variant name=".BlinkGC.AllocatedObjects"
       summary="Only counting objects allocated using Blink GC."/>
@@ -1136,7 +1138,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Browser.MappingsCount" units="count"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>lizeb@chromium.org</owner>
   <owner>chrome-memory@google.com</owner>
   <summary>
@@ -1319,7 +1321,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Browser.PrivateSwapFootprint" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>erikchen@chromium.org</owner>
   <owner>ssid@chromium.org</owner>
   <summary>
@@ -1369,7 +1371,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Browser.SharedMemoryFootprint" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>erikchen@chromium.org</owner>
   <summary>
     A rough estimate of the shared memory footprint of the browser process.
@@ -1384,7 +1386,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.CommitAvailableMB" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>aattar@google.com</owner>
   <owner>catan-team@chromium.org</owner>
   <summary>
@@ -1398,7 +1400,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Memory.CommitLimitMB" units="MB" expires_after="2026-11-15">
+<histogram name="Memory.CommitLimitMB" units="MB" expires_after="2027-01-17">
   <owner>aattar@google.com</owner>
   <owner>catan-team@chromium.org</owner>
   <summary>
@@ -1498,7 +1500,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Dump.Type.{DetailLevel}" enum="MemoryDumpType"
-    expires_after="2026-08-30">
+    expires_after="2027-02-28">
   <owner>joenotcharles@google.com</owner>
   <owner>chrome-catan@google.com</owner>
   <summary>
@@ -1629,7 +1631,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="Memory.Experimental.Browser2.Custom{ProcessMemoryAllocatorCustom2}"
-    units="bytes" expires_after="2026-11-29">
+    units="bytes" expires_after="2027-01-31">
   <owner>sashamcintosh@chromium.org</owner>
   <owner>chromeos-gfx@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
@@ -1907,7 +1909,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Experimental.Renderer.AvailableMemoryAfterOOM"
-    units="MB" expires_after="2026-11-15">
+    units="MB" expires_after="2027-01-17">
   <owner>etiennep@chromium.org</owner>
   <owner>fdoray@chromium.org</owner>
   <summary>
@@ -1919,7 +1921,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Experimental.Renderer.AvailableMemoryBeforeOOM"
-    units="MB" expires_after="2026-11-15">
+    units="MB" expires_after="2027-01-17">
   <owner>etiennep@chromium.org</owner>
   <owner>fdoray@chromium.org</owner>
   <summary>
@@ -1973,7 +1975,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Experimental.Renderer.TotalMemoryAfterOOM" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>etiennep@chromium.org</owner>
   <owner>fdoray@chromium.org</owner>
   <summary>
@@ -2160,7 +2162,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Extension.PrivateMemoryFootprint" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>erikchen@chromium.org</owner>
   <owner>ssid@chromium.org</owner>
   <summary>
@@ -2442,7 +2444,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.NetworkService.PrivateMemoryFootprint" units="MiB"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>mmenke@chromium.org</owner>
   <owner>morlovich@chromium.org</owner>
   <owner>erikchen@chromium.org</owner>
@@ -2502,7 +2504,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.OOMKills.Count" units="kills"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>vovoy@google.com</owner>
   <owner>wvk@google.com</owner>
   <summary>Cumulative count of OOM kills in one user session.</summary>
@@ -2629,7 +2631,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.ParkableString.Compression.Latency"
-    units="microseconds" expires_after="2026-11-15">
+    units="microseconds" expires_after="2027-01-17">
   <owner>lizeb@chromium.org</owner>
   <owner>thiabaud@google.com</owner>
   <summary>
@@ -2714,7 +2716,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.ParkableString.Read.Latency" units="microseconds"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>lizeb@chromium.org</owner>
   <owner>pasko@chromium.org</owner>
   <summary>
@@ -2866,7 +2868,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.ProcessCount2" units="processes"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>creis@chromium.org</owner>
   <owner>nasko@chromium.org</owner>
   <summary>
@@ -2953,7 +2955,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Renderer.PrivateSwapFootprint" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>erikchen@chromium.org</owner>
   <owner>ssid@chromium.org</owner>
   <summary>
@@ -3162,7 +3164,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.System.MemAvailableMB" units="MB"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>hidehiko@chromium.org</owner>
   <summary>
     System-wide estimate of memory available in ChromeOS, without swapping.
@@ -3182,7 +3184,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.SystemMemoryLists.QueryFailureStatus" enum="NTSTATUS"
-    expires_after="2026-11-22">
+    expires_after="2027-01-24">
   <owner>spvm@google.com</owner>
   <owner>etienneb@google.com</owner>
   <summary>
@@ -3217,7 +3219,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.SystemMemoryLists.TotalIntervalsRecorded"
-    units="intervals" expires_after="2026-11-15">
+    units="intervals" expires_after="2027-01-17">
   <owner>spvm@google.com</owner>
   <owner>etienneb@google.com</owner>
   <summary>
@@ -3336,7 +3338,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Memory.Total.PrivateMemoryFootprintExcludingWaivedRenderers"
-    units="MB" expires_after="2026-11-29">
+    units="MB" expires_after="2027-01-31">
   <owner>ckitagawa@chromium.org</owner>
   <owner>yfriedman@chromium.org</owner>
   <summary>
@@ -3528,7 +3530,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Memory.Total.TileMemory" units="MB" expires_after="2026-11-29">
+<histogram name="Memory.Total.TileMemory" units="MB" expires_after="2027-01-31">
   <owner>lizeb@chromium.org</owner>
   <owner>chrome-gpu-memory@google.com</owner>
   <summary>

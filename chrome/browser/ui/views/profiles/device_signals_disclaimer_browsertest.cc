@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/functional/callback_forward.h"
+#include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
 #include "base/task/single_thread_task_runner.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
@@ -15,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service_factory.h"
+#include "chrome/browser/enterprise/signin/signals_disclaimer_metrics.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
@@ -29,6 +31,7 @@
 #include "chrome/browser/ui/signin/signin_view_controller.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/test/test_browser_ui.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/profile_management_step_controller.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_test_base.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_view_test_utils.h"
@@ -36,6 +39,7 @@
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/device_signals/core/browser/pref_names.h"
 #include "components/policy/core/common/features.h"
 #include "components/signin/public/base/signin_switches.h"
@@ -74,6 +78,31 @@ namespace {
   if (!result && log_on_failure) {
     LOG(ERROR) << "WaitForAndClickButton failed for " << app << " -> "
                << button_id << ": " << result.message();
+  }
+  return result;
+}
+
+::testing::AssertionResult WaitForAndClickLearnMoreLink(
+    content::WebContents* web_contents) {
+  content::WaitForLoadStop(web_contents);
+  std::string script = R"(
+    new Promise((resolve) => {
+      const interval = setInterval(() => {
+        const link = document.querySelector('managed-user-profile-notice-app')
+                         ?.shadowRoot?.querySelector('signals-disclaimer')
+                         ?.shadowRoot?.querySelector('.subtitle a');
+        if (link && !link.hidden) {
+          clearInterval(interval);
+          link.click();
+          resolve(true);
+        }
+      }, 50);
+    });
+  )";
+
+  ::testing::AssertionResult result = content::ExecJs(web_contents, script);
+  if (!result) {
+    LOG(ERROR) << "WaitForAndClickLearnMoreLink failed: " << result.message();
   }
   return result;
 }
@@ -195,15 +224,17 @@ class DeviceSignalsDisclaimerUIWindowPixelTest
     SignInWithAccount(AccountManagementStatus::kManaged);
 
     profile_picker_view_ = new ProfileManagementStepTestView(
-        ProfilePicker::Params::ForFirstRun(browser()->profile()->GetPath(),
+        ProfilePicker::Params::ForFirstRun(browser()->GetProfile()->GetPath(),
                                            base::DoNothing()),
         ProfileManagementFlowController::Step::kDeviceSignalsDisclaimer,
         /*step_controller_factory=*/
-        base::BindRepeating([](ProfilePickerWebContentsHost* host) {
-          return ProfileManagementStepController::
-              CreateForDeviceSignalsDisclaimer(host, host->GetPickerContents(),
-                                               base::DoNothing());
-        }));
+        base::BindRepeating(
+            [](Profile* profile, ProfilePickerWebContentsHost* host) {
+              return ProfileManagementStepController::
+                  CreateForDeviceSignalsDisclaimer(host, profile,
+                                                   base::DoNothing());
+            },
+            browser()->GetProfile()));
     profile_picker_view_->views::View::AddObserver(this);
     profile_picker_view_->ShowAndWait(GetParam().window_size);
     if (ProfilePicker::GetWebViewForTesting()) {
@@ -395,7 +426,7 @@ class DeviceSignalsDisclaimerStartupInteractiveTest
                                                       true);
 
     // Reset permanent consent preference to false.
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         device_signals::prefs::kDeviceSignalsPermanentConsentReceived, false);
 
     ProfileManagementDisclaimerServiceFactory::GetForProfile(
@@ -425,6 +456,7 @@ class DeviceSignalsDisclaimerStartupInteractiveTest
 
   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
   std::optional<views::NamedWidgetShownWaiter> widget_waiter_;
+  base::HistogramTester histogram_tester_;
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
@@ -447,6 +479,11 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   destroyed_waiter.Wait();
   EXPECT_TRUE(browser()->GetProfile()->GetPrefs()->GetBoolean(
       device_signals::prefs::kDeviceSignalsPermanentConsentReceived));
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 1);
+  histogram_tester_.ExpectUniqueSample(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kAccepted, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
@@ -457,7 +494,7 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   content::WebContents* dialog_contents = GetModalDialogWebContents(browser());
   ASSERT_TRUE(dialog_contents);
 
-  ProfileBrowsersClosedWaiter browers_closed_waiter(
+  ProfileBrowsersClosedWaiter browsers_closed_waiter(
       profile_keep_alive_->profile());
 
   // Click cancel.
@@ -467,8 +504,13 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
       dialog_contents, "managed-user-profile-notice-app", "cancel-button");
 
   // Wait for all browsers to close and for the profile picker to be shown.
-  browers_closed_waiter.Wait();
+  browsers_closed_waiter.Wait();
   WaitForPickerWidgetCreated();
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 1);
+  histogram_tester_.ExpectUniqueSample(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kDeclined, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
@@ -505,6 +547,12 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   views::Widget* final_widget = next_dialog_waiter.WaitIfNeededAndGet();
   ASSERT_TRUE(final_widget);
   EXPECT_TRUE(ShowsModalDialog(browser()));
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 2);
+  histogram_tester_.ExpectUniqueSample(kEnterpriseSignalsDisclaimerModalResult,
+                                       EnterpriseSignalsDisclaimerModalResult::
+                                           kDismissedWithoutExplicitUserAction,
+                                       1);
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
@@ -541,6 +589,14 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   destroyed_waiter2.Wait();
   EXPECT_TRUE(new_browser->GetProfile()->GetPrefs()->GetBoolean(
       device_signals::prefs::kDeviceSignalsPermanentConsentReceived));
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 2);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kAccepted, 1);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kDismissedByAnotherWindow, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
@@ -570,6 +626,14 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   // Wait for all browsers to close and for the profile picker to be shown.
   waiter.Wait();
   WaitForPickerWidgetCreated();
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 2);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kDeclined, 1);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kDismissedByAnotherWindow, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
@@ -607,6 +671,80 @@ IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
   destroyed_waiter2.Wait();
   EXPECT_TRUE(new_browser->GetProfile()->GetPrefs()->GetBoolean(
       device_signals::prefs::kDeviceSignalsPermanentConsentReceived));
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalShown,
+                                      true, 2);
+  histogram_tester_.ExpectBucketCount(kEnterpriseSignalsDisclaimerModalResult,
+                                      EnterpriseSignalsDisclaimerModalResult::
+                                          kDismissedWithoutExplicitUserAction,
+                                      1);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalResult,
+      EnterpriseSignalsDisclaimerModalResult::kAccepted, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
+                       LearnMore_OpenAndClose) {
+  // The dialog opens in the current browser.
+  SimulateBrowserFocus(browser());
+  views::Widget* widget = widget_waiter_->WaitIfNeededAndGet();
+  ASSERT_TRUE(widget);
+  content::WebContents* dialog_contents = GetModalDialogWebContents(browser());
+  ASSERT_TRUE(dialog_contents);
+
+  // Click `Learn More` and wait for the popup browser to open.
+  ui_test_utils::BrowserCreatedObserver browser_creation_observer;
+  ASSERT_TRUE(WaitForAndClickLearnMoreLink(dialog_contents));
+  Browser* popup_browser = browser_creation_observer.Wait();
+  ASSERT_TRUE(popup_browser);
+
+  auto* browser_collection =
+      ProfileBrowserCollection::GetForProfile(browser()->GetProfile());
+  EXPECT_EQ(browser_collection->GetSize(), 2);
+
+  // Simulate the user clicking Close button and wait for destruction.
+  ui_test_utils::BrowserDestroyedObserver browser_destroyed_observer(
+      popup_browser);
+  BrowserView::GetBrowserViewForBrowser(popup_browser)
+      ->GetWidget()
+      ->CloseWithReason(views::Widget::ClosedReason::kCloseButtonClicked);
+  browser_destroyed_observer.Wait();
+
+  EXPECT_EQ(browser_collection->GetSize(), 1);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalLearnMoreClicked, true, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(DeviceSignalsDisclaimerStartupInteractiveTest,
+                       LearnMore_OpenAndOpen) {
+  // The dialog opens in the current browser.
+  SimulateBrowserFocus(browser());
+  views::Widget* widget = widget_waiter_->WaitIfNeededAndGet();
+  ASSERT_TRUE(widget);
+  content::WebContents* dialog_contents = GetModalDialogWebContents(browser());
+  ASSERT_TRUE(dialog_contents);
+
+  // Click `Learn More` and wait for the popup browser to open.
+  ui_test_utils::BrowserCreatedObserver browser_creation_observer;
+  ASSERT_TRUE(WaitForAndClickLearnMoreLink(dialog_contents));
+  Browser* popup_browser = browser_creation_observer.Wait();
+  ASSERT_TRUE(popup_browser);
+  auto* browser_collection =
+      ProfileBrowserCollection::GetForProfile(browser()->GetProfile());
+  EXPECT_EQ(browser_collection->GetSize(), 2u);
+
+  popup_browser->DidBecomeInactive();
+  SimulateBrowserFocus(browser());
+
+  // Click `Learn More` again.
+  ASSERT_FALSE(popup_browser->IsActive());
+  ASSERT_TRUE(WaitForAndClickLearnMoreLink(dialog_contents));
+
+  // New window should not be opened, instead the existing popup should be
+  // focused.
+  ui_test_utils::WaitUntilBrowserBecomeActive(popup_browser);
+  EXPECT_EQ(browser_collection->GetSize(), 2u);
+  histogram_tester_.ExpectBucketCount(
+      kEnterpriseSignalsDisclaimerModalLearnMoreClicked, true, 2);
 }
 
 // Profile picker tests are located in

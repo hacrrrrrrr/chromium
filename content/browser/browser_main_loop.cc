@@ -67,6 +67,7 @@
 #include "components/viz/host/compositing_mode_reporter_impl.h"
 #include "components/viz/host/gpu_host_impl.h"
 #include "components/viz/host/host_frame_sink_manager.h"
+#include "components/vrp_flags/buildflags.h"
 #include "content/browser/accessibility/browser_accessibility_state_impl.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/compositor/viz_process_transport_factory.h"
@@ -166,6 +167,10 @@
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/switches.h"
 
+#if BUILDFLAG(ENABLE_VRP_FLAGS)
+#include "components/vrp_flags/vrp_flags.h"  // nogncheck
+#endif
+
 #if defined(USE_AURA) || BUILDFLAG(IS_MAC)
 #include "content/browser/compositor/image_transport_factory.h"
 #endif
@@ -189,6 +194,7 @@
 #include "media/base/android/media_drm_bridge_client.h"
 #include "ui/android/screen_android.h"
 #include "ui/display/screen.h"
+#include "ui/events/devices/input_device_observer_android.h"
 #include "ui/gl/gl_surface.h"
 #endif
 
@@ -610,6 +616,10 @@ int BrowserMainLoop::EarlyInitialization() {
       RenderProcessHost::SetMaxRendererProcessCount(process_limit);
     }
   }
+
+#if BUILDFLAG(ENABLE_VRP_FLAGS)
+  vrp_flags::PostEarlyInitialization();
+#endif
 
   if (parts_)
     parts_->PostEarlyInitialization();
@@ -1290,6 +1300,14 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
     TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:GamepadService");
     device::GamepadService::GetInstance()->Terminate();
   }
+
+#if BUILDFLAG(IS_ANDROID)
+  {
+    TRACE_EVENT0("shutdown",
+                 "BrowserMainLoop::Subsystem:InputDeviceObserverAndroid");
+    ui::InputDeviceObserverAndroid::GetInstance()->Shutdown();
+  }
+#endif
   {
     TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:DeleteDataSources");
     URLDataManager::DeleteDataSources();
@@ -1543,6 +1561,10 @@ bool BrowserMainLoop::InitializeToolkit() {
   if (!env_)
     return false;
 #endif  // defined(USE_AURA)
+
+#if BUILDFLAG(IS_ANDROID)
+  ui::InputDeviceObserverAndroid::GetInstance()->Initialize();
+#endif
 
   if (parts_)
     parts_->ToolkitInitialized();

@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_replace_state.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/animation_effect_owner.h"
+#include "third_party/blink/renderer/core/animation/compositing/specific_compositing_decision.h"
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
 #include "third_party/blink/renderer/core/animation/timeline_offset.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -78,6 +79,20 @@ enum class BlinkAnimationType : int {
   kAnimationTypeEnumMax = 6
 };
 
+struct CORE_EXPORT AnimationCompositingDecisionState {
+  DISALLOW_NEW();
+
+  void Trace(Visitor* visitor) const { visitor->Trace(specific_reasons); }
+
+  void Reset(bool force_enable_tracing_for_test = false);
+  void ReportHistogramsAndTracing(const Animation&);
+
+  // TODO(crbug.com/521921832): gradually replace with a more granular enum
+  CompositorAnimations::FailureReasons disposition =
+      CompositorAnimations::kUnchecked;
+  Member<CompositingDecisionDetailsMap> specific_reasons;
+};
+
 class CORE_EXPORT Animation : public EventTarget,
                               public ActiveScriptWrappable<Animation>,
                               public ExecutionContextLifecycleObserver,
@@ -88,6 +103,7 @@ class CORE_EXPORT Animation : public EventTarget,
   USING_PRE_FINALIZER(Animation, Dispose);
 
  public:
+  using CompositingDecisionState = AnimationCompositingDecisionState;
   using AutoRewind = cc::Animation::AutoRewind;
   // Priority for sorting getAnimation by Animation class, arranged from lowest
   // priority to highest priority as per spec:
@@ -339,8 +355,7 @@ class CORE_EXPORT Animation : public EventTarget,
 
   CompositorAnimations::FailureReasons CheckCanStartAnimationOnCompositor(
       const PaintArtifactCompositor* paint_artifact_compositor,
-      StartOnCompositorReason check_reason,
-      PropertyHandleSet* unsupported_properties_for_tracing = nullptr) const;
+      StartOnCompositorReason check_reason);
   void StartAnimationOnCompositor(
       const PaintArtifactCompositor* paint_artifact_compositor,
       StartOnCompositorReason check_reason);
@@ -355,8 +370,12 @@ class CORE_EXPORT Animation : public EventTarget,
           CompositorPendingReason::kPendingRestart);
   void CancelIncompatibleAnimationsOnCompositor();
   bool HasActiveAnimationsOnCompositor() const;
-  CompositorAnimations::FailureReasons LastCompositorFailureReason() const {
-    return last_compositor_failure_reasons_;
+  // Returns the *current* compositing decision for this animation, which may be
+  // unchecked (not yet evaluated) or partially checked. Currently this is reset
+  // when the animation is set pending, and fully checked after PreCommit. This
+  // will change as crbug.com/521921835 gets checked in.
+  CompositingDecisionState& GetCompositingDecisionState() {
+    return compositing_decision_;
   }
 
   // The compositor started playing this animation on the impl thread.
@@ -438,7 +457,7 @@ class CORE_EXPORT Animation : public EventTarget,
 
   std::optional<base::TimeDelta> ComputeCompositorHoldTime() const;
 
-  // Updates |compositor_property_animations_have_no_effect_| and marks the
+  // Updates |animation_missing_compositor_elements_| and marks the
   // animation as pending if it changes.
   void MarkPendingIfCompositorPropertyAnimationChanges(
       const PaintArtifactCompositor*);
@@ -552,8 +571,7 @@ class CORE_EXPORT Animation : public EventTarget,
   void BeginUpdatingState();
   void EndUpdatingState();
 
-  CompositorAnimations::FailureReasons
-  CheckCanStartAnimationOnCompositorInternal() const;
+  void CheckCanStartAnimationOnCompositorInternal();
   void CreateCompositorAnimation(std::optional<int> replaced_cc_animation_id);
   void DestroyCompositorAnimation();
   void AttachCompositorTimeline();
@@ -594,14 +612,11 @@ class CORE_EXPORT Animation : public EventTarget,
   // Tracking the state of animations in dev tools.
   void NotifyProbe();
 
-  // Reset the cached value for the status of a possible background color
-  // animation if required. Any time an animation affecting background color
-  // changes we need to reset the flag so that Paint can make a fresh
-  // compositing decision and create a fresh paint worklet image from the
-  // keyframes.
-  // TODO(crbug.com/1310961): Investigate if we need a similar fix for
-  // non-native paint worklets.
-  void UpdateCompositedPaintStatus();
+  // Update the cached value for the status of native paint worklets. Any
+  // time an animation becomes compositor pending that affects one or more
+  // properties animated via native paint worklets, a fresh decision is required
+  // in PrePaint or Paint to determine eligibility to run on the compositor.
+  void UpdateCompositedPaintStatus(CompositorPendingReason reason);
 
   // Updates the start time for a running animation that is linked to a scroll
   // timeline. As the animation is linked to a timeline range, we don't
@@ -772,6 +787,10 @@ class CORE_EXPORT Animation : public EventTarget,
     Member<Animation> animation_;
   };
 
+  // The most recent/in progress compositing decision. Used to determine
+  // how/whether an animation can be optimized.
+  CompositingDecisionState compositing_decision_;
+
   // This mirrors the known compositor state. It is created when a compositor
   // animation is started. Updated once the start time is known and each time
   // modifications are pushed to the compositor.
@@ -780,8 +799,6 @@ class CORE_EXPORT Animation : public EventTarget,
   int compositor_group_;
 
   Member<CompositorAnimationHolder> compositor_animation_;
-
-  CompositorAnimations::FailureReasons last_compositor_failure_reasons_;
 
   bool effect_suppressed_;
 

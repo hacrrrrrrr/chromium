@@ -1578,6 +1578,10 @@ targets.tests.isolated_script_test(
 )
 
 targets.tests.isolated_script_test(
+    name = "ios_web_content_unittests",
+)
+
+targets.tests.isolated_script_test(
     name = "ios_web_inttests",
 )
 
@@ -1723,6 +1727,14 @@ targets.tests.isolated_script_test(
     name = "module_installer_junit_tests",
 )
 
+targets.tests.gtest_test(
+    name = "mojo_legacy_unittests",
+)
+
+targets.tests.gtest_test(
+    name = "mojo_proxy_unittests",
+)
+
 targets.tests.isolated_script_test(
     name = "mojo_python_unittests",
 )
@@ -1832,43 +1844,6 @@ targets.tests.isolated_script_test(
     name = "ondevice_stability_tests_light",
 )
 
-targets.tests.isolated_script_test(
-    name = "ondevice_model_benchmark_tests_gpu_submodel",
-    mixins = [
-        "has_native_resultdb_integration",
-    ],
-    args = [
-        "--benchmark_binary_dir=./",
-        "--backends=gpu",
-        "--use_submodel",
-    ],
-    binary = "ondevice_model_benchmark_tests",
-)
-
-targets.tests.isolated_script_test(
-    name = "ondevice_model_benchmark_tests_gpu_no_submodel",
-    mixins = [
-        "has_native_resultdb_integration",
-    ],
-    args = [
-        "--benchmark_binary_dir=./",
-        "--backends=gpu",
-    ],
-    binary = "ondevice_model_benchmark_tests",
-)
-
-targets.tests.isolated_script_test(
-    name = "ondevice_model_benchmark_tests_cpu_no_submodel",
-    mixins = [
-        "has_native_resultdb_integration",
-    ],
-    args = [
-        "--benchmark_binary_dir=./",
-        "--backends=cpu",
-    ],
-    binary = "ondevice_model_benchmark_tests",
-)
-
 # TODO(b:484388901): Enable GPU backedn testing when the issue is fixed.
 # targets.tests.isolated_script_test(
 #     name = "litert_e2e_tests_gpu",
@@ -1963,6 +1938,30 @@ targets.tests.isolated_script_test(
         "--backend=gpu",
         "--performance-hint=ON_DEVICE_MODEL_PERFORMANCE_HINT_FASTEST_INFERENCE",
         "--expectations-file=AIExpectations_LiteRTGPU",
+    ],
+    binary = "chrome_ai_wpt_tests",
+)
+
+targets.tests.isolated_script_test(
+    name = "chrome_ai_wpt_tests_manifest_gpu_high_tier",
+    args = [
+        "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_high_tier.json",
+    ],
+    binary = "chrome_ai_wpt_tests",
+)
+
+targets.tests.isolated_script_test(
+    name = "chrome_ai_wpt_tests_manifest_gpu_low_tier",
+    args = [
+        "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_gpu_low_tier.json",
+    ],
+    binary = "chrome_ai_wpt_tests",
+)
+
+targets.tests.isolated_script_test(
+    name = "chrome_ai_wpt_tests_manifest_cpu",
+    args = [
+        "--manifest-test-config=../../components/optimization_guide/internal/testing/configs/manifest_test_config_cpu.json",
     ],
     binary = "chrome_ai_wpt_tests",
 )
@@ -2195,6 +2194,10 @@ targets.tests.gtest_test(
 
 targets.tests.isolated_script_test(
     name = "resource_sizes_cronet_sample_apk",
+)
+
+targets.tests.gtest_test(
+    name = "rlz_unittests",
 )
 
 targets.tests.gtest_test(
@@ -3054,6 +3057,20 @@ targets.tests.gpu_telemetry_test(
         "gpu_integration_test_common_args",
     ],
     module_scheme = "flat",
+)
+
+targets.tests.isolated_script_test(
+    name = "webdriver_bidi_unittests",
+    mixins = [
+        "has_native_resultdb_integration",
+    ],
+)
+
+targets.tests.isolated_script_test(
+    name = "webdriver_bidi_e2e_tests",
+    mixins = [
+        "has_native_resultdb_integration",
+    ],
 )
 
 targets.tests.isolated_script_test(

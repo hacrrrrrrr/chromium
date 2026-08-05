@@ -89,7 +89,8 @@
 // to the view.
 @interface ReadingListCoordinator () <AccountSettingsPresenter,
                                       AuthenticationServiceObserving,
-                                      IdentityManagerObserverBridgeDelegate,
+                                      IdentityManagerObserving,
+                                      ReadingListMenuProvider,
                                       ReadingListListItemFactoryDelegate,
                                       ReadingListListViewControllerAudience,
                                       ReadingListListViewControllerDelegate,
@@ -281,8 +282,8 @@
 }
 
 - (void)dealloc {
-  CHECK(!_authServiceObserverBridge, base::NotFatalUntil::M145);
-  CHECK(!self.mediator, base::NotFatalUntil::M145);
+  CHECK(!_authServiceObserverBridge);
+  CHECK(!self.mediator);
 }
 
 #pragma mark - ReadingListListViewControllerAudience
@@ -587,10 +588,10 @@
 
 // TODO(crbug.com/40898970): This delegate's implementation will be moved to
 // SigninPromoViewMediator.
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
 // Called when a user changes the syncing state.
-- (void)onPrimaryAccountChanged:
+- (void)primaryAccountDidChange:
     (const signin::PrimaryAccountChangeEvent&)event {
   switch (event.GetEventTypeFor(signin::ConsentLevel::kSignin)) {
     case signin::PrimaryAccountChangeEvent::Type::kSet:
@@ -615,7 +616,7 @@
 #pragma mark - Private
 
 - (void)dismissReadingList {
-  CHECK([self canDismiss], base::NotFatalUntil::M145);
+  CHECK([self canDismiss]);
   [self.tableViewController willBeDismissed];
   [_delegate closeReadingList];
 }

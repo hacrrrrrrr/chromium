@@ -29,10 +29,12 @@
 #import "ios/chrome/browser/composebox/public/composebox_theme.h"
 #import "ios/chrome/browser/composebox/public/features.h"
 #import "ios/chrome/browser/metrics/model/activity_reporter.h"
+#import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/coordinator/scene/state/tab_grid_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
+#import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/shared/public/commands/scene_commands.h"
@@ -45,6 +47,7 @@
 #import "ios/chrome/browser/tabs/model/tab_helper_filter.h"
 #import "ios/chrome/browser/tabs/model/tab_helper_util.h"
 #import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
+#import "ios/chrome/browser/url_loading/model/url_loading_params.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ios/web/public/web_state.h"
 #import "ui/base/l10n/l10n_util_mac.h"
@@ -53,8 +56,7 @@
 @interface AssistantAIMCoordinator () <AIMSRPDebuggerURLViewControllerDelegate,
                                        AssistantAIMMediatorDelegate,
                                        AssistantAIMViewControllerDelegate,
-                                       AssistantContainerDelegate,
-                                       TabGridStateObserving>
+                                       AssistantContainerDelegate>
 
 // Block to execute when the 'Undo' snackbar dismisses.
 @property(nonatomic, strong) ProceduralBlock undoSnackbarDismissCompletion;
@@ -72,7 +74,17 @@ class AssistantAIMUIStateProvider
   explicit AssistantAIMUIStateProvider(AssistantAIMCoordinator* coordinator)
       : coordinator_(coordinator) {}
 
-  bool IsTabGridVisible() override { return [coordinator_ isTabGridVisible]; }
+  bool IsAssistantHiddenByUIState(web::WebState* web_state) override {
+    if ([coordinator_ isTabGridVisible]) {
+      return true;
+    }
+    if (!web_state) {
+      return true;
+    }
+    NewTabPageTabHelper* ntp_helper =
+        NewTabPageTabHelper::FromWebState(web_state);
+    return ntp_helper && ntp_helper->ShouldShowStartSurface();
+  }
 
  private:
   __weak AssistantAIMCoordinator* coordinator_;
@@ -88,6 +100,9 @@ class AssistantAIMUIStateProvider
   std::unique_ptr<AssistantAIMUIStateProvider> _uiStateProvider;
   AssistantContainerDetent _currentDetent;
   BOOL _isHiding;
+
+  // Whether the coordinator is currently in the middle of stopping.
+  BOOL _isStopping;
 
   // Handler for container related interactions.
   __weak id<AssistantContainerCommands> _containerHandler;
@@ -114,8 +129,6 @@ class AssistantAIMUIStateProvider
     return;
   }
   [_activityReporter reportActive];
-
-  [self.browser->GetSceneState().tabGridState addObserver:self];
 
   CobrowseBrowserAgent* agent = CobrowseBrowserAgent::FromBrowser(self.browser);
   if (agent) {
@@ -196,8 +209,10 @@ class AssistantAIMUIStateProvider
 }
 
 - (void)stop {
-  [self.browser->GetSceneState().tabGridState removeObserver:self];
-
+  if (_isStopping) {
+    return;
+  }
+  _isStopping = YES;
   CobrowseBrowserAgent* agent = CobrowseBrowserAgent::FromBrowser(self.browser);
   if (agent) {
     agent->SetUIStateProvider(nullptr);
@@ -216,6 +231,8 @@ class AssistantAIMUIStateProvider
     [self dismissAssistantContainerAnimated:NO completion:nil];
   }
   [_activityReporter reportInactive];
+  _activityReporter = nil;
+  _isStopping = NO;
 }
 
 - (void)setVisible:(BOOL)visible {
@@ -226,6 +243,7 @@ class AssistantAIMUIStateProvider
   if (visible) {
     [self dismissSnackbars];
     if (_viewController) {
+      [_mediator updateContext];
       if (minimized) {
         _currentDetent = AssistantContainerDetent::kMinimized;
       }
@@ -255,16 +273,6 @@ class AssistantAIMUIStateProvider
 
 - (BOOL)isTabGridVisible {
   return self.browser->GetSceneState().tabGridState.tabGridVisible;
-}
-
-#pragma mark - TabGridStateObserving
-
-- (void)willEnterTabGrid {
-  [self setVisible:NO];
-}
-
-- (void)willExitTabGrid {
-  [self setVisible:YES];
 }
 
 #pragma mark - AssistantAIMViewControllerDelegate
@@ -337,6 +345,16 @@ class AssistantAIMUIStateProvider
 
 #pragma mark - Private
 
+// Minimizes the cobrowse container and opens the specified URL.
+- (void)minimizeAndOpenURL:(const GURL&)URL {
+  [_containerHandler
+      animateAssistantContainerToDetent:AssistantContainerDetent::kMinimized
+                               duration:kSheetDetentAnimationDuration
+                                  curve:UIViewAnimationCurveEaseInOut];
+  UrlLoadParams params = UrlLoadParams::InCurrentTab(URL);
+  UrlLoadingBrowserAgent::FromBrowser(self.browser)->Load(params);
+}
+
 - (void)dismissKeyboard {
   [_inputPlateCoordinator endEditing];
 }
@@ -363,7 +381,7 @@ class AssistantAIMUIStateProvider
 
 // Closes the assistant.
 - (void)closeAssistant {
-  if (!self.browser) {
+  if (!self.browser || _isStopping) {
     return;
   }
   id<SceneCommands> sceneHandler =
@@ -434,7 +452,7 @@ class AssistantAIMUIStateProvider
 
 - (void)assistantContainer:(AssistantContainerViewController*)container
       didDisappearAnimated:(BOOL)animated {
-  if (_isHiding) {
+  if (_isHiding || _isStopping) {
     _isHiding = NO;
     return;
   }
@@ -535,12 +553,22 @@ class AssistantAIMUIStateProvider
                               completion:nil];
 }
 
+- (void)assistantAIMViewControllerDidTapMyActivity:
+    (AssistantAIMViewController*)viewController {
+  [self minimizeAndOpenURL:GURL(kMyActivityURL)];
+}
+
+- (void)assistantAIMViewControllerDidTapHelp:
+    (AssistantAIMViewController*)viewController {
+  [self minimizeAndOpenURL:GURL(kAssistantAIMHelpCenterURL)];
+}
+
 #pragma mark - AIMSRPDebuggerURLViewControllerDelegate
 
 - (void)debuggerURLViewController:
             (AIMSRPDebuggerURLViewController*)viewController
-                     didUpdateURL:(const GURL&)url {
-  [_mediator loadURL:url];
+                     didUpdateURL:(const GURL&)URL {
+  [_mediator loadURL:URL];
 }
 
 @end

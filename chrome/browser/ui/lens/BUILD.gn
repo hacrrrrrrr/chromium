@@ -58,7 +58,6 @@ source_set("lens") {
     "lens_results_panel_router.h",
     "lens_search_contextualization_controller.h",
     "lens_session_metrics_logger.h",
-    "lens_url_matcher.h",
     "page_content_type_conversions.h",
   ]
 
@@ -74,6 +73,7 @@ source_set("lens") {
     "//chrome/browser/ui/desktop_to_mobile_promos:service",
     "//chrome/browser/ui/exclusive_access",
     "//chrome/browser/ui/immersive:immersive_mode_controller",
+    "//chrome/browser/ui/location_bar",
     "//chrome/browser/ui/omnibox",
     "//chrome/browser/ui/side_panel",
     "//chrome/browser/ui/side_panel:side_panel_views_dependent",
@@ -139,7 +139,6 @@ source_set("impl") {
     "lens_session_metrics_logger.cc",
     "lens_side_panel_untrusted_ui.cc",
     "lens_string_utils.cc",
-    "lens_url_matcher.cc",
     "overlay_base_controller.cc",
     "page_content_type_conversions.cc",
   ]
@@ -243,6 +242,10 @@ source_set("impl") {
       "//components/pdf/browser",
     ]
   }
+
+  if (is_win || is_mac || is_linux || is_chromeos) {
+    deps += [ "//chrome/browser/ui/webui:theme_source" ]
+  }
 }
 
 source_set("test_support") {
@@ -295,6 +298,7 @@ source_set("browser_tests") {
     "//chrome/browser/contextual_tasks:test_support",
     "//chrome/browser/contextual_tasks:ui",
     "//chrome/browser/lens/core/mojom:mojo_bindings",
+    "//chrome/browser/pdf:pdf_extension_test_base",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/signin/e2e_tests:test_support",
     "//chrome/browser/sync",
@@ -425,7 +429,6 @@ source_set("unit_tests") {
     "lens_query_flow_router_unittest.cc",
     "lens_search_controller_unittest.cc",
     "lens_searchbox_controller_unittest.cc",
-    "lens_url_matcher_unittest.cc",
   ]
   deps = [
     ":lens",

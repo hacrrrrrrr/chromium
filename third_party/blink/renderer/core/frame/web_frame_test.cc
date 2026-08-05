@@ -43,6 +43,7 @@
 #include "base/functional/callback_helpers.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/bind.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 #include "cc/base/features.h"
@@ -159,6 +160,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
+#include "third_party/blink/renderer/core/frame/remote_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
@@ -1024,6 +1026,23 @@ TEST_F(WebFrameTest, IframeScriptRemovesSelf) {
   RunPendingTasks();
   EXPECT_TRUE(callback_helper.DidComplete());
   EXPECT_FALSE(callback_helper.HasAnyResults());
+}
+
+TEST_F(WebFrameTest, FrameOwnerElement) {
+  RegisterMockedHttpURLLoad("single_iframe.html");
+  RegisterMockedHttpURLLoad("visible_iframe.html");
+
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.InitializeAndLoad(base_url_ + "single_iframe.html");
+
+  WebFrame* main_frame = web_view_helper.LocalMainFrame();
+  WebFrame* child_frame = main_frame->FirstChild();
+  ASSERT_TRUE(child_frame);
+
+  // Child frames expose the element that embeds them. The top frame has no
+  // owner element.
+  EXPECT_TRUE(child_frame->FrameOwnerElement().HasHTMLTagName("iframe"));
+  EXPECT_TRUE(main_frame->FrameOwnerElement().IsNull());
 }
 
 namespace {
@@ -7176,7 +7195,8 @@ class FakeMainLocalFrameHost : public mojom::blink::LocalMainFrameHost {
                                 bool color_adjust) override {}
   void DraggableRegionsChanged(
       Vector<mojom::blink::DraggableRegionPtr> regions) override {}
-  void OnFirstContentfulPaint(base::TimeDelta duration) override {}
+  void OnFirstContentfulPaint(base::TimeTicks presentation_time) override {}
+  void OnLargestContentfulPaint(base::TimeTicks presentation_time) override {}
 
  private:
   void BindFrameHostReceiver(mojo::ScopedInterfaceEndpointHandle handle) {
@@ -8196,9 +8216,9 @@ TEST_F(WebFrameTest, FrameViewMoveWithSetFrameRect) {
   UpdateAllLifecyclePhases(web_view_helper.GetWebView());
 
   LocalFrameView* frame_view = web_view_helper.LocalMainFrame()->GetFrameView();
-  EXPECT_EQ(gfx::Rect(0, 0, 200, 200), frame_view->FrameRect());
+  EXPECT_EQ(gfx::Rect(0, 0, 200, 200), frame_view->DeprecatedFrameRect());
   frame_view->SetFrameRect(gfx::Rect(100, 100, 200, 200));
-  EXPECT_EQ(gfx::Rect(100, 100, 200, 200), frame_view->FrameRect());
+  EXPECT_EQ(gfx::Rect(100, 100, 200, 200), frame_view->DeprecatedFrameRect());
 }
 
 TEST_F(WebFrameTest, FrameViewScrollAccountsForBrowserControls) {
@@ -11308,6 +11328,84 @@ TEST_F(WebFrameTest, ImeSelectionCommitDoesNotChangeClipboard) {
   widget->SetHandlingInputEvent(false);
 }
 
+TEST_F(WebFrameTest, SetSelectionForAccessibilityHandlingInputEvent) {
+  RegisterMockedHttpURLLoad("foo.html");
+  SelectionMockWebFrameClient web_frame_client;
+
+  frame_test_helpers::WebViewHelper web_view_helper;
+  WebLocalFrameImpl* web_frame =
+      web_view_helper
+          .InitializeAndLoad(base_url_ + "foo.html", &web_frame_client)
+          ->MainFrameImpl();
+  WebViewImpl* web_view = web_view_helper.GetWebView();
+  WebFrameWidget* widget = web_view->MainFrameImpl()->FrameWidgetImpl();
+
+  bool was_handling_input_event = false;
+  EXPECT_CALL(web_frame_client, DidChangeSelection(_, _))
+      .WillRepeatedly([widget, &was_handling_input_event] {
+        was_handling_input_event = widget->HandlingInputEvent();
+      });
+
+  Document* document = web_frame->GetFrame()->GetDocument();
+  document->write("<div id='sample' contenteditable>hello world</div>");
+  Element* sample = document->getElementById(AtomicString("sample"));
+  sample->Focus();
+
+  EXPECT_FALSE(widget->HandlingInputEvent());
+
+  SelectionInDomTree selection =
+      SelectionInDomTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 5))
+          .Build();
+  web_frame->GetFrame()->Selection().SetSelectionForAccessibility(
+      selection, SetSelectionOptions());
+
+  EXPECT_TRUE(was_handling_input_event);
+  EXPECT_FALSE(widget->HandlingInputEvent());
+}
+
+TEST_F(WebFrameTest, SetSelectionForAccessibilityHandlingInputEventDisabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      features::kSetSelectionForAccessibilityHandlingInputEvent);
+
+  RegisterMockedHttpURLLoad("foo.html");
+  SelectionMockWebFrameClient web_frame_client;
+
+  frame_test_helpers::WebViewHelper web_view_helper;
+  WebLocalFrameImpl* web_frame =
+      web_view_helper
+          .InitializeAndLoad(base_url_ + "foo.html", &web_frame_client)
+          ->MainFrameImpl();
+  WebViewImpl* web_view = web_view_helper.GetWebView();
+  WebFrameWidget* widget = web_view->MainFrameImpl()->FrameWidgetImpl();
+
+  bool was_handling_input_event = false;
+  EXPECT_CALL(web_frame_client, DidChangeSelection(_, _))
+      .WillRepeatedly([widget, &was_handling_input_event] {
+        was_handling_input_event = widget->HandlingInputEvent();
+      });
+
+  Document* document = web_frame->GetFrame()->GetDocument();
+  document->write("<div id='sample' contenteditable>hello world</div>");
+  Element* sample = document->getElementById(AtomicString("sample"));
+  sample->Focus();
+
+  EXPECT_FALSE(widget->HandlingInputEvent());
+
+  SelectionInDomTree selection =
+      SelectionInDomTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 5))
+          .Build();
+  web_frame->GetFrame()->Selection().SetSelectionForAccessibility(
+      selection, SetSelectionOptions());
+
+  EXPECT_FALSE(was_handling_input_event);
+  EXPECT_FALSE(widget->HandlingInputEvent());
+}
+
 class TestRemoteFrameHostForVisibility : public FakeRemoteFrameHost {
  public:
   TestRemoteFrameHostForVisibility() = default;
@@ -14338,7 +14436,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
     EXPECT_CALL(policy_container_host,
-                SetReferrerPolicy(network::mojom::ReferrerPolicy::kNever));
+                SetReferrerPolicy(network::mojom::ReferrerPolicy::kNever, _));
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy("no-referrer", std::string()),
         test_url);
@@ -14356,7 +14454,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
     EXPECT_CALL(policy_container_host,
-                SetReferrerPolicy(network::mojom::ReferrerPolicy::kOrigin));
+                SetReferrerPolicy(network::mojom::ReferrerPolicy::kOrigin, _));
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy("origin", std::string()),
         test_url);
@@ -14373,7 +14471,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
         std::make_unique<PolicyContainer>(
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
-    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_)).Times(0);
+    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_, _)).Times(0);
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy(std::string(), std::string()),
         test_url);
@@ -14391,7 +14489,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
         std::make_unique<PolicyContainer>(
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
-    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_)).Times(0);
+    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_, _)).Times(0);
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy(std::string(), "origin"),
         test_url);
@@ -14408,7 +14506,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
         std::make_unique<PolicyContainer>(
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
-    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_)).Times(0);
+    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_, _)).Times(0);
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy(std::string(), "same-origin"),
         test_url);
@@ -14425,7 +14523,7 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
         std::make_unique<PolicyContainer>(
             policy_container_host.BindNewEndpointAndPassDedicatedRemote(),
             mojom::blink::PolicyContainerPolicies::New()));
-    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_)).Times(0);
+    EXPECT_CALL(policy_container_host, SetReferrerPolicy(_, _)).Times(0);
     frame_test_helpers::LoadHTMLString(
         frame, GetHTMLStringForReferrerPolicy(std::string(), "no-referrer"),
         test_url);
@@ -14436,6 +14534,44 @@ TEST_F(WebFrameTest, DownloadReferrerPolicy) {
   }
 
   web_view_helper.Reset();
+}
+
+TEST_F(WebFrameTest, RemoteFrameCompositingRectUpdatesWithFrameRect) {
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.Initialize();
+
+  WebViewImpl* web_view = web_view_helper.GetWebView();
+  web_view->Resize(gfx::Size(800, 800));
+  InitializeWithHTML(*web_view->MainFrameImpl()->GetFrame(), R"HTML(
+      <!DOCTYPE html>
+      <style>
+        iframe {
+          width: 120px;
+          height: 120px;
+          border: none;
+        }
+      </style>
+      <iframe></iframe>
+  )HTML");
+
+  WebRemoteFrameImpl* remote_frame = frame_test_helpers::CreateRemote();
+  frame_test_helpers::SwapRemoteFrame(
+      web_view_helper.LocalMainFrame()->FirstChild(), remote_frame);
+  remote_frame->SetReplicatedOrigin(
+      WebSecurityOrigin(SecurityOrigin::CreateUniqueOpaque()), false);
+
+  web_view->MainFrameImpl()
+      ->GetFrame()
+      ->View()
+      ->UpdateAllLifecyclePhasesForTest();
+  RunPendingTasks();
+
+  RemoteFrameView* remote_frame_view = remote_frame->GetFrame()->View();
+  ASSERT_EQ(remote_frame_view->GetCompositingRect(), gfx::Rect(0, 0, 120, 120));
+
+  remote_frame_view->SetFrameRect(gfx::Rect(0, 0, 520, 320));
+
+  EXPECT_EQ(remote_frame_view->GetCompositingRect(), gfx::Rect(0, 0, 520, 320));
 }
 
 TEST_F(WebFrameTest, RemoteFrameCompositingScaleFactor) {

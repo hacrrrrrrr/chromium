@@ -267,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsFindInPageCache) {
 
   std::u16string fip_text = u"first guest session search text";
   FindBarStateFactory::GetForBrowserContext(guest_profile)
-      ->SetLastSearchText(fip_text);
+      ->SetLastSearchText(fip_text, nullptr);
 
   // Open a second guest window and close one. This should not affect the find
   // in page cache as the guest session hasn't been ended.
@@ -276,7 +276,7 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsFindInPageCache) {
       chrome::startup::IsFirstRun::kNo, true /*always_create*/);
   CloseBrowserSynchronously(guest_browser);
   EXPECT_EQ(fip_text, FindBarStateFactory::GetForBrowserContext(guest_profile)
-                          ->GetSearchPrepopulateText());
+                          ->GetSearchPrepopulateText(nullptr));
 
   // Close the remaining guest browser window.
   BrowserWindowInterface* found_guest_browser =
@@ -293,7 +293,7 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestClearsFindInPageCache) {
 
   EXPECT_EQ(std::u16string(),
             FindBarStateFactory::GetForBrowserContext(guest_profile)
-                ->GetSearchPrepopulateText());
+                ->GetSearchPrepopulateText(nullptr));
 }
 
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestCannotSignin) {
@@ -324,14 +324,14 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, GuestAppMenuLacksBookmarks) {
 }
 
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, OpenBrowserWindowForProfile) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   size_t num_browsers = GlobalBrowserCollection::GetInstance()->GetSize();
   base::test::TestFuture<Browser*> future;
   profiles::OpenBrowserWindowForProfile(future.GetCallback(), true, false,
                                         false, profile);
   ASSERT_TRUE(future.Get());
   EXPECT_NE(browser(), future.Get());
-  EXPECT_EQ(profile, future.Get()->profile());
+  EXPECT_EQ(profile, future.Get()->GetProfile());
   EXPECT_EQ(num_browsers + 1,
             GlobalBrowserCollection::GetInstance()->GetSize());
   EXPECT_FALSE(ProfilePicker::IsOpen());
@@ -340,13 +340,13 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest, OpenBrowserWindowForProfile) {
 // Regression test for https://crbug.com/40903397
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest,
                        OpenTwoBrowserWindowsForProfile) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   size_t num_browsers = GlobalBrowserCollection::GetInstance()->GetSize();
   base::test::TestFuture<Browser*> future;
   profiles::OpenBrowserWindowForProfile(future.GetCallback(), true, false,
                                         false, profile);
   CreateBrowser(profile);
-  EXPECT_EQ(profile, future.Get()->profile());
+  EXPECT_EQ(profile, future.Get()->GetProfile());
   EXPECT_EQ(num_browsers + 2,
             GlobalBrowserCollection::GetInstance()->GetSize());
   EXPECT_FALSE(ProfilePicker::IsOpen());
@@ -363,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest,
 IN_PROC_BROWSER_TEST_F(ProfileWindowBrowserTest,
                        MAYBE_OpenBrowserWindowForProfileWithSigninRequired) {
   signin_util::ScopedForceSigninSetterForTesting force_signin_setter(true);
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   ProfileAttributesEntry* entry =
       g_browser_process->profile_manager()
           ->GetProfileAttributesStorage()

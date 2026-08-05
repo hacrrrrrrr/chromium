@@ -940,10 +940,10 @@ need to be translated for each locale.-->
       <message name="IDS_MESSAGE_NOTIFICATION_ACCESSIBLE_NAME" desc="The spoken feedback text when focusing a notification using ChromeVox.">
         Notification
       </message>
-      <message name="IDS_MESSAGE_NOTIFICATION_SEND_TAB_TO_SELF_CONFIRMATION_FAILURE_TITLE" desc="The title text for the confirmation notification when the user failed to share a tab to other devices.">
+      <message name="IDS_MESSAGE_NOTIFICATION_SEND_TAB_TO_SELF_CONFIRMATION_FAILURE_TITLE" desc="The title text for the confirmation notification when the user failed to share a tab to another device.">
         Failed to send
       </message>
-      <message name="IDS_MESSAGE_NOTIFICATION_SEND_TAB_TO_SELF_CONFIRMATION_FAILURE_MESSAGE" desc="The message text for the confirmation notification when the user failed to share a tab to other devices.">
+      <message name="IDS_MESSAGE_NOTIFICATION_SEND_TAB_TO_SELF_CONFIRMATION_FAILURE_MESSAGE" desc="The message text for the confirmation notification when the user failed to share a tab to another device.">
         Please try again
       </message>
 
@@ -1071,14 +1071,6 @@ need to be translated for each locale.-->
       </message>
       <message name="IDS_BROWSER_SHARING_ERROR_DIALOG_TEXT_INTERNAL_ERROR" desc="The text to be shown on the dialog when an internal error occurred while sending the message.">
         Something went wrong. Try again later.
-      </message>
-
-      <!-- Shared clipboard error message. Could potentially be made generic -->
-      <message name="IDS_BROWSER_SHARING_SHARED_CLIPBOARD_ERROR_DIALOG_TITLE_PAYLOAD_TOO_LARGE" desc="The label to be shown as the title of the dialog when the text shared is too large.">
-        Text is too large
-      </message>
-      <message name="IDS_BROWSER_SHARING_SHARED_CLIPBOARD_ERROR_DIALOG_TEXT_PAYLOAD_TOO_LARGE" desc="The text to be shown on the dialog when the text shared is too large.">
-        Try sharing the text in smaller chunks.
       </message>
 
       <if expr="is_android">

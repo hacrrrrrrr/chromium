@@ -100,6 +100,7 @@ public class SearchBoxMediatorUnitTest {
 
     private Context mContext;
     private SearchBoxContainerView mView;
+    private View mSearchBoxView;
     private PropertyModel mPropertyModel;
     private SearchBoxMediator mMediator;
 
@@ -113,7 +114,7 @@ public class SearchBoxMediatorUnitTest {
                 (SearchBoxContainerView)
                         LayoutInflater.from(mContext)
                                 .inflate(R.layout.fake_search_box_layout, null);
-
+        mSearchBoxView = mView.mSearchBoxView;
         mPropertyModel = new PropertyModel.Builder(SearchBoxProperties.ALL_KEYS).build();
         LensController.setInstanceForTesting(mLensController);
         TemplateUrlServiceFactory.setInstanceForTesting(mTemplateUrlService);
@@ -324,13 +325,13 @@ public class SearchBoxMediatorUnitTest {
                 ComposeplateUtils.getSearchBoxIconColorTint(
                         mContext, /* shouldApplyWhiteBackgroundOnSearchBox= */ true);
         mMediator.applyWhiteBackground(true);
-        assertTrue(mPropertyModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND));
+        assertTrue(mPropertyModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND_AND_SHADOW));
         assertEquals(resId, mPropertyModel.get(SearchBoxProperties.SEARCH_BOX_TEXT_STYLE_RES_ID));
         assertEquals(
                 colorStateList,
                 mPropertyModel.get(SearchBoxProperties.VOICE_SEARCH_COLOR_STATE_LIST));
         assertEquals(colorStateList, mPropertyModel.get(SearchBoxProperties.DSE_ICON_TINT));
-        verifyApplyBackground(mView);
+        verifyApplyBackground(mSearchBoxView);
 
         // Tests the case to remove the white background with shadow.
         resId = R.style.TextAppearance_FakeSearchBoxTextMedium;
@@ -338,13 +339,13 @@ public class SearchBoxMediatorUnitTest {
                 ComposeplateUtils.getSearchBoxIconColorTint(
                         mContext, /* shouldApplyWhiteBackgroundOnSearchBox= */ false);
         mMediator.applyWhiteBackground(false);
-        assertFalse(mPropertyModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND));
+        assertFalse(mPropertyModel.get(SearchBoxProperties.APPLY_WHITE_BACKGROUND_AND_SHADOW));
         assertEquals(resId, mPropertyModel.get(SearchBoxProperties.SEARCH_BOX_TEXT_STYLE_RES_ID));
         assertEquals(
                 colorStateList,
                 mPropertyModel.get(SearchBoxProperties.VOICE_SEARCH_COLOR_STATE_LIST));
         assertEquals(colorStateList, mPropertyModel.get(SearchBoxProperties.DSE_ICON_TINT));
-        verifyResetBackground(mView, defaultBackground);
+        verifyResetBackground(mSearchBoxView, defaultBackground);
     }
 
     @Test
@@ -664,7 +665,8 @@ public class SearchBoxMediatorUnitTest {
 
     private void verifyApplyBackground(View view) {
         // Verifies that the background is set to color white.
-        Drawable whiteBackground = view.getBackground();
+        View searchBoxShadowContainer = view.findViewById(R.id.search_box_shadow_container);
+        Drawable whiteBackground = searchBoxShadowContainer.getBackground();
         assertTrue(whiteBackground instanceof GradientDrawable);
         assertEquals(
                 Color.WHITE, ((GradientDrawable) whiteBackground).getColor().getDefaultColor());
@@ -672,8 +674,11 @@ public class SearchBoxMediatorUnitTest {
 
     private void verifyResetBackground(View view, Drawable defaultBackground) {
         // Verifies that the background of the view is to reset.
+        View searchBoxShadowContainer = view.findViewById(R.id.search_box_shadow_container);
         assertEquals(
                 ((GradientDrawable) defaultBackground).getColor().getDefaultColor(),
-                ((GradientDrawable) view.getBackground()).getColor().getDefaultColor());
+                ((GradientDrawable) searchBoxShadowContainer.getBackground())
+                        .getColor()
+                        .getDefaultColor());
     }
 }

@@ -331,11 +331,10 @@ constexpr char kActorLoginPermissionServiceName[] =
     "actor_login_permission_service";
 constexpr char kGapisServiceName[] = "gapis_service";
 constexpr char kOneTimeTokenServiceName[] = "one_time_token_service";
-constexpr char kDrivePickerHostName[] = "drive_picker_host";
 constexpr char kMultistepFilterName[] = "multistep_filter";
 constexpr char kContextMemoryServiceName[] = "context_memory_service";
 constexpr char kSyncPreviewName[] = "chromesync_preview";
-constexpr char kContextContainersServiceName[] = "context_containers_service";
+constexpr char kNotebooksServiceName[] = "notebooks_service";
 constexpr char kRemoteActorLoginCredentialsServiceName[] =
     "remote_actor_login_credentials_service";
 }  // namespace
@@ -780,9 +779,7 @@ OAuthConsumer OAuthConsumerRegistry::GetOAuthConsumerFromId(
           /*name=*/kSecureGatewayServiceName,
           /*scopes=*/{GaiaConstants::kSecureGatewayOAuth2Scope});
     case OAuthConsumerId::kDrivePickerHost:
-      return OAuthConsumer(
-          /*name=*/kDrivePickerHostName,
-          /*scopes=*/{kDriveReadOnlyOAuth2Scope});
+      return GetOAuthConsumerForDrivePickerHost();
     case OAuthConsumerId::kContextMemoryService:
       return OAuthConsumer(
           /*name=*/kContextMemoryServiceName,
@@ -796,14 +793,20 @@ OAuthConsumer OAuthConsumerRegistry::GetOAuthConsumerFromId(
       return OAuthConsumer(
           /*name=*/kFpopServiceName,
           /*scopes=*/{kFpopOAuth2Scope});
-    case OAuthConsumerId::kContextContainersService:
+    case OAuthConsumerId::kNotebooksService:
       return OAuthConsumer(
-          /*name=*/kContextContainersServiceName,
+          /*name=*/kNotebooksServiceName,
           /*scopes=*/{GaiaConstants::kGoogleUserInfoEmail});
     case OAuthConsumerId::kRemoteActorLoginCredentialsService:
       return OAuthConsumer(
           /*name=*/kRemoteActorLoginCredentialsServiceName,
           /*scopes=*/{kPassboxCredentialOAuth2Scope});
+    case OAuthConsumerId::kBrowserActuator:
+      return GetOAuthConsumerForBrowserActuator();
+    case OAuthConsumerId::kTabContextContainersService:
+      return OAuthConsumer(
+          /*name=*/oauth_consumer_name::kTabContextContainersServiceName,
+          /*scopes=*/{GaiaConstants::kChromeSyncOAuth2Scope});
   }
 }
 

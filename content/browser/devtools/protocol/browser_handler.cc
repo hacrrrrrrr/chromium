@@ -33,7 +33,6 @@
 #include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/protocol/devtools_download_manager_delegate.h"
 #include "content/browser/gpu/gpu_process_host.h"
-#include "content/browser/interest_group/interest_group_manager_impl.h"
 #include "content/browser/permissions/permission_controller_impl.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/public/browser/browser_context.h"
@@ -371,21 +370,18 @@ Response BrowserHandler::FindBrowserContext(
         "Browser context management is not supported.");
   if (!browser_context_id.has_value()) {
     *browser_context = delegate->GetDefaultBrowserContext();
-    if (*browser_context == nullptr)
+    if (!*browser_context) {
       return Response::ServerError(
           "Browser context management is not supported.");
+    }
     return Response::Success();
   }
-
-  std::string context_id = browser_context_id.value();
-  for (auto* context : delegate->GetBrowserContexts()) {
-    if (context->UniqueId() == context_id) {
-      *browser_context = context;
-      return Response::Success();
-    }
+  *browser_context = delegate->GetBrowserContext(browser_context_id.value());
+  if (!*browser_context) {
+    return Response::InvalidParams("Failed to find browser context for id " +
+                                   browser_context_id.value());
   }
-  return Response::InvalidParams("Failed to find browser context for id " +
-                                 context_id);
+  return Response::Success();
 }
 
 // static
@@ -703,7 +699,6 @@ Response BrowserHandler::CrashGpuProcess() {
   }
   return Response::Success();
 }
-
 
 void BrowserHandler::OnDownloadUpdated(download::DownloadItem* item) {
   std::string state;

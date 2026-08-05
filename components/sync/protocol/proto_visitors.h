@@ -782,7 +782,7 @@ VISIT_PROTO_FIELDS(
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::EntitySpecifics& proto) {
-  static_assert(65 == GetNumDataTypes(),
+  static_assert(67 == GetNumDataTypes(),
                 "When adding a new protocol type, you will likely need to add "
                 "it here as well.");
   VISIT(encrypted);
@@ -852,6 +852,8 @@ VISIT_PROTO_FIELDS(const sync_pb::EntitySpecifics& proto) {
   VISIT(contextual_task);
   VISIT(skill);
   VISIT(gemini_thread);
+  VISIT(notebook);
+  VISIT(journey);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::ExtensionSettingSpecifics& proto) {
@@ -1605,6 +1607,12 @@ VISIT_PROTO_FIELDS(const sync_pb::SyncEntity& proto) {
   VISIT(client_tag_hash);
   VISIT(collaboration);
   VISIT(deletion_origin);
+  VISIT(attachment);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::Attachment& proto) {
+  VISIT(temporary_blob_id);
+  VISIT(modification_time_unix_epoch_millis);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::SyncEntity::CollaborationMetadata& proto) {
@@ -2224,6 +2232,8 @@ VISIT_PROTO_FIELDS(const sync_pb::AutofillValuableSpecifics& proto) {
   VISIT(event_ticket);
   VISIT(transit_pass);
   VISIT(offer);
+  VISIT(order);
+  VISIT(shipment);
 }
 
 VISIT_PROTO_FIELDS(const sync_pb::Any& proto) {
@@ -2345,6 +2355,24 @@ VISIT_PROTO_FIELDS(const sync_pb::Offer& proto) {
   VISIT_REP(issuer_domains);
 }
 
+VISIT_PROTO_FIELDS(const sync_pb::Order& proto) {
+  VISIT(id);
+  VISIT(account);
+  VISIT(order_date);
+  VISIT(merchant_name);
+  VISIT(merchant_domain);
+  VISIT_REP(product_names);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::Shipment& proto) {
+  VISIT(tracking_number);
+  VISIT(delivery_zip_code);
+  VISIT(shipping_date);
+  VISIT(carrier_name);
+  VISIT(carrier_domain);
+  VISIT_REP(associated_order_ids);
+}
+
 VISIT_PROTO_FIELDS(const sync_pb::AutofillValuableMetadataSpecifics& proto) {
   VISIT(valuable_id);
   VISIT(use_count);
@@ -2453,6 +2481,36 @@ VISIT_PROTO_FIELDS(const sync_pb::GeminiThreadSpecifics& proto) {
   VISIT(last_turn_time_unix_epoch_millis);
 }
 
+VISIT_PROTO_FIELDS(const sync_pb::NotebookSpecifics& proto) {
+  VISIT(uuid);
+  VISIT(creation_time_windows_epoch_micros);
+  VISIT(update_time_windows_epoch_micros);
+  VISIT(notebook);
+  VISIT(schema_version);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::Notebook& proto) {}
+
+VISIT_PROTO_FIELDS(const sync_pb::JourneySpecifics::HistoryEntry& proto) {
+  VISIT(visit_timestamp_windows_epoch_micros);
+}
+
+VISIT_PROTO_FIELDS(
+    const sync_pb::JourneySpecifics::ContinuationQuery& proto) {
+  VISIT(title);
+  VISIT(prompt);
+}
+
+VISIT_PROTO_FIELDS(const sync_pb::JourneySpecifics& proto) {
+  VISIT(journey_id);
+  VISIT(title);
+  VISIT(emoji);
+  VISIT(overview);
+  VISIT(short_overview);
+  VISIT(creation_time_windows_epoch_micros);
+  VISIT_REP(history_entries);
+  VISIT_REP(continuation_queries);
+}
 
 VISIT_PROTO_FIELDS(const sync_pb::AiThreadSpecifics& proto) {
   VISIT_ENUM(type);

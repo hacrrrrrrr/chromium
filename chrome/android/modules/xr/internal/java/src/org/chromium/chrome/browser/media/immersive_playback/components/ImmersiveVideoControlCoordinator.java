@@ -20,6 +20,7 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.ui.xr.scenecore.XrEntityHolder;
 import org.chromium.ui.xr.scenecore.XrMovableComponent;
 import org.chromium.ui.xr.scenecore.XrPanelEntityHolder;
+import org.chromium.ui.xr.scenecore.XrPose;
 import org.chromium.ui.xr.scenecore.XrSceneCoreSessionManager;
 import org.chromium.ui.xr.scenecore.XrSpace;
 
@@ -38,7 +39,10 @@ public class ImmersiveVideoControlCoordinator {
         void onControlPanelMoveChanged(boolean isMoving);
 
         /** Called when the pose of the control panel changes during movement. */
-        void onControlPanelPoseChanged(float[] translation, float[] rotation);
+        void onControlPanelPoseChanged(XrPose pose);
+
+        /** Called when accessibility focus state of the control panel changes. */
+        void onControlPanelAccessibilityFocusChanged(boolean focused);
     }
 
     private final PropertyModel mModel =
@@ -59,17 +63,19 @@ public class ImmersiveVideoControlCoordinator {
     private final XrMovableComponent.OnMoveListener mOnMoveListener =
             new XrMovableComponent.OnMoveListener() {
                 @Override
-                public void onMoveStart(float[] translation, float[] rotation, float scale) {
+                public void onMoveStart(XrPose pose, float scale) {
                     mVideoControlDelegate.onControlPanelMoveChanged(true);
                 }
 
                 @Override
-                public void onMoveUpdate(float[] translation, float[] rotation, float scale) {}
+                public void onMoveUpdate(XrPose pose, float scale) {
+                    mVideoControlDelegate.onControlPanelPoseChanged(pose);
+                }
 
                 @Override
-                public void onMoveEnd(float[] translation, float[] rotation, float scale) {
+                public void onMoveEnd(XrPose pose, float scale) {
                     mVideoControlDelegate.onControlPanelMoveChanged(false);
-                    mVideoControlDelegate.onControlPanelPoseChanged(translation, rotation);
+                    mVideoControlDelegate.onControlPanelPoseChanged(pose);
                 }
             };
 
@@ -98,6 +104,8 @@ public class ImmersiveVideoControlCoordinator {
 
         mMediator = new ImmersiveVideoControlMediator(mModel, mVideoControlDelegate);
         mView = createView(mActivity, mMediator);
+        mView.setAccessibilityFocusListener(
+                mVideoControlDelegate::onControlPanelAccessibilityFocusChanged);
         mHolder = mSessionManager.createPanelEntity(mView, "MediaControlPanel");
         mHolder.getMovableComponent().addMoveListener(mOnMoveListener);
 
@@ -120,14 +128,25 @@ public class ImmersiveVideoControlCoordinator {
      */
     public void show(XrEntityHolder<?> parent) {
         ensureInitialized();
+        setParent(parent);
 
         if (mHolder != null) {
-            mHolder.setParent(parent);
             mHolder.setEntityEnabled(true);
         }
         if (mView != null) {
             mView.setVisibility(View.VISIBLE);
             mView.setHoverListener(mVideoControlDelegate::onControlPanelHoverChanged);
+        }
+    }
+
+    /**
+     * Sets the parent entity for the control panel.
+     *
+     * @param parent The parent entity to attach to.
+     */
+    public void setParent(XrEntityHolder<?> parent) {
+        if (mHolder != null) {
+            mHolder.setParent(parent);
         }
     }
 
@@ -179,9 +198,9 @@ public class ImmersiveVideoControlCoordinator {
      * @param translation The translation from the parent {@link XrSpace}.
      * @param rotation The rotation from the parent {@link XrSpace}.
      */
-    public void updatePose(float[] translation, float[] rotation) {
+    public void updatePose(XrPose pose) {
         if (mMediator != null) {
-            mMediator.updatePose(translation, rotation);
+            mMediator.updatePose(pose);
         }
     }
 

@@ -15,9 +15,11 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "components/policy/core/common/values_util.h"
 #include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
 #include "net/base/proxy_string_util.h"
+#include "net/http/http_util.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
@@ -57,6 +59,68 @@ constexpr char kAcceptLanguagePlaceholder[] = "${accept_language}";
 constexpr char kAuthNone[] = "none";
 constexpr char kAuthTypeProfileBearerToken[] = "profile_bearer_token";
 constexpr char kAuthScopeCloudSecureGateway[] = "cloud_secure_gateway";
+
+std::string AuthTypeToString(AuthType type) {
+  switch (type) {
+    case AuthType::kNone:
+      return kAuthNone;
+    case AuthType::kProfileBearerToken:
+      return kAuthTypeProfileBearerToken;
+  }
+}
+
+std::string AuthScopeToString(AuthScope scope) {
+  switch (scope) {
+    case AuthScope::kNone:
+      return kAuthNone;
+    case AuthScope::kCloudSecureGateway:
+      return kAuthScopeCloudSecureGateway;
+  }
+}
+
+std::string StateToString(ProvisioningDomainProxyConfig::State state) {
+  switch (state) {
+    case ProvisioningDomainProxyConfig::State::kRefreshNeeded:
+      return "RefreshNeeded";
+    case ProvisioningDomainProxyConfig::State::kFetching:
+      return "Fetching";
+    case ProvisioningDomainProxyConfig::State::kValid:
+      return "Valid";
+    case ProvisioningDomainProxyConfig::State::kFailedTransient:
+      return "FailedTransient";
+    case ProvisioningDomainProxyConfig::State::kFailedPermanent:
+      return "FailedPermanent";
+  }
+}
+
+std::string HeaderTypeToString(ProxyExtraHeader::HeaderType type) {
+  switch (type) {
+    case ProxyExtraHeader::HeaderType::kConstant:
+      return "constant";
+    case ProxyExtraHeader::HeaderType::kVariable:
+      return "variable";
+  }
+}
+
+base::ListValue ExtraHeadersToList(
+    const std::vector<ProxyExtraHeader>& extra_headers) {
+  base::ListValue list;
+  for (const auto& header : extra_headers) {
+    base::DictValue dict;
+    dict.Set(kKeyKey, header.key);
+    dict.Set(kValueKey, header.value);
+    dict.Set(kTypeKey, HeaderTypeToString(header.type));
+    list.Append(std::move(dict));
+  }
+  return list;
+}
+
+base::DictValue AuthConfigToDict(const ProxyAuthConfig& auth) {
+  base::DictValue dict;
+  dict.Set(kTypeKey, AuthTypeToString(auth.type));
+  dict.Set(kScopeKey, AuthScopeToString(auth.scope));
+  return dict;
+}
 
 struct PlaceholderReplacement {
   std::string_view placeholder;
@@ -165,7 +229,6 @@ ParseProxy(const base::DictValue& proxy_dict) {
 
   std::optional<ProxyAuthConfig> auth;
   std::vector<ProxyExtraHeader> extra_headers;
-
   // Parse optional google_chrome dictionary.
   if (const base::DictValue* chrome_dict =
           proxy_dict.FindDict(kGoogleChromeKey)) {
@@ -188,6 +251,8 @@ ParseProxy(const base::DictValue& proxy_dict) {
       ProvisioningDomainProxyConfig::ProxyEndpoint(
           std::move(proxy_chain), std::move(auth), std::move(extra_headers)));
 }
+
+}  // namespace
 
 std::optional<ProvisioningDomainProxyConfig::RoutingRule> ParseRoutingRule(
     const base::DictValue& match_dict) {
@@ -226,6 +291,11 @@ std::optional<ProvisioningDomainProxyConfig::RoutingRule> ParseRoutingRule(
   std::vector<uint16_t> ports;
   if (const base::ListValue* ports_list = match_dict.FindList(kPortsKey)) {
     for (const auto& port_value : *ports_list) {
+      // TODO(crbug.com/538199264): PvD standard supports port range strings
+      // (e.g. "1024-65535"), and ProxyHostMatchingRules is missing support
+      // for this. Only viable method for now is to create a single port matcher
+      // for each port in the range, but it can lead to memory explosion.
+      // We should add proper port range support to ProxyHostMatchingRules.
       if (port_value.is_string()) {
         uint32_t port = 0;
         if (base::StringToUint(port_value.GetString(), &port) &&
@@ -256,13 +326,22 @@ std::optional<ProvisioningDomainProxyConfig::RoutingRule> ParseRoutingRule(
   } else {
     // Combine domains and ports.
     for (const auto& domain : domains) {
-      if (!ports.empty()) {
-        for (uint16_t port : ports) {
-          destination_matchers.AddRuleFromString(
-              base::StrCat({domain, ":", base::NumberToString(port)}));
+      std::vector<std::string> patterns_to_add = {domain};
+      if (domain.starts_with("*.")) {
+        // By PvD proxy routing standard, entries that include a wildcard prefix
+        // (*.domain.com) also match the FQDN with no subdomain (domain.com)
+        patterns_to_add.push_back(domain.substr(2));
+      }
+
+      for (const auto& pattern : patterns_to_add) {
+        if (!ports.empty()) {
+          for (uint16_t port : ports) {
+            destination_matchers.AddRuleFromString(
+                base::StrCat({pattern, ":", base::NumberToString(port)}));
+          }
+        } else {
+          destination_matchers.AddRuleFromString(pattern);
         }
-      } else {
-        destination_matchers.AddRuleFromString(domain);
       }
     }
 
@@ -283,8 +362,6 @@ std::optional<ProvisioningDomainProxyConfig::RoutingRule> ParseRoutingRule(
       std::move(proxies), std::move(destination_matchers));
 }
 
-}  // namespace
-
 net::ProxyServer::Scheme ParseProvisioningDomainProxyProtocol(
     std::string_view protocol_str) {
   std::string normalized = base::ToLowerASCII(protocol_str);
@@ -299,8 +376,8 @@ net::ProxyServer::Scheme ParseProvisioningDomainProxyProtocol(
                                   : net::ProxyServer::SCHEME_INVALID;
 }
 
-net::HttpRequestHeaders ResolveExtraHeaders(
-    const ProvisioningDomainConfig& policy,
+net::HttpRequestHeaders ResolveExtraHeadersWithValues(
+    const std::vector<ProxyExtraHeader>& extra_headers,
     const std::string& profile_id,
     const std::string& accept_languages) {
   std::initializer_list<PlaceholderReplacement> replacements = {
@@ -309,10 +386,22 @@ net::HttpRequestHeaders ResolveExtraHeaders(
   };
 
   net::HttpRequestHeaders headers;
-  for (const auto& header : policy.extra_headers) {
-    std::string expanded_value = header.value;
-    ExpandPlaceholders(&expanded_value, replacements);
-    headers.SetHeader(header.key, expanded_value);
+  for (const auto& header : extra_headers) {
+    if (header.type == ProxyExtraHeader::HeaderType::kConstant) {
+      headers.SetHeader(header.key, header.value);
+      continue;
+    }
+
+    if (header.type == ProxyExtraHeader::HeaderType::kVariable) {
+      std::string expanded_value = header.value;
+      ExpandPlaceholders(&expanded_value, replacements);
+      // Drop header if it contains unsupported or unrecognized variable
+      // placeholders.
+      if (expanded_value.find("${") != std::string::npos) {
+        continue;
+      }
+      headers.SetHeader(header.key, expanded_value);
+    }
   }
   return headers;
 }
@@ -345,14 +434,7 @@ std::optional<ProvisioningDomainConfig> ParseProxyProvisioningDomainPolicy(
 }
 
 std::optional<ProvisioningDomainProxyConfig> ParseProvisioningDomainConfig(
-    const std::string& json_response) {
-  std::optional<base::DictValue> parsed_json =
-      base::JSONReader::ReadDict(json_response, 0);
-  if (!parsed_json.has_value()) {
-    return std::nullopt;
-  }
-
-  const base::DictValue& dict = *parsed_json;
+    const base::DictValue& dict) {
   const base::ListValue* proxies_list = dict.FindList(kProxiesKey);
   const base::ListValue* proxy_match_list = dict.FindList(kProxyMatchKey);
   if (!proxies_list || !proxy_match_list) {
@@ -365,6 +447,7 @@ std::optional<ProvisioningDomainProxyConfig> ParseProvisioningDomainConfig(
   if (const std::string* identifier = dict.FindString(kIdentifierKey)) {
     config_data.pvd_id = *identifier;
   }
+
   if (const std::string* expires_str = dict.FindString(kExpiresKey)) {
     base::Time expires_time;
     if (base::Time::FromString(expires_str->c_str(), &expires_time)) {
@@ -398,6 +481,17 @@ std::optional<ProvisioningDomainProxyConfig> ParseProvisioningDomainConfig(
   return config_data;
 }
 
+std::optional<ProvisioningDomainProxyConfig> ParseProvisioningDomainConfig(
+    const std::string& json_response) {
+  std::optional<base::DictValue> parsed_json =
+      base::JSONReader::ReadDict(json_response, 0);
+  if (!parsed_json.has_value()) {
+    return std::nullopt;
+  }
+
+  return ParseProvisioningDomainConfig(*parsed_json);
+}
+
 const ProvisioningDomainProxyConfig::ProxyEndpoint* FindMatchingProxyEndpoint(
     const ProvisioningDomainProxyConfig& config,
     const GURL& destination_url,
@@ -415,6 +509,78 @@ const ProvisioningDomainProxyConfig::ProxyEndpoint* FindMatchingProxyEndpoint(
     }
   }
   return nullptr;
+}
+
+std::string ComputePolicyHash(const ProvisioningDomainConfig& policy_config) {
+  return base::NumberToString(policy::PolicyValueHash(
+      base::Value(ProvisioningDomainConfigToDict(policy_config))));
+}
+
+base::DictValue ProvisioningDomainConfigToDict(
+    const ProvisioningDomainConfig& policy_config) {
+  base::DictValue dict;
+  dict.Set(kPvdIdKey, policy_config.pvd_id);
+  if (policy_config.auth_config.has_value()) {
+    dict.Set(kAuthConfigKey, AuthConfigToDict(*policy_config.auth_config));
+  }
+  if (!policy_config.extra_headers.empty()) {
+    dict.Set(kExtraHeadersKey, ExtraHeadersToList(policy_config.extra_headers));
+  }
+  return dict;
+}
+
+base::DictValue ProvisioningDomainProxyConfigToDict(
+    const ProvisioningDomainProxyConfig& proxy_config) {
+  base::DictValue dict;
+  dict.Set(kIdentifierKey, proxy_config.pvd_id);
+  dict.Set("state", StateToString(proxy_config.state));
+  if (!proxy_config.expires.is_null()) {
+    dict.Set(kExpiresKey, net::HttpUtil::TimeFormatHTTP(proxy_config.expires));
+  }
+
+  base::ListValue endpoints_list;
+  for (const auto& [id, endpoint] : proxy_config.proxy_endpoints) {
+    base::DictValue endpoint_dict;
+    endpoint_dict.Set(kIdentifierKey, id);
+    endpoint_dict.Set(kProtocolKey, "https-connect");
+    if (endpoint.proxy_chain.IsValid() && !endpoint.proxy_chain.is_direct()) {
+      endpoint_dict.Set(
+          kProxyKey, net::ProxyServerToProxyUri(endpoint.proxy_chain.First()));
+    }
+    base::DictValue chrome_dict;
+    if (endpoint.auth.has_value()) {
+      chrome_dict.Set(kAuthKey, AuthConfigToDict(*endpoint.auth));
+    }
+    if (!endpoint.extra_headers.empty()) {
+      chrome_dict.Set(kExtraHeadersKey,
+                      ExtraHeadersToList(endpoint.extra_headers));
+    }
+    if (!chrome_dict.empty()) {
+      endpoint_dict.Set(kGoogleChromeKey, std::move(chrome_dict));
+    }
+    endpoints_list.Append(std::move(endpoint_dict));
+  }
+  dict.Set(kProxiesKey, std::move(endpoints_list));
+
+  base::ListValue rules_list;
+  for (const auto& rule : proxy_config.routing_rules) {
+    base::DictValue rule_dict;
+    base::ListValue proxies_list;
+    for (const auto& proxy_id : rule.proxies) {
+      proxies_list.Append(proxy_id);
+    }
+    rule_dict.Set(kProxiesKey, std::move(proxies_list));
+
+    base::ListValue matchers_list;
+    for (const auto& matcher_rule : rule.destination_matchers.rules()) {
+      matchers_list.Append(matcher_rule->ToString());
+    }
+    rule_dict.Set(kDomainsKey, std::move(matchers_list));
+    rules_list.Append(std::move(rule_dict));
+  }
+  dict.Set(kProxyMatchKey, std::move(rules_list));
+
+  return dict;
 }
 
 }  // namespace enterprise_net

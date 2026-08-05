@@ -5,16 +5,18 @@
 #include "chrome/browser/permissions/system/system_permission_settings.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/check_deref.h"
 #include "base/notreached.h"
-#include "base/scoped_observation.h"
+#include "base/task/thread_pool.h"
+#include "base/win/scoped_com_initializer.h"
 #include "chrome/browser/permissions/system/geolocation_observation.h"
 #include "chrome/browser/permissions/system/platform_handle.h"
+#include "chrome/browser/permissions/system/system_media_permission_cache.h"
 #include "chrome/browser/permissions/system/system_media_source_win.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "services/device/public/cpp/device_features.h"
 #include "services/device/public/cpp/geolocation/geolocation_system_permission_manager.h"
 #include "services/device/public/cpp/geolocation/location_system_permission_status.h"
 
@@ -24,21 +26,55 @@ namespace system_permission_settings {
 
 namespace {
 
+SystemPermission CheckVideoCapturePermission() {
+  base::win::ScopedCOMInitializer com_initializer;
+  switch (SystemMediaSourceWin::GetInstance().SystemPermissionStatus(
+      ContentSettingsType::MEDIASTREAM_CAMERA)) {
+    case SystemMediaSourceWin::Status::kNotDetermined:
+      return SystemPermission::kNotDetermined;
+    case SystemMediaSourceWin::Status::kDenied:
+      return SystemPermission::kDenied;
+    case SystemMediaSourceWin::Status::kAllowed:
+      return SystemPermission::kAllowed;
+  }
+}
+
+SystemPermission CheckAudioCapturePermission() {
+  base::win::ScopedCOMInitializer com_initializer;
+  switch (SystemMediaSourceWin::GetInstance().SystemPermissionStatus(
+      ContentSettingsType::MEDIASTREAM_MIC)) {
+    case SystemMediaSourceWin::Status::kNotDetermined:
+      return SystemPermission::kNotDetermined;
+    case SystemMediaSourceWin::Status::kDenied:
+      return SystemPermission::kDenied;
+    case SystemMediaSourceWin::Status::kAllowed:
+      return SystemPermission::kAllowed;
+  }
+}
+
 class PlatformHandleImpl : public PlatformHandle {
  public:
+  PlatformHandleImpl()
+      : media_cache_(
+            base::BindOnce([](const base::TaskTraits& traits)
+                               -> scoped_refptr<base::SequencedTaskRunner> {
+              return base::ThreadPool::CreateCOMSTATaskRunner(traits);
+            }),
+            base::BindRepeating(&CheckVideoCapturePermission),
+            base::BindRepeating(&CheckAudioCapturePermission)) {}
+
+  PlatformHandleImpl(const PlatformHandleImpl&) = delete;
+  PlatformHandleImpl& operator=(const PlatformHandleImpl&) = delete;
+
+  ~PlatformHandleImpl() override = default;
+
   // PlatformHandle:
   bool CanPrompt(ContentSettingsType type) override {
     switch (type) {
-      case ContentSettingsType::GEOLOCATION: {
-        if (base::FeatureList::IsEnabled(
-                features::kWinSystemLocationPermission)) {
-          return device::GeolocationSystemPermissionManager::GetInstance()
-                     ->GetSystemPermission() ==
-                 device::LocationSystemPermissionStatus::kNotDetermined;
-        } else {
-          return false;
-        }
-      }
+      case ContentSettingsType::GEOLOCATION:
+        return device::GeolocationSystemPermissionManager::GetInstance()
+                   ->GetSystemPermission() ==
+               device::LocationSystemPermissionStatus::kNotDetermined;
       // crbug.com/414523295: while the status of camera/microphone can be
       // determined, we currently don't support requesting them on Windows.
       // Until this is fixed we will return `false`.
@@ -54,20 +90,13 @@ class PlatformHandleImpl : public PlatformHandle {
   bool IsDenied(ContentSettingsType type) override {
     switch (type) {
       case ContentSettingsType::GEOLOCATION:
-        if (base::FeatureList::IsEnabled(
-                features::kWinSystemLocationPermission)) {
-          return device::GeolocationSystemPermissionManager::GetInstance()
-                     ->GetSystemPermission() ==
-                 device::LocationSystemPermissionStatus::kDenied;
-        } else {
-          return false;
-        }
+        return device::GeolocationSystemPermissionManager::GetInstance()
+                   ->GetSystemPermission() ==
+               device::LocationSystemPermissionStatus::kDenied;
       case ContentSettingsType::MEDIASTREAM_CAMERA:
       case ContentSettingsType::MEDIASTREAM_MIC:
       case ContentSettingsType::CAMERA_PAN_TILT_ZOOM:
-        return SystemMediaSourceWin::GetInstance().SystemPermissionStatus(
-                   type) == SystemMediaSourceWin::Status::kDenied;
-
+        return media_cache_.IsDenied(type);
       default:
         return false;
     }
@@ -76,19 +105,13 @@ class PlatformHandleImpl : public PlatformHandle {
   bool IsAllowed(ContentSettingsType type) override {
     switch (type) {
       case ContentSettingsType::GEOLOCATION:
-        if (base::FeatureList::IsEnabled(
-                features::kWinSystemLocationPermission)) {
-          return device::GeolocationSystemPermissionManager::GetInstance()
-                     ->GetSystemPermission() ==
-                 device::LocationSystemPermissionStatus::kAllowed;
-        } else {
-          return true;
-        }
+        return device::GeolocationSystemPermissionManager::GetInstance()
+                   ->GetSystemPermission() ==
+               device::LocationSystemPermissionStatus::kAllowed;
       case ContentSettingsType::MEDIASTREAM_CAMERA:
       case ContentSettingsType::MEDIASTREAM_MIC:
       case ContentSettingsType::CAMERA_PAN_TILT_ZOOM:
-        return SystemMediaSourceWin::GetInstance().SystemPermissionStatus(
-                   type) == SystemMediaSourceWin::Status::kAllowed;
+        return media_cache_.IsAllowed(type);
       default:
         return true;
     }
@@ -99,10 +122,7 @@ class PlatformHandleImpl : public PlatformHandle {
     if (type == ContentSettingsType::MEDIASTREAM_MIC ||
         type == ContentSettingsType::MEDIASTREAM_CAMERA ||
         type == ContentSettingsType::CAMERA_PAN_TILT_ZOOM) {
-      // TODO(crbug.com/524529903, andypaicu@): When the Windows
-      // implementation switches to async permission status checks, call here
-      // an async function which will be defined in SystemMediaSourceWin.
-      std::move(callback).Run(IsDenied(type));
+      media_cache_.IsDeniedFresh(type, std::move(callback));
       return;
     }
     std::move(callback).Run(IsDenied(type));
@@ -112,11 +132,8 @@ class PlatformHandleImpl : public PlatformHandle {
                           ContentSettingsType type) override {
     switch (type) {
       case ContentSettingsType::GEOLOCATION: {
-        if (base::FeatureList::IsEnabled(
-                features::kWinSystemLocationPermission)) {
-          device::GeolocationSystemPermissionManager::GetInstance()
-              ->OpenSystemPermissionSetting();
-        }
+        device::GeolocationSystemPermissionManager::GetInstance()
+            ->OpenSystemPermissionSetting();
         return;
       }
       case ContentSettingsType::MEDIASTREAM_MIC:
@@ -135,10 +152,6 @@ class PlatformHandleImpl : public PlatformHandle {
     switch (type) {
       case ContentSettingsType::GEOLOCATION: {
         DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-        if (!base::FeatureList::IsEnabled(
-                features::kWinSystemLocationPermission)) {
-          return;
-        }
         geolocation_callbacks_.push_back(std::move(callback));
         // The system permission prompt is modal and requires a user decision
         // (Allow or Deny) before it can be dismissed.
@@ -181,6 +194,7 @@ class PlatformHandleImpl : public PlatformHandle {
     }
   }
 
+  SystemMediaPermissionCache media_cache_;
   std::vector<SystemPermissionResponseCallback> geolocation_callbacks_;
   std::unique_ptr<ScopedObservation> observation_;
   base::WeakPtrFactory<PlatformHandleImpl> weak_factory_{this};

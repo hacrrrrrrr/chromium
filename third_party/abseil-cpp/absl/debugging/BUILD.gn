@@ -1,8 +1,9 @@
 # Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Generated file. DO NOT EDIT.
 
-import("//build/config/sanitizers/sanitizers.gni")
 import("//third_party/abseil-cpp/absl.gni")
 
 absl_source_set("stacktrace") {
@@ -20,10 +21,9 @@ absl_source_set("stacktrace") {
     "stacktrace.cc",
   ]
   public = [ "stacktrace.h" ]
-
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
   deps = [
     ":debugging_internal",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:dynamic_annotations",
     "//third_party/abseil-cpp/absl/base:malloc_internal",
@@ -55,28 +55,22 @@ absl_source_set("symbolize") {
     "internal/symbolize.h",
     "symbolize.h",
   ]
-
-  public_deps = [
-    "//third_party/abseil-cpp/absl/base:config",
-    "//third_party/abseil-cpp/absl/strings:string_view",
-  ]
   deps = [
     ":debugging_internal",
     ":demangle_internal",
     "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:dynamic_annotations",
     "//third_party/abseil-cpp/absl/base:malloc_internal",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",
     "//third_party/abseil-cpp/absl/strings",
+    "//third_party/abseil-cpp/absl/strings:string_view",
   ]
-
-  # TODO(mbonadei): The bazel file has:
-  #   -DEFAULTLIB:dbghelp.lib
-  # evaluate if this needs to be added here as well.
 }
 
 # symbolize_test is excluded because defines its own main function
+# absl_test("symbolize_test")
 
 absl_source_set("examine_stack") {
   sources = [ "internal/examine_stack.cc" ]
@@ -85,11 +79,10 @@ absl_source_set("examine_stack") {
     ":*",
     "//third_party/abseil-cpp/absl/log/internal:*",
   ]
-
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
   deps = [
     ":stacktrace",
     ":symbolize",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
@@ -98,16 +91,18 @@ absl_source_set("examine_stack") {
 absl_source_set("failure_signal_handler") {
   sources = [ "failure_signal_handler.cc" ]
   public = [ "failure_signal_handler.h" ]
-
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
   deps = [
     ":examine_stack",
     ":stacktrace",
     "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
 }
+
+# failure_signal_handler_test is excluded because defines its own main function
+# absl_test("failure_signal_handler_test")
 
 absl_source_set("debugging_internal") {
   sources = [
@@ -122,12 +117,9 @@ absl_source_set("debugging_internal") {
     "internal/vdso_support.h",
   ]
   visibility = [ ":*" ]
-
-  public_deps = [
+  deps = [
     "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
-  ]
-  deps = [
     "//third_party/abseil-cpp/absl/base:dynamic_annotations",
     "//third_party/abseil-cpp/absl/base:errno_saver",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",
@@ -138,14 +130,13 @@ absl_source_set("demangle_internal") {
   sources = [ "internal/demangle.cc" ]
   public = [ "internal/demangle.h" ]
   visibility = [
+    ":*",
     "//third_party/abseil-cpp/absl/container:*",
-    "//third_party/abseil-cpp/absl/debugging:*",
   ]
-
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
   deps = [
     ":demangle_rust",
     "//third_party/abseil-cpp/absl/base",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:nullability",
     "//third_party/abseil-cpp/absl/numeric:bits",
@@ -153,20 +144,11 @@ absl_source_set("demangle_internal") {
 }
 
 # Disabled because this test relies on RTTI
-# absl_test("demangle_test") {
-#   sources = [ "internal/demangle_test.cc" ]
-#   deps = [
-#     ":demangle_internal",
-#     ":stack_consumption",
-#     "//third_party/abseil-cpp/absl/base:config",
-#     "//third_party/abseil-cpp/absl/base:core_headers",
-#     "//third_party/abseil-cpp/absl/log",
-#     "//third_party/abseil-cpp/absl/memory",
-#   ]
-# }
+# absl_test("demangle_test")
 
 absl_source_set("bounded_utf8_length_sequence") {
   public = [ "internal/bounded_utf8_length_sequence.h" ]
+  visibility = [ ":*" ]
   deps = [
     "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/numeric:bits",
@@ -184,14 +166,12 @@ absl_test("bounded_utf8_length_sequence_test") {
 absl_source_set("decode_rust_punycode") {
   sources = [ "internal/decode_rust_punycode.cc" ]
   public = [ "internal/decode_rust_punycode.h" ]
-
-  public_deps = [
-    "//third_party/abseil-cpp/absl/base:config",
-    "//third_party/abseil-cpp/absl/base:nullability",
-  ]
+  visibility = [ ":*" ]
   deps = [
     ":bounded_utf8_length_sequence",
     ":utf8_for_code_point",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:nullability",
   ]
 }
 
@@ -206,10 +186,10 @@ absl_test("decode_rust_punycode_test") {
 absl_source_set("demangle_rust") {
   sources = [ "internal/demangle_rust.cc" ]
   public = [ "internal/demangle_rust.h" ]
-
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+  visibility = [ ":*" ]
   deps = [
     ":decode_rust_punycode",
+    "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
   ]
 }
@@ -226,7 +206,8 @@ absl_test("demangle_rust_test") {
 absl_source_set("utf8_for_code_point") {
   sources = [ "internal/utf8_for_code_point.cc" ]
   public = [ "internal/utf8_for_code_point.h" ]
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+  visibility = [ ":*" ]
+  deps = [ "//third_party/abseil-cpp/absl/base:config" ]
 }
 
 absl_test("utf8_for_code_point_test") {
@@ -240,19 +221,38 @@ absl_test("utf8_for_code_point_test") {
 absl_source_set("leak_check") {
   sources = [ "leak_check.cc" ]
   public = [ "leak_check.h" ]
+  deps = [
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+  ]
+}
 
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
-  deps = [ "//third_party/abseil-cpp/absl/base:core_headers" ]
+absl_test("leak_check_test") {
+  sources = [ "leak_check_test.cc" ]
+  deps = [
+    ":leak_check",
+    "//third_party/abseil-cpp/absl/base:config",
+    "//third_party/abseil-cpp/absl/log",
+  ]
 }
 
 absl_source_set("stack_consumption") {
   testonly = true
   sources = [ "internal/stack_consumption.cc" ]
   public = [ "internal/stack_consumption.h" ]
+  visibility = [ ":*" ]
   deps = [
     "//third_party/abseil-cpp/absl/base:config",
     "//third_party/abseil-cpp/absl/base:core_headers",
     "//third_party/abseil-cpp/absl/base:raw_logging_internal",
   ]
-  visibility = [ ":*" ]
+}
+
+absl_test("stack_consumption_test") {
+  sources = [ "internal/stack_consumption_test.cc" ]
+  deps = [
+    ":stack_consumption",
+    "//third_party/abseil-cpp/absl/base:core_headers",
+    "//third_party/abseil-cpp/absl/log",
+  ]
 }

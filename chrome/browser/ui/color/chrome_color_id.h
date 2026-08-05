@@ -26,6 +26,8 @@
   E_CPONLY(kColorAppMenuExpandedForegroundPrimary) \
   E_CPONLY(kColorAppMenuChipInkDropHover) \
   E_CPONLY(kColorAppMenuChipInkDropRipple) \
+  E_CPONLY(kColorAppMenuYourChromeBackground) \
+  E_CPONLY(kColorAppMenuToolsAndActionsBackground) \
   /* Actor UI colors.*/ \
   E_CPONLY(kColorActorUiHandoffButtonBorder) \
   E_CPONLY(kColorActorUiOverlayBorder) \
@@ -58,8 +60,18 @@
   E_CPONLY(kColorAvatarButtonNormalRipple) \
   E_CPONLY(kColorAvatarStroke) \
   E_CPONLY(kColorAvatarFillForContrast) \
-  E_CPONLY(kColorAiSubscriptionRingGradientStart) \
-  E_CPONLY(kColorAiSubscriptionRingGradientEnd) \
+  E_CPONLY(kColorAvatarRingGradientStart) \
+  E_CPONLY(kColorAvatarRingGradientEnd) \
+  E_CPONLY(kColorAvatarBadgeWaveBase0) \
+  E_CPONLY(kColorAvatarBadgeWaveBase1) \
+  E_CPONLY(kColorAvatarBadgeWaveBase2) \
+  E_CPONLY(kColorAvatarBadgeWaveBase3) \
+  E_CPONLY(kColorAvatarBadgeWaveOverlay0) \
+  E_CPONLY(kColorAvatarBadgeWaveOverlay1) \
+  E_CPONLY(kColorAvatarBadgeWaveOverlay2) \
+  E_CPONLY(kColorAvatarBadgeWaveOverlay3) \
+  E_CPONLY(kColorAvatarBadgeShadow) \
+  E_CPONLY(kColorAvatarBadgeBackground) \
   /* Bookmark Manager page colors. */ \
   E_CPONLY(kColorBookmarkManagerItemBackgroundSelected) \
   E_CPONLY(kColorBookmarkManagerItemOutline) \
@@ -583,15 +595,6 @@
   E_CPONLY(kColorProfileMenuPromoButtonsBackground) \
   /* Profiles colors. */ \
   E_CPONLY(kColorProfilesReauthDialogBorder) \
-  /* Projects Panel colors. */ \
-  E_CPONLY(kColorProjectsPanelBackground) \
-  E_CPONLY(kColorProjectsPanelButtonDisabledIcon) \
-  E_CPONLY(kColorProjectsPanelButtonHoverBackground) \
-  E_CPONLY(kColorProjectsPanelButtonIcon) \
-  E_CPONLY(kColorProjectsPanelListsSeparator) \
-  E_CPONLY(kColorProjectsPanelNoTabGroupsText) \
-  E_CPONLY(kColorProjectsPanelTabGroupsDragPlaceholder) \
-  E_CPONLY(kColorProjectsPanelTabGroupsDropIndicator) \
   /* PWA colors. */ \
   E_CPONLY(kColorPwaBackground) \
   E_CPONLY(kColorPwaMenuButtonIcon) \

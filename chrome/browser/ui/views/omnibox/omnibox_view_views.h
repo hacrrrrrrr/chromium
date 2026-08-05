@@ -46,10 +46,6 @@
 class LocationBarView;
 class IconLabelBubbleView;
 
-namespace ai_mode_button_config {
-struct AiModeButtonConfig;
-}
-
 namespace content {
 class WebContents;
 }  // namespace content
@@ -131,7 +127,7 @@ class OmniboxViewViews
   void SaveStateToTab(content::WebContents* tab);
 
   // Called when the window's active tab changes.
-  void OnTabChanged(const content::WebContents* web_contents);
+  void OnTabChanged(content::WebContents* web_contents);
 
   // Called to clear the saved state for |web_contents|.
   void ResetTabState(content::WebContents* web_contents);
@@ -241,12 +237,6 @@ class OmniboxViewViews
                            NavigationToAndFromContextualTasks);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsPlaceholderTest,
                            TitleChangeUpdatesPlaceholder);
-  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsSendTabToSelfSubmenuEnabledTest,
-                           SendTabToSelfContextMenuSubmenuEnabled);
-  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsSendTabToSelfSubmenuDisabledTest,
-                           SendTabToSelfContextMenuSubmenuDisabled);
-  FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsSendTabToSelfSubmenuEnabledTest,
-                           SendTabToSelfContextMenuNotOffered);
 
   enum class UnelisionGesture {
     kHomeKeyPressed,
@@ -405,30 +395,9 @@ class OmniboxViewViews
   // DSE placeholder.
   void UpdatePlaceholderTextColor();
 
-  // Returns true if the AIM hint impression limits have been reached.
-  bool AreAimHintImpressionLimitsReached() const;
-
-  // Returns true if the AIM placeholder text should be installed instead of the
-  // DSE placeholder text.
-  bool ShouldInstallAimPlaceholderText() const;
-
-  // Returns true if the Contextual Tasks placeholder text should be installed
-  // instead of the DSE placeholder text.
-  bool ShouldInstallContextualTasksPlaceholderText() const;
-
-  // Helper to get the current `AiModeButtonConfig` if available.
-  const ai_mode_button_config::AiModeButtonConfig* GetAiModeConfig() const;
-
-  // Records an impression of the AIM hint text.
-  void RecordAimHintImpression();
-
   // Returns the AI Mode page action icon view, if present, or nullptr if the
   // view doesn't exist.
   IconLabelBubbleView* GetAiModePageActionIconView() const;
-
-  // Helper for updating the text in the Omnibox based on current focus state
-  // and whether the user is currently on a "contextual tasks" page.
-  void UpdateTextForContextualTasksPage();
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (smaller font size). This is used for popups.

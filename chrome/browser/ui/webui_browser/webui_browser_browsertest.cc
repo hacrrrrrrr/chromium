@@ -20,8 +20,10 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/desktop_browser_window_capabilities.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/omnibox_popup/omnibox_popup_web_contents_helper.h"
@@ -63,7 +65,11 @@ class WebUIBrowserTest : public InProcessBrowserTest {
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/{features::kWebium,
                               features::kAttachUnownedInnerWebContents},
-        /*disabled_features=*/{});
+        /*disabled_features=*/
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove these two Features.
+        {omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
     InProcessBrowserTest::SetUp();
   }
 
@@ -133,6 +139,21 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, StartupAndShutdown) {
       browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(web_contents);
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
+}
+
+// Ensures that WebUIBrowser does not crash when closing tabs (rather than
+// closing window).
+IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, ShutdownByClosingTabs) {
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
+  ASSERT_TRUE(window);
+
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(web_contents);
+  EXPECT_TRUE(content::WaitForLoadStop(web_contents));
+  browser()->tab_strip_model()->CloseAllTabs();
+  ASSERT_TRUE(base::test::RunUntil(
+      []() { return GlobalBrowserCollection::GetInstance()->IsEmpty(); }));
 }
 
 // Verifies that WebUIBrowserWindow allows keyboard lock for tab WebContents.
@@ -558,3 +579,29 @@ IN_PROC_BROWSER_TEST_F(WebUIBrowserTest,
   // from the render process.
   CloseBrowserSynchronously(new_browser);
 }
+
+IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, NewTabGetsFocus) {
+  auto* window = WebUIBrowserWindow::FromBrowser(browser());
+  ASSERT_TRUE(window);
+
+  content::WebContents* ui_web_contents =
+      window->GetWebUIBrowserUI()->web_ui()->GetWebContents();
+  EXPECT_TRUE(content::WaitForLoadStop(ui_web_contents));
+
+  // Open a new tab (e.g. simulating the new tab action or dragging a new tab).
+  GURL url = embedded_https_test_server().GetURL("a.com", "/defaultresponse");
+  EXPECT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  content::WebContents* second_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(second_tab);
+
+  // The newly created active tab should get focus.
+  EXPECT_TRUE(base::test::RunUntil([second_tab]() {
+    return second_tab->GetRenderWidgetHostView() &&
+           second_tab->GetRenderWidgetHostView()->HasFocus();
+  }));
+}
+

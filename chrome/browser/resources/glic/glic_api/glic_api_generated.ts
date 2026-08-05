@@ -8,6 +8,11 @@
 
 import type {AdditionalContextPart, ImageOriginAnnotations, InvocationPayload, Point, Rect, ResponseStopCause} from './glic_api.js';
 
+export enum FileUploadPolicyState {
+  ENABLED = 0,
+  DISABLED = 1,
+}
+
 // The type of user input reaction.
 export enum MetricUserInputReactionType {
   // An unknown reaction type.
@@ -199,6 +204,10 @@ export enum SkillSource {
   USER_CREATED = 2,
   // Skill derived from a first party skill.
   DERIVED_FROM_FIRST_PARTY = 3,
+  // Skill sourced from the EnterprisePublishedSkills enterprise policy.
+  ENTERPRISE = 4,
+  // Skill derived from an enterprise skill.
+  DERIVED_FROM_ENTERPRISE = 5,
 }
 
 // Enum to specify the skills web client event for metrics recording.
@@ -412,6 +421,8 @@ export enum InvocationSource {
   TAB_RESTORE = 39,
   // Implicitly focused or revealed, e.g., on tab switch or re-focus.
   RESHOW_INACTIVE = 40,
+  // From the tab context menu.
+  TAB_CONTEXT_MENU = 41,
 }
 
 // Target for actuation.
@@ -501,6 +512,8 @@ export enum ExperimentalTriggeringUpdateType {
   TERMINAL_FAILED = 5,
   // The interaction yielded to the user.
   YIELD_TO_USER = 6,
+  // The interaction has resumed after a pause or wait state.
+  RESUMED = 7,
 }
 
 // Lightweight page features detected on the page.
@@ -573,6 +586,8 @@ export enum HostCapability {
   IMG_WEB_DRAG_DROP = 12,
   // Indicates that the host does not show the WebUi preloader.
   NO_WEB_UI_LOADER = 13,
+  // Indicates that the host enforces paste eligibility checks.
+  ENFORCES_PASTE_ELIGIBILITY = 14,
 }
 
 // Lists capabilities that the glic web client may support.
@@ -624,6 +639,8 @@ export enum FeatureMode {
   UNIVERSAL_CART = 4,
   // Client feature mode for Promotion Page.
   PROMOTION_PAGE = 5,
+  // Client feature mode to initiate actuation for Password Change.
+  PASSWORD_CHANGE = 6,
 }
 
 // Settings for Gemini Enterprise.
@@ -818,6 +835,8 @@ export declare interface SkillPreview {
   curatedBy?: string;
   // The image URL to show when rendering this skill.
   imageUrl?: string;
+  // The category of the skill.
+  category?: string;
 }
 
 // A single skill.
@@ -997,6 +1016,17 @@ export declare interface PanelState {
   windowId?: string;
 }
 
+// Payload for invoking a skill.
+export declare interface SkillsPayload {
+  // Skill ID to trigger.
+  skillId: string;
+  // Skill name to show in the Glic client. Empty string is the null state.
+  skillName: string;
+  // Skill icon (emoji) to show in the Glic client.
+  // Empty string is the null state.
+  skillIcon: string;
+}
+
 // Payload for Universal Cart invocation.
 export declare interface UniversalCartPayload {
   // This metadata is received from the same Google endpoint we receive the
@@ -1021,6 +1051,7 @@ export declare interface InvokeOptions {
   // Whether to suppress Zero State Suggestions.
   disableZeroStateSuggestions: boolean;
   // Skill ID to trigger.
+  // Deprecated: Use payload.skills_payload.skill_id instead.
   skillId?: string;
   // Configuration to override the default ZSS behavior for the invocation.
   zssConfig?: ZssConfig;
@@ -1068,6 +1099,9 @@ export declare interface ExperimentalTriggeringUpdate {
   // The human-readable text associated with the update, such as response text
   // or status message.
   data: string;
+  // Optional structured metadata associated with the update (e.g., choice
+  // options for interactive yields).
+  metadata?: Record<string, string>;
 }
 
 // Information extracted from a tab.
@@ -1256,6 +1290,8 @@ export declare interface TaskOptions {
   duration?: TaskDuration;
   // The feature mode for the task.
   featureMode?: FeatureMode;
+  // The initial target tab to actuate on.
+  actuationTabId?: string;
 }
 
 // A credential used for the auto-login.
@@ -1349,6 +1385,34 @@ export declare interface SelectAutofillSuggestionsDialogRequest {
 export declare interface FormFillingResponse {
   // The ID corresponding to the user selected suggestion.
   selectedSuggestionId: string;
+}
+
+// Request to show a Gmail OTP opt-in dialog.
+export declare interface GmailOtpOptInRequest {
+  // ID of the actor's task.
+  taskId: number;
+}
+
+// Response for the Gmail OTP opt-in dialog.
+export declare interface GmailOtpOptInResponse {
+  // True if the user clicked the opt-in button, false if they
+  // cancelled/closed it.
+  permissionGranted: boolean;
+}
+
+// Request to show a Gmail OTP confirmation dialog.
+export declare interface GmailOtpConfirmationRequest {
+  // ID of the actor's task.
+  taskId: number;
+  // The verification code that the user needs to confirm.
+  verificationCode: string;
+}
+
+// Response for the Gmail OTP confirmation dialog.
+export declare interface GmailOtpConfirmationResponse {
+  // True if the user clicked the confirmation button, false if they
+  // cancelled/closed it.
+  permissionGranted: boolean;
 }
 
 // Meta tag name and content taken from the <head> element of a frame.

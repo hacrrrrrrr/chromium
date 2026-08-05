@@ -39,6 +39,7 @@
 #include "pdf/pdf_features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/gurl.h"
 
@@ -86,6 +87,9 @@ base::DictValue GetCommonStrings() {
   dict.Set("presetZoomFactors", zoom::GetPresetZoomFactorsAsJSON());
   dict.Set("pdfOopifEnabled",
            chrome_pdf::features::IsOopifPdfEnabled() ? "pdfOopifEnabled" : "");
+  dict.Set(
+      "webuiRoundedIconsAttribute",
+      features::IsWebUIRoundedIconsEnabled() ? "webui-rounded-icons" : "");
   return dict;
 }
 
@@ -168,6 +172,8 @@ base::DictValue GetPdfViewerStrings() {
       {"annotationRedo", IDS_PDF_ANNOTATION_REDO},
       {"annotationUndo", IDS_PDF_ANNOTATION_UNDO},
       {"cancelButton", IDS_CANCEL},
+      {"ink2AnnotationRedone", IDS_PDF_INK2_ANNOTATION_REDONE},
+      {"ink2AnnotationUndone", IDS_PDF_INK2_ANNOTATION_UNDONE},
       {"ink2BrushColorBlue1", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_1},
       {"ink2BrushColorBlue2", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_2},
       {"ink2BrushColorBlue3", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_3},
@@ -201,6 +207,13 @@ base::DictValue GetPdfViewerStrings() {
       {"ink2TextAlignRight", IDS_PDF_INK2_TEXT_ALIGN_RIGHT},
       {"ink2TextAlignment", IDS_PDF_INK2_TEXT_ALIGNMENT},
       {"ink2TextAnnotation", IDS_PDF_INK2_TEXT_ANNOTATION},
+      {"ink2TextAnnotationDeleted", IDS_PDF_INK2_TEXT_ANNOTATION_DELETED},
+      {"ink2TextAnnotationMovedDown", IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_DOWN},
+      {"ink2TextAnnotationMovedLeft", IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_LEFT},
+      {"ink2TextAnnotationMovedRight",
+       IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_RIGHT},
+      {"ink2TextAnnotationMovedUp", IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_UP},
+      {"ink2TextAnnotationResized", IDS_PDF_INK2_TEXT_ANNOTATION_RESIZED},
       {"ink2TextColor", IDS_PDF_INK2_TEXT_COLOR},
       {"ink2TextColorCyan1", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_1},
       {"ink2TextColorCyan2", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_2},

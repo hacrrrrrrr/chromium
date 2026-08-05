@@ -6,21 +6,27 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
+#include "base/base_paths.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_parameters.h"
+#include "media/webrtc/ml_model_handle.h"
 #include "media/webrtc/voice_isolation/voice_isolation.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/audio/ml_model_manager.h"
 #include "services/audio/voice_isolation_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/flatbuffers/src/include/flatbuffers/flatbuffers.h"
+#include "third_party/tflite/src/tensorflow/lite/model_builder.h"
 
 using ::testing::_;
 using ::testing::Eq;
@@ -62,25 +68,37 @@ namespace {
 
 #if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 
-class FakeMlModelHandle : public MlModelHandle {
+class FakeMlModelHandle : public media::MlModelHandle {
  public:
-  FakeMlModelHandle() = default;
-  ~FakeMlModelHandle() override = default;
+  FakeMlModelHandle() {
+    base::FilePath source_root;
+    CHECK(base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &source_root));
 
-  const tflite::FlatBufferModel* Get() override {
-    // Return a dummy non-null pointer so that model verification passes.
-    return reinterpret_cast<const tflite::FlatBufferModel*>(0x1234);
+    source_root = source_root.AppendASCII("media")
+                      .AppendASCII("webrtc")
+                      .AppendASCII("voice_isolation")
+                      .AppendASCII("test_model_1_2_160_2.tflite");
+
+    model_ = tflite::FlatBufferModel::BuildFromFile(
+        source_root.AsUTF8Unsafe().c_str());
   }
+
+  const tflite::FlatBufferModel& Get() override { return *model_; }
+
+ private:
+  ~FakeMlModelHandle() override = default;
+  std::vector<uint8_t> buffer_;
+  std::unique_ptr<tflite::FlatBufferModel> model_;
 };
 
 class MockMlModelManager : public MlModelManager {
  public:
   MockMlModelManager() {
     ON_CALL(*this, GetModel(testing::_)).WillByDefault([](mojom::MlModelType) {
-      return std::make_unique<FakeMlModelHandle>();
+      return base::MakeRefCounted<FakeMlModelHandle>();
     });
   }
-  MOCK_METHOD(std::unique_ptr<MlModelHandle>,
+  MOCK_METHOD(scoped_refptr<media::MlModelHandle>,
               GetModel,
               (mojom::MlModelType model_type),
               (override));
@@ -89,9 +107,6 @@ class MockMlModelManager : public MlModelManager {
 std::unique_ptr<VoiceIsolationHandler> GetVoiceIsolationHandler(
     const media::AudioParameters& output_params,
     VoiceIsolationHandler::DeliverProcessedAudioCallback callback) {
-  std::unique_ptr<media::VoiceIsolation> voice_isolation =
-      media::VoiceIsolation::CreateForTesting(output_params);
-
   MockMlModelManager model_manager;
 
   return VoiceIsolationHandler::MaybeCreate(

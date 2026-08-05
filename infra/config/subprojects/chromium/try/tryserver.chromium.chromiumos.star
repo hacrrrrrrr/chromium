@@ -73,6 +73,9 @@ try_.builder(
             "media/.+",
         ],
     ),
+    experiments = {
+        "luci.buildbucket.run_in_turboci": 100,
+    },
     main_list_view = "try",
 )
 
@@ -136,6 +139,7 @@ try_.builder(
     experiments = {
         # crbug/940930
         "chromium.enable_cleandead": 100,
+        "luci.buildbucket.run_in_turboci": 50,
         # go/rts-project-proposal
         "chromium_rts.filter_file_analysis": 100,
     },
@@ -221,6 +225,7 @@ try_.orchestrator_builder(
         "chromium.enable_cleandead": 100,
         # go/rts-project-proposal
         "chromium_rts.filter_file_analysis": 100,
+        "luci.buildbucket.run_in_turboci": 2,
     },
     main_list_view = "try",
     use_clang_coverage = True,
@@ -329,4 +334,19 @@ try_.builder(
         },
     },
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
+)
+
+try_.builder(
+    name = "linux-chromeos-no-initial-webui-rel",
+    mirrors = [
+        "ci/linux-chromeos-rel",
+        "ci/linux-chromeos-no-initial-webui-rel",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "ci/linux-chromeos-rel",
+            "release_try_builder",
+        ],
+    ),
+    contact_team_email = "chrome-webium-product-eng@google.com",
 )

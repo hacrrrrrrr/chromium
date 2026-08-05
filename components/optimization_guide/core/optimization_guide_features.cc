@@ -167,7 +167,6 @@ bool IsOnDeviceModelBackgroundDownloadEnabledForFeature(
   return std::ranges::contains(allowed_features, GetVariantName(feature));
 }
 
-BASE_FEATURE(kOptimizationGuideIconView, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kBrokerModelSessionsForUntrustedProcesses,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -541,6 +540,22 @@ bool IsFreeDiskSpaceTooLowForOnDeviceModelInstall(
                  base::GiBU(5).InMiB()))) >= free_disk_space_bytes;
 }
 
+BASE_FEATURE(kOnDeviceModelCachesDiskSpaceCheck,
+             "OnDeviceModelCachesDiskSpaceCheck",
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+bool IsFreeDiskSpaceTooLowForOnDeviceModelCachesBuild(
+    base::ByteSize free_disk_space_bytes) {
+  if (!base::FeatureList::IsEnabled(kOnDeviceModelCachesDiskSpaceCheck)) {
+    return false;
+  }
+  return base::MiBU(base::saturated_cast<uint64_t>(
+             base::GetFieldTrialParamByFeatureAsInt(
+                 kOnDeviceModelCachesDiskSpaceCheck,
+                 "free_space_mb_required_to_build_caches",
+                 base::GiBU(10).InMiB()))) >= free_disk_space_bytes;
+}
+
 base::ByteSize GetDiskSpaceRequiredForBackgroundOnDeviceModelInstall() {
   return base::MiBU(
       base::saturated_cast<uint64_t>(base::GetFieldTrialParamByFeatureAsInt(
@@ -632,9 +647,6 @@ std::vector<uint32_t> GetOnDeviceModelAllowedAdaptationRanks() {
   return ranks;
 }
 
-bool ShouldEnableOptimizationGuideIconView() {
-  return base::FeatureList::IsEnabled(kOptimizationGuideIconView);
-}
 
 std::optional<base::TimeDelta> GetSubframeGetAIPageContentTimeout() {
   if (!base::FeatureList::IsEnabled(kGetAIPageContentSubframeTimeoutEnabled)) {

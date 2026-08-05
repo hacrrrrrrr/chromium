@@ -1695,40 +1695,16 @@ TEST_F(SSLClientSocketTest, MldsaSignature) {
 
   cert_verifier_->set_default_result(OK);
 
-  {
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndEnableFeature(features::kTlsMldsaSignatures);
+  TestCompletionCallback callback;
+  auto transport = std::make_unique<TCPClientSocket>(
+      addr(), nullptr, nullptr, nullptr, NetLogSource(),
+      handles::kInvalidNetworkHandle);
+  EXPECT_THAT(callback.GetResult(transport->Connect(callback.callback())),
+              IsOk());
 
-    TestCompletionCallback callback;
-    auto transport = std::make_unique<TCPClientSocket>(
-        addr(), nullptr, nullptr, nullptr, NetLogSource(),
-        handles::kInvalidNetworkHandle);
-    EXPECT_THAT(callback.GetResult(transport->Connect(callback.callback())),
-                IsOk());
-
-    std::unique_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-        std::move(transport), host_port_pair(), SSLConfig()));
-    EXPECT_THAT(callback.GetResult(sock->Connect(callback.callback())), IsOk());
-  }
-
-  {
-    base::test::ScopedFeatureList feature_list;
-    feature_list.InitAndDisableFeature(features::kTlsMldsaSignatures);
-    // The connection should fail when the client doesn't have ML-DSA support
-    // enabled.
-
-    TestCompletionCallback callback;
-    auto transport = std::make_unique<TCPClientSocket>(
-        addr(), nullptr, nullptr, nullptr, NetLogSource(),
-        handles::kInvalidNetworkHandle);
-    EXPECT_THAT(callback.GetResult(transport->Connect(callback.callback())),
-                IsOk());
-
-    std::unique_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
-        std::move(transport), host_port_pair(), SSLConfig()));
-    EXPECT_THAT(callback.GetResult(sock->Connect(callback.callback())),
-                IsError(ERR_SSL_VERSION_OR_CIPHER_MISMATCH));
-  }
+  std::unique_ptr<SSLClientSocket> sock(CreateSSLClientSocket(
+      std::move(transport), host_port_pair(), SSLConfig()));
+  EXPECT_THAT(callback.GetResult(sock->Connect(callback.callback())), IsOk());
 }
 
 // Tests that SSLClientSocket properly handles when the underlying transport
@@ -6928,7 +6904,7 @@ TEST_P(SSLClientSocketAlpsTest, UnusedProtocols) {
             // The comment of `SSL_early_callback_ctx_extension_get` says that
             // `data` is set to extension contents, and `len` is the
             // length of the extension contents.
-            UNSAFE_BUFFERS(base::span(data, data + len)), base::span(expected));
+            UNSAFE_BUFFERS(base::span(data, len)), base::span(expected));
         return true;
       });
   ASSERT_TRUE(

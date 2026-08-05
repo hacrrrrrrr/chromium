@@ -155,7 +155,6 @@ chromium-metrics-reviews@google.com.
   <variant name=".OmniboxEverywhere"/>
   <variant name=".OmniboxPopup"/>
   <variant name=".PerformanceSidePanel"/>
-  <variant name=".PersonalContextNotice"/>
   <variant name=".ReadAnythingUntrusted"/>
   <variant name=".ReadingList"/>
   <variant name=".ReloadButtonUI"/>
@@ -241,7 +240,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="ContextMenu.LensSupportStatus" enum="LensSupportStatus"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>benwgold@google.com</owner>
   <owner>lens-chrome@google.com</owner>
   <summary>
@@ -372,7 +371,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="DefaultBrowser.InfoBar.UserInteraction"
-    enum="DefaultBrowserInfoBarUserInteraction" expires_after="2026-11-29">
+    enum="DefaultBrowserInfoBarUserInteraction" expires_after="2027-01-31">
   <owner>pmonette@chromium.org</owner>
   <owner>robliao@chromium.org</owner>
   <summary>
@@ -381,7 +380,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="DefaultBrowser.PinInfoBar.UserInteraction"
-    enum="PinInfoBarUserInteraction" expires_after="2026-11-22">
+    enum="PinInfoBarUserInteraction" expires_after="2027-01-24">
   <owner>jessemckenna@google.com</owner>
   <owner>davidbienvenu@chromium.org</owner>
   <summary>
@@ -606,7 +605,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InitialWebUI.NewWindow{CreationSource}.{ExistingWindow}.BrowserWindowToReloadButton.FirstPaintGap{Version}"
-    units="ms" expires_after="2026-11-29">
+    units="ms" expires_after="2027-01-31">
   <owner>mych@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -645,7 +644,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InitialWebUI.ReloadButton.InputCount"
-    enum="ReloadButtonInputType" expires_after="2026-11-15">
+    enum="ReloadButtonInputType" expires_after="2027-01-17">
   <owner>mych@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -803,7 +802,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InitialWebUI.Startup{Scenario}.BrowserWindowToReloadButton.FirstPaintGap{StartupTemperature}"
-    units="ms" expires_after="2026-11-29">
+    units="ms" expires_after="2027-01-31">
   <owner>mych@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -870,7 +869,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InitialWebUI.Startup{Scenario}.ReloadButton.{PaintType}{StartupTemperature}"
-    units="ms" expires_after="2026-11-29">
+    units="ms" expires_after="2027-01-31">
   <owner>mych@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -910,7 +909,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="InitialWebUI.Toolbar.ProcessAlreadyExistsForTheSameProfileOnCreation"
-    enum="Boolean" expires_after="2026-11-15">
+    enum="Boolean" expires_after="2027-01-17">
   <owner>leimy@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -945,7 +944,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="InitialWebUI.View.Creation" enum="InitialWebUIView"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>mych@chromium.org</owner>
   <owner>chrome-webium-product-eng@google.com</owner>
   <summary>
@@ -977,7 +976,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="RenderTextHarfBuzz.GetFallbackFontsTime" units="ms"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>dayeung@chromium.org</owner>
   <owner>etienneb@chromium.org</owner>
   <summary>
@@ -988,7 +987,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="RenderTextHarfBuzz.GetFallbackFontTime" units="ms"
-    expires_after="2026-11-16">
+    expires_after="2027-01-17">
   <owner>dayeung@chromium.org</owner>
   <owner>etienneb@chromium.org</owner>
   <summary>
@@ -1016,7 +1015,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="RenderTextHarfBuzz.ShapeRunsWithFallbackFontsTime" units="ms"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>dayeung@chromium.org</owner>
   <owner>etienneb@chromium.org</owner>
   <summary>
@@ -1025,8 +1024,18 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="RenderViewContextMenu.SelectedTextWordCount.SearchWeb"
+    units="words" expires_after="2027-07-26">
+  <owner>sophiechang@chromium.org</owner>
+  <owner>chrome-desktop-search@google.com</owner>
+  <summary>
+    Recorded when the user selects the &quot;Search Google for&quot; (Search Web
+    for) context menu item. Logs the number of words selected.
+  </summary>
+</histogram>
+
 <histogram name="RenderViewContextMenu.Shown" enum="RenderViewContextMenuItem"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>avi@chromium.org</owner>
   <owner>edwardjung@chromium.org</owner>
   <owner>mpearson@chromium.org</owner>
@@ -1061,7 +1070,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="Snackbar.DismissalReason" enum="SnackbarDismissalReason"
     expires_after="2027-01-03">
-  <owner>lazzzis@google.com</owner>
+  <owner>aishwaryarj@google.com</owner>
   <owner>src/chrome/browser/ui/messages/OWNERS</owner>
   <summary>Records the reason why a snackbar was dismissed.</summary>
 </histogram>
@@ -1167,7 +1176,7 @@ features through Chrome Labs. -->
 </histogram>
 
 <histogram name="Views.FocusRing.RefreshLayer.Time" units="microseconds"
-    expires_after="2026-10-10">
+    expires_after="2027-01-24">
   <owner>gjc@google.com</owner>
   <owner>chrome-loading@google.com</owner>
   <summary>
@@ -1179,7 +1188,7 @@ features through Chrome Labs. -->
 </histogram>
 
 <histogram name="Views.FocusRing.RefreshLayer.Time.NotCached"
-    units="microseconds" expires_after="2026-10-10">
+    units="microseconds" expires_after="2027-01-24">
   <owner>gjc@google.com</owner>
   <owner>chrome-loading@google.com</owner>
   <summary>
@@ -1191,7 +1200,7 @@ features through Chrome Labs. -->
 </histogram>
 
 <histogram name="Views.InvalidatesDuringLayout" units="count"
-    expires_after="2026-11-22">
+    expires_after="2027-01-24">
   <owner>dpranke@chromium.org</owner>
   <owner>elainechien@chromium.org</owner>
   <owner>kylixrd@chromium.org</owner>
@@ -1233,7 +1242,7 @@ features through Chrome Labs. -->
 
 <histogram
     name="Views.{Process}.NumColorProvidersInitializedDuringOnNativeThemeUpdated"
-    units="providers" expires_after="2026-11-29">
+    units="providers" expires_after="2027-01-31">
   <owner>pkasting@chromium.org</owner>
   <owner>tluk@chromium.org</owner>
   <owner>skau@chromium.org</owner>
@@ -1298,14 +1307,14 @@ features through Chrome Labs. -->
 </histogram>
 
 <histogram name="WebUI.CreatedForUrl" enum="WebUIUrlHashes"
-    expires_after="2026-11-22">
+    expires_after="2027-01-24">
   <owner>dpapad@chromium.org</owner>
   <owner>chrome-webui@google.com</owner>
   <summary>URLs for which Chrome creates WebUIControllers.</summary>
 </histogram>
 
 <histogram name="WebUI.Settings.PathVisited" enum="WebUISettingsPathHashes"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>dschuyler@chromium.org</owner>
   <owner>tbuckley@chromium.org</owner>
   <owner>bettes@chromium.org</owner>
@@ -1407,7 +1416,7 @@ features through Chrome Labs. -->
 </histogram>
 
 <histogram name="WrenchMenu.MenuAction" enum="WrenchMenuAction"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>ainslie@chromium.org</owner>
   <owner>edwardjung@chromium.org</owner>
   <summary>Number of times that each menu item is clicked.</summary>

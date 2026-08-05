@@ -6,6 +6,7 @@ package org.chromium.components.external_intents;
 
 import static org.chromium.build.NullUtil.assumeNonNull;
 
+import android.text.TextUtils;
 import android.util.Pair;
 
 import androidx.annotation.IntDef;
@@ -33,13 +34,13 @@ import org.chromium.components.navigation_interception.InterceptNavigationDelega
 import org.chromium.content_public.browser.ContentWebFeatureUsageUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
+import org.chromium.content_public.browser.NavigationEntry;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.Visibility;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.content_public.common.ConsoleMessageLevel;
 import org.chromium.content_public.common.Referrer;
-import org.chromium.network.mojom.ReferrerPolicy;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.url.GURL;
 import org.chromium.url.Origin;
@@ -283,7 +284,7 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
                         navigationHandle.isRedirect(),
                         navigationHandle.hasUserGesture(),
                         navigationHandle.isRendererInitiated(),
-                        navigationHandle.getReferrerUrl(),
+                        navigationHandle.getReferrer(),
                         navigationHandle.isInPrimaryMainFrame(),
                         navigationHandle.getInitiatorOrigin(),
                         navigationHandle.isExternalProtocol(),
@@ -409,8 +410,7 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
                         isRedirect,
                         hasUserGesture,
                         isRendererInitiated,
-                        GURL.emptyGURL()
-                        /* referrerUrl= */ ,
+                        /* referrer= */ null,
                         /* isInPrimaryMainFrame= */ false,
                         initiatorOrigin,
                         /* isExternalProtocol= */ true,
@@ -443,7 +443,7 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
             boolean isRedirect,
             boolean hasUserGesture,
             boolean isRendererInitiated,
-            GURL referrerUrl,
+            @Nullable Referrer referrer,
             boolean isInPrimaryMainFrame,
             @Nullable Origin initiatorOrigin,
             boolean isExternalProtocol,
@@ -464,7 +464,7 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
                 new ExternalNavigationParams.Builder(
                                 escapedUrl,
                                 mClient.isIncognito(),
-                                referrerUrl,
+                                referrer,
                                 pageTransition,
                                 isRedirect)
                         .setRedirectHandler(redirectHandler)
@@ -642,7 +642,12 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
 
     private boolean isInitialNavigation() {
         if (mClient.getWebContents() == null) return true;
-        return mClient.getWebContents().getNavigationController().isInitialNavigation();
+        NavigationController controller = mClient.getWebContents().getNavigationController();
+        if (controller.isInitialNavigation()) return true;
+
+        NavigationEntry lastCommittedEntry =
+                controller.getEntryAtIndex(controller.getLastCommittedEntryIndex());
+        return lastCommittedEntry != null && lastCommittedEntry.isInitialEntry();
     }
 
     private boolean isTabOnInitialNavigationChain() {
@@ -771,9 +776,8 @@ public class InterceptNavigationDelegateImpl extends InterceptNavigationDelegate
 
         int transitionType = PageTransition.LINK;
         final LoadUrlParams loadUrlParams = new LoadUrlParams(targetUrl, transitionType);
-        if (!params.getReferrerUrl().isEmpty()) {
-            Referrer referrer =
-                    new Referrer(params.getReferrerUrl().getSpec(), ReferrerPolicy.ALWAYS);
+        Referrer referrer = params.getReferrer();
+        if (referrer != null && !TextUtils.isEmpty(referrer.getUrl())) {
             loadUrlParams.setReferrer(referrer);
         }
         // Ideally this navigation would be part of the navigation chain that triggered it and get,

@@ -24,7 +24,9 @@
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/public/context/glic_sharing_manager.h"
 #include "chrome/browser/glic/public/features.h"
+#include "chrome/browser/glic/public/glic_cui_tracker.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
+#include "chrome/browser/glic/public/glic_submit_query_cui_tracker.h"
 #include "chrome/browser/glic/service/glic_instance_helper.h"
 #include "chrome/browser/glic/service/glic_state_tracker.h"
 #include "chrome/browser/glic/service/metrics/glic_instance_helper_metrics.h"
@@ -54,7 +56,10 @@ namespace {
 
 SafeEmbedderKey ToSafeKey(const EmbedderKey& key) {
   return std::visit(
-      absl::Overload{[](const SidePanelEmbedderKey& key) -> SafeEmbedderKey {
+      absl::Overload{[](const TabEmbedderKey& key) -> SafeEmbedderKey {
+                       return SafeEmbedderKey(key);
+                     },
+                     [](const SidePanelEmbedderKey& key) -> SafeEmbedderKey {
                        return SafeEmbedderKey(key.tab->GetHandle());
                      },
                      [](const FloatingEmbedderKey& key) -> SafeEmbedderKey {
@@ -83,7 +88,9 @@ enum class GlicTurnSource {
   kSidePanelAudio = 2,
   kFloatyText = 3,
   kFloatyAudio = 4,
-  kMaxValue = kFloatyAudio,
+  kTabText = 5,
+  kTabAudio = 6,
+  kMaxValue = kTabAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicTurnSource)
 
@@ -450,6 +457,13 @@ void GlicInstanceMetrics::OnShowInSidePanel(tabs::TabInterface* tab) {
   }
 }
 
+void GlicInstanceMetrics::OnShowInactiveSidePanel(
+    mojom::InvocationSource invocation_source) {
+  if (!initial_invocation_source_.has_value()) {
+    initial_invocation_source_ = invocation_source;
+  }
+}
+
 void GlicInstanceMetrics::OnShowInFloaty(const ShowOptions& options) {
   if (!floaty_open_time_.is_null()) {
     base::UmaHistogramEnumeration(
@@ -524,16 +538,7 @@ void GlicInstanceMetrics::OnSidePanelClosed(
                                 duration, base::Milliseconds(1), base::Hours(1),
                                 50);
 
-  if (!first_side_panel_close_recorded_) {
-    first_side_panel_close_recorded_ = true;
-    mojom::InvocationSource source = initial_invocation_source_.value_or(
-        mojom::InvocationSource::kUnsupported);
-    base::UmaHistogramCustomTimes(
-        base::StrCat({"Glic.InvocationSource.",
-                      GetInvocationSourceString(source),
-                      ".SidePanelFirstOpenDuration"}),
-        duration, base::Milliseconds(1), base::Hours(1), 50);
-  }
+  MaybeRecordFirstSidePanelOpenMetrics(duration);
 
   if (reason != CloseReason::kTabSwitched) {
     std::erase(tabs_with_side_panel_, tab->GetHandle());
@@ -544,6 +549,34 @@ void GlicInstanceMetrics::OnSidePanelClosed(
     }
   }
   side_panel_open_times_.erase(it);
+}
+
+void GlicInstanceMetrics::MaybeRecordFirstSidePanelOpenMetrics(
+    base::TimeDelta duration) {
+  if (first_side_panel_close_recorded_) {
+    return;
+  }
+  first_side_panel_close_recorded_ = true;
+  mojom::InvocationSource source = initial_invocation_source_.value_or(
+      mojom::InvocationSource::kUnsupported);
+  const std::string source_str = GetInvocationSourceString(source);
+
+  base::UmaHistogramCustomTimes(
+      base::StrCat({"Glic.InvocationSource.", source_str,
+                    ".SidePanelFirstOpenDuration"}),
+      duration, base::Milliseconds(1), base::Hours(1), 50);
+
+  const char* variant =
+      (side_panel_prompt_count_ >= 1) ? "WithPrompts" : "NoPrompts";
+  base::UmaHistogramCustomTimes(
+      base::StrCat({"Glic.InvocationSource.", source_str,
+                    ".SidePanelFirstOpenDuration.", variant}),
+      duration, base::Milliseconds(1), base::Hours(1), 50);
+
+  base::UmaHistogramCounts100(
+      base::StrCat({"Glic.InvocationSource.", source_str,
+                    ".SidePanelFirstOpenPromptCount"}),
+      side_panel_prompt_count_);
 }
 
 void GlicInstanceMetrics::OnDetach() {
@@ -567,16 +600,7 @@ void GlicInstanceMetrics::OnUnbindEmbedder(EmbedderKey key) {
       base::UmaHistogramCustomTimes("Glic.Instance.SidePanel.OpenDuration",
                                     duration, base::Milliseconds(1),
                                     base::Hours(1), 50);
-      if (!first_side_panel_close_recorded_) {
-        first_side_panel_close_recorded_ = true;
-        mojom::InvocationSource source = initial_invocation_source_.value_or(
-            mojom::InvocationSource::kUnsupported);
-        base::UmaHistogramCustomTimes(
-            base::StrCat({"Glic.InvocationSource.",
-                          GetInvocationSourceString(source),
-                          ".SidePanelFirstOpenDuration"}),
-            duration, base::Milliseconds(1), base::Hours(1), 50);
-      }
+      MaybeRecordFirstSidePanelOpenMetrics(duration);
       side_panel_open_times_.erase(it);
     } else {
       base::UmaHistogramEnumeration(
@@ -694,10 +718,15 @@ void GlicInstanceMetrics::OnOpen(glic::mojom::InvocationSource source,
   LogEvent(GlicInstanceEvent::kOpen);
 
   // 2. Log Initial Invocation Source
-  if (!initial_invocation_source_.has_value()) {
-    initial_invocation_source_ = source;
+  if (!did_open_) {
+    did_open_ = true;
+    // Don't overwrite initial invocation source if it was set due to being
+    // invoked in the background.
+    if (!initial_invocation_source_.has_value()) {
+      initial_invocation_source_ = source;
+    }
     base::UmaHistogramEnumeration("Glic.Instance.InitialInvocationSource",
-                                  source);
+                                  *initial_invocation_source_);
   }
 
   // 3. Record Actions
@@ -726,14 +755,14 @@ void GlicInstanceMetrics::OnOpen(glic::mojom::InvocationSource source,
 
 void GlicInstanceMetrics::OnToggle(
     glic::mojom::InvocationSource source,
-    const ShowOptions& options,
+    const EmbedderKey& embedder_key,
     bool is_showing,
     std::unique_ptr<GlicWindowInvocationTracker> invocation_tracker) {
   if (invocation_tracker) {
-    invocation_tracker_ = std::move(invocation_tracker);
+    cui_trackers_.push_back(std::move(invocation_tracker));
   }
   base::RecordAction(base::UserMetricsAction("Glic.Instance.Toggle"));
-  if (std::holds_alternative<FloatingShowOptions>(options.embedder_options)) {
+  if (std::holds_alternative<FloatingEmbedderKey>(embedder_key)) {
     base::UmaHistogramEnumeration("Glic.Instance.Floaty.ToggleSource", source);
   } else {
     base::UmaHistogramEnumeration("Glic.Instance.SidePanel.ToggleSource",
@@ -919,18 +948,21 @@ void GlicInstanceMetrics::OnClientReady(EmbedderType type) {
   }
   base::TimeDelta presentation_time =
       base::TimeTicks::Now() - invocation_start_time_;
-  const char* suffix =
-      (type == EmbedderType::kSidePanel) ? "SidePanel" : "Floaty";
-  base::UmaHistogramCustomTimes(
-      base::StrCat({"Glic.Instance.PanelPresentationTime.", suffix}),
-      presentation_time, base::Milliseconds(1), base::Seconds(60), 50);
+  if (type != EmbedderType::kUnknown) {
+    base::UmaHistogramCustomTimes(
+        base::StrCat({"Glic.Instance.PanelPresentationTime.",
+                      GetEmbedderTypeString(type)}),
+        presentation_time, base::Milliseconds(1), base::Seconds(60), 50);
+  }
   invocation_start_time_ = base::TimeTicks();
 }
 
 void GlicInstanceMetrics::LogEvent(GlicInstanceEvent event) {
-  if (invocation_tracker_) {
-    if (invocation_tracker_->OnEvent(event)) {
-      invocation_tracker_.reset();
+  for (auto it = cui_trackers_.begin(); it != cui_trackers_.end();) {
+    if ((*it)->OnEvent(event)) {
+      it = cui_trackers_.erase(it);
+    } else {
+      ++it;
     }
   }
   base::UmaHistogramEnumeration("Glic.Instance.EventCounts", event);
@@ -966,12 +998,16 @@ int GlicInstanceMetrics::GetEventCount(GlicInstanceEvent event) {
 }
 
 void GlicInstanceMetrics::OnUserInputSubmitted(mojom::WebClientMode mode) {
-  // Try to attribute the input submission to the currently focused tab for
-  // daisy chain metrics.
-  if (current_ui_mode_ == EmbedderType::kSidePanel && sharing_manager_) {
-    if (auto* tab = sharing_manager_->GetFocusedTabData().focus()) {
-      if (auto* helper = GlicInstanceHelper::From(tab)) {
-        helper->OnDaisyChainAction(DaisyChainFirstAction::kInputSubmitted);
+  if (current_ui_mode_ == EmbedderType::kSidePanel) {
+    side_panel_prompt_count_++;
+
+    // Try to attribute the input submission to the currently focused tab for
+    // daisy chain metrics.
+    if (sharing_manager_) {
+      if (auto* tab = sharing_manager_->GetFocusedTabData().focus()) {
+        if (auto* helper = GlicInstanceHelper::From(tab)) {
+          helper->OnDaisyChainAction(DaisyChainFirstAction::kInputSubmitted);
+        }
       }
     }
   }
@@ -990,6 +1026,8 @@ void GlicInstanceMetrics::OnUserInputSubmitted(mojom::WebClientMode mode) {
   }
   session_manager_.OnUserInputSubmitted(mode);
   LogEvent(GlicInstanceEvent::kUserInputSubmitted);
+  cui_trackers_.push_back(std::make_unique<GlicSubmitQueryCuiTracker>());
+
   base::RecordAction(base::UserMetricsAction("GlicResponseInputSubmit"));
 
   if (sharing_manager_) {
@@ -1158,6 +1196,19 @@ void GlicInstanceMetrics::OnResponseStopped(mojom::ResponseStopCause cause) {
           break;
         case mojom::WebClientMode::kAudio:
           turn_source = GlicTurnSource::kFloatyAudio;
+          break;
+        case mojom::WebClientMode::kUnknown:
+          turn_source = GlicTurnSource::kUnknown;
+          break;
+      }
+      break;
+    case EmbedderType::kTab:
+      switch (turn_.input_mode_) {
+        case mojom::WebClientMode::kText:
+          turn_source = GlicTurnSource::kTabText;
+          break;
+        case mojom::WebClientMode::kAudio:
+          turn_source = GlicTurnSource::kTabAudio;
           break;
         case mojom::WebClientMode::kUnknown:
           turn_source = GlicTurnSource::kUnknown;

@@ -18,7 +18,6 @@
 // Trigger identifiers currently used; duplicates not allowed.
 extern const char kHatsSurveyTriggerAutofillAddress[];
 extern const char kHatsSurveyTriggerAutofillAddressUserPerception[];
-extern const char kHatsSurveyTriggerAutofillAiFilling[];
 extern const char kHatsSurveyTriggerAutofillAiSavePrompt[];
 extern const char kHatsSurveyTriggerAutofillAddressUserDeclinedSuggestion[];
 extern const char kHatsSurveyTriggerAutofillAddressUserDeclinedSave[];
@@ -106,8 +105,10 @@ extern const char kHatsSurveyTriggerSigninNtpSigninButton[];
 extern const char kHatsSurveyTriggerSigninNtpAccountAvatarTap[];
 extern const char kHatsSurveyTriggerSigninNtpPromo[];
 extern const char kHatsSurveyTriggerSigninBookmarkPromo[];
+extern const char kHatsSurveyTriggerSuspiciousSiteWarning[];
 #endif  // #if !BUILDFLAG(IS_ANDROID)
 
+extern const char kHatsSurveyTriggerAutofillAiFilling[];
 extern const char kHatsSurveyTriggerPermissionsPrompt[];
 extern const char kHatsSurveyTriggerPrivacySandboxActSurvey[];
 extern const char kHatsSurveyTriggerOnFocusZpsSuggestionsHappiness[];

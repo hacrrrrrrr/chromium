@@ -13,21 +13,19 @@ import './exception_edit_dialog.js';
 import './exception_entry.js';
 import './exception_tabbed_add_dialog.js';
 
-import type {PrefsMixinInterface} from '/shared/settings/prefs/prefs_mixin.js';
-import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
+import {PrefService} from '/shared/settings/prefs2/pref_service.js';
+import {PrefServiceObserverMixin} from '/shared/settings/prefs2/pref_service_observer_mixin.js';
 import type {CrActionMenuElement} from 'chrome://resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import type {CrButtonElement} from 'chrome://resources/cr_elements/cr_button/cr_button.js';
 import type {CrCollapseElement} from 'chrome://resources/cr_elements/cr_collapse/cr_collapse.js';
 import type {CrExpandButtonElement} from 'chrome://resources/cr_elements/cr_expand_button/cr_expand_button.js';
 import type {CrLazyRenderElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.js';
 import type {CrTooltipElement} from 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
-import type {ListPropertyUpdateMixinInterface} from 'chrome://resources/cr_elements/list_property_update_mixin.js';
 import {ListPropertyUpdateMixin} from 'chrome://resources/cr_elements/list_property_update_mixin.js';
 import {assert} from 'chrome://resources/js/assert.js';
 import type {DomRepeat} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import type {TooltipMixinInterface} from '../../tooltip_mixin.js';
 import {TooltipMixin} from '../../tooltip_mixin.js';
 import type {PerformanceMetricsProxy} from '../performance_metrics_proxy.js';
 import {MemorySaverModeExceptionListAction, PerformanceMetricsProxyImpl} from '../performance_metrics_proxy.js';
@@ -51,11 +49,8 @@ export interface ExceptionListElement {
   };
 }
 
-type Constructor<T> = new (...args: any[]) => T;
-const ExceptionListElementBase =
-    TooltipMixin(ListPropertyUpdateMixin(PrefsMixin(PolymerElement))) as
-    Constructor<TooltipMixinInterface&ListPropertyUpdateMixinInterface&
-                PrefsMixinInterface&PolymerElement>;
+const ExceptionListElementBase = TooltipMixin(
+    ListPropertyUpdateMixin(PrefServiceObserverMixin(PolymerElement)));
 
 export class ExceptionListElement extends
     ExceptionListElementBase {
@@ -100,13 +95,6 @@ export class ExceptionListElement extends
     };
   }
 
-  static get observers() {
-    return [
-      `onPrefsChanged_(prefs.${TAB_DISCARD_EXCEPTIONS_PREF}.value.*,` +
-          `prefs.${TAB_DISCARD_EXCEPTIONS_MANAGED_PREF}.value.*)`,
-    ];
-  }
-
   declare private siteList_: ExceptionEntry[];
   declare private overflowSiteListExpanded: boolean;
   declare private selectedRule_: string;
@@ -116,6 +104,13 @@ export class ExceptionListElement extends
 
   private metricsProxy_: PerformanceMetricsProxy =
       PerformanceMetricsProxyImpl.getInstance();
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.addPrefObserver(TAB_DISCARD_EXCEPTIONS_PREF, () => this.updateList_());
+    this.addPrefObserver(
+        TAB_DISCARD_EXCEPTIONS_MANAGED_PREF, () => this.updateList_());
+  }
 
   private hasSites_(): boolean {
     return this.siteList_.length > 0;
@@ -154,7 +149,8 @@ export class ExceptionListElement extends
   }
 
   private onDeleteClick_() {
-    this.deletePrefDictEntry(TAB_DISCARD_EXCEPTIONS_PREF, this.selectedRule_);
+    PrefService.getInstance().deletePrefDictEntry(
+        TAB_DISCARD_EXCEPTIONS_PREF, this.selectedRule_);
     this.metricsProxy_.recordExceptionListAction(
         MemorySaverModeExceptionListAction.REMOVE);
     this.$.menu.get().close();
@@ -168,7 +164,7 @@ export class ExceptionListElement extends
     this.showEditDialog_ = false;
   }
 
-  private onPrefsChanged_() {
+  private updateList_() {
     const newSites: ExceptionEntry[] = [];
 
     const siteToExceptionEntry =
@@ -179,8 +175,8 @@ export class ExceptionListElement extends
         });
 
     {
-      const prefObject =
-          this.getPref<string[]>(TAB_DISCARD_EXCEPTIONS_MANAGED_PREF);
+      const prefObject = PrefService.getInstance().getPref<string[]>(
+          TAB_DISCARD_EXCEPTIONS_MANAGED_PREF);
       const sites: string[] = prefObject.value;
       newSites.push(
           ...sites.map(site => siteToExceptionEntry(site, prefObject)));
@@ -188,7 +184,8 @@ export class ExceptionListElement extends
 
     {
       const prefObject =
-          this.getPref<Record<string, string>>(TAB_DISCARD_EXCEPTIONS_PREF);
+          PrefService.getInstance().getPref<Record<string, string>>(
+              TAB_DISCARD_EXCEPTIONS_PREF);
       const sites: string[] = Object.keys(prefObject.value);
       newSites.push(
           ...sites.map(site => siteToExceptionEntry(site, prefObject)));

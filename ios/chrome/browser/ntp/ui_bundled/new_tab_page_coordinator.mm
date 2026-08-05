@@ -50,6 +50,8 @@
 #import "ios/chrome/browser/content_suggestions/coordinator/content_suggestions_coordinator.h"
 #import "ios/chrome/browser/content_suggestions/coordinator/content_suggestions_delegate.h"
 #import "ios/chrome/browser/content_suggestions/coordinator/content_suggestions_mediator.h"
+#import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_collection_view.h"
+#import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_smart_stack_layout.h"
 #import "ios/chrome/browser/content_suggestions/ui/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/content_suggestions/ui/content_suggestions_view_controller.h"
 #import "ios/chrome/browser/context_menu/ui_bundled/link_preview/link_preview_coordinator.h"
@@ -173,7 +175,7 @@
                                      FeedWrapperViewControllerDelegate,
                                      HomeCustomizationDelegate,
                                      HomeStartDataSource,
-                                     IdentityManagerObserverBridgeDelegate,
+                                     IdentityManagerObserving,
                                      NewTabPageActionsDelegate,
                                      NewTabPageContentDelegate,
                                      NewTabPageDelegate,
@@ -201,6 +203,7 @@
       _familyLinkUserCapabilitiesObserverBridge;
 
   BubbleViewControllerPresenter* _fakeboxLensIconBubblePresenter;
+  BubbleViewControllerPresenter* _aimBubblePresenter;
 }
 
 // Coordinator for the ContentSuggestions.
@@ -332,8 +335,8 @@
 }
 
 - (void)dealloc {
-  CHECK(!self.started, base::NotFatalUntil::M145);
-  CHECK(!_authServiceObserverBridge, base::NotFatalUntil::M145);
+  CHECK(!self.started);
+  CHECK(!_authServiceObserverBridge);
 }
 
 - (void)start {
@@ -497,6 +500,10 @@
   _safariDataImportExportCoordinator = nil;
 
   [_fakeboxLensIconBubblePresenter dismissAnimated:NO];
+  _fakeboxLensIconBubblePresenter = nil;
+
+  [_aimBubblePresenter dismissAnimated:NO];
+  _aimBubblePresenter = nil;
 
   _identityManager = nullptr;
 
@@ -645,6 +652,26 @@
   }
 
   [self presentLensIconBubbleNow];
+}
+
+- (void)presentAIModeBubble {
+  if (!IsLevelUpEnabled()) {
+    return;
+  }
+
+  if (!self.isScrolledToTop) {
+    __weak __typeof(self) weakSelf = self;
+    [UIView animateWithDuration:kMaterialDuration1
+        animations:^{
+          [weakSelf setContentOffsetToTop];
+        }
+        completion:^(BOOL finished) {
+          [weakSelf presentAIModeBubbleNow];
+        }];
+    return;
+  }
+
+  [self presentAIModeBubbleNow];
 }
 
 - (BOOL)isFeedVisible {
@@ -854,6 +881,8 @@
 // Binds properties to the New Tab Page view controller.
 - (void)configureViewControllerProperties:
     (NewTabPageViewController*)NTPViewController {
+  NTPViewController.layoutGuideCenter =
+      LayoutGuideCenterForBrowser(self.browser);
   NTPViewController.incognitoDisabled =
       IsIncognitoModeDisabled(self.prefService);
   NTPViewController.mutator = self.NTPMediator;
@@ -885,6 +914,12 @@
     self.NTPRedesignViewController.feedViewController = self.feedViewController;
     self.NTPRedesignViewController.mostVisitedViewController =
         self.contentSuggestionsCoordinator.viewController;
+    self.NTPRedesignViewController.magicStackViewController =
+        self.contentSuggestionsCoordinator.magicStackCollectionView;
+    MagicStackSmartStackLayout* customLayout =
+        [[MagicStackSmartStackLayout alloc] init];
+    [self.contentSuggestionsCoordinator.magicStackCollectionView
+        updateCollectionViewLayout:customLayout];
     self.NTPRedesignViewController.NTPShortcutsHandler = self;
     feature_engagement::Tracker* tracker =
         feature_engagement::TrackerFactory::GetForProfile(self.profile);
@@ -1066,6 +1101,10 @@
 
 - (void)toolsMenuWasTapped:(UIView*)toolsMenu {
   CHECK(IsChromeNextIaEnabled());
+  base::RecordAction(base::UserMetricsAction("MobileToolbarShowMenuOnNTP"));
+  base::RecordAction(
+      base::UserMetricsAction("MobileToolbarNTPEntrypointShowMenu"));
+
   id<PopupMenuCommands> popupMenuHandler = HandlerForProtocol(
       self.browser->GetCommandDispatcher(), PopupMenuCommands);
   [popupMenuHandler showToolsMenuPopup];
@@ -1095,7 +1134,7 @@
     _signinCoordinator.signinCompletion(
         _signinCoordinator, SigninCoordinatorResultInterrupted, nil);
     // The signin-completion should have unset the sign-in coordinator.
-    CHECK(!_signinCoordinator, base::NotFatalUntil::M146);
+    CHECK(!_signinCoordinator);
   }
   __weak __typeof(self) weakSelf = self;
   [command addSigninCompletion:^(SigninCoordinator* coordinator,
@@ -1288,8 +1327,7 @@
                                                DoNothingContinuationProvider()];
   } else {
     Browser* browser = self.browser;
-    CHECK_EQ(browser->type(), Browser::Type::kRegular,
-             base::NotFatalUntil::M145);
+    CHECK_EQ(browser->type(), Browser::Type::kRegular);
     _signinCoordinator = [SigninCoordinator
         instantSigninCoordinatorWithBaseViewController:baseVC
                                                browser:browser
@@ -1609,11 +1647,11 @@
   }
 }
 
-#pragma mark - IdentityManagerObserverBridgeDelegate
+#pragma mark - IdentityManagerObserving
 
 // TODO(crbug.com/346756363): Remove this method as it is replaced with
 // `onIsSubjectToParentalControlsCapabilityChanged`.
-- (void)onPrimaryAccountChanged:
+- (void)primaryAccountDidChange:
     (const signin::PrimaryAccountChangeEvent&)event {
   // An account change may trigger after the coordinator has been stopped.
   // In this case do not process the event.
@@ -1676,7 +1714,7 @@
 // stopped.
 - (void)accountMenuCoordinatorWantsToBeStopped:
     (AccountMenuCoordinator*)coordinator {
-  CHECK_EQ(_accountMenuCoordinator, coordinator, base::NotFatalUntil::M140);
+  CHECK_EQ(_accountMenuCoordinator, coordinator);
   [self stopAccountMenuCoordinator];
 }
 
@@ -1712,9 +1750,8 @@
 }
 
 - (void)showAccountMenu:(UIView*)identityDisc {
-  UIViewController* baseVC = [self activeViewController];
   _accountMenuCoordinator = [[AccountMenuCoordinator alloc]
-      initWithBaseViewController:baseVC
+      initWithBaseViewController:self.baseViewController
                          browser:self.browser
                       anchorView:identityDisc
                      accessPoint:AccountMenuAccessPoint::kNewTabPage
@@ -1942,7 +1979,11 @@
 // Restores the saved scroll position of the NTP associated with `self.webState`
 // if necessary.
 - (void)restoreNTPScrollPosition {
-  [self.NTPMediator restoreNTPScrollPositionForWebState:self.webState];
+  if ([self isStartSurface]) {
+    [self.NTPMediator.consumer restoreScrollPosition:-CGFLOAT_MAX];
+  } else {
+    [self.NTPMediator restoreNTPScrollPositionForWebState:self.webState];
+  }
 }
 
 // Opens the Home customization menu at a specific `page`.
@@ -2031,6 +2072,35 @@
   }
   [presenter presentInViewController:activeVC anchorPoint:anchorPoint];
   _fakeboxLensIconBubblePresenter = presenter;
+}
+
+// Presents the AI Mode button IPH bubble without checking scroll position.
+- (void)presentAIModeBubbleNow {
+  NSString* text = l10n_util::GetNSString(IDS_IOS_LEVEL_UP_AI_SEARCH_IPH);
+  UIView* aimButton = [LayoutGuideCenterForBrowser(self.browser)
+      referencedViewUnderName:kNTPAIMButtonGuide];
+  if (!aimButton) {
+    return;
+  }
+  CGPoint anchorPoint = [aimButton.superview convertPoint:aimButton.frame.origin
+                                                   toView:nil];
+  anchorPoint.x += aimButton.frame.size.width / 2;
+  anchorPoint.y += aimButton.frame.size.height;
+
+  BubbleViewControllerPresenter* presenter =
+      [[BubbleViewControllerPresenter alloc]
+          initDefaultBubbleWithText:text
+                     arrowDirection:BubbleArrowDirectionUp
+                          alignment:BubbleAlignmentTopOrLeading
+                  dismissalCallback:nil];
+  // Discard if it doesn't fit in the view as it is currently shown.
+  UIViewController* viewController = [self activeViewController];
+  if (![presenter canPresentInView:viewController.view
+                       anchorPoint:anchorPoint]) {
+    return;
+  }
+  [presenter presentInViewController:viewController anchorPoint:anchorPoint];
+  _aimBubblePresenter = presenter;
 }
 
 #pragma mark - HomeCustomizationDelegate

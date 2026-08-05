@@ -21,10 +21,10 @@
 #include "base/types/expected.h"
 #include "base/types/optional_util.h"
 #include "build/build_config.h"
+#include "content/browser/sandboxed_process_launcher_delegate.h"
 #include "content/common/features.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_launcher_utils.h"
-#include "content/public/browser/sandboxed_process_launcher_delegate.h"
 #include "content/public/browser/tracing_support.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
@@ -98,6 +98,10 @@ bool ChildProcessLauncher::Client::CanUseWarmUpConnection() {
 bool ChildProcessLauncher::Client::HasSpareRendererPriority() {
   return false;
 }
+
+bool ChildProcessLauncher::Client::IsForOutermostMainFrame() {
+  return false;
+}
 #endif
 
 ChildProcessLauncher::ChildProcessLauncher(
@@ -137,6 +141,7 @@ ChildProcessLauncher::ChildProcessLauncher(
       weak_factory_.GetWeakPtr(), terminate_child_on_shutdown_,
 #if BUILDFLAG(IS_ANDROID)
       client_->CanUseWarmUpConnection(), client_->HasSpareRendererPriority(),
+      client_->IsForOutermostMainFrame(),
 #endif
       std::move(mojo_invitation), process_error_callback, std::move(file_data),
       std::move(histogram_memory_region),

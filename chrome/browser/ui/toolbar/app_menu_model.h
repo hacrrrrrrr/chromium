@@ -123,6 +123,7 @@ enum AppMenuAction {
   MENU_ACTION_SHOW_TRAVEL = 100,
   MENU_ACTION_SHOW_CONTACT_INFO = 101,
   // MENU_ACTION_SHOW_CONTEXTUAL_TASKS_SIDE_PANEL = 102, // DEPRECATED
+  MENU_ACTION_NEW_ISOLATED_WINDOW = 103,
   LIMIT_MENU_ACTION
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/ui/enums.xml:WrenchMenuAction)
@@ -192,7 +193,6 @@ class AppMenuModel : public ui::SimpleMenuModel,
                      public user_education::HighlightingSimpleMenuModelDelegate,
                      public ui::ButtonMenuItemModel::Delegate {
  public:
-  DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kCreateNewTabGroupTopLevel);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kProfileMenuItem);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kProfileOpenGuestItem);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kBookmarksMenuItem);

@@ -39,19 +39,6 @@ PrivacySandboxService* GetPrivacySandboxService(
   return PrivacySandboxServiceFactory::GetForProfile(
       Profile::FromJavaObject(j_profile));
 }
-
-std::vector<jni_zero::ScopedJavaLocalRef<jobject>> ToJavaTopicsArray(
-    JNIEnv* env,
-    const std::vector<privacy_sandbox::CanonicalTopic>& topics) {
-  std::vector<ScopedJavaLocalRef<jobject>> j_topics;
-  for (const auto& topic : topics) {
-    j_topics.push_back(Java_PrivacySandboxBridge_createTopic(
-        env, topic.topic_id().value(), topic.taxonomy_version(),
-        ConvertUTF16ToJavaString(env, topic.GetLocalizedRepresentation()),
-        ConvertUTF16ToJavaString(env, topic.GetLocalizedDescription())));
-  }
-  return j_topics;
-}
 }  // namespace
 
 static bool JNI_PrivacySandboxBridge_IsPrivacySandboxRestricted(
@@ -64,86 +51,6 @@ static bool JNI_PrivacySandboxBridge_IsRestrictedNoticeEnabled(
     JNIEnv* env,
     const JavaRef<jobject>& j_profile) {
   return GetPrivacySandboxService(j_profile)->IsRestrictedNoticeEnabled();
-}
-
-static std::vector<jni_zero::ScopedJavaLocalRef<jobject>>
-JNI_PrivacySandboxBridge_GetCurrentTopTopics(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile) {
-  return ToJavaTopicsArray(
-      env, GetPrivacySandboxService(j_profile)->GetCurrentTopTopics());
-}
-
-static std::vector<jni_zero::ScopedJavaLocalRef<jobject>>
-JNI_PrivacySandboxBridge_GetBlockedTopics(JNIEnv* env,
-                                          const JavaRef<jobject>& j_profile) {
-  return ToJavaTopicsArray(
-      env, GetPrivacySandboxService(j_profile)->GetBlockedTopics());
-}
-
-static std::vector<jni_zero::ScopedJavaLocalRef<jobject>>
-JNI_PrivacySandboxBridge_GetFirstLevelTopics(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile) {
-  return ToJavaTopicsArray(
-      env, GetPrivacySandboxService(j_profile)->GetFirstLevelTopics());
-}
-
-static std::vector<jni_zero::ScopedJavaLocalRef<jobject>>
-JNI_PrivacySandboxBridge_GetChildTopicsCurrentlyAssigned(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile,
-    int32_t topic_id,
-    int32_t taxonomy_version) {
-  return ToJavaTopicsArray(
-      env, GetPrivacySandboxService(j_profile)->GetChildTopicsCurrentlyAssigned(
-               privacy_sandbox::CanonicalTopic(browsing_topics::Topic(topic_id),
-                                               taxonomy_version)));
-}
-
-static void JNI_PrivacySandboxBridge_SetTopicAllowed(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile,
-    int32_t topic_id,
-    int32_t taxonomy_version,
-    bool allowed) {
-  GetPrivacySandboxService(j_profile)->SetTopicAllowed(
-      privacy_sandbox::CanonicalTopic(browsing_topics::Topic(topic_id),
-                                      taxonomy_version),
-      allowed);
-}
-
-static void JNI_PrivacySandboxBridge_GetFledgeJoiningEtldPlusOneForDisplay(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile,
-    const JavaRef<jobject>& j_callback) {
-  GetPrivacySandboxService(j_profile)->GetFledgeJoiningEtldPlusOneForDisplay(
-      base::BindOnce(
-          [](const base::android::JavaRef<jobject>& j_callback,
-             std::vector<std::string> strings) {
-            DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-            JNIEnv* env = base::android::AttachCurrentThread();
-            base::android::RunObjectCallbackAndroid(
-                j_callback, base::android::ToJavaArrayOfStrings(env, strings));
-          },
-          base::android::ScopedJavaGlobalRef<jobject>(j_callback)));
-}
-
-static std::vector<std::string>
-JNI_PrivacySandboxBridge_GetBlockedFledgeJoiningTopFramesForDisplay(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile) {
-  return GetPrivacySandboxService(j_profile)
-      ->GetBlockedFledgeJoiningTopFramesForDisplay();
-}
-
-static void JNI_PrivacySandboxBridge_SetFledgeJoiningAllowed(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile,
-    const JavaRef<jstring>& top_frame_etld_plus1,
-    bool allowed) {
-  GetPrivacySandboxService(j_profile)->SetFledgeJoiningAllowed(
-      base::android::ConvertJavaStringToUTF8(top_frame_etld_plus1), allowed);
 }
 
 static bool JNI_PrivacySandboxBridge_IsRelatedWebsiteSetsDataAccessEnabled(
@@ -195,13 +102,6 @@ static bool JNI_PrivacySandboxBridge_IsPartOfManagedRelatedWebsiteSet(
       schemefulSite);
 }
 
-static void JNI_PrivacySandboxBridge_TopicsToggleChanged(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile,
-    bool new_value) {
-  GetPrivacySandboxService(j_profile)->TopicsToggleChanged(new_value);
-}
-
 static void
 JNI_PrivacySandboxBridge_SetAllPrivacySandboxAllowedForTesting(  // IN-TEST
     JNIEnv* env,
@@ -209,14 +109,6 @@ JNI_PrivacySandboxBridge_SetAllPrivacySandboxAllowedForTesting(  // IN-TEST
   PrivacySandboxSettingsFactory::GetForProfile(
       Profile::FromJavaObject(j_profile))
       ->SetAllPrivacySandboxAllowedForTesting();  // IN-TEST
-}
-
-static bool
-JNI_PrivacySandboxBridge_PrivacySandboxPrivacyGuideShouldShowAdTopicsCard(
-    JNIEnv* env,
-    const JavaRef<jobject>& j_profile) {
-  return GetPrivacySandboxService(j_profile)
-      ->PrivacySandboxPrivacyGuideShouldShowAdTopicsCard();
 }
 
 static bool JNI_PrivacySandboxBridge_ShouldUsePrivacyPolicyChinaDomain(

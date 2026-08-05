@@ -6,6 +6,7 @@
 #define COMPONENTS_SIGNIN_CORE_BROWSER_ACCOUNT_PREVIEW_DATA_SERVICE_IMPL_H_
 
 #include <memory>
+#include <optional>
 
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -14,6 +15,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/version_info/channel.h"
+#include "build/build_config.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/signin/core/browser/account_preview_data_service.h"
 #include "components/signin/core/browser/account_preview_metrics_recorder.h"
 #include "components/signin/public/base/wait_for_network_callback_helper.h"
@@ -36,6 +39,15 @@ class AccountPreviewDataFetcher;
 class AccountPreviewDataServiceImpl : public AccountPreviewDataService,
                                       public IdentityManager::Observer {
  public:
+  // LINT.IfChange(FetchTriggerCause)
+  enum class FetchTriggerCause {
+    kPeriodicRefresh = 0,
+    kRefreshTokenUpdated = 1,
+    kRefreshTokenRemoved = 2,
+    kMaxValue = kRefreshTokenRemoved,
+  };
+  // LINT.ThenChange(//tools/metrics/histograms/metadata/signin/enums.xml:AccountPreviewFetchTriggerCause)
+
   AccountPreviewDataServiceImpl(
       IdentityManager* identity_manager,
       PrefService* pref_service,
@@ -51,15 +63,21 @@ class AccountPreviewDataServiceImpl : public AccountPreviewDataService,
   ~AccountPreviewDataServiceImpl() override;
 
   // AccountPreviewDataService implementation:
-  AccountPreviewPreference GetPreferredAccountForPromo() const override;
+  std::optional<AccountPreviewPreference> GetPreferredAccountForPromo()
+      const override;
 
   // Retrieves the cached preview data. Exposed specifically for testing.
+  // Note: This may not be available if the browser restarted and no fetch has
+  // happened, which may wait until the timer is activated.
   std::optional<AccountPreviewData> GetAccountPreviewData(
       const GaiaId& gaia_id) const;
 
-  bool HasActiveFetcherForTesting(const GaiaId& gaia_id) const {
-    return active_fetchers_.contains(gaia_id);
-  }
+#if BUILDFLAG(IS_ANDROID)
+  void UpdateExternalAppAccount(
+      const std::optional<std::string>& email) override;
+#endif
+
+  bool HasActiveFetcherForTesting(const GaiaId& gaia_id) const;
 
   void SetFetchCompleteCallbackForTesting(base::OnceClosure callback);
   void SetAllDataAvailableCallbackForTesting(base::OnceClosure callback);
@@ -74,19 +92,28 @@ class AccountPreviewDataServiceImpl : public AccountPreviewDataService,
 
  private:
   void RefreshAllAccountPreviewData();
-  void EnsureAllAccountsFetched(bool is_periodic_refresh);
+  void EnsureAllAccountsFetched(FetchTriggerCause cause);
   void FetchAccountPreviewData(const GaiaId& gaia_id);
   void StartFetch(const GaiaId& gaia_id);
   void OnSingleFetchCompleted(const GaiaId& gaia_id,
                               std::optional<AccountPreviewData> data);
+  bool HaveAccountsMutatedSinceLastFetch(
+      const std::vector<CoreAccountInfo>& accounts) const;
+  void RecordAccountsUsedForLastFetch();
   void OnAllFetchesCompleted(bool should_reset_periodic_timer);
+  void OnSigninAllowedPrefChanged();
   void CreateAndStartRepeatingTimer();
   void ResetTimer();
-  AccountPreviewPreference ComputePreferredAccount() const;
+  std::optional<AccountPreviewPreference> ComputePreferredAccount() const;
 
-  AccountPreviewPreference ReadPreviewPreferenceFromPrefs() const;
-  void WritePreviewPreferenceToPrefs(
-      const AccountPreviewPreference& preference);
+  void ClearMemoryData();
+  void ClearStoredResults();
+  void ClearAllDataAndResults();
+
+  std::optional<AccountPreviewPreference> ReadPreferredAccountFromPrefs() const;
+  // Writing `std::nullopt` as `preference` clears the pref.
+  void WritePreferredAccountToPrefs(
+      std::optional<AccountPreviewPreference> preference);
 
   raw_ptr<IdentityManager> identity_manager_ = nullptr;
   raw_ptr<PrefService> pref_service_ = nullptr;
@@ -112,6 +139,7 @@ class AccountPreviewDataServiceImpl : public AccountPreviewDataService,
   // is removed.
   absl::flat_hash_map<CoreAccountId, GaiaId> account_id_to_gaia_id_;
 
+  PrefChangeRegistrar pref_change_registrar_;
   base::ScopedObservation<IdentityManager, IdentityManager::Observer>
       identity_manager_observation_{this};
 

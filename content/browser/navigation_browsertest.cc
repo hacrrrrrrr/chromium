@@ -9929,4 +9929,456 @@ IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
             embedded_test_server()->GetURL("/title1.html?push"));
 }
 
+// Regression test for crbug.com/40580002: When a cross-document navigation is
+// pending on a page with `upgrade-insecure-requests` CSP, the browser-side
+// insecure_request_policy must not be reset by the new document's CSP
+// initialization. Previously, ContentSecurityPolicy::BindToDelegate() for the
+// new document would send EnforceInsecureRequestPolicy(0) during the
+// Commit->DidCommit interval, clobbering the still-live old document's
+// BrowsingContextState (kUpgradeInsecureRequests ->
+// kLeaveInsecureRequestsAlone). A subsequent same-document navigation from the
+// old document then hit a mismatch: the renderer reported policy=1 (from the
+// old document's SecurityContext) while the browser had policy=0.
+//
+// The fix keeps the initial policy IPC off the mid-commit path: the local
+// renderer state is still set at CSP bind time (ApplyInsecureRequestPolicy),
+// but the browser is notified via DidCommitProvisionalLoadParams instead of a
+// separate IPC during commit. Post-commit policy updates (e.g. meta
+// http-equiv) still use NotifyBrowserOfInsecureRequestPolicy as before.
+class SameDocInsecureRequestPolicyTest : public NavigationBrowserTest {
+ public:
+  SameDocInsecureRequestPolicyTest() {
+    feature_list_.InitWithFeatures(
+        {features::kEnforceSameDocumentOriginInvariants}, {});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(SameDocInsecureRequestPolicyTest,
+                       SameDocNavDuringCrossDocNavWithUpgradeInsecureRequests) {
+  // Navigate to a page with upgrade-insecure-requests CSP header.
+  GURL initial_url = embedded_test_server()->GetURL(
+      "a.com",
+      "/set-header?Content-Security-Policy: upgrade-insecure-requests");
+  ASSERT_TRUE(NavigateToURL(shell(), initial_url));
+
+  // Start a cross-document same-origin navigation but pause it after the
+  // response is received (before DidCommit). Without the fix, the new
+  // document's CSP initialization fires EnforceInsecureRequestPolicy(0) here,
+  // resetting the browser-side BrowsingContextState while the old document is
+  // still live.
+  GURL cross_doc_url = embedded_test_server()->GetURL("a.com", "/title1.html");
+  TestNavigationManager manager(web_contents(), cross_doc_url);
+  shell()->LoadURL(cross_doc_url);
+  ASSERT_TRUE(manager.WaitForResponse());
+
+  // Perform a same-document navigation via pushState on the current page.
+  // Use kNavigationFinished rather than the default kLoadStopped because
+  // the cross-doc navigation is still outstanding, so load-stop will not
+  // fire for the same-doc pushState.
+  TestNavigationObserver same_doc_observer(web_contents());
+  same_doc_observer.set_wait_event(
+      TestNavigationObserver::WaitEvent::kNavigationFinished);
+  ASSERT_TRUE(ExecJs(shell(), "history.pushState({}, '', '?same_doc_nav')"));
+  same_doc_observer.Wait();
+
+  // The same-document navigation must commit at the expected URL.
+  EXPECT_EQ(current_frame_host()->GetLastCommittedURL().query(),
+            "same_doc_nav");
+
+  // The browser-side replicated insecure_request_policy must still reflect
+  // the currently committed document's UIR policy. Without the fix, the
+  // pending cross-doc navigation's CSP bind clobbers this to
+  // kLeaveInsecureRequestsAlone, producing the mismatch this test guards
+  // against.
+  EXPECT_EQ(main_frame()->current_replication_state().insecure_request_policy,
+            blink::mojom::InsecureRequestPolicy::kUpgradeInsecureRequests);
+
+  // Let the cross-document navigation finish.
+  ASSERT_TRUE(manager.WaitForNavigationFinished());
+}
+
+// Test that POST submissions and file grants are not preserved if a history
+// navigation ends up at an error page, per https://crbug.com/531165110.
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       DoNotGrantFileAccessToFailedSubframeHistoryNav) {
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  IsolateOriginsForTesting(embedded_test_server(), shell()->web_contents(),
+                           {"a.com", "b.com"});
+
+  // Navigate to site A with a same-origin iframe.
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(a)"));
+  ASSERT_TRUE(NavigateToURL(shell(), main_url));
+  FrameTreeNode* root = web_contents->GetPrimaryFrameTree().root();
+  ASSERT_EQ(1u, root->child_count());
+  FrameTreeNode* child = root->child_at(0);
+  ChildProcessId process_a = root->current_frame_host()->GetProcess()->GetID();
+
+  // Navigate iframe to site B.
+  GURL b_form_url(embedded_test_server()->GetURL(
+      "b.com", "/form_that_posts_to_echoall.html"));
+  ASSERT_TRUE(NavigateToURLFromRenderer(child, b_form_url));
+  ChildProcessId process_b = child->current_frame_host()->GetProcess()->GetID();
+  ASSERT_NE(process_a, process_b);
+
+  // Select a file in the form of the site B iframe.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  base::FilePath file_path;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir.GetPath(), &file_path));
+  ASSERT_TRUE(base::WriteFile(file_path, "b-private-data"));
+  {
+    base::RunLoop run_loop;
+    auto delegate = std::make_unique<FileChooserDelegate>(
+        file_path, run_loop.QuitClosure());
+    web_contents->SetDelegate(delegate.get());
+    ASSERT_TRUE(ExecJs(child, "document.getElementById('file').click();"));
+    run_loop.Run();
+    web_contents->SetDelegate(nullptr);
+  }
+
+  // Selecting the file should grant access to the file to the process for site
+  // B, and not the process for site A.
+  EXPECT_TRUE(policy->CanReadFile(process_b, file_path));
+  EXPECT_FALSE(policy->CanReadFile(process_a, file_path));
+
+  // Submit the form to another site B URL, which puts the POST data into the
+  // FrameNavigationEntry.
+  GURL b_post_target(embedded_test_server()->GetURL("b.com", "/echoall"));
+  {
+    TestNavigationObserver post_observer(web_contents, 1);
+    ASSERT_TRUE(
+        ExecJs(child, "document.getElementById('file-form').submit();"));
+    post_observer.Wait();
+  }
+  ASSERT_EQ(b_post_target, child->current_url());
+
+  // Navigate the iframe to site A again, whose process still has no access to
+  // the uploaded file.
+  GURL a_child_url(embedded_test_server()->GetURL("a.com", "/title2.html"));
+  ASSERT_TRUE(NavigateToURLFromRenderer(child, a_child_url));
+  ASSERT_EQ(process_a, child->current_frame_host()->GetProcess()->GetID());
+  ASSERT_FALSE(policy->CanReadFile(process_a, file_path));
+
+  // Install a CSP that will cause a back navigation to site B to fail.
+  ASSERT_TRUE(ExecJs(root,
+                     "var meta = document.createElement('meta');"
+                     "meta.httpEquiv = 'Content-Security-Policy';"
+                     "meta.content = \"frame-src 'none'\";"
+                     "document.head.appendChild(meta);"));
+  // Ensure the CSP has propagated to the browser-side PolicyContainerHost
+  // (which the subframe NavigationRequest will snapshot for its frame-src
+  // check).
+  ASSERT_EQ(1u, root->current_frame_host()
+                    ->policy_container_host()
+                    ->policies()
+                    .content_security_policies.size());
+
+  // Go back to site B in the iframe, which will be blocked by CSP and result in
+  // an error page in site A's process.
+  {
+    TestNavigationObserver back_observer(web_contents, 1);
+    ASSERT_TRUE(ExecJs(root, "history.back();"));
+    back_observer.Wait();
+    EXPECT_FALSE(back_observer.last_navigation_succeeded());
+    EXPECT_EQ(net::ERR_BLOCKED_BY_CSP, back_observer.last_net_error_code());
+  }
+  EXPECT_EQ(process_a, child->current_frame_host()->GetProcess()->GetID());
+  // The error page's URL is the original target (b.com).
+  EXPECT_EQ(b_post_target, child->current_url());
+
+  // Ensure that the failed navigation did not grant site A's process access to
+  // the file that was uploaded to site B.
+  EXPECT_FALSE(policy->CanReadFile(process_a, file_path));
+}
+
+// Similar to DoNotGrantFileAccessToFailedSubframeHistoryNav, but ensures that
+// POST submissions and file grants do work across cross-site 307/308 redirects
+// in session history, which intentionally preserve POST, even across processes.
+//
+// Note: This test uses NavigationBaseBrowserTest because it needs to create
+// ControllableHttpResponses before starting the embedded test server.
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
+                       RedirectOnReloadWithGrantedFile) {
+  // Define custom responses for two separate requests to /echoall, and then
+  // start the test server.
+  net::test_server::ControllableHttpResponse response1(embedded_test_server(),
+                                                       "/echoall");
+  net::test_server::ControllableHttpResponse response2(embedded_test_server(),
+                                                       "/echoall");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  IsolateOriginsForTesting(embedded_test_server(), shell()->web_contents(),
+                           {"a.com", "b.com"});
+
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  // Navigate to site A.
+  GURL main_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  ASSERT_TRUE(NavigateToURL(shell(), main_url));
+  FrameTreeNode* root = web_contents->GetPrimaryFrameTree().root();
+  ChildProcessId process_a = root->current_frame_host()->GetProcess()->GetID();
+
+  // Navigate cross-process to a page with a form on site B.
+  GURL b_form_url(embedded_test_server()->GetURL(
+      "b.com", "/form_that_posts_to_echoall.html"));
+  ASSERT_TRUE(NavigateToURLFromRenderer(root, b_form_url));
+  ChildProcessId process_b = root->current_frame_host()->GetProcess()->GetID();
+  ASSERT_NE(process_a, process_b);
+
+  // Select a file in the form of the site B frame.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  base::FilePath file_path;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir.GetPath(), &file_path));
+  ASSERT_TRUE(base::WriteFile(file_path, "b-private-data"));
+  {
+    base::RunLoop run_loop;
+    auto delegate = std::make_unique<FileChooserDelegate>(
+        file_path, run_loop.QuitClosure());
+    web_contents->SetDelegate(delegate.get());
+    ASSERT_TRUE(ExecJs(root, "document.getElementById('file').click();"));
+    run_loop.Run();
+    web_contents->SetDelegate(nullptr);
+  }
+
+  // Selecting the file should grant site B's process access to the file.
+  EXPECT_TRUE(policy->CanReadFile(process_b, file_path));
+
+  // Submit the form to another site B URL, which puts the POST data into the
+  // FrameNavigationEntry.
+  GURL b_post_target(embedded_test_server()->GetURL("b.com", "/echoall"));
+  {
+    TestNavigationObserver post_observer(web_contents, 1);
+    ASSERT_TRUE(ExecJs(root, "document.getElementById('file-form').submit();"));
+    response1.WaitForRequest();
+    response1.Send(
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "\r\n"
+        "Received.");
+    response1.Done();
+    post_observer.Wait();
+  }
+  ASSERT_EQ(b_post_target, root->current_url());
+
+  // Reload the page, which now redirects to site A using a 307 response that
+  // intentionally preserves the POST submission.
+  {
+    TestNavigationObserver back_observer(web_contents, 1);
+    web_contents->GetController().Reload(content::ReloadType::NORMAL,
+                                         /*check_for_repost=*/false);
+
+    // Send a redirect response from B to A.
+    response2.WaitForRequest();
+    response2.Send(
+        "HTTP/1.1 307 Temporary Redirect\r\n"
+        "Location: " +
+        main_url.spec() + "\r\n\r\n");
+    response2.Done();
+
+    back_observer.Wait();
+    EXPECT_TRUE(back_observer.last_navigation_succeeded());
+  }
+  EXPECT_EQ(main_url, root->current_url());
+
+  // There is now a second process for site A, since the previous one went away.
+  ChildProcessId process_a2 = root->current_frame_host()->GetProcess()->GetID();
+
+  // Due to the redirect, we should grant access to the previously posted file.
+  EXPECT_TRUE(policy->CanReadFile(process_a2, file_path));
+
+  // Check the FrameNavigationEntry's post data still exists as well.
+  NavigationEntryImpl* entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  scoped_refptr<FrameNavigationEntry> frame_entry =
+      entry->root_node()->frame_entry.get();
+  std::string content_type;
+  EXPECT_NE(frame_entry->GetPostData(&content_type), nullptr);
+}
+
+// Similar to DoNotGrantFileAccessToFailedSubframeHistoryNav, but ensures that
+// POST submissions and file grants are not preserved if a subframe reload ends
+// up at an error page even if a cross-site redirect occurs before the error.
+IN_PROC_BROWSER_TEST_F(NavigationBaseBrowserTest,
+                       DoNotGrantFileAccessToFailedSubframeReloadRedirect) {
+  // Define custom responses for two separate requests to /echoall, and then
+  // start the test server.
+  net::test_server::ControllableHttpResponse response1(embedded_test_server(),
+                                                       "/echoall");
+  net::test_server::ControllableHttpResponse response2(embedded_test_server(),
+                                                       "/echoall");
+  ASSERT_TRUE(embedded_test_server()->Start());
+  IsolateOriginsForTesting(embedded_test_server(), shell()->web_contents(),
+                           {"a.com", "b.com", "c.com"});
+
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+
+  // Navigate to site A with a same-origin iframe.
+  GURL main_url(embedded_test_server()->GetURL(
+      "a.com", "/cross_site_iframe_factory.html?a(a)"));
+  ASSERT_TRUE(NavigateToURL(shell(), main_url));
+  FrameTreeNode* root = web_contents->GetPrimaryFrameTree().root();
+  ASSERT_EQ(1u, root->child_count());
+  FrameTreeNode* child = root->child_at(0);
+  ChildProcessId process_a = root->current_frame_host()->GetProcess()->GetID();
+
+  // Navigate iframe to site B.
+  GURL b_form_url(embedded_test_server()->GetURL(
+      "b.com", "/form_that_posts_to_echoall.html"));
+  ASSERT_TRUE(NavigateToURLFromRenderer(child, b_form_url));
+  ChildProcessId process_b = child->current_frame_host()->GetProcess()->GetID();
+  ASSERT_NE(process_a, process_b);
+
+  // Select a file in the form of the site B iframe.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir temp_dir;
+  base::FilePath file_path;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir.GetPath(), &file_path));
+  ASSERT_TRUE(base::WriteFile(file_path, "b-private-data"));
+  {
+    base::RunLoop run_loop;
+    auto delegate = std::make_unique<FileChooserDelegate>(
+        file_path, run_loop.QuitClosure());
+    web_contents->SetDelegate(delegate.get());
+    ASSERT_TRUE(ExecJs(child, "document.getElementById('file').click();"));
+    run_loop.Run();
+    web_contents->SetDelegate(nullptr);
+  }
+
+  // Selecting the file should grant access to the file to the process for site
+  // B, and not the process for site A.
+  EXPECT_TRUE(policy->CanReadFile(process_b, file_path));
+  EXPECT_FALSE(policy->CanReadFile(process_a, file_path));
+
+  // Submit the form to another site B URL, which puts the POST data into the
+  // FrameNavigationEntry.
+  GURL b_post_target(embedded_test_server()->GetURL("b.com", "/echoall"));
+  {
+    TestNavigationObserver post_observer(web_contents, 1);
+    ASSERT_TRUE(
+        ExecJs(child, "document.getElementById('file-form').submit();"));
+    response1.WaitForRequest();
+    response1.Send(
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html; charset=utf-8\r\n"
+        "Cache-Control: no-store\r\n"
+        "\r\n"
+        "Received.");
+    response1.Done();
+    post_observer.Wait();
+  }
+  ASSERT_EQ(b_post_target, child->current_url());
+
+  // Install a CSP that will allow a reload to B but cause an error page if it
+  // redirects elsewhere (e.g., to site C).
+  ASSERT_TRUE(ExecJs(root,
+                     "var meta = document.createElement('meta');"
+                     "meta.httpEquiv = 'Content-Security-Policy';"
+                     "meta.content = \"frame-src http://b.com:*\";"
+                     "document.head.appendChild(meta);"));
+  // Ensure the CSP has propagated to the browser-side PolicyContainerHost
+  // (which the subframe NavigationRequest will snapshot for its frame-src
+  // check).
+  ASSERT_EQ(1u, root->current_frame_host()
+                    ->policy_container_host()
+                    ->policies()
+                    .content_security_policies.size());
+
+  // Reload the submitted form in the iframe, which redirects to C and will thus
+  // be blocked by CSP and result in an error page.
+  GURL c_url(embedded_test_server()->GetURL("c.com", "/title1.html"));
+  {
+    TestNavigationObserver reload_observer(web_contents, 1);
+    web_contents->GetController().ReloadFrame(child);
+
+    // Send a redirect response from B to C.
+    response2.WaitForRequest();
+    response2.Send(
+        "HTTP/1.1 307 Temporary Redirect\r\n"
+        "Location: " +
+        c_url.spec() + "\r\n\r\n");
+    response2.Done();
+    reload_observer.Wait();
+    EXPECT_FALSE(reload_observer.last_navigation_succeeded());
+    EXPECT_EQ(net::ERR_BLOCKED_BY_CSP, reload_observer.last_net_error_code());
+  }
+
+  // A browser-initiated reload goes into the destination (C) process without
+  // subframe error page isolation, rather than A's process. We can still verify
+  // that file access is not granted due to the error page.
+  //
+  // Note that using location.reload() in the subframe above makes this renderer
+  // initiated, but in that case the error page ends up in B's process (which is
+  // the current process of the subframe), which already has access to the file.
+  // A history navigation might be a way to cause the error page to be in A's
+  // process, but the test doesn't seem to be proceeding to the request in that
+  // case.
+  ChildProcessId process_c = child->current_frame_host()->GetProcess()->GetID();
+  EXPECT_NE(process_c, process_a);
+  EXPECT_NE(process_c, process_b);
+
+  // The error page's URL is the pre-error target (c.com).
+  EXPECT_EQ(c_url, child->current_url());
+
+  // Ensure that the failed navigation did not grant site C's process access to
+  // the file that was uploaded to site B.
+  EXPECT_FALSE(policy->CanReadFile(process_c, file_path));
+}
+
+// Verify that navigating an about:blank iframe (which sets
+// client_side_redirect_url to about:blank) succeeds.
+IN_PROC_BROWSER_TEST_F(NavigationBrowserTest,
+                       AboutBlankFrameClientSideRedirectUrl) {
+  GURL start_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), start_url));
+
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  FrameTreeNode* root = web_contents->GetPrimaryFrameTree().root();
+
+  // Create an iframe and navigate it to about:blank so that it is a committed,
+  // non-initial document.
+  EXPECT_TRUE(ExecJs(root->current_frame_host(),
+                     "var frame = document.createElement('iframe'); "
+                     "frame.id = 'child'; "
+                     "document.body.appendChild(frame);"));
+  EXPECT_TRUE(
+      NavigateIframeToURL(web_contents, "child", GURL(url::kAboutBlankURL)));
+
+  // Perform a client-side redirect (replacement navigation) from about:blank.
+  GURL target_url(embedded_test_server()->GetURL("b.com", "/title2.html"));
+  TestNavigationObserver nav_observer(web_contents);
+  EXPECT_TRUE(ExecJs(root->current_frame_host(),
+                     JsReplace("document.getElementById('child').contentWindow."
+                               "location.replace($1);",
+                               target_url)));
+  nav_observer.Wait();
+  EXPECT_TRUE(nav_observer.last_navigation_succeeded());
+
+  // Check that the client side redirect URL (about:blank) is pushed as the
+  // first URL onto the subframe's redirect chain.
+  NavigationEntryImpl* entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  FrameNavigationEntry* frame_entry = entry->GetFrameEntry(root->child_at(0));
+  ASSERT_TRUE(frame_entry);
+  EXPECT_EQ(frame_entry->redirect_chain().size(), 2u);
+  EXPECT_EQ(frame_entry->redirect_chain()[0], GURL(url::kAboutBlankURL));
+  EXPECT_EQ(frame_entry->redirect_chain()[1], target_url);
+}
+
 }  // namespace content

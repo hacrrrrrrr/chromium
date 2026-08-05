@@ -255,6 +255,14 @@ BASE_FEATURE(kUseAndroidCustomFrameDeadlines,
              base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<int> kAndroidCustomFrameDeadlinePresentationOffset{
     &kUseAndroidCustomFrameDeadlines, "presentation_offset", 0};
+const base::FeatureParam<base::TimeDelta>
+    kAndroidCustomFrameDeadlineMaxNonInteractiveIdleDuration{
+        &kUseAndroidCustomFrameDeadlines, "max_non_interactive_idle_duration",
+        base::Milliseconds(50)};
+const base::FeatureParam<base::TimeDelta>
+    kAndroidCustomFrameDeadlineMaxInteractionIdleDuration{
+        &kUseAndroidCustomFrameDeadlines, "max_interaction_idle_duration",
+        base::Seconds(3)};
 #endif
 
 // When enabled, SDR maximum luminance nits of then current display will be used
@@ -273,6 +281,8 @@ BASE_FEATURE(kUseDisplaySDRMaxLuminanceNits, base::FEATURE_DISABLED_BY_DEFAULT);
 // On mac, when the RenderWidgetHostViewMac is hidden, also hide the
 // DelegatedFrameHost. Among other things, it unlocks the compositor frames,
 // which can saves hundreds of MiB of memory with bfcache entries.
+// TODO(crbug.com/538294830): Enable this in Finch alongside
+// OmniboxWebUIPopupMarkAsHidden to fix Mac memory eviction tracking.
 BASE_FEATURE(kHideDelegatedFrameHostMac, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // When enabled, ClientResourceProvider will attempt to unlock and delete

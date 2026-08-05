@@ -40,7 +40,10 @@
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
+#include "chrome/browser/ui/side_panel/side_panel_action_callback.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
 #include "chrome/browser/ui/side_panel/side_panel_entry_key.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_browsertest.h"
@@ -70,6 +73,7 @@
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/network_change_notifier.h"
+#include "ui/actions/actions.h"
 #include "ui/base/ui_base_features.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -141,7 +145,7 @@ class BrowserCommandControllerBrowserTestRefreshOnly
     }
     translate::TranslateManager::SetIgnoreMissingKeyForTesting(true);
     net::NetworkChangeNotifier::CreateMockIfNeeded();
-    browser()->command_controller()->TabStateChanged();
+    chrome::BrowserCommandController::From(browser())->TabStateChanged();
   }
 };
 // Test case for actions behind Toolbar Pinning.
@@ -217,7 +221,8 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   Browser* browser = CreateGuestBrowser();
   EXPECT_TRUE(browser);
 
-  const CommandUpdater* command_updater = browser->command_controller();
+  const CommandUpdater* command_updater =
+      chrome::BrowserCommandController::From(browser);
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_SHOW_AVATAR_MENU));
 }
 #endif
@@ -254,23 +259,28 @@ class BrowserCommandControllerBrowserTestLockedFullscreen
 
     // Update the corresponding command controller state as well as other
     // states so we can verify what commands are enabled.
-    browser()->command_controller()->LockedFullscreenStateChanged();
-    browser()->command_controller()->TabStateChanged();
-    browser()->command_controller()->FullscreenStateChanged();
-    browser()->command_controller()->PrintingStateChanged();
-    browser()->command_controller()->ExtensionStateChanged();
-    browser()->command_controller()->FindBarVisibilityChanged();
-    browser()->command_controller()->UpdateReloadStopState(/*is_loading=*/true,
-                                                           /*force=*/false);
+    chrome::BrowserCommandController::From(browser())
+        ->LockedFullscreenStateChanged();
+    chrome::BrowserCommandController::From(browser())->TabStateChanged();
+    chrome::BrowserCommandController::From(browser())->FullscreenStateChanged();
+    chrome::BrowserCommandController::From(browser())->PrintingStateChanged();
+    chrome::BrowserCommandController::From(browser())->ExtensionStateChanged();
+    chrome::BrowserCommandController::From(browser())
+        ->FindBarVisibilityChanged();
+    chrome::BrowserCommandController::From(browser())->UpdateReloadStopState(
+        /*is_loading=*/true,
+        /*force=*/false);
   }
 
   void ExitLockedFullscreen() {
     ash::UnpinWindow(browser()->GetWindow()->GetNativeWindow());
-    browser()->command_controller()->LockedFullscreenStateChanged();
+    chrome::BrowserCommandController::From(browser())
+        ->LockedFullscreenStateChanged();
   }
 
   CommandUpdater* GetCommandUpdater() {
-    return browser()->command_controller()->command_updater_.get();
+    return chrome::BrowserCommandController::From(browser())
+        ->command_updater_.get();
   }
 
  private:
@@ -332,7 +342,10 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
       IDC_BACK, IDC_FORWARD, IDC_RELOAD, IDC_RELOAD_BYPASSING_CACHE,
       IDC_RELOAD_CLEARING_CACHE, IDC_STOP,
       // Tab navigation commands.
-      IDC_SELECT_NEXT_TAB, IDC_SELECT_PREVIOUS_TAB,
+      IDC_SELECT_NEXT_TAB, IDC_SELECT_PREVIOUS_TAB, IDC_CYCLE_TO_NEXT_TAB,
+      IDC_CYCLE_TO_PREV_TAB, IDC_SELECT_TAB_0, IDC_SELECT_TAB_1,
+      IDC_SELECT_TAB_2, IDC_SELECT_TAB_3, IDC_SELECT_TAB_4, IDC_SELECT_TAB_5,
+      IDC_SELECT_TAB_6, IDC_SELECT_TAB_7, IDC_SELECT_LAST_TAB,
       // Find content commands.
       IDC_FIND, IDC_FIND_NEXT, IDC_FIND_PREVIOUS, IDC_CLOSE_FIND_OR_STOP};
 
@@ -367,7 +380,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   // After initialization, the command should become disabled because there's
   // nothing to restore.
   chrome::BrowserCommandController* commandController =
-      browser()->command_controller();
+      chrome::BrowserCommandController::From(browser());
   ASSERT_EQ(false, commandController->IsCommandEnabled(IDC_RESTORE_TAB));
 }
 
@@ -398,7 +411,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   // After initialization, the command should remain enabled because there's
   // one tab to restore.
   chrome::BrowserCommandController* commandController =
-      browser()->command_controller();
+      chrome::BrowserCommandController::From(browser());
   ASSERT_EQ(true, commandController->IsCommandEnabled(IDC_RESTORE_TAB));
 }
 
@@ -407,12 +420,25 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   auto params = Browser::CreateParams::CreateForApp(
       "abcdefghaghpphfffooibmlghaeopach", true /* trusted_source */,
       gfx::Rect(), /* window_bounts */
-      browser()->profile(), true /* user_gesture */);
+      browser()->GetProfile(), true /* user_gesture */);
   Browser* browser = Browser::Create(params);
 
   chrome::BrowserCommandController* commandController =
-      browser->command_controller();
+      chrome::BrowserCommandController::From(browser);
   ASSERT_EQ(false, commandController->IsCommandEnabled(IDC_OPEN_FILE));
+}
+
+IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
+                       NewTabEnabledForAppBrowser) {
+  auto params = Browser::CreateParams::CreateForApp(
+      "abcdefghaghpphfffooibmlghaeopach", true /* trusted_source */,
+      gfx::Rect(), /* window_bounts */
+      browser()->GetProfile(), true /* user_gesture */);
+  Browser* app_browser = Browser::Create(params);
+
+  chrome::BrowserCommandController* commandController =
+      app_browser->GetFeatures().browser_command_controller();
+  EXPECT_TRUE(commandController->IsCommandEnabled(IDC_NEW_TAB));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
@@ -420,11 +446,11 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   auto params = Browser::CreateParams::CreateForAppPopup(
       "abcdefghaghpphfffooibmlghaeopach", true /* trusted_source */,
       gfx::Rect(), /* window_bounts */
-      browser()->profile(), true /* user_gesture */);
+      browser()->GetProfile(), true /* user_gesture */);
   Browser* browser = Browser::Create(params);
 
   chrome::BrowserCommandController* commandController =
-      browser->command_controller();
+      chrome::BrowserCommandController::From(browser);
   ASSERT_EQ(false, commandController->IsCommandEnabled(IDC_OPEN_FILE));
 }
 
@@ -435,7 +461,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
   Browser* browser = Browser::Create(params);
 
   chrome::BrowserCommandController* commandController =
-      browser->command_controller();
+      chrome::BrowserCommandController::From(browser);
   ASSERT_EQ(false, commandController->IsCommandEnabled(IDC_OPEN_FILE));
 }
 
@@ -485,8 +511,14 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::WaitForLoadStop(web_contents);
-  EXPECT_TRUE(
-      chrome::ExecuteCommand(browser(), IDC_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL));
+  EXPECT_TRUE(chrome::ExecuteCommandWithContext(
+      browser(), IDC_SHOW_CUSTOMIZE_CHROME_SIDE_PANEL,
+      actions::ActionInvocationContext::Builder()
+          .SetProperty(
+              kSidePanelOpenTriggerKey,
+              static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
+                  SidePanelOpenTrigger::kAppMenu))
+          .Build()));
   EXPECT_TRUE(browser()->GetFeatures().side_panel_ui()->IsSidePanelEntryShowing(
       SidePanelEntryKey(SidePanelEntryId::kCustomizeChrome)));
 }
@@ -496,8 +528,14 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::WaitForLoadStop(web_contents);
-  EXPECT_TRUE(
-      chrome::ExecuteCommand(browser(), IDC_SHOW_CUSTOMIZE_CHROME_TOOLBAR));
+  EXPECT_TRUE(chrome::ExecuteCommandWithContext(
+      browser(), IDC_SHOW_CUSTOMIZE_CHROME_TOOLBAR,
+      actions::ActionInvocationContext::Builder()
+          .SetProperty(
+              kSidePanelOpenTriggerKey,
+              static_cast<std::underlying_type_t<SidePanelOpenTrigger>>(
+                  SidePanelOpenTrigger::kAppMenu))
+          .Build()));
   EXPECT_TRUE(browser()->GetFeatures().side_panel_ui()->IsSidePanelEntryShowing(
       SidePanelEntryKey(SidePanelEntryId::kCustomizeChrome)));
 }
@@ -600,24 +638,27 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
   net::NetworkChangeNotifier::CreateMockIfNeeded();
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
-  browser()->command_controller()->TabStateChanged();
+  chrome::BrowserCommandController::From(browser())->TabStateChanged();
 
   EXPECT_FALSE(
-      browser()->command_controller()->IsCommandEnabled(IDC_SHOW_TRANSLATE));
+      chrome::BrowserCommandController::From(browser())->IsCommandEnabled(
+          IDC_SHOW_TRANSLATE));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
                        ShowTranslateStatusEnglishPage) {
   LoadAndWaitForLanguage("/english_page.html");
   EXPECT_TRUE(
-      browser()->command_controller()->IsCommandEnabled(IDC_SHOW_TRANSLATE));
+      chrome::BrowserCommandController::From(browser())->IsCommandEnabled(
+          IDC_SHOW_TRANSLATE));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
                        ShowTranslateStatusFrenchPage) {
   LoadAndWaitForLanguage("/french_page.html");
   EXPECT_TRUE(
-      browser()->command_controller()->IsCommandEnabled(IDC_SHOW_TRANSLATE));
+      chrome::BrowserCommandController::From(browser())->IsCommandEnabled(
+          IDC_SHOW_TRANSLATE));
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestRefreshOnly,
@@ -634,7 +675,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestToolbarPinningOnly,
   net::NetworkChangeNotifier::CreateMockIfNeeded();
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
-  browser()->command_controller()->TabStateChanged();
+  chrome::BrowserCommandController::From(browser())->TabStateChanged();
 
   EXPECT_FALSE(actions::ActionManager::GetForTesting()
                    .FindAction(kActionShowTranslate)
@@ -675,14 +716,17 @@ IN_PROC_BROWSER_TEST_F(CreateShortcutBrowserCommandControllerNavTest,
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 
 // Tests for Your saved info submenu.
-class BrowserCommandControllerBrowserTestYourSavedInfo
-    : public BrowserCommandControllerBrowserTest {
- private:
-  base::test::ScopedFeatureList scoped_feature_list_{
-      autofill::features::kYourSavedInfoSettingsPage};
-};
+IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
+                       ExecuteShowContactInfo) {
+  EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_SHOW_CONTACT_INFO));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  content::WaitForLoadStop(web_contents);
+  EXPECT_EQ(web_contents->GetURL().possibly_invalid_spec(),
+            "chrome://settings/contactInfo");
+}
 
-IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestYourSavedInfo,
+IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
                        ExecuteShowIdentityDocs) {
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_SHOW_IDENTITY_DOCS));
   content::WebContents* web_contents =
@@ -692,8 +736,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestYourSavedInfo,
             "chrome://settings/identityDocs");
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestYourSavedInfo,
-                       ExecuteShowTravel) {
+IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest, ExecuteShowTravel) {
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_SHOW_TRAVEL));
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -716,7 +759,7 @@ class BrowserCommandControllerBrowserTestGlic
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestGlic,
                        ExecuteGlicTogglePin) {
-  PrefService* profile_prefs = browser()->profile()->GetPrefs();
+  PrefService* profile_prefs = browser()->GetProfile()->GetPrefs();
   profile_prefs->SetBoolean(glic::prefs::kGlicPinnedToTabstrip, false);
 
   EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_GLIC_TOGGLE_PIN));
@@ -758,7 +801,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestGlic,
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestGlic,
                        ExecuteGlicThreeDotMenuItem) {
   // Bypass glic eligibility check.
-  PrefService* profile_prefs = browser()->profile()->GetPrefs();
+  PrefService* profile_prefs = browser()->GetProfile()->GetPrefs();
   profile_prefs->SetInteger(
       optimization_guide::prefs::kGeminiSettings,
       std::to_underlying(

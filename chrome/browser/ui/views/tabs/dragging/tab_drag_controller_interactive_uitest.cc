@@ -97,6 +97,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/display/screen_base.h"
 #include "ui/gfx/animation/animation_test_api.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/native/native_view_host.h"
@@ -158,6 +159,9 @@
 
 #if BUILDFLAG(IS_LINUX)
 #include "chrome/browser/ui/views/frame/browser_native_widget_aura_linux.h"
+#include "chrome/common/chrome_features.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/linux/linux_ui.h"
 #define DESKTOP_BROWSER_FRAME_AURA BrowserNativeWidgetAuraLinux
 #else
@@ -545,7 +549,8 @@ void ResizeUsingMouseEmulation(Browser* browser,
           kTabStripFrameGrabHandleElementId);
   auto grab_coordinates =
       ui_test_utils::GetCenterInScreenCoordinates(grab_handle_space);
-  gfx::Vector2d grab_offset = {grab_coordinates.x(), grab_coordinates.y()};
+  gfx::Rect window_bounds = browser->GetWindow()->GetBounds();
+  gfx::Vector2d grab_offset = grab_coordinates - window_bounds.origin();
   auto move_target = target_bounds.origin() + grab_offset;
   ASSERT_TRUE(ui_test_utils::SendMouseMoveSync(grab_coordinates, window));
   ASSERT_TRUE(ui_test_utils::SendMouseEventsSync(
@@ -685,6 +690,14 @@ void TabDragControllerTest::HandleGestureEvent(TabStrip* tab_strip,
 bool TabDragControllerTest::HasDragStarted(TabStrip* tab_strip) const {
   return GetTabDragController(tab_strip) &&
          GetTabDragController(tab_strip)->started_drag();
+}
+
+bool TabDragControllerTest::IsWaitingForWindowToShow(
+    TabStrip* tab_strip) const {
+  TabDragController* controller = GetTabDragController(tab_strip);
+  return controller &&
+         controller->current_state_ ==
+             TabDragController::DragState::kWaitingForWindowToShow;
 }
 
 void TabDragControllerTest::SetTabDragPointResolver(
@@ -868,7 +881,7 @@ class DetachToBrowserTabDragControllerTest
     EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 #endif  // BUILDFLAG(IS_MAC)
         // Disable Split View drag and drop to avoid creating Split Views.
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         prefs::kSplitViewDragAndDropEnabled, false);
   }
 
@@ -1985,9 +1998,11 @@ void DragToSeparateWindowStep2(DetachToBrowserTabDragControllerTest* test,
   // cleared on the source tabstrip.
   EXPECT_TRUE(test->IsTabDraggingInfoCleared(not_attached_tab_strip));
   // At this moment there should be a new browser window for the dragged tabs.
-  EXPECT_EQ(3u, GlobalBrowserCollection::GetInstance()->GetSize());
+  ASSERT_EQ(3u, GlobalBrowserCollection::GetInstance()->GetSize());
   BrowserWindowInterface* const new_browser =
       ui_test_utils::GetBrowserNotInSet({not_attached_browser, target_browser});
+  ASSERT_TRUE(new_browser);
+
   TabStrip* const new_tab_strip = GetTabStripForBrowser(new_browser);
   EXPECT_TRUE(IsDragSessionActive(new_tab_strip));
   // Test that the tab dragging info should be correctly set on the new window.
@@ -2093,8 +2108,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 }
 
 // Test is based on DragToSeparateWindow. https://crbug.com/40748225
-#if (BUILDFLAG(IS_MAC) && defined(ARCH_CPU_ARM64)) || \
-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 #define MAYBE_DragToSeparateWindowDuringDragEnd \
   DISABLED_DragToSeparateWindowDuringDragEnd
 #else
@@ -2441,17 +2455,13 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 // then detaching it again retains the original window's size.
 IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
                        DetachAttachDetachRetainsOriginalSize) {
-#if BUILDFLAG(IS_LINUX)
-  if (base::FeatureList::IsEnabled(features::kInitialWebUI)) {
-    GTEST_SKIP() << "Skipping test because it fails with InitialWebUI "
-                    "enabled. See crbug.com/477426026.";
-  }
-#endif  // BUILDFLAG(IS_LINUX)
-
   Browser* browser_large = browser();
   // Set up two windows with different sizes. `browser_large` is the source.
   AddTabsAndResetBrowser(browser_large, 1);
   TabStrip* tab_strip_large = GetTabStripForBrowser(browser_large);
+  if (!tab_strip_large->GetWidget()->IsMoveLoopSupported()) {
+    GTEST_SKIP() << "Not relevant for fallback tab dragging";
+  }
   tabs::TabHandle dragged_tab =
       browser_large->tab_strip_model()->GetTabAtIndex(0)->GetHandle();
 
@@ -2465,6 +2475,9 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
       gfx::ScaleToFlooredSize(browser_small->GetWindow()->GetBounds().size(),
                               kSmallWindowScaleFactor));
   ui_test_utils::SetAndWaitForBounds(*browser_small, small_rect);
+
+  browser_large->GetWindow()->Activate();
+  ui_test_utils::WaitForBrowserSetLastActive(browser_large);
 
   Tab* tab = tab_strip_large->tab_at(0);
   // Move to the first tab and drag it enough so that it detaches and attaches
@@ -3578,8 +3591,8 @@ class VerticalTabsFullscreenDragTest
 
   void SetUpOnMainThread() override {
     DetachToBrowserTabDragControllerTest::SetUpOnMainThread();
-    browser()->profile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
-                                                 true);
+    browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
+                                                    true);
   }
 
  private:
@@ -3640,9 +3653,6 @@ IN_PROC_BROWSER_TEST_P(VerticalTabsFullscreenDragTest,
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
 }
 
-// TODO(crbug.com/508647866): Create a Tab Dragging Test Case to Verify that
-// Vertical Tabs Detach Preserves State.
-
 INSTANTIATE_TEST_SUITE_P(
     TabDragging,
     VerticalTabsFullscreenDragTest,
@@ -3651,6 +3661,106 @@ INSTANTIATE_TEST_SUITE_P(
         /*input_source=*/::testing::Values("mouse")));
 
 #endif  // BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(IS_LINUX)
+
+// Variant of DetachToBrowserTabDragControllerTest that enables InitialWebUI
+// with deferred BrowserView::Show() so that the detached browser is not
+// immediately visible after Show() and TabDragController spins its
+// kWaitingForWindowToShow nested RunLoop before entering the move loop.
+class DetachTabWithDeferredShowDragControllerTest
+    : public DetachToBrowserTabDragControllerTest {
+ public:
+  DetachTabWithDeferredShowDragControllerTest() {
+    deferred_show_feature_list_.InitWithFeaturesAndParameters(
+        {{features::kInitialWebUI, {}},
+         {features::kWebUIReloadButton, {}},
+         {features::kArtificialUIDelay,
+          {{"initial_web_ui_delay_duration", "2s"},
+           {"views_ui_delay_duration", "0ms"}}}},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList deferred_show_feature_list_;
+};
+
+// Detaches a tab into a new browser and, while the controller is waiting for
+// the new browser's deferred Show() to complete, attempts to start a data drag
+// from the source browser's window. The data drag must be rejected so that it
+// cannot release the tab drag's pointer capture and take over the gesture.
+IN_PROC_BROWSER_TEST_P(DetachTabWithDeferredShowDragControllerTest,
+                       RejectDataDragWhileWaitingForDetachedWindow) {
+  // The kWaitingForWindowToShow state is only reached on the RunMoveLoop path.
+  if (!test::PlatformSupportsScreenCoordinates()) {
+    GTEST_SKIP() << "RunMoveLoop is not used on this platform.";
+  }
+
+  AddTabsAndResetBrowser(browser(), 1);
+  TabStrip* tab_strip = GetTabStripForBrowser(browser());
+
+  aura::Window* const source_window = browser()->GetWindow()->GetNativeWindow();
+  aura::Window* const source_root = source_window->GetRootWindow();
+
+  bool data_drag_attempted = false;
+  TabStrip* new_tab_strip = nullptr;
+  // Releases the pointer once the controller has left kWaitingForWindowToShow
+  // and entered the move loop, so the move loop sees the button-up.
+  base::RepeatingClosure release_when_in_move_loop =
+      base::BindLambdaForTesting([&]() {
+        if (new_tab_strip && IsWaitingForWindowToShow(new_tab_strip)) {
+          base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+              FROM_HERE, release_when_in_move_loop);
+          return;
+        }
+        ASSERT_TRUE(ReleaseInput(0, /*async=*/true));
+      });
+
+  Tab* const tab = tab_strip->tab_at(0);
+  ASSERT_TRUE(PressInputAtCenter(tab));
+  ASSERT_TRUE(DragInputToCenterNotifyWhenDone(
+      tab, base::BindLambdaForTesting([&]() {
+        // The mouse-move that triggered detach has entered the
+        // kWaitingForWindowToShow nested loop; post into it.
+        base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+            FROM_HERE, base::BindLambdaForTesting([&]() {
+              data_drag_attempted = true;
+              ASSERT_TRUE(TabDragController::IsActive());
+              ASSERT_EQ(2u, GlobalBrowserCollection::GetInstance()->GetSize());
+              BrowserWindowInterface* const new_browser =
+                  ui_test_utils::GetBrowserNotInSet({browser()});
+              ASSERT_TRUE(new_browser);
+              new_tab_strip = GetTabStripForBrowser(new_browser);
+              ASSERT_TRUE(IsWaitingForWindowToShow(new_tab_strip));
+
+              auto data = std::make_unique<ui::OSExchangeData>();
+              data->SetString(u"test");
+              ui::mojom::DragOperation result =
+                  aura::client::GetDragDropClient(source_root)
+                      ->StartDragAndDrop(std::move(data), source_root,
+                                         source_window, gfx::Point(),
+                                         ui::DragDropTypes::DRAG_COPY,
+                                         ui::mojom::DragEventSource::kMouse);
+              EXPECT_EQ(ui::mojom::DragOperation::kNone, result);
+
+              release_when_in_move_loop.Run();
+            }));
+      }),
+      gfx::Vector2d(0, GetDetachY(tab_strip))));
+
+  ASSERT_TRUE(
+      base::test::RunUntil([]() { return !TabDragController::IsActive(); }));
+  EXPECT_TRUE(data_drag_attempted);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TabDragging,
+    DetachTabWithDeferredShowDragControllerTest,
+    ::testing::Combine(
+        /*kTearOffWebAppTabOpensWebAppWindow=*/::testing::Values(false),
+        /*input_source=*/::testing::Values("mouse")));
+
+#endif  // BUILDFLAG(IS_LINUX)
 
 namespace {
 
@@ -6931,6 +7041,254 @@ IN_PROC_BROWSER_TEST_F(SideBySideTabDragControllerTest,
   EXPECT_TRUE(IsTabInSplit(3));
   EXPECT_TRUE(IsTabInSplit(4));
 }
+
+#if BUILDFLAG(IS_MAC)
+class DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop
+    : public DetachToBrowserTabDragControllerTest {
+ public:
+  DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop() = default;
+  DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop(
+      const DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop&) =
+      delete;
+  DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop& operator=(
+      const DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop&) =
+      delete;
+  ~DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop() override =
+      default;
+
+  void SetScreenInstance() override {
+    mock_screen_.Init();
+    // Primary display: 2000x1200
+    mock_screen_.display_list().AddDisplay({1, gfx::Rect(0, 0, 2000, 1200)},
+                                           display::DisplayList::Type::PRIMARY);
+    // Secondary display: 1200x800, located at x=2000
+    mock_screen_.display_list().AddDisplay(
+        {2, gfx::Rect(2000, 0, 1200, 800)},
+        display::DisplayList::Type::NOT_PRIMARY);
+    ASSERT_EQ(2, display::Screen::Get()->GetNumDisplays());
+  }
+
+  void DragTabToSmallerSecondaryDisplayStep2(
+      const gfx::Point& target_point,
+      BrowserWindowInterface* source_browser,
+      BrowserWindowInterface* detached_browser) {
+    TabStrip* const source_tab_strip = GetTabStripForBrowser(source_browser);
+    mock_screen_.set_cursor_position(target_point);
+    ASSERT_TRUE(DragInputTo(target_point, GetWindowHint(source_tab_strip)));
+
+    // Drag a little bit more to generate another drag event.
+    gfx::Point target_point2 = target_point + gfx::Vector2d(10, 10);
+    mock_screen_.set_cursor_position(target_point2);
+    ASSERT_TRUE(DragInputTo(target_point2, GetWindowHint(source_tab_strip)));
+
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop::
+                DragTabToSmallerSecondaryDisplayStep3,
+            base::Unretained(this)));
+  }
+
+  void DragTabToSmallerSecondaryDisplayStep3() { ASSERT_TRUE(ReleaseInput()); }
+
+  void DragWindowToSmallerSecondaryDisplayStep2(
+      const gfx::Point& target_point,
+      BrowserWindowInterface* source_browser) {
+    TabStrip* const source_tab_strip = GetTabStripForBrowser(source_browser);
+    mock_screen_.set_cursor_position(target_point);
+    ASSERT_TRUE(DragInputTo(target_point, GetWindowHint(source_tab_strip)));
+
+    // Drag a little bit more to generate another drag event.
+    gfx::Point target_point2 = target_point + gfx::Vector2d(10, 10);
+    mock_screen_.set_cursor_position(target_point2);
+    ASSERT_TRUE(DragInputTo(target_point2, GetWindowHint(source_tab_strip)));
+
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE,
+        base::BindOnce(
+            &DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop::
+                DragWindowToSmallerSecondaryDisplayStep3,
+            base::Unretained(this)));
+  }
+
+  void DragWindowToSmallerSecondaryDisplayStep3() {
+    ASSERT_TRUE(ReleaseInput());
+  }
+
+ protected:
+  class MockScreen : public display::ScreenBase {
+   public:
+    MockScreen() = default;
+    ~MockScreen() override { display::Screen::SetScreenInstance(nullptr); }
+
+    void Init() { display::Screen::SetScreenInstance(this); }
+
+    display::Display GetDisplayNearestWindow(
+        gfx::NativeWindow window) const override {
+      views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+      if (widget) {
+        return GetDisplayMatching(widget->GetWindowBoundsInScreen());
+      }
+      return GetPrimaryDisplay();
+    }
+
+    gfx::Point GetCursorScreenPoint() override { return cursor_position_; }
+
+    void set_cursor_position(const gfx::Point& point) {
+      cursor_position_ = point;
+    }
+
+   private:
+    gfx::Point cursor_position_;
+  };
+
+  MockScreen mock_screen_;
+};
+
+// Drags a tab to a secondary smaller display and releases.
+// Verifies that the new window created on the secondary display is downsized
+// to fit inside the work area of that secondary display.
+IN_PROC_BROWSER_TEST_P(
+    DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop,
+    DragTabToSmallerSecondaryDisplay) {
+  AddTabsAndResetBrowser(browser(), 1);
+
+  // Size the source browser window to 1600x1000, which is larger than the
+  // secondary display's work area (1200x800).
+  browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1600, 1000));
+
+  display::Screen* const screen = display::Screen::Get();
+  display::Display second_display = ui_test_utils::GetSecondaryDisplay(screen);
+  ASSERT_EQ(second_display.id(), 2);
+
+  mock_screen_.set_cursor_position(GetCenterInScreenCoordinates(
+      GetTabStripForBrowser(browser())->tab_at(1)));
+
+  // Target point is on the secondary screen.
+  const gfx::Point target(second_display.bounds().x() + 200,
+                          second_display.bounds().y() + 200);
+  ASSERT_TRUE(second_display.bounds().Contains(target));
+
+  // Perform drag to detach, then continue dragging to target on secondary
+  // display.
+  BrowserWindowInterface* const new_browser = DragTabForDetachAndNotify(
+      browser(),
+      base::BindOnce(
+          &DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop::
+              DragTabToSmallerSecondaryDisplayStep2,
+          base::Unretained(this), target),
+      1);
+
+  ASSERT_TRUE(new_browser);
+
+  // Verify that the new browser's bounds fit within the secondary display's
+  // work area.
+  gfx::Rect new_bounds = new_browser->GetWindow()->GetBounds();
+  EXPECT_LE(new_bounds.width(), second_display.work_area().width());
+  EXPECT_LE(new_bounds.height(), second_display.work_area().height());
+}
+
+// Drags a single-tab browser window to a secondary smaller display and
+// releases. Verifies that the browser window on the secondary display is
+// downsized to fit inside the work area of that secondary display.
+IN_PROC_BROWSER_TEST_P(
+    DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop,
+    DragWindowToSmallerSecondaryDisplay) {
+  // Ensure the browser has exactly 1 tab.
+  ASSERT_EQ(1, browser()->tab_strip_model()->count());
+  TabStrip* tab_strip = GetTabStripForBrowser(browser());
+
+  // Size the browser window to 1600x1000, which is larger than the
+  // secondary display's work area (1200x800).
+  browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1600, 1000));
+
+  display::Screen* const screen = display::Screen::Get();
+  display::Display second_display = ui_test_utils::GetSecondaryDisplay(screen);
+  ASSERT_EQ(second_display.id(), 2);
+
+  mock_screen_.set_cursor_position(
+      GetCenterInScreenCoordinates(tab_strip->tab_at(0)));
+
+  // Target point is on the secondary screen.
+  const gfx::Point target(second_display.bounds().x() + 200,
+                          second_display.bounds().y() + 200);
+  ASSERT_TRUE(second_display.bounds().Contains(target));
+
+  // Perform drag (which will drag the window since it's a single-tab window),
+  // then continue dragging to target on secondary display.
+  DragTabAndNotify(
+      tab_strip,
+      base::BindOnce(
+          &DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop::
+              DragWindowToSmallerSecondaryDisplayStep2,
+          base::Unretained(this), target, browser()),
+      0);
+
+  // Verify that the browser's bounds fit within the secondary display's work
+  // area.
+  gfx::Rect new_bounds = browser()->GetWindow()->GetBounds();
+  EXPECT_LE(new_bounds.width(), second_display.work_area().width());
+  EXPECT_LE(new_bounds.height(), second_display.work_area().height());
+}
+
+// Drags a tab to a secondary display with a work area smaller than its physical
+// size (insets) and releases. Verifies that the new window created on the
+// secondary display is downsized to fit inside the WORK AREA of that secondary
+// display, not the physical bounds.
+IN_PROC_BROWSER_TEST_P(
+    DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop,
+    DragTabToSecondaryDisplayWithWorkAreaInsets) {
+  AddTabsAndResetBrowser(browser(), 1);
+
+  // Size the source browser window to 1600x1000, which is larger than the
+  // secondary display's bounds (1200x800) and work area (1200x600).
+  browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1600, 1000));
+
+  display::Screen* const screen = display::Screen::Get();
+  display::Display second_display = ui_test_utils::GetSecondaryDisplay(screen);
+  ASSERT_EQ(second_display.id(), 2);
+
+  // Update the secondary display to have work area insets (e.g. y-offset of
+  // 100, height of 600).
+  second_display.set_work_area(gfx::Rect(2000, 100, 1200, 600));
+  mock_screen_.display_list().UpdateDisplay(second_display);
+
+  mock_screen_.set_cursor_position(GetCenterInScreenCoordinates(
+      GetTabStripForBrowser(browser())->tab_at(1)));
+
+  // Target point is on the secondary screen inside its work area.
+  const gfx::Point target(second_display.bounds().x() + 200,
+                          second_display.bounds().y() + 200);
+  ASSERT_TRUE(second_display.work_area().Contains(target));
+
+  // Perform drag to detach, then continue dragging to target on secondary
+  // display.
+  BrowserWindowInterface* const new_browser = DragTabForDetachAndNotify(
+      browser(),
+      base::BindOnce(
+          &DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop::
+              DragTabToSmallerSecondaryDisplayStep2,
+          base::Unretained(this), target),
+      1);
+
+  ASSERT_TRUE(new_browser);
+
+  // Verify that the new browser's bounds fit within the secondary display's
+  // work area, accounting for kMaximizedWindowInset (10 DIPs) on each side:
+  // Expected max width = 1200 - 2 * 10 = 1180
+  // Expected max height = 600 - 2 * 10 = 580
+  gfx::Rect new_bounds = new_browser->GetWindow()->GetBounds();
+  EXPECT_LE(new_bounds.width(), 1180);
+  EXPECT_LE(new_bounds.height(), 580);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TabDragging,
+    DetachToBrowserInSeparateDisplayTabDragControllerTestDesktop,
+    ::testing::Combine(
+        /*kTearOffWebAppTabOpensWebAppWindow=*/::testing::Values(false),
+        /*input_source=*/::testing::Values("mouse")));
+#endif  // BUILDFLAG(IS_MAC)
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_CHROMEOS)

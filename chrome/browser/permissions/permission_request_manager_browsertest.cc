@@ -13,6 +13,7 @@
 #include "base/metrics/field_trial_params.h"
 #include "base/run_loop.h"
 #include "base/test/mock_callback.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/values_test_util.h"
 #include "build/build_config.h"
@@ -133,7 +134,7 @@ class PermissionRequestManagerBrowserTestBase : public InProcessBrowserTest {
     }));
 
     browser()
-        ->profile()
+        ->GetProfile()
         ->GetPermissionController()
         ->RequestPermissionFromCurrentDocument(
             rfh, std::move(request_description), callback.Get());
@@ -343,6 +344,62 @@ IN_PROC_BROWSER_TEST_F(PermissionRequestManagerBrowserTest,
 
   EXPECT_EQ(1, bubble_factory()->show_count());
   EXPECT_EQ(2, bubble_factory()->TotalRequestCount());
+}
+
+// Verifies that when a background tab is discarded (e.g. by memory saver) and
+// subsequently reloads in the background, requesting permissions inside it does
+// not pop up permission prompt bubbles while another tab is active.
+IN_PROC_BROWSER_TEST_F(PermissionRequestManagerBrowserTest,
+                       TestSplitViewDiscardInitializationRace) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Open tab 0 (title1.html) and tab 1 (title2.html in foreground).
+  EXPECT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/title1.html")));
+
+  EXPECT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), embedded_test_server()->GetURL("/title2.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  // Discard background tab 0, replacing its WebContents with a new hidden one.
+  content::WebContents::CreateParams params(browser()->GetProfile());
+  params.initially_hidden = true;
+  std::unique_ptr<content::WebContents> new_contents =
+      content::WebContents::Create(params);
+  content::WebContents* raw_new_contents = new_contents.get();
+  browser()->tab_strip_model()->DiscardWebContentsAt(0,
+                                                     std::move(new_contents));
+
+  permissions::PermissionRequestManager* manager =
+      permissions::PermissionRequestManager::FromWebContents(raw_new_contents);
+
+  // Reload discarded tab 0 while tab 1 remains the active foreground tab.
+  raw_new_contents->GetController().LoadURL(
+      embedded_test_server()->GetURL("/title1.html"), content::Referrer(),
+      ui::PAGE_TRANSITION_LINK, std::string());
+
+  EXPECT_TRUE(content::WaitForLoadStop(raw_new_contents));
+
+  EXPECT_EQ(1, browser()->tab_strip_model()->active_index());
+
+  permissions::MockPermissionPromptFactory mock_factory(manager);
+
+  // Issue a notifications permission request in background tab 0.
+  ExecuteScriptAsync(raw_new_contents, "Notification.requestPermission();");
+
+  // Wait for the request to reach tab 0's manager, then verify no prompt bubble
+  // is shown on screen because tab 0 is inactive in the tab strip.
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return !manager->Requests().empty(); }));
+
+  EXPECT_EQ(0, mock_factory.TotalRequestCount());
+
+  // After the discarded tab is revived by activating it, the pending request's
+  // prompt must appear.
+  browser()->tab_strip_model()->ActivateTabAt(0);
+  EXPECT_TRUE(base::test::RunUntil(
+      [&]() { return mock_factory.TotalRequestCount() == 1; }));
 }
 
 // Requests before the load should not be bundled with a request after the
@@ -2203,14 +2260,6 @@ IN_PROC_BROWSER_TEST_F(
 class PermissionRequestManagerApproximateLocationBrowserTest
     : public PermissionRequestManagerBrowserTestBase {
  public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    PermissionRequestManagerBrowserTestBase::SetUpCommandLine(command_line);
-    command_line->AppendSwitchASCII(
-        "enable-blink-features",
-        "ApproximateGeolocationPermissionAPI,"
-        "ApproximateGeolocationPermissionAccuracyMode");
-  }
-
   void SetUpOnMainThread() override {
     PermissionRequestManagerBrowserTestBase::SetUpOnMainThread();
     ASSERT_TRUE(embedded_test_server()->Start());
@@ -2259,7 +2308,7 @@ IN_PROC_BROWSER_TEST_F(PermissionRequestManagerApproximateLocationBrowserTest,
   permissions::PermissionRequestManager* request_manager =
       GetPermissionRequestManager();
   content::PermissionController* permission_controller =
-      browser()->profile()->GetPermissionController();
+      browser()->GetProfile()->GetPermissionController();
 
   {
     base::HistogramTester histograms;
@@ -2325,7 +2374,7 @@ IN_PROC_BROWSER_TEST_F(PermissionRequestManagerApproximateLocationBrowserTest,
   permissions::PermissionRequestManager* request_manager =
       GetPermissionRequestManager();
   content::PermissionController* permission_controller =
-      browser()->profile()->GetPermissionController();
+      browser()->GetProfile()->GetPermissionController();
 
   {
     base::HistogramTester histograms;
@@ -2415,7 +2464,7 @@ IN_PROC_BROWSER_TEST_F(
   permissions::PermissionRequestManager* request_manager =
       GetPermissionRequestManager();
   content::PermissionController* permission_controller =
-      browser()->profile()->GetPermissionController();
+      browser()->GetProfile()->GetPermissionController();
 
   base::HistogramTester histograms;
   request_manager->set_auto_response_for_test(
@@ -2451,6 +2500,128 @@ IN_PROC_BROWSER_TEST_F(
 
 IN_PROC_BROWSER_TEST_F(PermissionRequestManagerApproximateLocationBrowserTest,
                        PermissionAPI) {
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/title1.html")));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  const char kQueryPermission[] = R"(
+      (async () => {
+        const status = await navigator.permissions.query({name: 'geolocation'});
+        return {name: status.name, state: status.state,
+                toString: status.toString()};
+      })();
+    )";
+
+  const char kSubscribeToPermissionChanges[] = R"(
+        var statuses = [];
+        navigator.permissions.query({name: 'geolocation'}).then(status => {
+          status.onchange = () => statuses.push(status.state);
+        });
+    )";
+
+  EXPECT_TRUE(content::ExecJs(web_contents, kSubscribeToPermissionChanges));
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "prompt",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  HostContentSettingsMap* hcsm = HostContentSettingsMapFactory::GetForProfile(
+      Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+  GURL permission_origin = embedded_test_server()->GetURL("/");
+
+  hcsm->SetPermissionSettingDefaultScope(
+      permission_origin, GURL(), ContentSettingsType::GEOLOCATION_WITH_OPTIONS,
+      GeolocationSetting{.approximate = PermissionOption::kAllowed,
+                         .precise = PermissionOption::kAsk});
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "granted",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  hcsm->SetPermissionSettingDefaultScope(
+      permission_origin, GURL(), ContentSettingsType::GEOLOCATION_WITH_OPTIONS,
+      GeolocationSetting{.approximate = PermissionOption::kAllowed,
+                         .precise = PermissionOption::kDenied});
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "granted",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  hcsm->SetPermissionSettingDefaultScope(
+      permission_origin, GURL(), ContentSettingsType::GEOLOCATION_WITH_OPTIONS,
+      GeolocationSetting{.approximate = PermissionOption::kAllowed,
+                         .precise = PermissionOption::kAllowed});
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "granted",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  hcsm->SetPermissionSettingDefaultScope(
+      permission_origin, GURL(), ContentSettingsType::GEOLOCATION_WITH_OPTIONS,
+      GeolocationSetting{.approximate = PermissionOption::kDenied,
+                         .precise = PermissionOption::kDenied});
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "denied",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  hcsm->SetPermissionSettingDefaultScope(
+      permission_origin, GURL(), ContentSettingsType::GEOLOCATION_WITH_OPTIONS,
+      GeolocationSetting{.approximate = PermissionOption::kAsk,
+                         .precise = PermissionOption::kDenied});
+
+  EXPECT_THAT(content::EvalJs(web_contents, kQueryPermission),
+              content::EvalJsResult::IsOkAndHolds(base::test::IsJson(
+                  R"({
+     "name": "geolocation",
+     "state": "prompt",
+     "toString": "[object PermissionStatus]"
+  })")));
+
+  // onchange events should only be delivered when there is an actual,
+  // observable change.
+  EXPECT_THAT(content::EvalJs(web_contents, "statuses"),
+              content::EvalJsResult::IsOkAndHolds(
+                  base::test::IsJson(R"(["granted", "denied", "prompt"])")));
+}
+
+class
+    PermissionRequestManagerApproximateLocationExperimentalPermissionBrowserTest
+    : public PermissionRequestManagerApproximateLocationBrowserTest {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PermissionRequestManagerApproximateLocationBrowserTest::SetUpCommandLine(
+        command_line);
+    command_line->AppendSwitchASCII(
+        "enable-blink-features",
+        "ApproximateGeolocationPermissionAPI,"
+        "ApproximateGeolocationPermissionAccuracyMode");
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(
+    PermissionRequestManagerApproximateLocationExperimentalPermissionBrowserTest,
+    PermissionAPI) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/title1.html")));
   content::WebContents* web_contents =

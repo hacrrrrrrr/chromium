@@ -10,7 +10,10 @@ import static org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetPropert
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.FlyoutProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.HomeProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.IllustrationCardItemProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.NoticeItemProperties;
 import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.SuggestionItemProperties;
+import org.chromium.chrome.browser.ui.autofill.AtMemoryBottomSheetProperties.TextWithClickableLinkProperties;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 
@@ -53,20 +56,54 @@ class AtMemoryBottomSheetViewBinder {
             view.setSearchBarDelegate(model.get(HomeProperties.SEARCH_BAR_DELEGATE));
         } else if (propertyKey == HomeProperties.IS_LOADING) {
             view.setIsLoading(model.get(HomeProperties.IS_LOADING));
-        } else if (propertyKey == HomeProperties.SHOW_SUGGESTIONS_BACKGROUND) {
-            view.setShowSuggestionsBackground(
-                    model.get(HomeProperties.SHOW_SUGGESTIONS_BACKGROUND));
         } else if (propertyKey == HomeProperties.SHEET_ITEMS) {
             view.setUpSheetItems(model.get(HomeProperties.SHEET_ITEMS));
-        } else if (propertyKey == HomeProperties.IS_NOTICE_VISIBLE) {
-            view.setNoticeVisible(model.get(HomeProperties.IS_NOTICE_VISIBLE));
-        } else if (propertyKey == HomeProperties.NOTICE_OK_CLICK_LISTENER) {
-            view.setNoticeOkClickListener(model.get(HomeProperties.NOTICE_OK_CLICK_LISTENER));
-        } else if (propertyKey == HomeProperties.NOTICE_SETTINGS_CLICK_LISTENER) {
-            view.setNoticeSettingsClickListener(
-                    model.get(HomeProperties.NOTICE_SETTINGS_CLICK_LISTENER));
         } else {
             // Unhandled property.
+            assert false : "Unhandled property: " + propertyKey;
+        }
+    }
+
+    /**
+     * Called whenever the illustration card item property model changes. It updates the given view
+     * accordingly.
+     *
+     * @param model The model containing the illustration card item properties.
+     * @param view The view to update.
+     * @param propertyKey The property key that changed.
+     */
+    static void bindIllustrationCardItemView(
+            PropertyModel model,
+            AtMemoryBottomSheetIllustrationCardView view,
+            PropertyKey propertyKey) {
+        if (propertyKey == IllustrationCardItemProperties.TITLE) {
+            view.setTitle(model.get(IllustrationCardItemProperties.TITLE));
+        } else if (propertyKey == IllustrationCardItemProperties.SUBTITLE) {
+            view.setSubtitle(model.get(IllustrationCardItemProperties.SUBTITLE));
+        } else {
+            // Unhandled property.
+            assert false : "Unhandled property: " + propertyKey;
+        }
+    }
+
+    /**
+     * Called whenever the notice item property model changes. It updates the given view
+     * accordingly.
+     *
+     * @param model The model containing the notice item properties.
+     * @param view The view to update.
+     * @param propertyKey The property key that changed.
+     */
+    static void bindNoticeItemView(
+            PropertyModel model, AtMemoryBottomSheetNoticeView view, PropertyKey propertyKey) {
+        if (propertyKey == NoticeItemProperties.ON_OK_CLICKED) {
+            view.setOkClickListener(model.get(NoticeItemProperties.ON_OK_CLICKED));
+        } else if (propertyKey == NoticeItemProperties.ON_SETTINGS_CLICKED
+                || propertyKey == NoticeItemProperties.IS_LOGGING_ALLOWED) {
+            view.setNoticeTextAndSettingsClickListener(
+                    model.get(NoticeItemProperties.ON_SETTINGS_CLICKED),
+                    model.get(NoticeItemProperties.IS_LOGGING_ALLOWED));
+        } else {
             assert false : "Unhandled property: " + propertyKey;
         }
     }
@@ -116,8 +153,32 @@ class AtMemoryBottomSheetViewBinder {
             view.setFlyoutClickListener(model.get(SuggestionItemProperties.ON_FLYOUT_CLICKED));
         } else if (propertyKey == SuggestionItemProperties.IS_FLYOUT_VISIBLE) {
             view.setFlyoutVisible(model.get(SuggestionItemProperties.IS_FLYOUT_VISIBLE));
+        } else if (propertyKey == SuggestionItemProperties.TRAILING_ICON_ID) {
+            view.setTrailingIcon(model.get(SuggestionItemProperties.TRAILING_ICON_ID));
         } else if (propertyKey == SuggestionItemProperties.APPLY_DEACTIVATED_STYLE) {
             view.applyDeactivatedStyle(model.get(SuggestionItemProperties.APPLY_DEACTIVATED_STYLE));
+        } else {
+            assert false : "Unhandled property: " + propertyKey;
+        }
+    }
+
+    /**
+     * Called whenever the text with clickable link property model changes. It updates the given
+     * view accordingly.
+     *
+     * @param model The model containing the text with clickable link properties.
+     * @param view The view to update.
+     * @param propertyKey The property key that changed.
+     */
+    static void bindTextWithClickableLinkView(
+            PropertyModel model,
+            AtMemoryBottomSheetTextWithClickableLinkView view,
+            PropertyKey propertyKey) {
+        if (propertyKey == TextWithClickableLinkProperties.TEXT
+                || propertyKey == TextWithClickableLinkProperties.ON_LINK_CLICKED) {
+            view.setText(
+                    model.get(TextWithClickableLinkProperties.TEXT),
+                    model.get(TextWithClickableLinkProperties.ON_LINK_CLICKED));
         } else {
             assert false : "Unhandled property: " + propertyKey;
         }

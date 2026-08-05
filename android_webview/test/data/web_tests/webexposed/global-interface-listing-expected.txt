@@ -22,9 +22,7 @@ interface AbsoluteOrientationSensor : OrientationSensor
 interface AbstractRange
     attribute @@toStringTag
     getter collapsed
-    getter endContainer
     getter endOffset
-    getter startContainer
     getter startOffset
     method constructor
 interface Accelerometer : Sensor
@@ -178,7 +176,6 @@ interface AudioContext : BaseAudioContext
     getter onsinkchange
     getter outputLatency
     getter playbackStats
-    getter playoutStats
     getter sinkId
     method close
     method constructor
@@ -298,17 +295,6 @@ interface AudioPlaybackStats
     getter totalDuration
     getter underrunDuration
     getter underrunEvents
-    method constructor
-    method resetLatency
-    method toJSON
-interface AudioPlayoutStats
-    attribute @@toStringTag
-    getter averageLatency
-    getter fallbackFramesDuration
-    getter fallbackFramesEvents
-    getter maximumLatency
-    getter minimumLatency
-    getter totalFramesDuration
     method constructor
     method resetLatency
     method toJSON
@@ -2090,7 +2076,6 @@ interface Document : Node
     getter readyState
     getter referrer
     getter rootElement
-    getter routeMap
     getter scripts
     getter scrollingElement
     getter spellCheckCustomDictionary
@@ -3175,6 +3160,7 @@ interface GPUComputePassEncoder
     method setBindGroup
     method setImmediates
     method setPipeline
+    method setResourceTable
     method writeTimestamp
     setter label
 interface GPUComputePipeline
@@ -3204,6 +3190,7 @@ interface GPUDevice : EventTarget
     method createRenderBundleEncoder
     method createRenderPipeline
     method createRenderPipelineAsync
+    method createResourceTable
     method createSampler
     method createShaderModule
     method createTexture
@@ -3317,6 +3304,16 @@ interface GPURenderPipeline
     getter label
     method constructor
     method getBindGroupLayout
+    setter label
+interface GPUResourceTable
+    attribute @@toStringTag
+    getter label
+    getter size
+    method constructor
+    method destroy
+    method insert
+    method remove
+    method update
     setter label
 interface GPUSampler
     attribute @@toStringTag
@@ -3434,6 +3431,7 @@ interface GamepadButton
     attribute @@toStringTag
     getter pressed
     getter touched
+    getter type
     getter value
     method constructor
 interface GamepadEvent : Event
@@ -4129,7 +4127,6 @@ interface HTMLEmbedElement : HTMLElement
     setter type
     setter width
 interface HTMLFencedFrameElement : HTMLElement
-    static method canLoadOpaqueURL
     attribute @@toStringTag
     getter allow
     getter config
@@ -4144,6 +4141,7 @@ interface HTMLFencedFrameElement : HTMLElement
     setter width
 interface HTMLFieldSetElement : HTMLElement
     attribute @@toStringTag
+    getter checkable
     getter disabled
     getter elements
     getter form
@@ -4156,6 +4154,7 @@ interface HTMLFieldSetElement : HTMLElement
     method constructor
     method reportValidity
     method setCustomValidity
+    setter checkable
     setter disabled
     setter name
 interface HTMLFontElement : HTMLElement
@@ -4322,6 +4321,7 @@ interface HTMLIFrameElement : HTMLElement
     getter allow
     getter allowFullscreen
     getter allowPaymentRequest
+    getter connectionAllowlist
     getter contentDocument
     getter contentWindow
     getter credentialless
@@ -4351,6 +4351,7 @@ interface HTMLIFrameElement : HTMLElement
     setter allow
     setter allowFullscreen
     setter allowPaymentRequest
+    setter connectionAllowlist
     setter credentialless
     setter csp
     setter frameBorder
@@ -5182,6 +5183,7 @@ interface HTMLTableSectionElement : HTMLElement
     setter vAlign
 interface HTMLTemplateElement : HTMLElement
     attribute @@toStringTag
+    getter buffer
     getter content
     getter htmlFor
     getter shadowRootAdoptedStyleSheets
@@ -5189,15 +5191,18 @@ interface HTMLTemplateElement : HTMLElement
     getter shadowRootCustomElementRegistry
     getter shadowRootDelegatesFocus
     getter shadowRootMode
+    getter shadowRootReferenceTarget
     getter shadowRootSerializable
     getter shadowRootSlotAssignment
     method constructor
+    setter buffer
     setter htmlFor
     setter shadowRootAdoptedStyleSheets
     setter shadowRootClonable
     setter shadowRootCustomElementRegistry
     setter shadowRootDelegatesFocus
     setter shadowRootMode
+    setter shadowRootReferenceTarget
     setter shadowRootSerializable
     setter shadowRootSlotAssignment
 interface HTMLTextAreaElement : HTMLElement
@@ -6846,6 +6851,11 @@ interface NodeList
     method item
     method keys
     method values
+interface NodeRange : AbstractRange
+    attribute @@toStringTag
+    getter endContainer
+    getter startContainer
+    method constructor
 interface NotRestoredReasonDetails
     attribute @@toStringTag
     getter reason
@@ -7272,6 +7282,7 @@ interface PerformanceLongAnimationFrameTiming : PerformanceEntry
     getter paintTime
     getter presentationTime
     getter renderStart
+    getter scriptCount
     getter scripts
     getter styleAndLayoutStart
     getter styleDuration
@@ -7901,7 +7912,7 @@ interface RadioNodeList : NodeList
     method @@iterator
     method constructor
     setter value
-interface Range : AbstractRange
+interface Range : NodeRange
     attribute @@toStringTag
     attribute END_TO_END
     attribute END_TO_START
@@ -8068,18 +8079,6 @@ interface RestrictionTarget
     static method fromElement
     attribute @@toStringTag
     method constructor
-interface Route : EventTarget
-    attribute @@toStringTag
-    getter matches
-    getter pattern
-    method constructor
-interface RouteEvent : Event
-    attribute @@toStringTag
-    method constructor
-interface RouteMap
-    attribute @@toStringTag
-    method constructor
-    method get
 interface RtcReceivedPacket
     attribute @@toStringTag
     getter payloadByteLength
@@ -9726,7 +9725,7 @@ interface SpellCheckCustomDictionary
     method addWords
     method constructor
     method removeWords
-interface StaticRange : AbstractRange
+interface StaticRange : NodeRange
     attribute @@toStringTag
     method constructor
 interface StereoPannerNode : AudioNode
@@ -11913,10 +11912,12 @@ interface WebTransport
     getter closed
     getter congestionControl
     getter datagrams
+    getter draining
     getter incomingBidirectionalStreams
     getter incomingUnidirectionalStreams
     getter protocol
     getter ready
+    getter responseHeaders
     method close
     method constructor
     method createBidirectionalStream

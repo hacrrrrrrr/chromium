@@ -72,7 +72,8 @@ class TabStripBrowsertest : public InProcessBrowserTest {
 
   TabStrip* tab_strip() {
     return views::AsViewClass<HorizontalTabStripRegionView>(
-               browser()->GetBrowserView().tab_strip_view())
+               BrowserView::GetBrowserViewForBrowser(browser())
+                   ->tab_strip_view())
         ->tab_strip();
   }
 
@@ -1057,6 +1058,40 @@ IN_PROC_BROWSER_TEST_F(TabStripBrowsertest, AccessibleName) {
             data.GetString16Attribute(ax::mojom::StringAttribute::kName));
 }
 
+IN_PROC_BROWSER_TEST_F(TabStripBrowsertest, AccessibleNameUpdatesOnTabFocus) {
+  AppendTab();
+  Tab* tab = tab_strip()->tab_at(1);
+  tabs::TabInterface* tab_interface = tab->tab_handle().Get();
+  ASSERT_TRUE(tab_interface);
+
+  auto* helper = TabResourceUsageTabHelper::From(tab_interface);
+  ASSERT_TRUE(helper);
+
+  // Initially, the accessible name should be just the tab title.
+  ui::AXNodeData data;
+  tab->GetViewAccessibility().GetAccessibleNodeData(&data);
+  std::u16string initial_name =
+      data.GetString16Attribute(ax::mojom::StringAttribute::kName);
+  EXPECT_EQ(u"New Tab", initial_name);
+
+  // Set memory usage.
+  base::ByteSize memory_usage = base::ByteSize(1024 * 1024);  // 1 MiB
+  helper->SetMemoryUsage(memory_usage);
+
+  // Focus the tab via FocusManager. Gaining focus should update the accessible
+  // name.
+  tab->GetFocusManager()->SetFocusedView(tab);
+
+  data = ui::AXNodeData();
+  tab->GetViewAccessibility().GetAccessibleNodeData(&data);
+  std::u16string updated_name =
+      data.GetString16Attribute(ax::mojom::StringAttribute::kName);
+
+  // The updated name should contain the memory usage.
+  std::u16string expected_memory_string = ui::FormatBytes(memory_usage);
+  EXPECT_NE(std::u16string::npos, updated_name.find(expected_memory_string));
+}
+
 IN_PROC_BROWSER_TEST_F(TabStripBrowsertest,
                        DISABLED_TabGroupHeaderAccessibleProperties) {
   browser()->set_update_ui_immediately_for_testing();
@@ -1392,7 +1427,7 @@ IN_PROC_BROWSER_TEST_F(TabStripBrowsertest, TabGroupTabNavigationAccelerators) {
   // Select the fourth tab.
   tab_strip_model()->ActivateTabAt(3);
 
-  CommandUpdater* updater = browser()->command_controller();
+  CommandUpdater* updater = chrome::BrowserCommandController::From(browser());
 
   // Navigate to the first tab using an accelerator.
   updater->ExecuteCommand(IDC_SELECT_TAB_0);

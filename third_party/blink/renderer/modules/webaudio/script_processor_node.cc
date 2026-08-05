@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_processing_event.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
+#include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_node.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
@@ -215,7 +216,7 @@ ScriptProcessorNode* ScriptProcessorNode::Create(
       if (context.HasRealtimeConstraint() && !context.IsContextCleared()) {
         RealtimeAudioDestinationHandler& destination_handler =
             static_cast<RealtimeAudioDestinationHandler&>(
-                context.destination()->GetAudioDestinationHandler());
+                context.destinationNode()->GetAudioDestinationHandler());
         buffer_size =
             ChooseBufferSize(destination_handler.GetCallbackBufferSize());
       } else {
@@ -241,6 +242,16 @@ ScriptProcessorNode* ScriptProcessorNode::Create(
           StrCat({"buffer size (", String::Number(requested_buffer_size),
                   ") must be 0 or a power of two between 256 and 16384."}));
       return nullptr;
+  }
+
+  uint32_t render_quantum_size = context.renderQuantumSize();
+  if (render_quantum_size == 0 || buffer_size % render_quantum_size != 0) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        StrCat({"buffer size (", String::Number(buffer_size),
+                ") must be a multiple of the context render quantum size (",
+                String::Number(render_quantum_size), ")."}));
+    return nullptr;
   }
 
   ScriptProcessorNode* node = MakeGarbageCollected<ScriptProcessorNode>(

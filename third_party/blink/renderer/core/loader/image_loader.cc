@@ -116,7 +116,7 @@ class ImageLoader::Task {
       : loader_(loader), update_behavior_(update_behavior) {
     ExecutionContext* context = loader_->GetElement()->GetExecutionContext();
     async_task_context_.Schedule(context, "Image",
-                                 probe::AsyncTaskContext::ScanForAds::kTrue);
+                                 probe::AsyncTaskContext::StackOptions::kScan);
     world_ = context->GetCurrentWorld();
   }
 
@@ -502,26 +502,6 @@ void ImageLoader::DoUpdateFromElement(const DOMWrapperWorld* world,
 
     DCHECK(document.GetFrame());
     auto* frame = document.GetFrame();
-    if (IsA<HTMLImageElement>(GetElement())) {
-      bool shared_storage_writable_opted_in =
-          GetElement()->FastHasAttribute(
-              html_names::kSharedstoragewritableAttr) &&
-          RuntimeEnabledFeatures::SharedStorageAPIEnabled(
-              GetElement()->GetExecutionContext()) &&
-          GetElement()->GetExecutionContext()->IsSecureContext() &&
-          !SecurityOrigin::Create(url)->IsOpaque();
-      resource_request.SetSharedStorageWritableOptedIn(
-          shared_storage_writable_opted_in);
-      if (GetElement()->FastHasAttribute(html_names::kBrowsingtopicsAttr) &&
-          RuntimeEnabledFeatures::TopicsAPIEnabled(
-              GetElement()->GetExecutionContext()) &&
-          GetElement()->GetExecutionContext()->IsSecureContext()) {
-        resource_request.SetBrowsingTopics(true);
-        UseCounter::Count(document, mojom::blink::WebFeature::kTopicsAPIImg);
-        Deprecation::CountDeprecation(GetElement()->GetExecutionContext(),
-                                      WebFeature::kTopicsAPIAll);
-      }
-    }
 
     bool page_is_being_dismissed =
         document.PageDismissalEventBeingDispatched() != Document::kNoDismissal;

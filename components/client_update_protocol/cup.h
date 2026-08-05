@@ -7,14 +7,17 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "base/containers/span.h"
 #include "crypto/hash.h"
-#include "crypto/keypair.h"
 
 namespace client_update_protocol {
+
+class SigningStrategy;
 
 // Client Update Protocol v2 (CUP) is used by Google Update (Omaha) servers to
 // ensure freshness and authenticity of server responses over HTTP, without the
@@ -64,19 +67,20 @@ class Cup {
   void OverrideNonceForTesting(int key_version, uint32_t nonce);
 
  private:
-  std::string GetKeyId(int key_version = -1) const;
+  static std::unique_ptr<const SigningStrategy> CreateSigningStrategy(
+      int key_version,
+      base::span<const uint8_t> public_key);
 
-  // The server keeps multiple signing keys; a version must be sent so that
-  // the correct signing key is used to sign the assembled message.
-  const int pub_key_version_;
+  bool ParseETagHeader(std::string_view etag_header_value_in,
+                       std::vector<uint8_t>* signature_out,
+                       std::vector<uint8_t>* request_hash_out) const;
 
-  // The public key (ECDSA or ML-DSA-44) to use for verifying response
-  // signatures.
-  const crypto::keypair::PublicKey public_key_;
+  // Strategy instance selected based on the public key algorithm.
+  const std::unique_ptr<const SigningStrategy> strategy_;
 
   // The SHA-256 hash of the XML request.  This is modified on each call to
   // PrepareRequestParameters(), and checked by ValidateResponse().
-  std::array<uint8_t, crypto::hash::kSha256Size> request_hash_;
+  std::array<uint8_t, crypto::hash::kSha256Size> request_hash_ = {};
 
   // The query string containing key version and nonce in UTF-8 form.  This is
   // modified on each call to PrepareRequestParameters(), and checked by

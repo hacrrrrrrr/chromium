@@ -18,6 +18,10 @@
 #include "mojo/public/cpp/base/big_buffer.h"
 #include "ui/base/l10n/l10n_util.h"
 
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/tabs/page_context_eligibility_helper.h"
+#endif
+
 namespace glic {
 
 // static
@@ -44,8 +48,20 @@ void GlicContextMenuInvocationHelper::HandleContextualMenuClick(
 
     std::u16string_view trimmed_selection =
         base::TrimWhitespace(selection_text, base::TRIM_ALL);
+    bool is_page_eligible = false;
     if (base::FeatureList::IsEnabled(features::kGlicTextSelectionContextMenu) &&
         !trimmed_selection.empty()) {
+#if !BUILDFLAG(IS_ANDROID)
+      tabs::PageContextEligibilityHelper* helper =
+          tab ? tabs::PageContextEligibilityHelper::From(tab) : nullptr;
+      is_page_eligible =
+          helper &&
+          helper->IsPageContextEligible() ==
+              optimization_guide::PageContextEligibilityStatus::kEligible;
+#endif
+    }
+
+    if (is_page_eligible) {
       auto context = glic::mojom::AdditionalContext::New();
       context->source = glic::mojom::AdditionalContextSource::kTextSelection;
       context->tab_id = tab->GetHandle().raw_value();

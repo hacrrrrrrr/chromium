@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/check_deref.h"
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/strings/string_util.h"
@@ -22,8 +23,14 @@
 #include "components/multistep_filter/core/prefs/multistep_filter_retention_prefs.h"
 #include "components/multistep_filter/core/storage/filter_store.h"
 #include "components/multistep_filter/core/suggestion/filter_suggestion_generator.h"
+#include "components/multistep_filter/core/switches.h"
 #include "components/multistep_filter/core/verification/filter_application_verifier.h"
+#include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/optimization_guide_prefs.h"
+#include "components/prefs/pref_service.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
+#include "components/signin/public/identity_manager/tribool.h"
 #include "components/sync/base/user_selectable_type.h"
 #include "components/sync/service/sync_service.h"
 #include "components/sync/service/sync_user_settings.h"
@@ -70,9 +77,6 @@ void LogHistoryDeleted(MultistepFilterLogRouter* log_router,
       << LogDetail{"reason", reason}
       << LogDetail{"rows_deleted", static_cast<int>(rows_deleted.value_or(0))};
 }
-
-
-
 
 }  // namespace
 
@@ -136,6 +140,46 @@ bool MultistepFilterService::HasUserProvidedConsent(int64_t navigation_id,
   return consent_enabled;
 }
 
+bool MultistepFilterService::IsSmartSuggestionsEnabled() const {
+  // TODO(b/522733094): Clean this up once proper eligibility integration is
+  // complete.
+  int opt_in_state = pref_service_->GetInteger(
+      optimization_guide::prefs::GetSettingEnabledPrefName(
+          optimization_guide::UserVisibleFeatureKey::kContextualCueing));
+  if (opt_in_state ==
+      std::to_underlying(
+          optimization_guide::prefs::FeatureOptInState::kDisabled)) {
+    return false;
+  }
+
+  if (pref_service_->GetInteger(
+          optimization_guide::prefs::kChromeSuggestionsSettings) ==
+      kChromeSuggestionsSettingsDisabled) {
+    return false;
+  }
+
+  return true;
+}
+
+bool MultistepFilterService::CanUseModelExecutionFeatures() const {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kMultistepFilterBypassCapabilityCheck)) {
+    return true;
+  }
+  if (!IsUserSignedIn()) {
+    return false;
+  }
+  const CoreAccountId account_id =
+      identity_manager_->GetPrimaryAccountId(signin::ConsentLevel::kSignin);
+  if (account_id.empty()) {
+    return false;
+  }
+  const AccountInfo account_info =
+      identity_manager_->FindExtendedAccountInfoByAccountId(account_id);
+  return account_info.GetAccountCapabilities()
+             .can_use_model_execution_features() == signin::Tribool::kTrue;
+}
+
 bool MultistepFilterService::IsUserSignedIn() const {
   return identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSignin);
 }
@@ -162,6 +206,10 @@ void MultistepFilterService::OnHistoryDeletions(
   std::vector<std::string> deleted_hosts;
   for (const history::URLRow& url_row : deletion_info.deleted_rows()) {
     deleted_hosts.push_back(url_row.url().GetHost());
+  }
+
+  if (!deletion_info.time_range().IsValid() && deleted_hosts.empty()) {
+    return;
   }
 
   // If the time range is invalid (e.g., when specific URLs are deleted from

@@ -6,9 +6,12 @@
 
 #include <algorithm>
 
+#include "base/containers/to_vector.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/state_transitions.h"
+#include "net/http/http_no_vary_search_data.h"
+#include "services/network/public/mojom/no_vary_search.mojom-blink.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-shared.h"
 #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
@@ -39,6 +42,7 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "url/gurl.h"
 
 namespace blink {
 
@@ -189,6 +193,54 @@ enum class UpdateSpeculationCandidatesReason {
   kRestoredFromBFCache = 1,
   kMaxValue = kRestoredFromBFCache,
 };
+
+// Converts a blink-variant No-Vary-Search hint into net's matcher type. This
+// mirrors content's no_vary_search::ParseHttpNoVarySearchDataFromMojom for the
+// blink mojom variant.
+net::HttpNoVarySearchData ToNetNoVarySearch(
+    const network::mojom::blink::NoVarySearchPtr& nvs) {
+  const network::mojom::blink::SearchParamsVariancePtr& variance =
+      nvs->search_variance;
+  auto to_utf8 = [](const String& param) { return param.Utf8(); };
+  if (variance->is_vary_params()) {
+    return net::HttpNoVarySearchData::CreateFromVaryParams(
+        base::ToVector(variance->get_vary_params(), to_utf8),
+        nvs->vary_on_key_order);
+  }
+  return net::HttpNoVarySearchData::CreateFromNoVaryParams(
+      base::ToVector(variance->get_no_vary_params(), to_utf8),
+      nvs->vary_on_key_order);
+}
+
+// Returns true if `candidate` should be enacted for an interaction on
+// `interaction_url`: either an exact URL match, or a No-Vary-Search-hint
+// match (the candidate declares that the differing query params don't vary
+// the response). Mirrors PreloadingDecider's exact +
+// EnumerateNoVarySearchMatchedCandidates matching.
+bool CandidateMatchesInteractionUrl(const KURL& interaction_url,
+                                    const SpeculationCandidate& candidate) {
+  if (candidate.url() == interaction_url) {
+    return true;
+  }
+  const network::mojom::blink::NoVarySearchPtr& hint =
+      candidate.no_vary_search();
+  if (!hint) {
+    return false;
+  }
+  return ToNetNoVarySearch(hint).AreEquivalent(GURL(interaction_url),
+                                               GURL(candidate.url()));
+}
+
+// Key that buckets candidates by the parts an exact or No-Vary-Search match
+// requires to be identical: scheme, host, port and path. Only the query may
+// differ under No-Vary-Search, so stripping the query and fragment yields a key
+// shared by every candidate that could match a given interaction URL.
+String CandidateUrlMatchKey(const KURL& url) {
+  KURL key = url;
+  key.SetQuery(String());
+  key.RemoveFragmentIdentifier();
+  return key.GetString();
+}
 
 }  // namespace
 
@@ -627,6 +679,7 @@ void DocumentSpeculationRules::Trace(Visitor* visitor) const {
   visitor->Trace(elements_blocking_child_style_recalc_);
   visitor->Trace(selectors_);
   visitor->Trace(sent_candidates_);
+  visitor->Trace(activated_candidates_);
 }
 
 mojom::blink::SpeculationHost* DocumentSpeculationRules::GetHost() {
@@ -639,6 +692,135 @@ mojom::blink::SpeculationHost* DocumentSpeculationRules::GetHost() {
             execution_context->GetTaskRunner(TaskType::kInternalDefault)));
   }
   return host_.get();
+}
+
+bool DocumentSpeculationRules::OnPointerDownHeuristic(const KURL& url) {
+  if (!base::FeatureList::IsEnabled(
+          features::kSpeculationRulesRendererSideHeuristics)) {
+    return false;
+  }
+  // Mirrors PreloadingDecider::BehaviorConfig::pointer_down_eagerness_.
+  Vector<mojom::blink::SpeculationEagerness> eagernesses = {
+      mojom::blink::SpeculationEagerness::kConservative,
+      mojom::blink::SpeculationEagerness::kModerate};
+  if (base::FeatureList::IsEnabled(features::kPreloadingEagerHoverHeuristics)) {
+    eagernesses.push_back(mojom::blink::SpeculationEagerness::kEager);
+  }
+  return EnactMatchingCandidates(
+      url, eagernesses, mojom::blink::SpeculationHeuristic::kPointerDown);
+}
+
+bool DocumentSpeculationRules::OnHoverHeuristic(
+    const KURL& url,
+    mojom::blink::SpeculationEagerness triggered_eagerness) {
+  if (!base::FeatureList::IsEnabled(
+          features::kSpeculationRulesRendererSideHeuristics)) {
+    return false;
+  }
+  // A hover that reaches the `triggered_eagerness` dwell threshold enacts only
+  // candidates registered at exactly that eagerness, matching
+  // PreloadingDecider::OnPointerHover (which excludes all other eagerness
+  // levels for a given hover event).
+  return EnactMatchingCandidates(
+      url, {triggered_eagerness},
+      mojom::blink::SpeculationHeuristic::kPointerHover);
+}
+
+bool DocumentSpeculationRules::OnViewportHeuristic(
+    const KURL& url,
+    mojom::blink::SpeculationEagerness triggered_eagerness) {
+  if (!base::FeatureList::IsEnabled(
+          features::kSpeculationRulesRendererSideHeuristics)) {
+    return false;
+  }
+  // The moderate/eager viewport heuristics each enact candidates at exactly
+  // their eagerness (matching PreloadingDecider's kModerateViewportHeuristic /
+  // kEagerViewportHeuristic predictors).
+  const mojom::blink::SpeculationHeuristic heuristic =
+      triggered_eagerness == mojom::blink::SpeculationEagerness::kEager
+          ? mojom::blink::SpeculationHeuristic::kViewportEager
+          : mojom::blink::SpeculationHeuristic::kViewportModerate;
+  return EnactMatchingCandidates(url, {triggered_eagerness}, heuristic);
+}
+
+bool DocumentSpeculationRules::EnactMatchingCandidates(
+    const KURL& url,
+    const Vector<mojom::blink::SpeculationEagerness>& eagernesses,
+    mojom::blink::SpeculationHeuristic heuristic) {
+  // Every caller gates on this feature. Sending EnactCandidate without it makes
+  // the browser reject the message as a bad message, which kills the renderer.
+  CHECK(base::FeatureList::IsEnabled(
+      features::kSpeculationRulesRendererSideHeuristics));
+  // `immediate` candidates are enacted when candidates are updated, not via
+  // these interaction heuristics, so callers never pass `immediate` here.
+  CHECK(!eagernesses.Contains(mojom::blink::SpeculationEagerness::kImmediate));
+
+  mojom::blink::SpeculationHost* host = GetHost();
+  if (!host) {
+    return false;
+  }
+  // A heuristic can match several candidates for the same URL (e.g. a
+  // `conservative` and a `moderate` rule, both enacted on pointerdown). Enact
+  // just one candidate per action, merging the tags of every matching
+  // candidate into it (mirroring the browser's
+  // GetMergedSpeculationTagsFromSuitableCandidates). Enacting them separately
+  // would let the browser dedupe the later attempts and drop their tags.
+  struct Enactment {
+    mojom::blink::SpeculationAction action;
+    wtf_size_t representative;  // Index into `sent_candidates_`.
+    Vector<String> tags;        // Union of matching candidates' tags.
+  };
+  // Only candidates that share the interaction URL's scheme/host/port/path can
+  // match, so consult that bucket rather than scanning every sent candidate.
+  auto candidates_bucket =
+      sent_candidates_by_match_key_.find(CandidateUrlMatchKey(url));
+  if (candidates_bucket == sent_candidates_by_match_key_.end()) {
+    return false;
+  }
+
+  Vector<Enactment> enactments;
+
+  for (wtf_size_t i : candidates_bucket->value) {
+    const SpeculationCandidate& candidate = *sent_candidates_[i];
+    if (!eagernesses.Contains(candidate.eagerness()) ||
+        !CandidateMatchesInteractionUrl(url, candidate)) {
+      continue;
+    }
+    auto it =
+        std::ranges::find(enactments, candidate.action(), &Enactment::action);
+    if (it == enactments.end()) {
+      enactments.push_back(Enactment{candidate.action(), i, candidate.tags()});
+      continue;
+    }
+    // Merge this candidate's tags into the action's enactment.
+    for (const String& tag : candidate.tags()) {
+      if (!it->tags.Contains(tag)) {
+        it->tags.push_back(tag);
+      }
+    }
+  }
+
+  for (Enactment& enactment : enactments) {
+    SpeculationCandidate* candidate =
+        sent_candidates_[enactment.representative];
+    mojom::blink::SpeculationCandidatePtr mojom_candidate =
+        candidate->ToMojom();
+    mojom_candidate->tags = std::move(enactment.tags);
+    host->EnactCandidate(std::move(mojom_candidate), heuristic);
+    MarkCandidateActivated(candidate);
+  }
+  return !enactments.empty();
+}
+
+void DocumentSpeculationRules::MarkCandidateActivated(
+    SpeculationCandidate* candidate) {
+  const bool already_activated =
+      std::ranges::any_of(activated_candidates_, [&](const auto& existing) {
+        return existing->IsSimilarFromAuthorPerspective(*candidate);
+      });
+  if (!already_activated) {
+    activated_candidates_.push_back(candidate);
+  }
 }
 
 void DocumentSpeculationRules::UpdateSpeculationCandidatesMicrotask() {
@@ -768,13 +950,30 @@ void DocumentSpeculationRules::UpdateSpeculationCandidates() {
 
   // Accumulate candidates for the SpeculationMeasurement API.
   // Candidates are never removed.
+  const bool renderer_side_heuristics = base::FeatureList::IsEnabled(
+      features::kSpeculationRulesRendererSideHeuristics);
   for (SpeculationCandidate* candidate : candidates) {
     bool already_tracked =
         std::ranges::any_of(sent_candidates_, [&](const auto& existing) {
           return existing->IsSimilarFromAuthorPerspective(*candidate);
         });
     if (!already_tracked) {
+      const wtf_size_t index = sent_candidates_.size();
       sent_candidates_.push_back(candidate);
+      sent_candidates_by_match_key_
+          .insert(CandidateUrlMatchKey(candidate->url()), Vector<wtf_size_t>())
+          .stored_value->value.push_back(index);
+    }
+    // Immediate-eagerness candidates are activated by the browser as soon as
+    // they are sent, so the renderer records them as activated immediately.
+    // Non-immediate candidates become activated later, when a renderer-side
+    // heuristic enacts them (see EnactMatchingCandidates). Only the renderer
+    // knows the activated set, so `activated_candidates_` is only tracked (and
+    // only read by getSpeculations()) when renderer-side heuristics are on.
+    if (renderer_side_heuristics &&
+        candidate->eagerness() ==
+            mojom::blink::SpeculationEagerness::kImmediate) {
+      MarkCandidateActivated(candidate);
     }
   }
 

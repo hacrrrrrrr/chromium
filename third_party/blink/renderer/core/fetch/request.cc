@@ -119,8 +119,8 @@ V8RequestDestination::Enum DestinationToV8Enum(
       return V8RequestDestination::Enum::kXslt;
     case network::mojom::RequestDestination::kFencedframe:
       return V8RequestDestination::Enum::kFencedframe;
-    case network::mojom::RequestDestination::kDictionary:
-      return V8RequestDestination::Enum::kDictionary;
+    case network::mojom::RequestDestination::kCompressionDictionary:
+      return V8RequestDestination::Enum::kCompressionDictionary;
     case network::mojom::RequestDestination::kSpeculationRules:
       return V8RequestDestination::Enum::kSpeculationrules;
     case network::mojom::RequestDestination::kJson:
@@ -171,8 +171,6 @@ FetchRequestData* CreateCopyOfFetchRequestDataForFetch(
   request->SetFetchPriorityHint(original->FetchPriorityHint());
   request->SetPriority(original->Priority());
   request->SetKeepalive(original->Keepalive());
-  request->SetBrowsingTopics(original->BrowsingTopics());
-  request->SetAdAuctionHeaders(original->AdAuctionHeaders());
   request->SetSharedStorageWritable(original->SharedStorageWritable());
   request->SetIsHistoryNavigation(original->IsHistoryNavigation());
   request->SetIsReloadNavigation(original->IsReloadNavigation());
@@ -210,10 +208,10 @@ static bool AreAnyMembersPresent(const RequestInit* init) {
          init->hasReferrer() || init->hasReferrerPolicy() || init->hasMode() ||
          init->hasTargetAddressSpace() || init->hasCredentials() ||
          init->hasCache() || init->hasRedirect() || init->hasIntegrity() ||
-         init->hasKeepalive() || init->hasBrowsingTopics() ||
-         init->hasAdAuctionHeaders() || init->hasSharedStorageWritable() ||
-         init->hasPriority() || init->hasSignal() || init->hasDuplex() ||
-         init->hasPrivateToken() || init->hasRetryOptions();
+         init->hasKeepalive() || init->hasAdAuctionHeaders() ||
+         init->hasSharedStorageWritable() || init->hasPriority() ||
+         init->hasSignal() || init->hasDuplex() || init->hasPrivateToken() ||
+         init->hasRetryOptions();
 }
 
 static BodyStreamBuffer* ExtractBody(ScriptState* script_state,
@@ -694,24 +692,6 @@ Request* Request::CreateRequestWithRequestOrString(
     request->SetRetryOptions(options);
   }
 
-  if (init->hasBrowsingTopics()) {
-    if (!execution_context->IsSecureContext()) {
-      exception_state.ThrowTypeError(
-          "browsingTopics: Topics operations are only available in secure "
-          "contexts.");
-      return nullptr;
-    }
-
-    request->SetBrowsingTopics(init->browsingTopics());
-
-    if (init->browsingTopics()) {
-      UseCounter::Count(execution_context,
-                        mojom::blink::WebFeature::kTopicsAPIFetch);
-      Deprecation::CountDeprecation(execution_context,
-                                    mojom::blink::WebFeature::kTopicsAPIAll);
-    }
-  }
-
   if (init->hasAdAuctionHeaders()) {
     if (!execution_context->IsSecureContext()) {
       exception_state.ThrowDOMException(
@@ -720,8 +700,6 @@ Request* Request::CreateRequestWithRequestOrString(
           "secure contexts.");
       return nullptr;
     }
-
-    request->SetAdAuctionHeaders(init->adAuctionHeaders());
   }
 
   if (init->hasSharedStorageWritable()) {

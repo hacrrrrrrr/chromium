@@ -283,19 +283,6 @@ class ComputedStyle final : public ComputedStyleBase {
   friend class css_longhand::WebkitTextFillColor;
   friend class css_longhand::WebkitTextStrokeColor;
   friend class css_shorthand::TextDecoration;
-  // Access to *WidthInternal(). This is needed to access the *-width property
-  // before the "treat as zero if style is none" logic is applied. For example,
-  // if `BorderLeftStyle` is 'none', `BorderLeftWidth` will resolve to 0, but
-  // `BorderLeftWidthInternal` will return the actual computed width regardless
-  // of style.
-  friend class css_longhand::BorderBottomWidth;
-  friend class css_longhand::BorderLeftWidth;
-  friend class css_longhand::BorderRightWidth;
-  friend class css_longhand::BorderTopWidth;
-  friend class css_longhand::ColumnRuleWidth;
-  friend class css_longhand::OutlineWidth;
-  friend class ComputedStylePropertyMap;
-  friend class LengthPropertyFunctions;
   // Access to private Appearance() and HasAppearance().
   friend class LayoutTheme;
   friend class StyleAdjuster;
@@ -604,16 +591,16 @@ class ComputedStyle final : public ComputedStyleBase {
 
   // Border width properties.
   int BorderTopWidth() const {
-    return BorderWidth(BorderTopStyle(), BorderTopWidthInternal());
+    return BorderWidth(BorderTopStyle(), SpecifiedBorderTopWidth());
   }
   int BorderBottomWidth() const {
-    return BorderWidth(BorderBottomStyle(), BorderBottomWidthInternal());
+    return BorderWidth(BorderBottomStyle(), SpecifiedBorderBottomWidth());
   }
   int BorderLeftWidth() const {
-    return BorderWidth(BorderLeftStyle(), BorderLeftWidthInternal());
+    return BorderWidth(BorderLeftStyle(), SpecifiedBorderLeftWidth());
   }
   int BorderRightWidth() const {
-    return BorderWidth(BorderRightStyle(), BorderRightWidthInternal());
+    return BorderWidth(BorderRightStyle(), SpecifiedBorderRightWidth());
   }
 
   // clip-path
@@ -624,36 +611,6 @@ class ComputedStyle final : public ComputedStyleBase {
     // to reduce the cost of these expensive indirections by placing a bit
     // in more easily accessible memory.
     return HasClipPath() ? ClipPathInternal().Get() : nullptr;
-  }
-
-  // column-rule-width
-  GapDataList<int> ColumnRuleWidth() const {
-    // The legacy version of 'column-rule-width' behaved such that if
-    // 'column-rule-style' was not visible, we'd treat the width as 0. We will
-    // continue to apply this rule for 'column-rule-width' if a single value is
-    // provided for 'column-rule-width' and 'column-rule-style' for backwards
-    // compat. However, if one of the properties is a list of values, we will
-    // return the true computed value of the width as specified by the author
-    // (per CSSWG resolution [1]).
-    //
-    // [1]: https://github.com/w3c/csswg-drafts/issues/11494
-    const GapDataList<EBorderStyle> rule_style = ColumnRuleStyle();
-    bool is_legacy_column_rule_behavior =
-        rule_style.HasSingleValue() &&
-        ColumnRuleWidthInternal().HasSingleValue() &&
-        !BorderStyleIsVisible(rule_style.GetLegacyValue());
-    if (!RuntimeEnabledFeatures::
-            DecoupleResolvedColumnRuleWidthFromStyleEnabled() &&
-        is_legacy_column_rule_behavior) {
-      return GapDataList<int>(0);
-    }
-
-    return ColumnRuleWidthInternal();
-  }
-
-  // row-rule-width
-  const GapDataList<int>& RowRuleWidth() const {
-    return RowRuleWidthInternal();
   }
 
   // content
@@ -700,22 +657,12 @@ class ComputedStyle final : public ComputedStyleBase {
         other.OutlineStyle() == EBorderStyle::kNone) {
       return true;
     }
-    return OutlineWidthInternal() == other.OutlineWidthInternal() &&
+    return OutlineWidth() == other.OutlineWidth() &&
            ResolvedColor(OutlineColor()) ==
                other.ResolvedColor(other.OutlineColor()) &&
            OutlineStyle() == other.OutlineStyle() &&
            OutlineOffset() == other.OutlineOffset() &&
            OutlineStyleIsAuto() == other.OutlineStyleIsAuto();
-  }
-
-  // outline-width
-  int OutlineWidth() const {
-    if (!RuntimeEnabledFeatures::
-            DecoupleResolvedColumnRuleWidthFromStyleEnabled() &&
-        OutlineStyle() == EBorderStyle::kNone) {
-      return 0;
-    }
-    return OutlineWidthInternal();
   }
 
   // For history and compatibility reasons, we draw outline:auto (for focus
@@ -856,8 +803,7 @@ class ComputedStyle final : public ComputedStyleBase {
     return GetFont()->GetFontDescription();
   }
   bool HasFontRelativeUnits() const {
-    return HasEmUnits() || HasRootFontRelativeUnits() ||
-           HasGlyphRelativeUnits();
+    return HasEmUnits() || HasRootRelativeUnits() || HasGlyphRelativeUnits();
   }
   bool HasAnyRelativeUnits() const {
     return HasFontRelativeUnits() || HasContainerRelativeValue() ||
@@ -1093,9 +1039,9 @@ class ComputedStyle final : public ComputedStyleBase {
 
   bool IsGapDecorationsContainer() const {
     // `SpecifiesColumns()` signifies we are in a multicol context. Return false
-    // if we are not in a multicol, grid, or flex context.
+    // if we are not in a multicol, grid, grid lanes, or flex context.
     return SpecifiesColumns() || IsDisplayFlex() || IsDisplayWebkitBox() ||
-           IsDisplayGrid();
+           IsDisplayGrid() || IsDisplayGridLanes();
   }
 
   // Flex utility functions.
@@ -1351,6 +1297,32 @@ class ComputedStyle final : public ComputedStyleBase {
     return IsHorizontalWritingMode() ? ContainIntrinsicHeight()
                                      : ContainIntrinsicWidth();
   }
+
+  StyleIntrinsicLength EffectiveContainIntrinsicWidth() const {
+    StyleIntrinsicLength length = ContainIntrinsicWidth();
+    if (HasSizeContainmentForViewTransitionScope() &&
+        RuntimeEnabledFeatures::ScopedViewTransitionSizeContainmentEnabled()) {
+      length.SetHasAuto();
+    }
+    return length;
+  }
+  StyleIntrinsicLength EffectiveContainIntrinsicHeight() const {
+    StyleIntrinsicLength length = ContainIntrinsicHeight();
+    if (HasSizeContainmentForViewTransitionScope() &&
+        RuntimeEnabledFeatures::ScopedViewTransitionSizeContainmentEnabled()) {
+      length.SetHasAuto();
+    }
+    return length;
+  }
+
+  StyleIntrinsicLength EffectiveContainIntrinsicInlineSize() const {
+    return IsHorizontalWritingMode() ? EffectiveContainIntrinsicWidth()
+                                     : EffectiveContainIntrinsicHeight();
+  }
+  StyleIntrinsicLength EffectiveContainIntrinsicBlockSize() const {
+    return IsHorizontalWritingMode() ? EffectiveContainIntrinsicHeight()
+                                     : EffectiveContainIntrinsicWidth();
+  }
   bool IsResponsivelySized() const {
     return FrameSizing() != EFrameSizing::kAuto;
   }
@@ -1485,20 +1457,20 @@ class ComputedStyle final : public ComputedStyleBase {
 
     return BorderSideVisuallyEqual(BorderTopColor(), o.BorderTopColor(),
                                    BorderTopStyle(), o.BorderTopStyle(),
-                                   BorderTopWidthInternal(),
-                                   o.BorderTopWidthInternal()) &&
+                                   SpecifiedBorderTopWidth(),
+                                   o.SpecifiedBorderTopWidth()) &&
            BorderSideVisuallyEqual(BorderRightColor(), o.BorderRightColor(),
                                    BorderRightStyle(), o.BorderRightStyle(),
-                                   BorderRightWidthInternal(),
-                                   o.BorderRightWidthInternal()) &&
+                                   SpecifiedBorderRightWidth(),
+                                   o.SpecifiedBorderRightWidth()) &&
            BorderSideVisuallyEqual(BorderBottomColor(), o.BorderBottomColor(),
                                    BorderBottomStyle(), o.BorderBottomStyle(),
-                                   BorderBottomWidthInternal(),
-                                   o.BorderBottomWidthInternal()) &&
+                                   SpecifiedBorderBottomWidth(),
+                                   o.SpecifiedBorderBottomWidth()) &&
            BorderSideVisuallyEqual(BorderLeftColor(), o.BorderLeftColor(),
                                    BorderLeftStyle(), o.BorderLeftStyle(),
-                                   BorderLeftWidthInternal(),
-                                   o.BorderLeftWidthInternal()) &&
+                                   SpecifiedBorderLeftWidth(),
+                                   o.SpecifiedBorderLeftWidth()) &&
            BorderImage() == o.BorderImage() &&
            base::ValuesEquivalent(BorderShape(), o.BorderShape());
   }
@@ -1571,10 +1543,6 @@ class ComputedStyle final : public ComputedStyleBase {
   }
   bool HasOutOfFlowPosition() const {
     return HasOutOfFlowPosition(GetPosition());
-  }
-  bool HasInFlowPosition() const {
-    return GetPosition() == EPosition::kRelative ||
-           GetPosition() == EPosition::kSticky;
   }
   bool HasStickyConstrainedPosition() const {
     return GetPosition() == EPosition::kSticky &&
@@ -1674,7 +1642,8 @@ class ComputedStyle final : public ComputedStyleBase {
   static unsigned EffectiveContainment(unsigned contain,
                                        unsigned container_type,
                                        EContentVisibility content_visibility,
-                                       bool skips_contents) {
+                                       bool skips_contents,
+                                       bool has_size_containment_for_vt_scope) {
     unsigned effective = contain;
 
     if (container_type & kContainerTypeInlineSize) {
@@ -1693,7 +1662,9 @@ class ComputedStyle final : public ComputedStyleBase {
       effective |= kContainsLayout;
       effective |= kContainsPaint;
     }
-    if (skips_contents) {
+    if (skips_contents || (has_size_containment_for_vt_scope &&
+                           RuntimeEnabledFeatures::
+                               ScopedViewTransitionSizeContainmentEnabled())) {
       effective |= kContainsSize;
     }
 
@@ -1702,7 +1673,10 @@ class ComputedStyle final : public ComputedStyleBase {
 
   unsigned EffectiveContainment() const {
     return ComputedStyle::EffectiveContainment(
-        Contain(), ContainerType(), ContentVisibility(), SkipsContents());
+        Contain(), ContainerType(), ContentVisibility(), SkipsContents(),
+        HasSizeContainmentForViewTransitionScope() &&
+            RuntimeEnabledFeatures::
+                ScopedViewTransitionSizeContainmentEnabled());
   }
 
   bool ContainsStyle() const { return EffectiveContainment() & kContainsStyle; }
@@ -3053,19 +3027,19 @@ class ComputedStyleBuilder final : public ComputedStyleBuilderBase {
   // border-*-width
   int BorderTopWidth() const {
     return ComputedStyle::BorderWidth(BorderTopStyle(),
-                                      BorderTopWidthInternal());
+                                      SpecifiedBorderTopWidth());
   }
   int BorderBottomWidth() const {
     return ComputedStyle::BorderWidth(BorderBottomStyle(),
-                                      BorderBottomWidthInternal());
+                                      SpecifiedBorderBottomWidth());
   }
   int BorderLeftWidth() const {
     return ComputedStyle::BorderWidth(BorderLeftStyle(),
-                                      BorderLeftWidthInternal());
+                                      SpecifiedBorderLeftWidth());
   }
   int BorderRightWidth() const {
     return ComputedStyle::BorderWidth(BorderRightStyle(),
-                                      BorderRightWidthInternal());
+                                      SpecifiedBorderRightWidth());
   }
 
   // border-image-*
@@ -3197,7 +3171,10 @@ class ComputedStyleBuilder final : public ComputedStyleBuilderBase {
   // contain
   bool ShouldApplyAnyContainment(const Element& element) const {
     unsigned effective_containment = ComputedStyle::EffectiveContainment(
-        Contain(), ContainerType(), ContentVisibility(), SkipsContents());
+        Contain(), ContainerType(), ContentVisibility(), SkipsContents(),
+        HasSizeContainmentForViewTransitionScope() &&
+            RuntimeEnabledFeatures::
+                ScopedViewTransitionSizeContainmentEnabled());
     return ComputedStyle::ShouldApplyAnyContainment(element, GetDisplayStyle(),
                                                     effective_containment);
   }

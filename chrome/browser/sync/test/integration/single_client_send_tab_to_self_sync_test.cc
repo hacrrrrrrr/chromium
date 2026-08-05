@@ -71,6 +71,7 @@ namespace {
 using send_tab_to_self_helper::GetFormFieldValueById;
 using send_tab_to_self_helper::PopulateFormField;
 using testing::AllOf;
+using testing::AnyOf;
 using testing::Eq;
 using testing::Field;
 using testing::HasSubstr;
@@ -475,7 +476,7 @@ void SimulateOpeningReceivedTab(
 
   if (!controller->IsBubbleShowing()) {
     PinnedToolbarActions* pinned_controller =
-        browser->browser_window_features()->pinned_toolbar_actions();
+        browser->GetFeatures().pinned_toolbar_actions();
     pinned_controller->ShowActionEphemerallyInToolbar(kActionSendTabToSelf,
                                                       true);
     auto anchor = pinned_controller->GetBubbleAnchor(kActionSendTabToSelf);
@@ -570,14 +571,15 @@ IN_PROC_BROWSER_TEST_P(SingleClientSendTabToSelfTextFragmentSyncTest,
       chrome::AddAndReturnTabAt(GetBrowser(0), test_url, -1, true);
   ASSERT_TRUE(content::WaitForLoadStop(web_contents));
 
-  // Scroll to the content so it's precisely in the center of the viewport.
+  // Scroll the page so the target element's vertical midpoint moves to 35% of
+  // the viewport height, where the reading position hit-test occurs.
   EXPECT_TRUE(content::ExecJs(web_contents, R"(
       new Promise(r => {
-        document.getElementById('target').scrollIntoView({
-          behavior: 'instant',
-          block: 'center',
-          inline: 'center'
-        });
+        const target = document.getElementById('target');
+        const rect = target.getBoundingClientRect();
+        const currentMidpointY = rect.top + rect.height / 2;
+        const desiredMidpointY = window.innerHeight * 0.35;
+        window.scrollBy(0, currentMidpointY - desiredMidpointY);
         requestAnimationFrame(() => requestAnimationFrame(r));
       });
     )"));
@@ -619,9 +621,8 @@ IN_PROC_BROWSER_TEST_P(SingleClientSendTabToSelfTextFragmentSyncTest,
   // viewport size and layout on different platforms/bots.
   const sync_pb::TextFragmentData& tf =
       decrypted_context.scroll_position().text_fragment();
-  EXPECT_THAT(tf.text_start(), testing::AnyOf(testing::HasSubstr("fox"),
-                                              testing::HasSubstr("jumps"),
-                                              testing::HasSubstr("dog")));
+  EXPECT_THAT(tf.text_start(),
+              AnyOf(HasSubstr("fox"), HasSubstr("jumps"), HasSubstr("dog")));
 }
 
 IN_PROC_BROWSER_TEST_P(SingleClientSendTabToSelfTextFragmentSyncTest,
@@ -657,6 +658,27 @@ IN_PROC_BROWSER_TEST_P(SingleClientSendTabToSelfTextFragmentSyncTest,
 
   // No scroll position since there's no text on the empty page.
   EXPECT_FALSE(specifics.page_context().has_scroll_position());
+}
+
+// Tests that after sync is set up, context menu display reason is valid
+// for HTTP/HTTPS URLs.
+IN_PROC_BROWSER_TEST_P(SingleClientSendTabToSelfSyncTest,
+                       ContextMenuDisplayReasonIsValidForHttpUrl) {
+  ASSERT_TRUE(SetupSync());
+
+  GURL test_url = embedded_test_server()->GetURL("/empty.html");
+  content::WebContents* web_contents =
+      chrome::AddAndReturnTabAt(GetBrowser(0), test_url, -1, true);
+  ASSERT_TRUE(content::WaitForLoadStop(web_contents));
+
+  // Verify that GetEntryPointDisplayReason() returns kInformNoTargetDevice
+  // (not nullopt) for HTTP/HTTPS URLs when Sync is enabled without target
+  // devices, allowing the context menu promo item to be shown.
+  std::optional<send_tab_to_self::EntryPointDisplayReason> reason =
+      send_tab_to_self::GetEntryPointDisplayReason(web_contents, test_url);
+  ASSERT_TRUE(reason.has_value());
+  EXPECT_EQ(*reason,
+            send_tab_to_self::EntryPointDisplayReason::kInformNoTargetDevice);
 }
 
 }  // namespace

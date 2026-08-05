@@ -31,7 +31,7 @@ fn test_basic_message_write_and_send() {
         system::message::WritableMessage::new_with_data(b"hello", vec![dummy_handle.into()])
             .unwrap();
 
-    let write_result = endpoint_b.write(hello.finalize_for_sending());
+    let write_result = endpoint_b.write(hello.into());
     expect_true!(write_result.is_ok());
 
     // Attempt to read the result.
@@ -119,7 +119,7 @@ fn test_trap_signal_on_readable() {
     trap.arm().expect("Failed to arm trap");
 
     let hello = system::message::WritableMessage::new_with_bytes(b"hello").unwrap();
-    let write_result = endpoint_b.write(hello.finalize_for_sending());
+    let write_result = endpoint_b.write(hello.into());
     expect_true!(write_result.is_ok());
     {
         let count = hit_count.lock().unwrap();
@@ -179,7 +179,7 @@ fn test_make_regular_trap() {
 fn test_report_bad_message() {
     let (endpoint_a, endpoint_b) = system::message_pipe::MessageEndpoint::create_pipe().unwrap();
     let msg = system::message::WritableMessage::new_with_bytes(b"moist").unwrap();
-    endpoint_b.write(msg.finalize_for_sending()).unwrap();
+    endpoint_b.write(msg.into()).unwrap();
     let mut received_msg = endpoint_a.read().unwrap();
 
     let err_msg: Arc<Mutex<String>> = Arc::new(Mutex::new("".to_string()));
@@ -207,12 +207,12 @@ fn test_typestate_transitions() {
             .unwrap();
 
     // State 2: SendableMessage
-    let sendable_msg: system::message::SendableMessage = msg.finalize_for_sending();
+    let sendable_msg: system::message::SendableMessage = msg.into();
     let write_result = endpoint_b.write(sendable_msg);
     expect_true!(write_result.is_ok());
 
-    // State 3: FullyReadableWithHandlesMessage
-    let fully_readable_msg: system::message::FullyReadableWithHandlesMessage =
+    // State 3: ReadableMessage
+    let fully_readable_msg: system::message::ReadableWithHandlesMessage =
         endpoint_a.read().expect("failed to read");
 
     // Can read bytes in FullyReadable
@@ -228,4 +228,44 @@ fn test_typestate_transitions() {
     // Can still read bytes in BytesOnly
     let bytes2 = bytes_only_msg.read_bytes().unwrap();
     expect_eq!(bytes2, b"hello");
+}
+
+#[gtest(RustSystemAPITestSuite, SharedBufferTest)]
+fn test_shared_buffer() {
+    let num_bytes: u64 = 1024;
+
+    // Create a shared buffer of 1024 bytes.
+    let handle = system::buffer::SharedBuffer::create(num_bytes).unwrap();
+
+    // Verify that the system reports the correct size for this buffer handle.
+    let size = handle.size();
+    expect_eq!(size, num_bytes);
+
+    // Map the memory into the current process's address space.
+    let mut mapped = handle.map(0, num_bytes as usize).unwrap();
+
+    // Write to the mapped memory safely using the mutable slice.
+    // SAFETY: We are the only ones with a mapping to this memory right now.
+    unsafe {
+        let mapped_slice = mapped.as_mut_slice();
+        mapped_slice[0] = 42;
+        mapped_slice[1023] = 43;
+    }
+
+    // Duplicate the buffer handle. The shared buffer remains alive as long as at
+    // least one handle to it exists.
+    let duplicate = handle.clone_handle().unwrap();
+
+    // Map the newly duplicated handle and verify the memory contents are exactly
+    // what we wrote using the original handle.
+    let mapped_dup = duplicate.map(0, num_bytes as usize).unwrap();
+
+    // SAFETY: We mapped it successfully and we are just reading from it.
+    unsafe {
+        let mapped_dup_slice = mapped_dup.as_slice();
+        expect_eq!(mapped_dup_slice[0], 42);
+        expect_eq!(mapped_dup_slice[1023], 43);
+    }
+
+    // MappedBuffer and SharedBuffer will safely unmap and close via Drop.
 }

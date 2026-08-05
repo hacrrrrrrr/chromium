@@ -179,34 +179,34 @@ export class ScanPreviewElement extends ScanPreviewElementBase implements
     ];
   }
 
-  appState: AppState;
-  objectUrls: string[];
-  private pageNumber: number;
-  private progressPercent: number;
-  private showHelpOrProgress: boolean;
-  private showScannedImages: boolean;
-  private showHelperText: boolean;
-  private showScanProgress: boolean;
-  private showCancelingProgress: boolean;
-  private progressTextString: string;
-  private previewAriaLabel: string;
-  private progressTimer: number|null;
-  private isMultiPageScan: boolean;
-  private currentPageIndexInView: number;
-  private scannedImagesLoaded: boolean;
-  private showActionToolbar: boolean;
-  private dialogTitleText: string;
-  private dialogConfirmationText: string;
-  private dialogButtonText: string;
-  private multiPageScanning: boolean;
-  private showSingleImageFocus: boolean;
-  private forceActionToolbarVisible: boolean;
-  private actionToolbarHeight: number;
-  private actionToolbarWidth: number;
+  declare appState: AppState;
+  declare objectUrls: string[];
+  declare private pageNumber: number;
+  declare private progressPercent: number;
+  declare private showHelpOrProgress: boolean;
+  declare private showScannedImages: boolean;
+  declare private showHelperText: boolean;
+  declare private showScanProgress: boolean;
+  declare private showCancelingProgress: boolean;
+  declare private progressTextString: string;
+  declare private previewAriaLabel: string;
+  declare private progressTimer: number|null;
+  declare private isMultiPageScan: boolean;
+  declare private currentPageIndexInView: number;
+  declare private scannedImagesLoaded: boolean;
+  declare private showActionToolbar: boolean;
+  declare private dialogTitleText: string;
+  declare private dialogConfirmationText: string;
+  declare private dialogButtonText: string;
+  declare private multiPageScanning: boolean;
+  declare private showSingleImageFocus: boolean;
+  declare private forceActionToolbarVisible: boolean;
+  private actionToolbarHeight: number = 0;
+  private actionToolbarWidth: number = 0;
   private forceHiddenElementsVisibleObserverReceiver:
-      ForceHiddenElementsVisibleObserverReceiver;
-  private onDialogActionClick: EventListenerOrEventListenerObject;
-  private onWindowResized: EventListenerOrEventListenerObject;
+      ForceHiddenElementsVisibleObserverReceiver|null = null;
+  private onDialogActionClick: ((e: Event) => void)|null = null;
+  private onWindowResized: (e: Event) => void;
   private previewAreaResizeObserver: ResizeObserver;
   // ScanningBrowserProxy is initialized when scanning_app.js is created.
   private browserProxy = ScanningBrowserProxyImpl.getInstance();
@@ -648,8 +648,11 @@ export class ScanPreviewElement extends ScanPreviewElementBase implements
   private closeDialog(): void {
     this.shadowRoot!.querySelector<CrDialogElement>(
                         '#scanPreviewDialog')!.close();
-    this.shadowRoot!.querySelector<CrButtonElement>('#actionButton')!
-        .removeEventListener('click', this.onDialogActionClick);
+    if (this.onDialogActionClick) {
+      this.shadowRoot!.querySelector<CrButtonElement>('#actionButton')!
+          .removeEventListener('click', this.onDialogActionClick);
+      this.onDialogActionClick = null;
+    }
   }
 
   /**

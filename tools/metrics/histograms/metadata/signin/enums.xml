@@ -213,6 +213,16 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(//components/signin/core/browser/account_preview_data_fetcher.h:AccountPreviewDataFetchState) -->
 
+<!-- LINT.IfChange(AccountPreviewFetchTriggerCause) -->
+
+<enum name="AccountPreviewFetchTriggerCause">
+  <int value="0" label="PeriodicRefresh"/>
+  <int value="1" label="RefreshTokenUpdated"/>
+  <int value="2" label="RefreshTokenRemoved"/>
+</enum>
+
+<!-- LINT.ThenChange(//components/signin/core/browser/account_preview_data_service_impl.h:FetchTriggerCause) -->
+
 <!-- LINT.IfChange(AccountProfileStartupState) -->
 
 <enum name="AccountProfileStartupState">
@@ -493,6 +503,16 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(//chrome/browser/signin/dice_response_handler.h:TokenBindingOutcome) -->
 
+<!-- LINT.IfChange(ExplicitSigninDatatypeMigrationState) -->
+
+<enum name="ExplicitSigninDatatypeMigrationState">
+  <int value="0" label="SignedIn"/>
+  <int value="1" label="SignedInWithExplicitBookmarks"/>
+  <int value="2" label="SignedInWithExplicitExtensions"/>
+</enum>
+
+<!-- LINT.ThenChange(//components/signin/internal/identity_manager/primary_account_manager.h:ExplicitSigninDatatypeMigrationState) -->
+
 <enum name="FRESigninEvents">
   <int value="0" label="Checking managed status"/>
   <int value="1" label="Signing in - unmanaged"/>
@@ -723,6 +743,8 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(//ios/chrome/browser/signin/model/authentication_service.h:IOSProfileInitializationOutcome) -->
 
+<!-- LINT.IfChange(LaunchWebAuthFlowResult) -->
+
 <enum name="LaunchWebAuthFlowResult">
   <int value="0" label="Success"/>
   <int value="1" label="kOffTheRecord"/>
@@ -734,7 +756,10 @@ chromium-metrics-reviews@google.com.
   <int value="7" label="kCannotCreateWindow"/>
   <int value="8" label="kInvalidURLScheme"/>
   <int value="9" label="kBrowserContextShutDown"/>
+  <int value="10" label="kWebAuthFlowInProgress"/>
 </enum>
+
+<!-- LINT.ThenChange(//chrome/browser/extensions/api/identity/identity_launch_web_auth_flow_function.h:LaunchWebAuthFlowResult) -->
 
 <!-- LINT.IfChange(MirrorHeaderEvent) -->
 
@@ -887,8 +912,10 @@ chromium-metrics-reviews@google.com.
   <int value="101" label="Context Memory Service"/>
   <int value="102" label="Sync Preview"/>
   <int value="103" label="Fpop Service"/>
-  <int value="104" label="Context Containers Service"/>
+  <int value="104" label="Notebooks Service"/>
   <int value="105" label="Remote Actor Login Credentials Service"/>
+  <int value="106" label="Browser Actuator"/>
+  <int value="107" label="Tab Context Containers Service"/>
 </enum>
 
 <!-- LINT.ThenChange(//components/signin/public/base/oauth_consumer_id.h:OAuthConsumerId) -->
@@ -1259,6 +1286,7 @@ chromium-metrics-reviews@google.com.
   <int value="21"
       label="Abort: not the first account but there is no primary account."/>
   <int value="22" label="Abort: management disclaimer service in progress"/>
+  <int value="23" label="Abort: account connected to primary"/>
 </enum>
 
 <enum name="SigninInterceptionDismissReason">

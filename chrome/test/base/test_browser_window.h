@@ -79,7 +79,6 @@ class TestBrowserWindow : public BrowserWindow,
   std::vector<StatusBubble*> GetStatusBubbles() override;
   void UpdateTitleBar() override {}
   void UpdateLoadingAnimations(bool is_visible) override {}
-  void SetStarredState(bool is_starred) override {}
   void OnActiveTabChanged(content::WebContents* old_contents,
                           content::WebContents* new_contents,
                           int index,
@@ -107,9 +106,7 @@ class TestBrowserWindow : public BrowserWindow,
   ui::mojom::WindowShowState GetWindowShowState() const override;
   bool IsFullscreen() const override;
   LocationBar* GetLocationBar() const override;
-  void UpdatePageActionIcon(PageActionIconType type) override {}
   autofill::AutofillBubbleHandler* GetAutofillBubbleHandler() override;
-  void ExecutePageActionIconForTesting(PageActionIconType type) override {}
   void SetFocusToLocationBar(bool is_user_initiated) override {}
   void UpdateReloadStopState(bool is_loading, bool force) override {}
   void UpdateToolbar(content::WebContents* contents) override {}
@@ -247,7 +244,7 @@ class TestBrowserWindow : public BrowserWindow,
     void OnChanged() override {}
     void UpdateWithoutTabRestore() override {}
     ui::TrackedElement* GetAnchorOrNull() override;
-    Browser* GetBrowser() override;
+    BrowserWindowInterface* GetBrowser() override;
     Profile* GetProfile() override;
     bool IsInitialized() const override;
     bool IsVisible() const override;
@@ -264,6 +261,7 @@ class TestBrowserWindow : public BrowserWindow,
     void Update(content::WebContents* contents) override {}
     void ResetTabState(content::WebContents* contents) override {}
     bool HasSecurityStateChanged() override;
+    void AnnounceAlert(const std::u16string& announcement) override {}
   };
 
   // BrowserCollectionObserver:

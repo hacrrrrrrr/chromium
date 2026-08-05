@@ -8,6 +8,7 @@
 
 #include "base/check.h"
 #include "base/feature_list.h"
+#include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -15,28 +16,26 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/ai_mode_button_service_factory.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
-#include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_context_menu_delegate.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_bubble_controller.h"
-#include "chrome/browser/user_education/user_education_service.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/lens/lens_features.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/search_engines/ai_mode_button_config.h"
 #include "components/search_engines/ai_mode_button_service.h"
 #include "components/search_engines/search_engines_switches.h"
-#include "components/send_tab_to_self/features.h"
 #include "components/url_formatter/elide_url.h"
+#include "content/public/browser/context_menu_params.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "third_party/blink/public/common/context_menu_data/edit_flags.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/ui_base_features.h"
@@ -45,6 +44,7 @@
 #include "ui/menus/simple_menu_model.h"
 #include "ui/touch_selection/touch_editing_controller.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/views_text_services_context_menu.h"
 
 #if BUILDFLAG(IS_MAC)
 #include "ui/base/cocoa/appkit_utils.h"
@@ -57,7 +57,61 @@ bool IsClipboardDataMarkedAsConfidential() {
       ->IsMarkedByOriginatorAsConfidential();
 }
 
+class StandinTextfield : public views::Textfield {
+ public:
+  explicit StandinTextfield(OmniboxContextMenuMixinBase* owner,
+                            base::WeakPtr<content::WebContents> web_contents)
+      : owner_(owner), web_contents_(web_contents) {}
+
+  const views::Widget* GetWidget() const override {
+    return owner_->GetWidgetForTextServices();
+  }
+  views::Widget* GetWidget() override {
+    return owner_->GetWidgetForTextServices();
+  }
+
+#if BUILDFLAG(IS_MAC)
+  bool SupportsLookUp() const override {
+    return !features::IsMenuSimplificationEnabled();
+  }
+#endif
+
+  bool SupportsEmoji() const override {
+    return !features::IsMenuSimplificationEnabled();
+  }
+
+#if BUILDFLAG(IS_MAC)
+  bool SupportsEditableContextMenuItems() const override { return false; }
+#endif
+
+  bool GetWordLookupDataFromSelection(gfx::DecoratedText* decorated_text,
+                                      gfx::Rect* rect) override {
+#if BUILDFLAG(IS_MAC)
+    if (web_contents_) {
+      if (content::RenderWidgetHostView* view =
+              web_contents_->GetRenderWidgetHostView()) {
+        view->ShowDefinitionForSelection();
+      }
+    }
+#endif
+    return false;
+  }
+
+ private:
+  raw_ptr<OmniboxContextMenuMixinBase> owner_;
+  base::WeakPtr<content::WebContents> web_contents_;
+};
+
 }  // namespace
+
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuMixinBase,
+                                      kCopyMenuItem);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(OmniboxContextMenuMixinBase,
+                                      kShowFullUrlsMenuItem);
+
+views::Widget* OmniboxContextMenuMixinBase::GetWidgetForTextServices() {
+  return nullptr;
+}
 
 OmniboxContextMenuMixinBase::OmniboxContextMenuMixinBase(
     LocationBar* location_bar,
@@ -137,6 +191,11 @@ std::u16string OmniboxContextMenuMixinBase::HandleGetLabelForCommandId(
 
 bool OmniboxContextMenuMixinBase::HandleIsCommandIdEnabled(
     int command_id) const {
+  if (text_services_context_menu_ &&
+      text_services_context_menu_->SupportsCommand(command_id)) {
+    return text_services_context_menu_->IsCommandIdEnabled(command_id);
+  }
+
   if (command_id ==
       std::to_underlying(ui::TouchEditable::MenuCommands::kPaste)) {
     return !IsContextMenuForReadOnlyOmnibox() &&
@@ -197,6 +256,12 @@ bool OmniboxContextMenuMixinBase::HandleIsCommandIdEnabled(
 
 bool OmniboxContextMenuMixinBase::HandleExecuteCommand(int command_id,
                                                        int event_flags) {
+  if (text_services_context_menu_ &&
+      text_services_context_menu_->SupportsCommand(command_id)) {
+    text_services_context_menu_->ExecuteCommand(command_id, event_flags);
+    return true;
+  }
+
   switch (command_id) {
     // These commands DO NOT invoke the popup via
     // OnBefore/AfterPossibleChange().
@@ -236,6 +301,66 @@ bool OmniboxContextMenuMixinBase::HandleExecuteCommand(int command_id,
   }
 }
 
+void OmniboxContextMenuMixinBase::HandleExecuteTextEditingCommandOnWebContents(
+    content::WebContents* web_contents,
+    int command_id,
+    int event_flags) {
+  switch (command_id) {
+    case views::Textfield::kUndo:
+      web_contents->Undo();
+      return;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kCut):
+      web_contents->Cut();
+      return;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kCopy):
+      web_contents->Copy();
+      return;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kPaste):
+      web_contents->Paste();
+      return;
+    case views::Textfield::kDelete:
+      web_contents->Delete();
+      return;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kSelectAll):
+      web_contents->SelectAll();
+      return;
+  }
+}
+
+bool OmniboxContextMenuMixinBase::HandleIsContextMenuTextEditingCommandEnabled(
+    int command_id,
+    const content::ContextMenuParams& menu_params) const {
+  int edit_flags = menu_params.edit_flags;
+  switch (command_id) {
+    case views::Textfield::kUndo:
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanUndo;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kCut):
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanCut;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kCopy):
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanCopy;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kPaste):
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanPaste;
+    case views::Textfield::kDelete:
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanDelete;
+    case std::to_underlying(ui::TouchEditable::MenuCommands::kSelectAll):
+      return edit_flags & blink::ContextMenuDataEditFlags::kCanSelectAll;
+    default:
+      return false;
+  }
+}
+
+bool OmniboxContextMenuMixinBase::HandleGetAcceleratorForCommandId(
+    int command_id,
+    ui::Accelerator* accelerator) const {
+  if (views::Textfield::GetStandardAcceleratorForCommandId(command_id,
+                                                           accelerator)) {
+    return true;
+  }
+  return text_services_context_menu_ &&
+         text_services_context_menu_->GetAcceleratorForCommandId(command_id,
+                                                                 accelerator);
+}
+
 void OmniboxContextMenuMixinBase::PrepareToShowContextMenu(
     base::OnceClosure closure) {
   GetClipboardText(
@@ -248,6 +373,33 @@ void OmniboxContextMenuMixinBase::OnGotClipboardText(base::OnceClosure closure,
                                                      std::u16string text) {
   clipboard_text_for_menu_ = std::move(text);
   std::move(closure).Run();
+}
+
+void OmniboxContextMenuMixinBase::AddTextfieldItems(
+    base::WeakPtr<content::WebContents> web_contents,
+    const content::ContextMenuParams& menu_params,
+    ui::SimpleMenuModel* menu_contents) {
+  text_services_context_menu_.reset();
+  context_menu_textfield_helper_.reset();
+
+  context_menu_textfield_helper_ =
+      std::make_unique<StandinTextfield>(this, web_contents);
+  context_menu_textfield_helper_->SetReadOnly(
+      IsContextMenuForReadOnlyOmnibox());
+  // MacOS has a menu entry that speaks the selection; so set our selection
+  // on the fake entry so it knows what to speak.
+  context_menu_textfield_helper_->SetText(menu_params.selection_text);
+  context_menu_textfield_helper_->SelectAll(/*reversed=*/false);
+  text_services_context_menu_ = views::Textfield::UpdateContextMenuContents(
+      context_menu_textfield_helper_.get(), /*controller=*/nullptr,
+      menu_contents);
+
+  menu_contents->SetElementIdentifierAt(
+      menu_contents
+          ->GetIndexOfCommandId(
+              std::to_underlying(ui::TouchEditable::MenuCommands::kCopy))
+          .value(),
+      kCopyMenuItem);
 }
 
 void OmniboxContextMenuMixinBase::AddOmniboxSpecificItems(
@@ -279,6 +431,9 @@ void OmniboxContextMenuMixinBase::AddOmniboxSpecificItems(
   if (!show_full_urls_pref->IsManaged()) {
     menu_contents->AddCheckItemWithStringId(IDC_SHOW_FULL_URLS,
                                             IDS_CONTEXT_MENU_SHOW_FULL_URLS);
+    menu_contents->SetElementIdentifierAt(
+        menu_contents->GetIndexOfCommandId(IDC_SHOW_FULL_URLS).value(),
+        kShowFullUrlsMenuItem);
   }
 
   // Location bar is also used in non-browser UI in production environment.
@@ -299,7 +454,7 @@ void OmniboxContextMenuMixinBase::AddOmniboxSpecificItems(
   }
 
   if (omnibox::ShouldShowAimContextMenuOption(location_bar_->GetProfile())) {
-    auto* config = GetAiModeConfig();
+    auto* config = GetAiModeUiConfig();
     if (config) {
       menu_contents->AddCheckItem(IDC_SHOW_AI_MODE_OMNIBOX_BUTTON,
                                   config->context_menu_label);
@@ -313,6 +468,11 @@ void OmniboxContextMenuMixinBase::AddOmniboxSpecificItems(
 }
 
 bool OmniboxContextMenuMixinBase::HandleIsCommandIdChecked(int id) const {
+  if (text_services_context_menu_ &&
+      text_services_context_menu_->SupportsCommand(id)) {
+    return text_services_context_menu_->IsCommandIdChecked(id);
+  }
+
   if (id == IDC_SHOW_FULL_URLS) {
     return location_bar_->GetProfile()->GetPrefs()->GetBoolean(
         omnibox::kPreventUrlElisionsInOmnibox);
@@ -332,8 +492,8 @@ bool OmniboxContextMenuMixinBase::HandleIsCommandIdChecked(int id) const {
   return false;
 }
 
-const ai_mode_button_config::AiModeButtonConfig*
-OmniboxContextMenuMixinBase::GetAiModeConfig() const {
+const AiModeButtonUiConfig* OmniboxContextMenuMixinBase::GetAiModeUiConfig()
+    const {
   if (!location_bar_) {
     return nullptr;
   }
@@ -342,61 +502,11 @@ OmniboxContextMenuMixinBase::GetAiModeConfig() const {
   return service ? service->GetCurrentConfig() : nullptr;
 }
 
-void OmniboxContextMenuMixinBase::BuildSendTabToSelfSubmenu(
-    ui::SimpleMenuModel* menu_contents,
-    size_t index) {
-  CHECK(location_bar_);
-  send_tab_to_self_submenu_delegate_ =
-      std::make_unique<send_tab_to_self::SendTabToSelfContextMenuDelegate>(
-          location_bar_->GetWebContents(),
-          send_tab_to_self::ShareEntryPoint::kOmniboxMenu);
-  send_tab_to_self_submenu_ = std::make_unique<ui::SimpleMenuModel>(
-      send_tab_to_self_submenu_delegate_.get());
-  send_tab_to_self_submenu_delegate_->PopulateSubmenu(
-      send_tab_to_self_submenu_.get());
-
-  menu_contents->InsertSubMenuWithStringIdAt(index, IDC_SEND_TAB_TO_SELF,
-                                             IDS_MENU_SEND_TAB_TO_SELF,
-                                             send_tab_to_self_submenu_.get());
-#if !BUILDFLAG(IS_MAC)
-  menu_contents->SetIcon(
-      index, ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
-                                                ? kDevicesIcon
-                                                : kDevicesOldIcon));
-#endif
-  menu_contents->SetIsNewFeatureAt(
-      index, UserEducationService::MaybeShowNewBadge(
-                 location_bar_->GetProfile(),
-                 send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2));
-}
-
-void OmniboxContextMenuMixinBase::BuildSendTabToSelfSimpleItem(
-    ui::SimpleMenuModel* menu_contents,
-    size_t index) {
-  menu_contents->InsertItemAt(
-      index, IDC_SEND_TAB_TO_SELF,
-      l10n_util::GetStringUTF16(IDS_MENU_SEND_TAB_TO_SELF));
-#if !BUILDFLAG(IS_MAC)
-  menu_contents->SetIcon(
-      index, ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
-                                                ? kDevicesIcon
-                                                : kDevicesOldIcon));
-#endif
-}
-
 void OmniboxContextMenuMixinBase::MaybeAddSendTabToSelfItem(
     ui::SimpleMenuModel* menu_contents) {
-  // WebContents is required to evaluate Send Tab to Self availability
-  // (such as sync state and target devices) and to provide tab context
-  // (URL and title) for the context menu delegate.
-  if (!location_bar_ || !location_bar_->GetWebContents()) {
-    return;
-  }
-
-  std::optional<send_tab_to_self::EntryPointDisplayReason> reason =
-      send_tab_to_self::GetEntryPointDisplayReason(
-          location_bar_->GetWebContents());
-  if (!reason) {
+  // Only add this menu entry if SendTabToSelf feature is enabled.
+  if (!send_tab_to_self::ShouldDisplayEntryPoint(
+          location_bar_->GetWebContents())) {
     return;
   }
 
@@ -411,16 +521,14 @@ void OmniboxContextMenuMixinBase::MaybeAddSendTabToSelfItem(
     menu_contents->InsertSeparatorAt(index++, ui::NORMAL_SEPARATOR);
   }
 
-  // Build an inline submenu showing target devices if the Omnibox context menu
-  // feature is enabled and target devices are available. Otherwise, fallback
-  // to a simple command item that triggers the bubble dialog.
-  if (base::FeatureList::IsEnabled(
-          send_tab_to_self::kSendTabToSelfEnhancedDesktopUIv2) &&
-      *reason == send_tab_to_self::EntryPointDisplayReason::kOfferFeature) {
-    BuildSendTabToSelfSubmenu(menu_contents, index);
-  } else {
-    BuildSendTabToSelfSimpleItem(menu_contents, index);
-  }
-
+  menu_contents->InsertItemAt(
+      index, IDC_SEND_TAB_TO_SELF,
+      l10n_util::GetStringUTF16(IDS_MENU_SEND_TAB_TO_SELF));
+#if !BUILDFLAG(IS_MAC)
+  menu_contents->SetIcon(
+      index, ui::ImageModel::FromVectorIcon(features::IsRoundedIconsEnabled()
+                                                ? kDevicesIcon
+                                                : kDevicesOldIcon));
+#endif
   menu_contents->InsertSeparatorAt(++index, ui::NORMAL_SEPARATOR);
 }

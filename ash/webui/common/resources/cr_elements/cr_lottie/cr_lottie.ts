@@ -89,11 +89,6 @@ export class CrLottieElement extends PolymerElement {
         value: false,
       },
 
-      hidden: {
-        type: Boolean,
-        value: false,
-      },
-
       singleLoop: {
         type: Boolean,
         value: false,
@@ -101,10 +96,9 @@ export class CrLottieElement extends PolymerElement {
     };
   }
 
-  animationUrl: string;
-  autoplay: boolean;
-  override hidden: boolean;
-  singleLoop: boolean;
+  declare animationUrl: string;
+  declare autoplay: boolean;
+  declare singleLoop: boolean;
 
   private canvasElement_: CanvasElementWithOffscreen|null = null;
   private isAnimationLoaded_: boolean = false;
@@ -215,7 +209,7 @@ export class CrLottieElement extends PolymerElement {
   /**
    * Updates the animation that is being displayed.
    */
-  private animationUrlChanged_() {
+  protected animationUrlChanged_() {
     if (!this.worker_) {
       // The worker hasn't loaded yet. We will load the new animation once the
       // worker loads.

@@ -196,6 +196,24 @@ GlicInvokeHandler::GlicInvokeHandler(
 
 GlicInvokeHandler::~GlicInvokeHandler() = default;
 
+bool GlicInvokeHandler::RequiresClientInvoke(
+    const mojom::InvokeOptionsPtr& mojo_options,
+    bool has_auto_submit_passkey) {
+  return mojo_options->invocation_source ==
+             mojom::InvocationSource::kCaptureRegionHotkey ||
+         has_auto_submit_passkey || !mojo_options->payload.is_null() ||
+         (mojo_options->prompts && !mojo_options->prompts->empty()) ||
+         !mojo_options->context.is_null() ||
+         mojo_options->feature_mode != mojom::FeatureMode::kUnspecified ||
+         (mojo_options->actuation_target != mojom::ActuationTarget::kUnknown &&
+          mojo_options->actuation_target !=
+              mojom::ActuationTarget::kAgentDecides) ||
+         mojo_options->disable_zero_state_suggestions ||
+         mojo_options->skill_id.has_value() ||
+         !mojo_options->zss_config.is_null() ||
+         mojo_options->actuation_tab_id.has_value();
+}
+
 void GlicInvokeHandler::Invoke() {
   timeout_timer_.Start(FROM_HERE, options_.timeout.value_or(kDefaultTimeout),
                        base::BindOnce(&GlicInvokeHandler::OnError,
@@ -299,29 +317,45 @@ void GlicInvokeHandler::Invoke() {
         instance_->profile(), options_.fre_override));
   }
 
-  tasks.push_back(std::make_unique<SendToClientTask>(
-      &*instance_, CreateMojoOptions(), auto_submit_passkey_));
+  mojom::InvokeOptionsPtr mojo_options = CreateMojoOptions();
+
+  if (RequiresClientInvoke(mojo_options, auto_submit_passkey_.has_value())) {
+    tasks.push_back(std::make_unique<SendToClientTask>(
+        &*instance_, std::move(mojo_options), auto_submit_passkey_));
+  }
 
   if (IsActuatingFeatureMode()) {
-    auto on_actuation_started = base::BindOnce(
-        [](base::WeakPtr<GlicInvokeHandler> handler) {
-          if (handler) {
-            handler->timeout_timer_.Stop();
-          }
-        },
-        weak_ptr_factory_.GetWeakPtr());
+    if (auto* task_manager = instance_->GetActorTaskManager()) {
+      if (task_manager->IsActuating()) {
+        OnActuatingChanged(true);
+      } else {
+        actuating_subscription_ = task_manager->AddActuatingChangedCallback(
+            base::BindRepeating(&GlicInvokeHandler::OnActuatingChanged,
+                                weak_ptr_factory_.GetWeakPtr()));
+      }
+    }
 
     tasks.push_back(std::make_unique<WaitForActuationTask>(
         &*instance_, options_.timeout.value_or(kDefaultTimeout),
         base::BindOnce(&GlicInvokeHandler::OnError,
-                       weak_ptr_factory_.GetWeakPtr()),
-        std::move(on_actuation_started)));
+                       weak_ptr_factory_.GetWeakPtr())));
   }
 
   main_task_ = std::make_unique<SequentialTaskGroup>(std::move(tasks));
 
   main_task_->Start(base::BindOnce(&GlicInvokeHandler::OnSuccess,
                                    weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GlicInvokeHandler::OnActuatingChanged(bool actuating) {
+  if (actuating) {
+    actuating_subscription_ = {};
+    tab_destruction_subscription_ = {};
+    if (auto* tab_surface = std::get_if<TabSurface>(&resolved_target_)) {
+      tab_surface->tab = nullptr;
+    }
+    timeout_timer_.Stop();
+  }
 }
 
 void GlicInvokeHandler::Cancel(GlicInvokeError error) {
@@ -392,6 +426,7 @@ bool GlicInvokeHandler::IsActuatingFeatureMode() const {
     case mojom::FeatureMode::kActuation:
     case mojom::FeatureMode::kExperimentalTriggering:
     case mojom::FeatureMode::kUniversalCart:
+    case mojom::FeatureMode::kPasswordChange:
       return true;
     default:
       return false;

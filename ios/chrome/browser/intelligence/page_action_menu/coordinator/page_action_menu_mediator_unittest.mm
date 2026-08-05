@@ -24,6 +24,7 @@
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
 #import "ios/chrome/browser/intelligence/bwg/model/fake_gemini_service.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_consumer.h"
@@ -80,17 +81,19 @@ class PageActionMenuMediatorTest : public PlatformTest {
                                 BuildIdentityManagerForTests));
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegateFactory(
-            base::BindOnce(
-                [](ProfileIOS* profile)
-                    -> std::unique_ptr<AuthenticationServiceDelegate> {
-                  return std::make_unique<FakeAuthenticationServiceDelegate>();
-                })));
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
+            std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
     builder.AddTestingFactory(
         ios::TemplateURLServiceFactory::GetInstance(),
         ios::TemplateURLServiceFactory::GetDefaultFactory());
+    builder.AddTestingFactory(
+        GeminiServiceFactory::GetInstance(),
+        base::BindRepeating(
+            [](ProfileIOS* profile) -> std::unique_ptr<KeyedService> {
+              return std::make_unique<FakeGeminiService>();
+            }));
 
     browser_state_ = std::move(builder).Build();
 
@@ -99,7 +102,8 @@ class PageActionMenuMediatorTest : public PlatformTest {
         AuthenticationServiceFactory::GetForProfile(browser_state_.get());
     pref_service_ = browser_state_->GetPrefs();
     ASSERT_TRUE(pref_service_);
-    fake_gemini_service_ = std::make_unique<FakeGeminiService>();
+    fake_gemini_service_ = static_cast<FakeGeminiService*>(
+        GeminiServiceFactory::GetForProfile(browser_state_.get()));
     web_state_ = std::make_unique<web::FakeWebState>();
     web_state_->SetBrowserState(browser_state_.get());
     web_state_->WasShown();
@@ -124,6 +128,7 @@ class PageActionMenuMediatorTest : public PlatformTest {
                  geminiService:fake_gemini_service_.get()
                geminiTabHelper:gemini_tab_helper_
            readerModeTabHelper:nil
+        readerModeBrowserAgent:nil
         hostContentSettingsMap:settings_map_];
     fake_consumer_ = [[FakePageActionMenuConsumer alloc] init];
     mediator_.consumer = fake_consumer_;
@@ -134,7 +139,7 @@ class PageActionMenuMediatorTest : public PlatformTest {
     fake_consumer_ = nil;
     gemini_tab_helper_ = nullptr;
     web_state_.reset();
-    fake_gemini_service_.reset();
+    fake_gemini_service_ = nullptr;
     settings_map_ = nullptr;
     pref_service_ = nullptr;
     auth_service_ = nullptr;
@@ -170,7 +175,7 @@ class PageActionMenuMediatorTest : public PlatformTest {
   raw_ptr<PrefService> pref_service_ = nullptr;
   raw_ptr<HostContentSettingsMap> settings_map_ = nullptr;
   std::unique_ptr<web::FakeWebState> web_state_;
-  std::unique_ptr<FakeGeminiService> fake_gemini_service_;
+  raw_ptr<FakeGeminiService> fake_gemini_service_ = nullptr;
   raw_ptr<GeminiTabHelper> gemini_tab_helper_;
   PageActionMenuMediator* mediator_;
   FakePageActionMenuConsumer* fake_consumer_;
@@ -285,6 +290,7 @@ TEST_F(PageActionMenuMediatorTest, PopupBlocker) {
                geminiService:fake_gemini_service_.get()
              geminiTabHelper:GeminiTabHelper::FromWebState(real_web_state.get())
          readerModeTabHelper:nil
+      readerModeBrowserAgent:nil
       hostContentSettingsMap:settings_map_];
 
   FakePageActionMenuConsumer* local_consumer =

@@ -10,8 +10,6 @@
 #include <vector>
 
 #include "base/values.h"
-#include "build/build_config.h"
-#include "components/enterprise/buildflags/buildflags.h"
 #include "components/enterprise/net/core/types.h"
 #include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
@@ -26,10 +24,19 @@ namespace enterprise_net {
 net::ProxyServer::Scheme ParseProvisioningDomainProxyProtocol(
     std::string_view protocol_str);
 
-// Resolves and expands policy extra headers (including placeholders) into a
-// net::HttpRequestHeaders object.
-net::HttpRequestHeaders ResolveExtraHeaders(
-    const ProvisioningDomainConfig& policy,
+// Resolves and expands policy extra headers into a net::HttpRequestHeaders
+// object.
+// - `kConstant` headers are set directly.
+// - `kVariable` headers will have their supported placeholders expanded.
+//
+// Supported variable placeholders:
+//   - `${profile_id}`
+//   - `${accept_language}`
+//
+// If a `kVariable` header contains unsupported/unrecognized variable
+// placeholders, it will be dropped.
+net::HttpRequestHeaders ResolveExtraHeadersWithValues(
+    const std::vector<ProxyExtraHeader>& extra_headers,
     const std::string& profile_id,
     const std::string& accept_languages);
 
@@ -38,6 +45,12 @@ net::HttpRequestHeaders ResolveExtraHeaders(
 // Returns std::nullopt if the entry is invalid or missing a valid pvd_id.
 std::optional<ProvisioningDomainConfig> ParseProxyProvisioningDomainPolicy(
     const base::DictValue& domain_dict);
+
+// Parses a PvD configuration dictionary into a
+// ProvisioningDomainProxyConfig struct. Returns std::nullopt if the dictionary
+// is invalid or missing required fields.
+std::optional<ProvisioningDomainProxyConfig> ParseProvisioningDomainConfig(
+    const base::DictValue& dict);
 
 // Parses a raw PvD JSON configuration string into a
 // ProvisioningDomainProxyConfig struct. Returns std::nullopt if the JSON is
@@ -54,6 +67,25 @@ const ProvisioningDomainProxyConfig::ProxyEndpoint* FindMatchingProxyEndpoint(
     const ProvisioningDomainProxyConfig& config,
     const GURL& destination_url,
     const net::ProxyChain& proxy_chain);
+
+// Computes a deterministic hash string for a ProvisioningDomainConfig policy
+// struct.
+std::string ComputePolicyHash(const ProvisioningDomainConfig& policy_config);
+
+// Serializes a ProvisioningDomainConfig struct into a base::DictValue
+// representation.
+base::DictValue ProvisioningDomainConfigToDict(
+    const ProvisioningDomainConfig& policy_config);
+
+// Serializes a ProvisioningDomainProxyConfig struct into a base::DictValue
+// representation.
+base::DictValue ProvisioningDomainProxyConfigToDict(
+    const ProvisioningDomainProxyConfig& proxy_config);
+
+// Parses a single "proxy-match" routing rule dictionary into a RoutingRule
+// struct.
+std::optional<ProvisioningDomainProxyConfig::RoutingRule> ParseRoutingRule(
+    const base::DictValue& match_dict);
 
 }  // namespace enterprise_net
 

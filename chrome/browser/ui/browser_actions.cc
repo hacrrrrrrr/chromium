@@ -35,6 +35,7 @@
 #include "chrome/browser/glic/resources/grit/glic_browser_resources.h"
 #include "chrome/browser/indigo/indigo_page_action_controller.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/ai_mode_button_service_factory.h"
@@ -49,8 +50,6 @@
 #include "chrome/common/webui_url_constants.h"
 #include "components/search_engines/ai_mode_button_config.h"
 #include "components/search_engines/ai_mode_button_service.h"
-#include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_zoom.h"
 #include "ui/base/interaction/element_identifier.h"
@@ -77,7 +76,6 @@
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
-#include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/actions/actions_util.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/actions/chrome_action_properties.h"
@@ -107,7 +105,6 @@
 #include "chrome/browser/ui/commerce/commerce_ui_tab_helper.h"
 #include "chrome/browser/ui/customize_chrome/side_panel_controller.h"
 #include "chrome/browser/ui/dialogs/browser_dialogs.h"
-#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
 #include "chrome/browser/ui/lens/lens_overlay_controller.h"
 #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
@@ -122,7 +119,6 @@
 #include "chrome/browser/ui/passwords/ui_utils.h"
 #include "chrome/browser/ui/performance_controls/memory_saver_bubble_controller.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
-#include "chrome/browser/ui/qrcode_generator/qrcode_generator_bubble_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_entry_point_controller.h"
 #include "chrome/browser/ui/search/omnibox_utils.h"
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
@@ -134,7 +130,7 @@
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/features.h"
-#include "chrome/browser/ui/tabs/projects/projects_panel_state_controller.h"
+#include "chrome/browser/ui/tabs/organizer/organizer_panel_state_controller.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
@@ -161,6 +157,7 @@
 #include "chrome/browser/ui/views/side_panel/history_clusters/history_clusters_side_panel_utils.h"
 #include "chrome/browser/ui/views/side_panel/tabs_from_other_devices/tabs_from_other_devices_side_panel_coordinator.h"
 #include "chrome/browser/ui/views/tabs/groups/recent_activity_bubble_dialog_view.h"
+#include "chrome/browser/ui/views/tabs/organizer/organizer_panel_utils.h"
 #include "chrome/browser/ui/views/toolbar/ai_overlay_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/chrome_labs/chrome_labs_coordinator.h"
 #include "chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.h"
@@ -173,7 +170,6 @@
 #include "chrome/browser/ui/webid/account_selection_view.h"
 #include "chrome/browser/ui/webui/inspect/inspect_ui.h"
 #include "chrome/browser/ui/webui/side_panel/customize_chrome/customize_chrome_section.h"
-#include "chrome/browser/undo/bookmark_undo_service_factory.h"
 #include "chrome/browser/web_applications/web_app_install_params.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/chrome_features.h"
@@ -193,7 +189,6 @@
 #include "components/lens/lens_overlay_invocation_source.h"
 #include "components/media_router/browser/media_router_dialog_controller.h"
 #include "components/media_router/browser/media_router_metrics.h"
-#include "components/media_router/common/pref_names.h"
 #include "components/multistep_filter/core/features.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/vector_icons.h"
@@ -212,19 +207,15 @@
 #include "components/split_tabs/split_tab_visual_data.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/tabs/public/tab_interface.h"
-#include "components/undo/bookmark_undo_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/common/profiling.h"
 #include "extensions/common/extension_urls.h"
-#include "services/network/public/mojom/referrer_policy.mojom.h"
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 #include "chrome/browser/ui/browser_commands_chromeos.h"
 #endif
-#include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "components/lens/lens_overlay_invocation_source.h"
-#include "components/translate/core/browser/translate_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/vector_icons/vector_icons.h"
 #include "printing/buildflags/buildflags.h"
@@ -248,6 +239,14 @@
 #endif
 
 namespace {
+
+ui::Accelerator GetAcceleratorForCommandId(int command_id) {
+  ui::Accelerator accelerator;
+  if (::GetAcceleratorForCommandId(command_id, &accelerator)) {
+    return accelerator;
+  }
+  return ui::Accelerator();
+}
 
 actions::ActionItem::ActionItemBuilder ChromeMenuAction(
     actions::ActionItem::InvokeActionCallback callback,
@@ -314,83 +313,25 @@ actions::ActionItem::ActionItemBuilder SidePanelAction(
       .SetProperty(actions::kActionItemPinnableKey, pinnable_state);
 }
 
-bool IsInProgressiveWebApp(BrowserWindowInterface* bwi) {
-  const Browser* const browser = bwi->GetBrowserForMigrationOnly();
-  return browser && (browser->is_type_app() || browser->is_type_app_popup());
-}
-
-BrowserWindowInterface* FindNormalBrowser(const Profile* profile) {
-  BrowserWindowInterface* normal_browser = nullptr;
-  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-      [&](BrowserWindowInterface* browser) {
-        if (browser->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
-            browser->GetProfile() == profile) {
-          normal_browser = browser;
-          return false;  // stop iterating
-        }
-        return true;  // continue iterating
-      });
-  return normal_browser;
-}
-
-BrowserWindowInterface* GetTargetBrowserForNavigation(
-    BrowserWindowInterface* bwi,
-    WindowOpenDisposition& disposition) {
-  if (IsInProgressiveWebApp(bwi)) {
-    BrowserWindowInterface* const normal_browser =
-        FindNormalBrowser(bwi->GetProfile());
-    if (normal_browser) {
-      disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-      return normal_browser;
-    } else {
-      disposition = WindowOpenDisposition::NEW_WINDOW;
-    }
-  }
-  return bwi;
-}
-
-void ExecOpenLink(BrowserWindowInterface* bwi,
-                  WindowOpenDisposition disposition,
-                  bool resolve_target_browser,
-                  const actions::ActionInvocationContext& context) {
-  const GURL* const link_url = context.GetProperty(chrome::kLinkUrlKey);
-  if (!link_url || !link_url->is_valid()) {
-    return;
-  }
-  const GURL* const frame_url = context.GetProperty(chrome::kFrameUrlKey);
-  const url::Origin* const frame_origin =
-      context.GetProperty(chrome::kFrameOriginKey);
-  int referrer_policy_raw = context.GetProperty(chrome::kReferrerPolicyKey);
-  auto referrer_policy =
-      static_cast<network::mojom::ReferrerPolicy>(referrer_policy_raw);
-
-  BrowserWindowInterface* target_bwi = bwi;
-  if (resolve_target_browser) {
-    target_bwi = GetTargetBrowserForNavigation(bwi, disposition);
-  }
-
-  GURL referrer_url;
-  if (disposition != WindowOpenDisposition::OFF_THE_RECORD && frame_url) {
-    referrer_url = frame_url->GetAsReferrer();
-  }
-
-  content::OpenURLParams params(
-      *link_url,
-      content::Referrer::SanitizeForRequest(
-          *link_url, content::Referrer(referrer_url, referrer_policy)),
-      disposition, ui::PAGE_TRANSITION_LINK,
-      /*is_renderer_initiated=*/false);
-  if (frame_origin) {
-    params.initiator_origin = *frame_origin;
-  }
-  params.started_from_context_menu = true;
-  target_bwi->OpenURL(params, /*navigation_handle_callback=*/{});
-}
-
 }  // namespace
 
+DEFINE_USER_DATA(BrowserActions);
+
+// static
+BrowserActions* BrowserActions::From(BrowserWindowInterface* browser) {
+  return Get(browser->GetUnownedUserDataHost());
+}
+
+// static
+const BrowserActions* BrowserActions::From(
+    const BrowserWindowInterface* browser) {
+  return Get(browser->GetUnownedUserDataHost());
+}
+
 BrowserActions::BrowserActions(BrowserWindowInterface* bwi)
-    : bwi_(CHECK_DEREF(bwi)), profile_(CHECK_DEREF(bwi->GetProfile())) {}
+    : bwi_(CHECK_DEREF(bwi)),
+      profile_(CHECK_DEREF(bwi->GetProfile())),
+      scoped_unowned_user_data_(bwi->GetUnownedUserDataHost(), *this) {}
 
 BrowserActions::~BrowserActions() {
   browser_action_prefs_listener_.reset();
@@ -422,6 +363,8 @@ void BrowserActions::InitializeBrowserActions() {
   InitializeToolbarAndMiscActions();
 
   InitializeNavigationActions();
+
+  InitializeSubmenuActions();
 
   AddListeners();
 }
@@ -472,9 +415,8 @@ void BrowserActions::InitializeSidePanelActions() {
       SidePanelAction(SidePanelEntryId::kCustomizeChrome,
                       IDS_SIDE_PANEL_CUSTOMIZE_CHROME_TITLE,
                       IDS_SIDE_PANEL_CUSTOMIZE_CHROME_TITLE,
-                      features::IsRoundedIconsEnabled() ? kEditIcon
-                      : features::IsRoundedIconsEnabled()
-                          ? vector_icons::kEditIcon
+                      features::IsRoundedIconsEnabled()
+                          ? kEditIcon
                           : vector_icons::kEditChromeRefreshOldIcon,
                       kActionSidePanelShowCustomizeChrome, bwi, false)
           .Build());
@@ -594,6 +536,39 @@ void BrowserActions::InitializeSidePanelActions() {
               ui::kColorIcon))
           .Build());
 
+  root_action_item_->AddChild(
+      actions::ActionItem::Builder(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {
+                std::underlying_type_t<SidePanelOpenTrigger>
+                    side_panel_trigger =
+                        context.GetProperty(kSidePanelOpenTriggerKey);
+                ReadAnythingOpenTrigger open_trigger =
+                    ReadAnythingOpenTrigger::kAppMenu;
+                if (side_panel_trigger != -1) {
+                  std::optional<ReadAnythingOpenTrigger> mapped_trigger =
+                      read_anything::SidePanelToReadAnythingOpenTrigger(
+                          static_cast<SidePanelOpenTrigger>(
+                              side_panel_trigger));
+                  if (mapped_trigger.has_value()) {
+                    open_trigger = mapped_trigger.value();
+                  }
+                }
+                read_anything::ReadAnythingEntryPointController::ShowUI(
+                    bwi, open_trigger);
+              },
+              bwi))
+          .SetActionId(kActionShowReadingModeSidePanel)
+          .SetText(l10n_util::GetStringUTF16(IDS_READING_MODE_TITLE))
+          .SetTooltipText(l10n_util::GetStringFUTF16(IDS_READING_MODE_TOOLTIP,
+                                                     reading_mode_shortcut))
+          .SetImage(ui::ImageModel::FromVectorIcon(
+              features::IsRoundedIconsEnabled() ? kMenuBookIcon
+                                                : kMenuBookChromeRefreshOldIcon,
+              ui::kColorIcon))
+          .Build());
+
   if (lens::features::IsLensOverlayEnabled()) {
     const gfx::VectorIcon& icon =
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -617,11 +592,9 @@ void BrowserActions::InitializeSidePanelActions() {
                 bwi))
             .SetActionId(kActionSidePanelShowLensOverlayResults)
             .SetText(l10n_util::GetStringUTF16(
-                lens::GetLensOverlayEntrypointLabelAltIds(
-                    IDS_SHOW_LENS_OVERLAY)))
+                lens::GetLensOverlayEntrypointLabelAltIds()))
             .SetTooltipText(l10n_util::GetStringUTF16(
-                lens::GetLensOverlayEntrypointLabelAltIds(
-                    IDS_SIDE_PANEL_LENS_OVERLAY_TOOLBAR_TOOLTIP)))
+                lens::GetLensOverlayEntrypointLabelAltIds()))
             .SetImage(ui::ImageModel::FromVectorIcon(
                 icon, ui::kColorIcon, ui::SimpleMenuModel::kDefaultIconSize))
             .SetProperty(actions::kActionItemPinnableKey,
@@ -653,7 +626,7 @@ void BrowserActions::InitializeSidePanelActions() {
             .Build());
   }
 
-  if (base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks)) {
+  if (contextual_tasks::IsContextualTasksUIEnabled()) {
     root_action_item_->AddChild(
         actions::ActionItem::Builder(
             base::BindRepeating(
@@ -722,7 +695,7 @@ void BrowserActions::InitializePageActionIconActions() {
               IDS_AUTOFILL_OFFERS_REMINDER_ICON_TOOLTIP_TEXT))
           .SetImage(ui::ImageModel::FromVectorIcon(
               features::IsRoundedIconsEnabled()
-                  ? kShoppingmodeIcon
+                  ? vector_icons::kShoppingmodeIcon
                   : kLocalOfferFlippedRefreshOldIcon,
               ui::kColorIcon, ui::SimpleMenuModel::kDefaultIconSize))
           .Build());
@@ -798,8 +771,7 @@ void BrowserActions::InitializePageActionIconActions() {
                   return;
                 }
                 auto anchor =
-                    bwi->GetBrowserForMigrationOnly()
-                        ->GetBrowserView()
+                    CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))
                         .toolbar_button_provider()
                         ->GetBubbleAnchor(kActionShowJsOptimizationsIcon);
 
@@ -854,11 +826,12 @@ void BrowserActions::InitializePageActionIconActions() {
                         /*from_user_gesture=*/true);
               },
               bwi))
-          .SetActionId(kActionZoomNormal)
+          .SetActionId(kActionShowZoomBubble)
           .SetText(l10n_util::GetStringUTF16(IDS_ZOOM_NORMAL))
           .SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_ZOOM))
           .SetImage(ui::ImageModel::FromVectorIcon(
               features::IsRoundedIconsEnabled() ? kZoomInIcon : kZoomInOldIcon))
+          .SetEnabled(true)
           .Build());
 
   root_action_item_->AddChild(
@@ -870,11 +843,14 @@ void BrowserActions::InitializePageActionIconActions() {
               },
               bwi))
           .SetActionId(kActionFind)
+          .SetText(BrowserActions::GetCleanTitleAndTooltipText(
+              l10n_util::GetStringUTF16(IDS_FIND_AND_EDIT_MENU)))
           .SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_FIND))
           .SetImage(ui::ImageModel::FromVectorIcon(
               features::IsRoundedIconsEnabled()
                   ? omnibox::kFindInPageIcon
                   : omnibox::kFindInPageChromeRefreshOldIcon))
+          .SetAccelerator(GetAcceleratorForCommandId(IDC_FIND))
           .Build());
 
   root_action_item_->AddChild(
@@ -1102,10 +1078,19 @@ void BrowserActions::InitializeChromeMenuActions() {
                       controller->GetCollapseState() ==
                       tabs::VerticalTabStripCollapseState::kExpanded;
                   controller->RequestCollapse(collapse);
-                  base::RecordAction(base::UserMetricsAction(
-                      collapse
-                          ? "VerticalTabs_TabStrip_ButtonToggleCollapsed"
-                          : "VerticalTabs_TabStrip_ButtonToggleUncollapsed"));
+                  if (context.GetProperty(chrome::kActionInvocationSourceKey) ==
+                      chrome::ActionInvocationSource::kKeyboardShortcut) {
+                    base::RecordAction(base::UserMetricsAction(
+                        collapse ? "VerticalTabs_TabStrip_"
+                                   "KeyboardShortcutToggleCollapsed"
+                                 : "VerticalTabs_TabStrip_"
+                                   "KeyboardShortcutToggleUncollapsed"));
+                  } else {
+                    base::RecordAction(base::UserMetricsAction(
+                        collapse
+                            ? "VerticalTabs_TabStrip_ButtonToggleCollapsed"
+                            : "VerticalTabs_TabStrip_ButtonToggleUncollapsed"));
+                  }
                 },
                 bwi))
             .SetActionId(kActionToggleCollapseVertical)
@@ -1136,16 +1121,16 @@ void BrowserActions::InitializeChromeMenuActions() {
             .Build());
   }
 
-  if (tab_groups::IsProjectsPanelFeatureEnabled()) {
+  if (organizer_panel::IsOrganizerPanelFeatureEnabled()) {
     root_action_item_->AddChild(
         actions::ActionItem::Builder(
             base::BindRepeating(
                 [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                    actions::ActionInvocationContext context) {
-                  auto* controller = ProjectsPanelStateController::From(bwi);
+                  auto* controller = OrganizerPanelStateController::From(bwi);
                   if (controller) {
-                    controller->SetProjectsVisible(
-                        !controller->IsProjectsPanelVisible());
+                    controller->SetOrganizerVisible(
+                        !controller->IsOrganizerPanelVisible());
                   }
 
                   // Dismiss the IPH promo if it is currently showing, or abort
@@ -1164,7 +1149,7 @@ void BrowserActions::InitializeChromeMenuActions() {
                   }
                 },
                 bwi))
-            .SetActionId(kActionToggleProjectsPanel)
+            .SetActionId(kActionToggleOrganizerPanel)
             .SetImage(ui::ImageModel::FromVectorIcon(
                 features::IsRoundedIconsEnabled()
                     ? kGridViewIcon
@@ -1224,6 +1209,7 @@ void BrowserActions::InitializeChromeMenuActions() {
               bwi),
           kActionPrint, IDS_PRINT, IDS_PRINT,
           features::IsRoundedIconsEnabled() ? kPrintIcon : kPrintMenuOldIcon)
+          .SetAccelerator(GetAcceleratorForCommandId(IDC_PRINT))
           .SetEnabled(chrome::CanPrint(bwi))
           .Build());
 
@@ -1402,9 +1388,9 @@ void BrowserActions::InitializeChromeMenuActions() {
                 auto* controller =
                     CookieControlsPageActionController::From(tab);
                 CHECK(controller);
-                controller->ExecutePageAction(bwi->GetBrowserForMigrationOnly()
-                                                  ->GetBrowserView()
-                                                  .toolbar_button_provider());
+                controller->ExecutePageAction(
+                    CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))
+                        .toolbar_button_provider());
               },
               bwi))
           .SetActionId(kActionShowCookieControls)
@@ -1533,9 +1519,8 @@ void BrowserActions::InitializeChromeMenuActions() {
                 },
                 bwi),
             kActionShowChromeLabs, IDS_CHROMELABS, IDS_CHROMELABS,
-            features::IsRoundedIconsEnabled()   ? kScienceIcon
-            : features::IsRoundedIconsEnabled() ? vector_icons::kScienceIcon
-                                                : kScienceOldIcon)
+            features::IsRoundedIconsEnabled() ? vector_icons::kScienceIcon
+                                              : vector_icons::kScienceOldIcon)
             .SetVisible(ShouldShowChromeLabsUI(profile))
             .Build());
   }
@@ -1699,52 +1684,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
                  actions::ActionInvocationContext context) {
                 content::WebContents* const web_contents =
                     tab_strip_model->GetActiveWebContents();
-                if (web_contents) {
-                  content::RenderFrameHost* const rfh =
-                      web_contents->GetFocusedFrame();
-                  if (rfh) {
-                    rfh->GetRenderWidgetHost()->UpdateTextDirection(
-                        base::i18n::LEFT_TO_RIGHT);
-                    rfh->GetRenderWidgetHost()->NotifyTextDirection();
-                  }
-                }
-              },
-              tab_strip_model))
-          .SetActionId(kActionWritingDirectionLtr)
-          .SetText(l10n_util::GetStringUTF16(
-              IDS_CONTENT_CONTEXT_WRITING_DIRECTION_LTR))
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](TabStripModel* tab_strip_model, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                content::WebContents* const web_contents =
-                    tab_strip_model->GetActiveWebContents();
-                if (web_contents) {
-                  content::RenderFrameHost* const rfh =
-                      web_contents->GetFocusedFrame();
-                  if (rfh) {
-                    rfh->GetRenderWidgetHost()->UpdateTextDirection(
-                        base::i18n::RIGHT_TO_LEFT);
-                    rfh->GetRenderWidgetHost()->NotifyTextDirection();
-                  }
-                }
-              },
-              tab_strip_model))
-          .SetActionId(kActionWritingDirectionRtl)
-          .SetText(l10n_util::GetStringUTF16(
-              IDS_CONTENT_CONTEXT_WRITING_DIRECTION_RTL))
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](TabStripModel* tab_strip_model, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                content::WebContents* const web_contents =
-                    tab_strip_model->GetActiveWebContents();
                 const GURL& url = chrome::GetURLToBookmark(web_contents);
                 IntentPickerTabHelper* const intent_picker_tab_helper =
                     IntentPickerTabHelper::FromWebContents(web_contents);
@@ -1799,7 +1738,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi, tab_strip_model),
           kActionCopyUrl, IDS_APP_MENU_COPY_LINK, IDS_APP_MENU_COPY_LINK,
-          features::IsRoundedIconsEnabled() ? kLinkIcon
+          features::IsRoundedIconsEnabled() ? vector_icons::kLinkIcon
                                             : kLinkChromeRefreshOldIcon)
           .SetEnabled(chrome::CanCopyUrl(bwi))
           .SetVisible(!sharing_hub::SharingIsDisabledByPolicy(profile))
@@ -1877,8 +1816,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
                 ToolbarButtonProvider* toolbar_button_provider =
-                    bwi->GetBrowserForMigrationOnly()
-                        ->GetBrowserView()
+                    CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))
                         .toolbar_button_provider();
                 CHECK(toolbar_button_provider);
 
@@ -2016,8 +1954,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
                 auto* toolbar_button_provider =
-                    bwi->GetBrowserForMigrationOnly()
-                        ->GetBrowserView()
+                    CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))
                         .toolbar_button_provider();
                 if (toolbar_button_provider) {
                   toolbar_button_provider->GetPinnedToolbarActions()
@@ -2041,8 +1978,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
                 auto* toolbar_button_provider =
-                    bwi->GetBrowserForMigrationOnly()
-                        ->GetBrowserView()
+                    CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))
                         .toolbar_button_provider();
                 if (toolbar_button_provider) {
                   toolbar_button_provider->GetPinnedToolbarActions()
@@ -2089,13 +2025,15 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
                  actions::ActionInvocationContext context) {
                 base::RecordAction(
                     base::UserMetricsAction("InstallWebAppFromMenu"));
-                web_app::ShowPwaInstallDialog(bwi);
+                web_app::CreateWebAppFromCurrentWebContents(
+                    bwi->GetBrowserForMigrationOnly(),
+                    web_app::WebAppInstallFlow::kInstallSite);
               },
               bwi))
           .SetActionId(kActionInstallPwa)
           .SetImage(ui::ImageModel::FromVectorIcon(
               features::IsRoundedIconsEnabled()
-                  ? kInstallDesktopIcon
+                  ? vector_icons::kInstallDesktopIcon
                   : kInstallDesktopChromeRefreshOldIcon,
               ui::kColorIcon))
           .SetProperty(actions::kActionItemPinnableKey, false)
@@ -2119,7 +2057,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           base::BindRepeating(
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
-                bwi->GetBrowserForMigrationOnly()->GetBrowserView().Cut();
+                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Cut();
               },
               bwi))
           .SetActionId(actions::kActionCut)
@@ -2129,7 +2067,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           base::BindRepeating(
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
-                bwi->GetBrowserForMigrationOnly()->GetBrowserView().Copy();
+                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Copy();
               },
               bwi))
           .SetActionId(actions::kActionCopy)
@@ -2139,7 +2077,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           base::BindRepeating(
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
-                bwi->GetBrowserForMigrationOnly()->GetBrowserView().Paste();
+                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Paste();
               },
               bwi))
           .SetActionId(actions::kActionPaste)
@@ -2176,8 +2114,7 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
                 l10n_util::GetStringUTF16(
                     IDS_TAB_GROUP_HEADER_CXMENU_UNFOCUS_GROUP)))
             .SetImage(ui::ImageModel::FromVectorIcon(
-                features::IsRoundedIconsEnabled() ? kArrowBackIcon
-                : features::IsRoundedIconsEnabled()
+                features::IsRoundedIconsEnabled()
                     ? vector_icons::kArrowBackIcon
                     : vector_icons::kArrowBackOldIcon,
                 ui::kColorIcon))
@@ -2417,16 +2354,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
             .SetText(l10n_util::GetStringUTF16(IDS_AUTOFILL_PAYMENT_TEXT))
             .Build());
   }
-
-  // Fake Page Action for Chrome internals page debugging.
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {},
-              bwi))
-          .SetActionId(kActionFakePageActionForDebug)
-          .Build());
 
   root_action_item_->AddChild(
       actions::ActionItem::Builder(
@@ -2869,6 +2796,44 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           base::BindRepeating(
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
+                if (chrome::IsCtrlTabMruEnabled(bwi)) {
+                  base::RecordAction(
+                      base::UserMetricsAction("Accel_CycleToNextTab"));
+                  chrome::CycleToMruTab(bwi);
+                } else {
+                  base::RecordAction(
+                      base::UserMetricsAction("Accel_SelectNextTab"));
+                  chrome::SelectNextTab(bwi);
+                }
+              },
+              bwi))
+          .SetActionId(kActionCycleToNextTab)
+          .Build());
+
+  root_action_item_->AddChild(
+      actions::ActionItem::Builder(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {
+                if (chrome::IsCtrlTabMruEnabled(bwi)) {
+                  base::RecordAction(
+                      base::UserMetricsAction("Accel_CycleToPrevTab"));
+                  chrome::CycleToMruTab(bwi);
+                } else {
+                  base::RecordAction(
+                      base::UserMetricsAction("Accel_SelectPreviousTab"));
+                  chrome::SelectPreviousTab(bwi);
+                }
+              },
+              bwi))
+          .SetActionId(kActionCycleToPrevTab)
+          .Build());
+
+  root_action_item_->AddChild(
+      actions::ActionItem::Builder(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {
                 base::RecordAction(
                     base::UserMetricsAction("Accel_SelectNumberedTab"));
                 chrome::SelectNumberedTab(bwi, 0);
@@ -3204,16 +3169,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           .SetActionId(kActionGroupUngroupedTabs)
           .Build());
 
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                chrome::CreateNewTabGroup(bwi);
-              },
-              bwi))
-          .SetActionId(kActionCreateNewTabGroupTopLevel)
-          .Build());
 
   root_action_item_->AddChild(
       actions::ActionItem::Builder(
@@ -3439,27 +3394,14 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           base::BindRepeating(
               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
                  actions::ActionInvocationContext context) {
-                ExclusiveAccessManager* manager =
-                    ExclusiveAccessManager::From(bwi);
-                if (manager) {
-                  manager->ExitExclusiveAccess();
-                }
+                chrome::Zoom(bwi, content::PAGE_ZOOM_RESET);
               },
               bwi))
-          .SetActionId(kActionContentContextExitFullscreen)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                NavigateToManagePasswordsPage(
-                    bwi, password_manager::ManagePasswordsReferrer::
-                             kPasswordContextMenu);
-              },
-              bwi))
-          .SetActionId(kActionContentContextShowAllSavedPasswords)
+          .SetActionId(kActionZoomNormal)
+          .SetText(l10n_util::GetStringUTF16(IDS_ZOOM_NORMAL))
+          .SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_ZOOM))
+          .SetImage(ui::ImageModel::FromVectorIcon(
+              features::IsRoundedIconsEnabled() ? kZoomInIcon : kZoomInOldIcon))
           .Build());
 
   root_action_item_->AddChild(
@@ -3471,142 +3413,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi))
           .SetActionId(kActionBookmarkBarAlwaysShow)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                PrefService* prefs = bwi->GetProfile()->GetPrefs();
-                prefs->SetBoolean(
-                    bookmarks::prefs::kShowAppsShortcutInBookmarkBar,
-                    !prefs->GetBoolean(
-                        bookmarks::prefs::kShowAppsShortcutInBookmarkBar));
-              },
-              bwi))
-          .SetActionId(kActionBookmarkBarShowAppsShortcut)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                PrefService* prefs = bwi->GetProfile()->GetPrefs();
-                prefs->SetBoolean(
-                    bookmarks::prefs::kShowManagedBookmarksInBookmarkBar,
-                    !prefs->GetBoolean(
-                        bookmarks::prefs::kShowManagedBookmarksInBookmarkBar));
-              },
-              bwi))
-          .SetActionId(kActionBookmarkBarShowManagedBookmarks)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                BookmarkUndoServiceFactory::GetForProfile(bwi->GetProfile())
-                    ->undo_manager()
-                    ->Undo();
-              },
-              bwi))
-          .SetActionId(kActionBookmarkBarUndo)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                BookmarkUndoServiceFactory::GetForProfile(bwi->GetProfile())
-                    ->undo_manager()
-                    ->Redo();
-              },
-              bwi))
-          .SetActionId(kActionBookmarkBarRedo)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                chrome::ShowBookmarkManager(bwi);
-              },
-              bwi))
-          .SetActionId(kActionBookmarkManager)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                PrefService* service = g_browser_process->local_state();
-                if (service) {
-                  service->SetBoolean(prefs::kBackgroundModeEnabled, false);
-                }
-              },
-              bwi))
-          .SetActionId(kActionStatusTrayKeepChromeRunningInBackground)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                tabs::TabInterface* const active_tab =
-                    bwi->GetActiveTabInterface();
-                if (!active_tab) {
-                  return;
-                }
-                content::WebContents* const web_contents =
-                    active_tab->GetContents();
-                if (!web_contents) {
-                  return;
-                }
-                ChromeTranslateClient* chrome_translate_client =
-                    ChromeTranslateClient::FromWebContents(web_contents);
-                if (!chrome_translate_client) {
-                  return;
-                }
-                translate::TranslateManager* manager =
-                    chrome_translate_client->GetTranslateManager();
-                if (manager) {
-                  manager->ShowTranslateUI(/*auto_translate=*/true,
-                                           /*triggered_from_menu=*/true);
-                }
-              },
-              bwi))
-          .SetActionId(kActionContentContextTranslate)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                read_anything::ReadAnythingEntryPointController::ShowUI(
-                    bwi, ReadAnythingOpenTrigger::kReadAnythingContextMenu);
-              },
-              bwi))
-          .SetActionId(kActionContentContextOpenInReadingMode)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                read_anything::ReadAnythingEntryPointController::ShowUI(
-                    bwi, ReadAnythingOpenTrigger::kReadAnythingContextMenu);
-              },
-              bwi))
-          .SetActionId(kActionContentContextListenToThisPage)
           .Build());
 
   root_action_item_->AddChild(
@@ -3695,21 +3501,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           .SetActionId(kActionBasicPrint)
           .Build());
 #endif  // BUILDFLAG(ENABLE_PRINTING)
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                tabs::TabInterface* const active_tab =
-                    bwi->GetActiveTabInterface();
-                if (active_tab && active_tab->GetContents()) {
-                  active_tab->GetContents()->Focus();
-                }
-              },
-              bwi))
-          .SetActionId(kActionFocusThisTab)
-          .Build());
 
   root_action_item_->AddChild(
       actions::ActionItem::Builder(
@@ -3896,35 +3687,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi))
           .SetActionId(kActionCaretBrowsingToggle)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                tabs::TabInterface* const active_tab =
-                    bwi->GetActiveTabInterface();
-                if (!active_tab) {
-                  return;
-                }
-                content::WebContents* const web_contents =
-                    active_tab->GetContents();
-                if (!web_contents) {
-                  return;
-                }
-                auto* bubble_controller =
-                    qrcode_generator::QRCodeGeneratorBubbleController::Get(
-                        web_contents);
-                if (bubble_controller) {
-                  base::RecordAction(base::UserMetricsAction(
-                      "SharingQRCode.DialogLaunched.ContextMenuPage"));
-                  bubble_controller->ShowBubble(
-                      web_contents->GetLastCommittedURL());
-                }
-              },
-              bwi))
-          .SetActionId(kActionContentContextGenerateQrCode)
           .Build());
 
   root_action_item_->AddChild(
@@ -4145,51 +3907,6 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi))
           .SetActionId(kActionShowAiModeOmniboxButton)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                PrefService* pref_service = bwi->GetProfile()->GetPrefs();
-                const char* pref_name =
-                    media_router::prefs::
-                        kMediaRouterShowCastSessionsStartedByOtherDevices;
-                pref_service->SetBoolean(pref_name,
-                                         !pref_service->GetBoolean(pref_name));
-              },
-              bwi))
-          .SetActionId(kActionMediaToolbarContextShowOtherSessions)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                PrefService* prefs = bwi->GetProfile()->GetPrefs();
-                const char* pref_name =
-                    "accessibility.captions.live_caption_enabled";
-                bool is_enabled = !prefs->GetBoolean(pref_name);
-                prefs->SetBoolean(pref_name, is_enabled);
-                base::UmaHistogramBoolean(
-                    "Accessibility.LiveCaption.EnableFromContextMenu",
-                    is_enabled);
-              },
-              bwi))
-          .SetActionId(kActionLiveCaption)
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                chrome::FocusLocationBar(bwi);
-              },
-              bwi))
-          .SetActionId(kActionSearch)
           .Build());
 
 #if !BUILDFLAG(IS_CHROMEOS)
@@ -4419,6 +4136,16 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi))
           .SetActionId(kActionShowHistory)
+          .SetText(BrowserActions::GetCleanTitleAndTooltipText(
+              l10n_util::GetStringUTF16(IDS_HISTORY_MENU)))
+          .SetTooltipText(BrowserActions::GetCleanTitleAndTooltipText(
+              l10n_util::GetStringUTF16(IDS_HISTORY_MENU)))
+          .SetImage(ui::ImageModel::FromVectorIcon(
+              features::IsRoundedIconsEnabled()
+                  ? vector_icons::kHistoryIcon
+                  : vector_icons::kHistoryChromeRefreshOldIcon,
+              ui::kColorIcon))
+          .SetAccelerator(GetAcceleratorForCommandId(IDC_SHOW_HISTORY))
           .Build());
 
   root_action_item_->AddChild(
@@ -4465,6 +4192,16 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
               },
               bwi))
           .SetActionId(kActionManageExtensions)
+          .SetText(BrowserActions::GetCleanTitleAndTooltipText(
+              l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS)))
+          .SetTooltipText(BrowserActions::GetCleanTitleAndTooltipText(
+              l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS)))
+          .SetImage(ui::ImageModel::FromVectorIcon(
+              features::IsRoundedIconsEnabled()
+                  ? vector_icons::kChromeExtensionIcon
+                  : vector_icons::kExtensionChromeRefreshOldIcon,
+              ui::kColorIcon))
+          .SetAccelerator(GetAcceleratorForCommandId(IDC_MANAGE_EXTENSIONS))
           .Build());
 
   root_action_item_->AddChild(
@@ -4706,84 +4443,40 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
           .Build());
 #endif
 #if !BUILDFLAG(IS_ANDROID)
-  if (base::FeatureList::IsEnabled(
-          autofill::features::kAutofillEnableResurrectingPaymentsUsers)) {
-    root_action_item_->AddChild(
-        actions::ActionItem::Builder(
-            base::BindRepeating(
-                [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                   actions::ActionInvocationContext context) {
-                  if (!bwi) {
-                    return;
-                  }
+  root_action_item_->AddChild(
+      actions::ActionItem::Builder(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {
+                if (!base::FeatureList::IsEnabled(
+                        autofill::features::
+                            kAutofillEnableResurrectingPaymentsUsers)) {
+                  return;
+                }
 
-                  auto* tab = bwi->GetActiveTabInterface();
-                  if (!tab) {
-                    return;
-                  }
+                if (!bwi) {
+                  return;
+                }
 
-                  if (auto* controller =
-                          autofill::PaymentsChurnedUsersBubbleController::From(
-                              *tab)) {
-                    controller->ReshowBubble();
-                  }
-                },
-                bwi))
-            .SetActionId(kActionShowPaymentsChurnedUsersBubble)
-            .SetImage(ui::ImageModel::FromVectorIcon(
-                features::IsRoundedIconsEnabled()
-                    ? kCreditCardIcon
-                    : kCreditCardChromeRefreshOldIcon))
-            .Build());
-  }
+                auto* tab = bwi->GetActiveTabInterface();
+                if (!tab) {
+                  return;
+                }
+
+                if (auto* controller =
+                        autofill::PaymentsChurnedUsersBubbleController::From(
+                            *tab)) {
+                  controller->ReshowBubble();
+                }
+              },
+              bwi))
+          .SetActionId(kActionShowPaymentsChurnedUsersBubble)
+          .SetImage(ui::ImageModel::FromVectorIcon(
+              features::IsRoundedIconsEnabled()
+                  ? kCreditCardIcon
+                  : kCreditCardChromeRefreshOldIcon))
+          .Build());
 #endif  // !BUILDFLAG(IS_ANDROID)
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                ExecOpenLink(bwi, WindowOpenDisposition::NEW_BACKGROUND_TAB,
-                             /*resolve_target_browser=*/true, context);
-              },
-              bwi))
-          .SetActionId(kActionContentContextOpenLinkNewTab)
-          .SetText(
-              l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKNEWTAB))
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                ExecOpenLink(bwi, WindowOpenDisposition::NEW_WINDOW,
-                             /*resolve_target_browser=*/false, context);
-              },
-              bwi))
-          .SetActionId(kActionContentContextOpenLinkNewWindow)
-          .SetText(
-              l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW))
-          .Build());
-
-  root_action_item_->AddChild(
-      actions::ActionItem::Builder(
-          base::BindRepeating(
-              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
-                 actions::ActionInvocationContext context) {
-                ExecOpenLink(bwi, WindowOpenDisposition::OFF_THE_RECORD,
-                             /*resolve_target_browser=*/false, context);
-              },
-              bwi))
-          .SetActionId(kActionContentContextOpenLinkOffTheRecord)
-          .SetText(l10n_util::GetStringUTF16(
-              IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD))
-          .Build());
-}
-
-void BrowserActions::AddListeners() {
-  browser_action_prefs_listener_ = std::make_unique<BrowserActionPrefsListener>(
-      base::to_address(profile_), this);
 }
 
 void BrowserActions::InitializeNavigationActions() {
@@ -4889,4 +4582,164 @@ void BrowserActions::InitializeNavigationActions() {
               bwi))
           .SetActionId(kActionForward)
           .Build());
+}
+
+void BrowserActions::InitializeSubmenuActions() {
+  BrowserWindowInterface* const bwi = base::to_address(bwi_);
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuBookmarksSubmenu, IDS_BOOKMARKS_AND_LISTS_MENU,
+          IDS_BOOKMARKS_AND_LISTS_MENU,
+          features::IsRoundedIconsEnabled() ? kStarIcon
+                                            : kBookmarksListsMenuOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuPasswordsAndAutofillSubmenu,
+          IDS_PASSWORDS_AND_AUTOFILL_MENU, IDS_PASSWORDS_AND_AUTOFILL_MENU,
+          features::IsRoundedIconsEnabled()
+              ? vector_icons::kPasswordManagerIcon
+              : vector_icons::kPasswordManagerOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuReadingListSubmenu, IDS_READING_LIST_MENU,
+          IDS_READING_LIST_MENU,
+          features::IsRoundedIconsEnabled() ? kListAltIcon
+                                            : kReadingListOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuZoomSubmenu, IDS_ZOOM_MENU, IDS_ZOOM_MENU,
+          features::IsRoundedIconsEnabled() ? kZoomInIcon : kZoomInOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  // TODO(crbug.com/538215007): Need to ensure that profile submenu is correct
+  const gfx::VectorIcon& avatar_vector_icon =
+      profile_->IsIncognitoProfile()
+          ? (features::IsRoundedIconsEnabled() ? kIncognitoCircleFilledIcon
+                                               : kIncognitoOldIcon)
+          : (features::IsRoundedIconsEnabled()
+                 ? kAccountCircleIcon
+                 : kAccountCircleChromeRefreshOldIcon);
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuProfileSubmenu, IDS_READING_LIST_MENU,
+          IDS_READING_LIST_MENU, avatar_vector_icon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuFindAndEditSubmenu, IDS_FIND_AND_EDIT_MENU,
+          IDS_FIND_AND_EDIT_MENU,
+          features::IsRoundedIconsEnabled() ? kFindInPageIcon
+                                            : kSearchMenuOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  int save_and_share_menu_string_id =
+      media_router::MediaRouterEnabled(bwi->GetProfile())
+          ? IDS_CAST_SAVE_AND_SHARE_MENU
+          : IDS_SAVE_AND_SHARE_MENU;
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuSaveAndShareSubmenu, save_and_share_menu_string_id,
+          save_and_share_menu_string_id,
+          features::IsRoundedIconsEnabled() ? kFileSaveIcon
+                                            : kFileSaveChromeRefreshOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuHelpSubmenu, IDS_HELP_MENU, IDS_HELP_MENU,
+          features::IsRoundedIconsEnabled() ? kHelpCustomIcon
+                                            : kHelpMenuOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuSavedTabGroupsSubmenu, IDS_SAVED_TAB_GROUPS_MENU,
+          IDS_SAVED_TAB_GROUPS_MENU,
+          features::IsRoundedIconsEnabled()
+              ? kGridViewIcon
+              : kSavedTabGroupBarEverythingOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuRecentTabsSubmenu, IDS_HISTORY_MENU, IDS_HISTORY_MENU,
+          features::IsRoundedIconsEnabled() ? kHistoryIcon : kHistoryOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+
+  root_action_item_->AddChild(
+      ChromeMenuAction(
+          base::BindRepeating(
+              [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                 actions::ActionInvocationContext context) {},
+              bwi),
+          kActionMenuDeveloperSubmenu, IDS_MORE_TOOLS_MENU, IDS_MORE_TOOLS_MENU,
+          features::IsRoundedIconsEnabled() ? kHomeRepairServiceIcon
+                                            : kMoreToolsMenuOldIcon,
+          /*is_pinnable=*/false)
+          .Build());
+}
+
+void BrowserActions::AddListeners() {
+  browser_action_prefs_listener_ = std::make_unique<BrowserActionPrefsListener>(
+      base::to_address(profile_), this);
 }

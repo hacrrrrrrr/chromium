@@ -3,17 +3,22 @@
 // found in the LICENSE file.
 
 import 'chrome://resources/cr_elements/cr_link_row/cr_link_row.js';
+import '../controls/settings_toggle_button.js';
 import '../settings_page/settings_section.js';
 // <if expr="_google_chrome">
 import '../internal/icons.html.js';
 
+import type {OnDeviceAiBrowserProxy, OnDeviceAiEnabled} from './on_device_ai_browser_proxy.js';
+import {OnDeviceAiBrowserProxyImpl} from './on_device_ai_browser_proxy.js';
 // </if>
 
 import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
+import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {assert, assertNotReached} from 'chrome://resources/js/assert.js';
 import {OpenWindowProxyImpl} from 'chrome://resources/js/open_window_proxy.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import type {SettingsToggleButtonElement} from '../controls/settings_toggle_button.js';
 import {loadTimeData} from '../i18n_setup.js';
 import type {MetricsBrowserProxy} from '../metrics_browser_proxy.js';
 import {AiPageInteractions, MetricsBrowserProxyImpl} from '../metrics_browser_proxy.js';
@@ -24,7 +29,8 @@ import {SettingsViewMixin} from '../settings_page/settings_view_mixin.js';
 import {getTemplate} from './ai_page.html.js';
 import {FeatureOptInState, SettingsAiPageFeaturePrefName} from './constants.js';
 
-const SettingsAiPageElementBase = SettingsViewMixin(PrefsMixin(PolymerElement));
+const SettingsAiPageElementBase =
+    WebUiListenerMixin(SettingsViewMixin(PrefsMixin(PolymerElement)));
 export class SettingsAiPageElement extends SettingsAiPageElementBase {
   static get is() {
     return 'settings-ai-page';
@@ -56,6 +62,11 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
         value: () => loadTimeData.getBoolean('showAiSuggestionsControl'),
       },
 
+      showInlineCueMenuControl_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('showInlineCueMenuControl'),
+      },
+
       showSkillsSettingPage_: {
         type: Boolean,
         value: () => loadTimeData.getBoolean('showSkillsSettingPage'),
@@ -71,6 +82,22 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
         value: () =>
             loadTimeData.getBoolean('showGoogleSearchAiModeWorkspaceControl'),
       },
+
+      // <if expr="_google_chrome">
+      showOnDeviceAiSettings_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('showOnDeviceAiSettings'),
+      },
+
+      onDeviceAiPref_: {
+        type: Object,
+        value: () => ({
+          key: 'settings.on_device_ai_enabled',
+          type: chrome.settingsPrivate.PrefType.BOOLEAN,
+          value: true,
+        }),
+      },
+      // </if>
     };
   }
 
@@ -78,9 +105,16 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
   declare private showHistorySearchControl_: boolean;
   declare private showPasswordChangeControl_: boolean;
   declare private showAiSuggestionsControl_: boolean;
+  declare private showInlineCueMenuControl_: boolean;
   declare private showSkillsSettingPage_: boolean;
   declare private showIndigoControl_: boolean;
   declare private showGoogleSearchAiModeWorkspaceControl_: boolean;
+  // <if expr="_google_chrome">
+  declare private showOnDeviceAiSettings_: boolean;
+  declare private onDeviceAiPref_: chrome.settingsPrivate.PrefObject<boolean>;
+  private onDeviceAiBrowserProxy_: OnDeviceAiBrowserProxy =
+      OnDeviceAiBrowserProxyImpl.getInstance();
+  // </if>
 
   private shouldRecordMetrics_: boolean = true;
   private metricsBrowserProxy_: MetricsBrowserProxy =
@@ -89,6 +123,12 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
   override connectedCallback() {
     super.connectedCallback();
     this.maybeLogVisibilityMetrics_();
+    // <if expr="_google_chrome">
+    const setOnDeviceAiPref = (onDeviceAiEnabled: OnDeviceAiEnabled) =>
+        this.setOnDeviceAiPref_(onDeviceAiEnabled);
+    this.addWebUiListener('on-device-ai-enabled-changed', setOnDeviceAiPref);
+    this.onDeviceAiBrowserProxy_.getOnDeviceAiEnabled().then(setOnDeviceAiPref);
+    // </if>
   }
 
   private maybeLogVisibilityMetrics_() {
@@ -153,6 +193,15 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
     router.navigateTo(router.getRoutes().AI_SUGGESTIONS);
   }
 
+  private onInlineCueMenuRowClick_() {
+    this.recordInteractionMetrics_(
+        AiPageInteractions.INLINE_CUE_MENU_CLICK,
+        'Settings.AiPage.InlineCueMenuEntryPointClick');
+
+    const router = Router.getInstance();
+    router.navigateTo(router.getRoutes().INLINE_CUE_MENU);
+  }
+
   private onSkillsRowClick_() {
     this.recordInteractionMetrics_(
         AiPageInteractions.SKILLS_CLICK,
@@ -176,8 +225,27 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
         AiPageInteractions.GOOGLE_SEARCH_AI_MODE_WORKSPACE_CLICK,
         'Settings.AiPage.GoogleSearchAiModeWorkspaceEntryPointClick');
 
-    OpenWindowProxyImpl.getInstance().openUrl(
-        loadTimeData.getString('googleSearchAiModeWorkspaceUrl'));
+    let isRestricted = false;
+    try {
+      const consentState =
+          this.getPref('contextual_search.drive_consent_state').value;
+      isRestricted = consentState === 1;  // DriveConsentState::kRestricted
+    } catch (e) {
+      console.error(
+          'Failed to read contextual_search.drive_consent_state pref:', e);
+    }
+
+    let url;
+    try {
+      url = loadTimeData.getString(
+          isRestricted ? 'googleSearchAiModeRestrictedUrl' :
+                         'googleSearchAiModeWorkspaceUrl');
+    } catch (e) {
+      console.error('Failed to read URL from loadTimeData:', e);
+      return;
+    }
+
+    OpenWindowProxyImpl.getInstance().openUrl(url);
   }
 
 
@@ -201,6 +269,39 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
         loadTimeData.getString('historySearchSublabelOff');
   }
 
+  // <if expr="_google_chrome">
+  private onOnDeviceAiSubLabelLinkClicked_() {
+    OpenWindowProxyImpl.getInstance().openUrl(
+        loadTimeData.getString('onDeviceAiLearnMoreUrl'));
+  }
+
+  private onOnDeviceAiSendFeedback_(e: Event) {
+    e.stopPropagation();
+    this.onDeviceAiBrowserProxy_.openFeedbackDialog();
+  }
+
+  private onOnDeviceAiSettingsBooleanControlChange_(e: Event) {
+    const enabled = (e.target as SettingsToggleButtonElement).checked;
+    this.onDeviceAiBrowserProxy_.setOnDeviceAiEnabled(enabled);
+  }
+
+  private setOnDeviceAiPref_(onDeviceAiEnabled: OnDeviceAiEnabled) {
+    const pref: chrome.settingsPrivate.PrefObject<boolean> = {
+      key: 'settings.on_device_ai_enabled',
+      type: chrome.settingsPrivate.PrefType.BOOLEAN,
+      value: onDeviceAiEnabled.enabled,
+    };
+
+    if (!onDeviceAiEnabled.allowedByPolicy) {
+      pref.enforcement = chrome.settingsPrivate.Enforcement.ENFORCED;
+      pref.controlledBy = chrome.settingsPrivate.ControlledBy.USER_POLICY;
+      pref.value = false;
+    }
+
+    this.onDeviceAiPref_ = pref;
+  }
+  // </if>
+
   // SettingsViewMixin implementation.
   override getFocusConfig() {
     const map = new Map();
@@ -217,6 +318,10 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
       map.set(routes.AI_SUGGESTIONS.path, '#aiSuggestionsRow');
     }
 
+    if (routes.INLINE_CUE_MENU) {
+      map.set(routes.INLINE_CUE_MENU.path, '#inlineCueMenuRow');
+    }
+
     if (routes.SKILLS) {
       map.set(routes.SKILLS.path, '#skillsRow');
     }
@@ -230,6 +335,7 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
       'compose',
       'historySearch',
       'aiSuggestions',
+      'inlineCueMenu',
       'skills',
     ];
     assert(ids.includes(childViewId));
@@ -247,6 +353,10 @@ export class SettingsAiPageElement extends SettingsAiPageElementBase {
       case 'aiSuggestions':
         assert(this.showAiSuggestionsControl_);
         triggerId = 'aiSuggestionsRow';
+        break;
+      case 'inlineCueMenu':
+        assert(this.showInlineCueMenuControl_);
+        triggerId = 'inlineCueMenuRow';
         break;
       case 'skills':
         assert(this.showSkillsSettingPage_);

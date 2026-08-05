@@ -25,7 +25,6 @@
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/web_applications/file_utils_wrapper.h"
-#include "chrome/browser/web_applications/isolated_web_apps/remove_isolated_web_app_data.h"
 #include "chrome/browser/web_applications/jobs/uninstall/remove_install_source_job.h"
 #include "chrome/browser/web_applications/locks/all_apps_lock.h"
 #include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
@@ -35,7 +34,6 @@
 #include "chrome/browser/web_applications/web_app_constants.h"
 #include "chrome/browser/web_applications/web_app_database_factory.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
-#include "chrome/browser/web_applications/web_app_install_finalizer.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
 #include "chrome/browser/web_applications/web_app_management_type.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
@@ -43,6 +41,7 @@
 #include "chrome/browser/web_applications/web_app_registry_update.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/browser/web_applications/web_app_translation_manager.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/data_type.h"
@@ -162,19 +161,7 @@ void RemoveWebAppJob::RemoveForCorruptDatabase(
           return;
         }
         PrefService* prefs = profile_keep_alive->profile()->GetPrefs();
-        prefs->ClearPref(prefs::kWebAppsPreferences);
-        prefs->ClearPref(prefs::kWebAppsDailyMetrics);
-        prefs->ClearPref(prefs::kWebAppsAppAgnosticIphState);
-        prefs->ClearPref(prefs::kWebAppsAppAgnosticMlState);
-        prefs->ClearPref(prefs::kWebAppsAppAgnosticIPHLinkCapturingState);
-        prefs->ClearPref(prefs::kWebAppsLastPreinstallSynchronizeVersion);
-        prefs->ClearPref(webapps::kWebAppsMigratedPreinstalledApps);
-        prefs->ClearPref(prefs::kWebAppsDidMigrateDefaultChromeApps);
-        prefs->ClearPref(prefs::kWebAppsUninstalledDefaultChromeApps);
-        prefs->ClearPref(prefs::kAppShortcutsVersion);
-        prefs->ClearPref(prefs::kAppShortcutsArch);
-        prefs->ClearPref(prefs::kIsolatedWebAppPendingInitializationCount);
-        prefs->ClearPref(prefs::kIsolatedWebAppUserInstallationEnabled);
+        ClearWebAppProfilePrefs(prefs);
         prefs->SetBoolean(prefs::kShouldGarbageCollectStoragePartitions, true);
       },
       std::move(profile_keep_alive));
@@ -271,22 +258,12 @@ void RemoveWebAppJob::Start(AllAppsLock& lock, Callback callback) {
   // - Clears data on StoragePartitions to prevent data leak on reinstall
   // before GC.
   if (app->isolation_data().has_value()) {
-    profile_->GetPrefs()->SetBoolean(
-        prefs::kShouldGarbageCollectStoragePartitions, true);
-
-    url::Origin iwa_origin = url::Origin::Create(app->scope());
-    web_app::RemoveIsolatedWebAppBrowsingData(
-        &profile_.get(), iwa_origin,
+    lock_->isolation_delegate().ClearAppResourcesOnUninstall(
+        app_id_,
         base::BindOnce(
-            GetLogCallback("isolated_web_app_browsing_data_cleared_success",
+            GetLogCallback("isolated_web_app_resources_cleared_success",
                            concurrent.CreateCallback()),
             true));
-
-    web_app::CloseAndDeleteBundle(
-        &profile_.get(), app->isolation_data()->location(),
-        base::BindOnce(GetLogCallback("isolated_web_app_bundle_deleted_success",
-                                      concurrent.CreateCallback()),
-                       true));
   }
   lock_->os_integration_manager().Synchronize(
       app_id_, base::BindOnce(&RemoveWebAppJob::SynchronizeAndUninstallOsHooks,

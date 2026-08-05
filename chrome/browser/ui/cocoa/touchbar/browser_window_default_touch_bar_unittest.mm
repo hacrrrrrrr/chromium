@@ -44,7 +44,7 @@ class BrowserWindowDefaultTouchBarUnitTest : public BrowserWithTestWindowTest {
         std::make_unique<TemplateURLServiceFactoryTestUtil>(profile());
     template_service_util_->VerifyLoad();
 
-    command_updater_ = browser()->command_controller();
+    command_updater_ = chrome::BrowserCommandController::From(browser());
 
     browser()->tab_strip_model()->AppendWebContents(
         content::WebContentsTester::CreateTestWebContents(profile(), nullptr),
@@ -59,11 +59,13 @@ class BrowserWindowDefaultTouchBarUnitTest : public BrowserWithTestWindowTest {
   }
 
   bool ShowsHomeButton() {
-    return browser()->profile()->GetPrefs()->GetBoolean(prefs::kShowHomeButton);
+    return browser()->GetProfile()->GetPrefs()->GetBoolean(
+        prefs::kShowHomeButton);
   }
 
   void SetShowHomeButton(bool flag) {
-    browser()->profile()->GetPrefs()->SetBoolean(prefs::kShowHomeButton, flag);
+    browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kShowHomeButton,
+                                                    flag);
   }
 
   void TearDown() override {

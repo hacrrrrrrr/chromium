@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/html/media/autoplay_policy.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
+#include "third_party/blink/renderer/modules/webaudio/realtime_audio_destination_node.h"
 #include "third_party/blink/renderer/platform/audio/audio_frame_stats_accumulator.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_deque.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -44,7 +45,6 @@ namespace blink {
 class AudioContextOptions;
 class AudioTimestamp;
 class AudioPlaybackStats;
-class AudioPlayoutStats;
 class ExceptionState;
 class ExecutionContext;
 class HTMLMediaElement;
@@ -53,7 +53,6 @@ class MediaElementAudioSourceNode;
 class MediaStream;
 class MediaStreamAudioDestinationNode;
 class MediaStreamAudioSourceNode;
-class RealtimeAudioDestinationNode;
 class ScriptState;
 class V8UnionAudioSinkOptionsOrString;
 class WebAudioLatencyHint;
@@ -201,6 +200,7 @@ class MODULES_EXPORT AudioContext final
   void RecordAutoPictureInPictureInfo(
       const media::PictureInPictureEventsInfo::AutoPipInfo&
           auto_picture_in_picture_info) override {}
+  void RequestSaveVideoFrame() override {}
 
   // BaseAudioContext override to enable UseCounter.
   // https://webaudio.github.io/web-audio-api/#BaseAudioContext
@@ -237,11 +237,12 @@ class MODULES_EXPORT AudioContext final
   // https://webaudio.github.io/web-audio-api/#AudioPlaybackStats
   AudioPlaybackStats* playbackStats();
 
-  //  To be removed at M147.
-  AudioPlayoutStats* playoutStats();
 
-  // Cannot be called from the audio thread.
-  RealtimeAudioDestinationNode* GetRealtimeAudioDestinationNode() const;
+  // Cannot be called from the audio thread. This method returns a
+  // GarbageCollected object, which must not be accessed on the real-time audio
+  // thread. For audio thread access, use the corresponding
+  // AudioDestinationHandler instead.
+  RealtimeAudioDestinationNode* destinationNode() const override;
 
   void HandleAudibility(AudioBus* destination_bus);
 
@@ -272,9 +273,9 @@ class MODULES_EXPORT AudioContext final
 
   void OnRenderError();
 
-  // A helper function for AudioPlayoutStats. Passes `audio_frame_stats_` to be
+  // A helper function for AudioPlaybackStats. Passes `audio_frame_stats_` to be
   // absorbed by `receiver`. See:
-  // https://wicg.github.io/web_audio_playout
+  // https://webaudio.github.io/web-audio-api/#AudioPlaybackStats
   void TransferAudioFrameStatsTo(AudioFrameStatsAccumulator& receiver);
 
   // Get the number of pending device list updates, to allow waiting until the
@@ -383,9 +384,11 @@ class MODULES_EXPORT AudioContext final
 
   // Send notification to browser that an AudioContext has started or stopped
   // playing audible audio.
-  void NotifyAudibleAudioStarted()
+  void NotifyAudibleAudioStarted(unsigned sequence_id)
       VALID_CONTEXT_REQUIRED(main_thread_sequence_checker_);
-  void NotifyAudibleAudioStopped()
+  void NotifyAudibleAudioStopped(unsigned sequence_id, double silence_time)
+      VALID_CONTEXT_REQUIRED(main_thread_sequence_checker_);
+  void ClearAudibilityState()
       VALID_CONTEXT_REQUIRED(main_thread_sequence_checker_);
 
   void EnsureAudioContextManagerService();
@@ -475,7 +478,6 @@ class MODULES_EXPORT AudioContext final
   AudioFrameStatsAccumulator audio_frame_stats_;
 
   Member<AudioPlaybackStats> audio_playback_stats_;
-  Member<AudioPlayoutStats> audio_playout_stats_;
 
   // Whether a user gesture is required to start this AudioContext.
   bool user_gesture_required_ = false;
@@ -505,7 +507,19 @@ class MODULES_EXPORT AudioContext final
 
   // Keeps track if the output of this destination was audible, before the
   // current rendering quantum.  Used for recording "playback" time.
-  bool was_audible_ = false;
+  std::atomic<bool> was_audible_{false};
+
+  // Keeps track of the accumulated silent rendering time (in seconds) to
+  // implement hysteresis for audibility notifications.
+  std::atomic<double> accumulated_silence_time_{0.0};
+
+  // Monotonically increasing ID to invalidate stale asynchronous audibility
+  // tasks. When the context's audibility state is cleared synchronously on the
+  // main thread (e.g. during suspend or close), this sequence ID is
+  // incremented. Pending asynchronous NotifyAudibleAudioStarted/Stopped tasks
+  // posted from the audio thread before the reset will carry an older sequence
+  // ID and be safely ignored, avoiding out-of-sync audibility state changes.
+  std::atomic<unsigned> audibility_sequence_id_{0};
 
   // Counts the number of render quanta where audible sound was played.  We
   // determine audibility on render quantum boundaries, so counting quanta is
@@ -611,6 +625,8 @@ class MODULES_EXPORT AudioContext final
   base::TimeTicks audible_start_timestamp_;
   // Total accumulated time this audio context has been audible.
   base::TimeDelta total_audible_duration_;
+
+  const bool use_audibility_hysteresis_;
 
   // Set to true when the DidClose() method is called. Used to detect if the
   // context is destroyed without being properly closed.

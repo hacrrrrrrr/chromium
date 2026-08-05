@@ -19,14 +19,25 @@ struct PasswordForm;
 // Base controller interface for PasswordCombinedSelectorView.
 class PasswordCombinedSelectorController : public PasswordBaseDialogController {
  public:
+  enum class DisplayType {
+    kCredentialManager,
+    kRemoteActor,
+  };
+
   using FormsVector =
       std::vector<std::unique_ptr<password_manager::PasswordForm>>;
 
   PasswordCombinedSelectorController() = default;
   ~PasswordCombinedSelectorController() override = default;
 
+  virtual DisplayType GetDisplayType() const = 0;
+  virtual bool ShouldShowTopIllustration() const = 0;
+
+  virtual std::u16string GetTitle() const = 0;
+  virtual std::u16string GetSubtitle() const = 0;
+  virtual std::u16string GetOkButtonLabel() const = 0;
+
   virtual const FormsVector& GetLocalForms() const = 0;
-  virtual url::Origin GetOrigin() const = 0;
   virtual void OnChooseCredentials(
       const password_manager::PasswordForm& password_form,
       password_manager::CredentialType credential_type) = 0;

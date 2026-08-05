@@ -1722,12 +1722,22 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ProcessTransferAfterError) {
   EXPECT_EQ(2, shell()->web_contents()->GetController().GetEntryCount());
 
   // Ensure that we have created a new process for the subframe.
-  EXPECT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
-      "Where A = http://a.com/\n"
-      "      B = http://b.com/",
-      DepictFrameTree(root));
+  if (SiteIsolationPolicy::IsErrorPageIsolationEnabled(
+          /*in_main_frame=*/false)) {
+    EXPECT_EQ(
+        " Site A ------------ proxies for B\n"
+        "   +--Site B ------- proxies for A\n"
+        "Where A = http://a.com/\n"
+        "      B = chrome-error://chromewebdata/",
+        DepictFrameTree(root));
+  } else {
+    EXPECT_EQ(
+        " Site A ------------ proxies for B\n"
+        "   +--Site B ------- proxies for A\n"
+        "Where A = http://a.com/\n"
+        "      B = http://b.com/",
+        DepictFrameTree(root));
+  }
   EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
             child->current_frame_host()->GetSiteInstance());
 
@@ -1756,18 +1766,34 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ProcessTransferAfterError) {
             child->current_origin().Serialize() + '/');
 
   // Ensure that we have created a new process for the subframe.
-  EXPECT_EQ(
-      " Site A ------------ proxies for B\n"
-      "   +--Site B ------- proxies for A\n"
-      "Where A = http://a.com/\n"
-      "      B = http://b.com/",
-      DepictFrameTree(root));
+  if (base::FeatureList::IsEnabled(features::kIsolateSubframeErrorPages)) {
+    EXPECT_EQ(
+        " Site A ------------ proxies for C\n"
+        "   +--Site C ------- proxies for A\n"
+        "Where A = http://a.com/\n"
+        "      C = http://b.com/",
+        DepictFrameTree(root));
+  } else {
+    EXPECT_EQ(
+        " Site A ------------ proxies for B\n"
+        "   +--Site B ------- proxies for A\n"
+        "Where A = http://a.com/\n"
+        "      B = http://b.com/",
+        DepictFrameTree(root));
+  }
   EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
             child->current_frame_host()->GetSiteInstance());
 
-  // Make sure that the navigation replaced the error page and that going back
-  // ends up on the original site.
-  EXPECT_EQ(2, shell()->web_contents()->GetController().GetEntryCount());
+  // Navigating a subframe displaying an error page for b.com from cross-origin
+  // initiator (a.com) does not replace the entry, preventing cross-origin
+  // history length leaks. Thus, entry count is 3.
+  EXPECT_EQ(3, shell()->web_contents()->GetController().GetEntryCount());
+  {
+    TestNavigationObserver back_load_observer(shell()->web_contents());
+    shell()->web_contents()->GetController().GoBack();
+    back_load_observer.Wait();
+  }
+  // Going back a second time ends up on the original site.
   {
     RenderFrameDeletedObserver deleted_observer(child->current_frame_host());
     TestNavigationObserver back_load_observer(shell()->web_contents());

@@ -7,12 +7,15 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/glic/common/local_hotkey_manager.h"
+#include "components/prefs/pref_change_registrar.h"
 
 namespace glic {
 
 class GlicInstanceCoordinator;
+class GlicEnabling;
 
 // Manages instance-independent hotkeys that are active application-wide.
 // These hotkeys are registered globally across all browser windows and are
@@ -25,7 +28,8 @@ class InstanceIndependentHotkeyManager
  public:
   explicit InstanceIndependentHotkeyManager(
       GlicInstanceCoordinator* coordinator,
-      Profile* profile);
+      Profile* profile,
+      GlicEnabling* enabling = nullptr);
   ~InstanceIndependentHotkeyManager() override;
 
   // LocalHotkeyManager::EventHandler:
@@ -37,8 +41,13 @@ class InstanceIndependentHotkeyManager
   void RequestCaptureRegion();
 #endif
 
+  void UpdateHotkeyRegistration();
+
   raw_ptr<GlicInstanceCoordinator> coordinator_;
   raw_ptr<Profile> profile_;
+  PrefChangeRegistrar pref_registrar_;
+  base::CallbackListSubscription consent_subscription_;
+  base::CallbackListSubscription enabled_subscription_;
   std::unique_ptr<LocalHotkeyManager> hotkey_manager_;
 };
 

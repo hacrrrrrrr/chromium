@@ -184,18 +184,6 @@ Color ResolveQuirkOrLinkOrFocusRingColor(
   }
 }
 
-ScopedCSSNameList* ConvertNoneOrCustomIdentList(StyleResolverState& state,
-                                                const CSSValue& value) {
-  DCHECK(value.IsScopedValue());
-  DCHECK(value.IsBaseValueList());
-  HeapVector<Member<const ScopedCSSName>> names;
-  for (const Member<const CSSValue>& item : To<CSSValueList>(value)) {
-    names.push_back(
-        StyleBuilderConverter::ConvertNoneOrCustomIdent(state, *item));
-  }
-  return MakeGarbageCollected<ScopedCSSNameList>(std::move(names));
-}
-
 Vector<AtomicString> ConvertNoneOrCustomIdentListUnscoped(
     StyleResolverState& state,
     const CSSValue& value) {
@@ -2036,8 +2024,21 @@ Superellipse StyleBuilderConverter::ConvertCornerShape(
   }
 
   const auto& superellipse = To<cssvalue::CSSSuperellipseValue>(value);
-  return Superellipse(
-      superellipse.Param().ComputeNumber(state.CssToLengthConversionData()));
+  const CSSPrimitiveValue& param = superellipse.Param();
+  double param_val;
+  if (const auto* numeric = DynamicTo<CSSNumericLiteralValue>(param)) {
+    param_val = numeric->DoubleValue();
+  } else if (const auto* math = DynamicTo<CSSMathFunctionValue>(param)) {
+    if (std::optional<double> unclamped =
+            math->ExpressionNode()->GetValueIfKnown()) {
+      param_val = *unclamped;
+    } else {
+      param_val = param.ComputeNumber(state.CssToLengthConversionData());
+    }
+  } else {
+    param_val = param.ComputeNumber(state.CssToLengthConversionData());
+  }
+  return Superellipse(param_val);
 }
 
 LayoutUnit StyleBuilderConverter::ConvertLayoutUnit(
@@ -4313,12 +4314,6 @@ MaxLinesData StyleBuilderConverter::ConvertMaxLines(StyleResolverState& state,
       To<CSSPrimitiveValue>(num_lines_value)
           ->ConvertTo<uint16_t>(state.CssToLengthConversionData());
   return MaxLinesData(num_lines, has_auto);
-}
-
-ScopedCSSNameList* StyleBuilderConverter::ConvertTimelineTriggerName(
-    StyleResolverState& state,
-    const CSSValue& value) {
-  return ConvertNoneOrCustomIdentList(state, value);
 }
 
 StyleTriggerScope StyleBuilderConverter::ConvertTriggerScope(

@@ -195,10 +195,10 @@ BASE_FEATURE(kHideAimEntrypointForUrlSuggestions, DISABLED);
 BASE_FEATURE(kOmniboxMultimodalInput, DISABLED);
 
 // An additional gate to the behavior of OmniboxMultimodalInput on desktop.
-BASE_FEATURE(kAndroidDesktopAimGate, DISABLED);
+BASE_FEATURE(kAndroidDesktopAimGate, ENABLED);
 
 // Enables the AIM entrypoint for third party search engines.
-BASE_FEATURE(kAim3pEntrypoint, DISABLED);
+BASE_FEATURE(kAim3pEntrypoint, ENABLED);
 const base::FeatureParam<bool> kAim3pEntrypointDebug{
     &kAim3pEntrypoint, "Aim3pEntrypointDebug", false};
 
@@ -225,7 +225,7 @@ BASE_FEATURE(kOmniboxWebUIDetachWebContentsOnHide, ENABLED);
 
 // When enabled, the Omnibox WebUI popup will mark its web contents as hidden
 // when hidden, to unlock frames from compositor cache.
-BASE_FEATURE(kOmniboxWebUIPopupMarkAsHidden, DISABLED);
+BASE_FEATURE(kOmniboxWebUIPopupMarkAsHidden, ENABLED);
 
 // When enabled, the WebUI searchbox will bypass OmniboxController and
 // OmniboxEditModel.
@@ -291,6 +291,9 @@ BASE_FEATURE(kUrlScoringModel, enable_if(!IS_ANDROID));
 // are enabled.
 BASE_FEATURE(kOmniboxTouchDownTriggerForPrefetch, enable_if(IS_ANDROID));
 
+// Enables simultaneous prefetch and navigation on Enter KeyDown in Omnibox.
+BASE_FEATURE(kOmniboxSearchPrefetchOnEnterKeyDown, DISABLED);
+
 // Enables keyword-based site search functionality on Android devices.
 BASE_FEATURE(kOmniboxSiteSearch, DISABLED);
 
@@ -336,9 +339,6 @@ BASE_FEATURE(kOmniboxMobileParityUpdateV2, ENABLED);
 
 // If enabled, the X-Geo header will include permission granularity.
 BASE_FEATURE(kOmniboxXGeoPermissionGranularity, ENABLED);
-
-// If enabled, omnibox group separators and headers will use item decorations.
-BASE_FEATURE(kOmniboxItemDecoration, DISABLED);
 
 // When the first suggestion is a url, the favicon is shown in the status view.
 BASE_FEATURE(kExactMatchFavicons, DISABLED);
@@ -420,7 +420,6 @@ const base::FeatureParam<std::string> kComposeboxDriveConsentEntrypointId{
 // only used for testing purposes since dasher accounts are not allowed to
 // consent via pContext.
 BASE_FEATURE(kForceDriveDisclaimerAccepted,
-             "ForceDriveDisclaimerAccepted",
              DISABLED);
 
 // Whether the composebox should show a verbatim match for context in
@@ -443,6 +442,8 @@ BASE_FEATURE(kOmniboxDebugLogs, base::FEATURE_DISABLED_BY_DEFAULT);
 //  - No live transcription below the new recording animation.
 BASE_FEATURE(kVoiceSearchCoherenceComposeboxes,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDrivePickerV2Scope, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables voice search coherence (as described above) only for cobrowsing.
 // Overrides the default (default was all surfaces enabled).
@@ -499,8 +500,9 @@ BASE_FEATURE(kServeJavaCachedZeroSuggest, ENABLED);
 // of the Omnibox suggestion list to the top during any re-layout.
 BASE_FEATURE(kResetSuggestionsScroll, DISABLED);
 
-// If enabled, the UrlBar context menu will use ListMenu instead of MenuItem.
-BASE_FEATURE(kOmniboxListMenuContextMenu, ENABLED);
+// Kill switch for special handling for session-less voice search queries
+// (e.g. from NTP fakebox). This special case was added to address b/541295247.
+BASE_FEATURE(kOmniboxSessionlessVoiceSearch, ENABLED);
 
 namespace android {
 static int64_t JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
@@ -526,11 +528,11 @@ static int64_t JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
       &kServeJavaCachedZeroSuggest,
       &kAIMSuppressVerbatimMatch,
       &kResetSuggestionsScroll,
-      &kOmniboxListMenuContextMenu,
-      &kOmniboxItemDecoration,
       &kExactMatchFavicons,
       &kStarterPackExpansion,
-      &kOmniboxAimImageDownscaling};
+      &kOmniboxSearchPrefetchOnEnterKeyDown,
+      &kOmniboxAimImageDownscaling,
+      &kOmniboxSessionlessVoiceSearch};
   static base::NoDestructor<base::android::FeatureMap> kFeatureMap(
       kFeaturesExposedToJava);
   return reinterpret_cast<int64_t>(kFeatureMap.get());
@@ -572,6 +574,28 @@ const base::FeatureParam<InlineLocationSignalingWording>
         InlineLocationSignalingWording::kUseApproximateLocation,
         &kInlineLocationSignalingWordingOptions};
 
+// If enabled, the "Ask Google about this page" action will route to cobrowse.
+BASE_FEATURE(kWebUIOmniboxAskGAboutThisPage, DISABLED);
+
+const base::FeatureParam<bool> kAskGCoBrowse{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGCoBrowse", false};
+const base::FeatureParam<bool> kAskGCoBrowseWithVisualSelection{
+    &kWebUIOmniboxAskGAboutThisPage,
+    "Omnibox_AskGCoBrowseWithVisualSelection", false};
+const base::FeatureParam<bool> kAskGComposeBox{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGComposeBox", false};
+const base::FeatureParam<bool> kAskGLensChipRoute{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGLensChipRoute", false};
+const base::FeatureParam<bool> kAskGSwapIcon{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGSwapIcon", false};
+const base::FeatureParam<bool> kAskGCurrentTabChip{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGCurrentTabChip", false};
+const base::FeatureParam<bool> kAskGLensIcon{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGLensIcon", false};
+const base::FeatureParam<bool> kAskGLensSearchHintText{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGLensSearchHintText", false};
+const base::FeatureParam<bool> kAskGComposeboxLensChip{
+    &kWebUIOmniboxAskGAboutThisPage, "Omnibox_AskGComposeboxLensChip", false};
 // Note: no new flags beyond this point.
 
 namespace flag_descriptions {

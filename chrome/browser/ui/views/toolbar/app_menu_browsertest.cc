@@ -340,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonState) {
                             }))),
           Property(&views::View::GetEnabled, Eq(true))))));
 
-  browser()->GetBrowserView().SetCanFullscreen(false);
+  BrowserView::GetBrowserViewForBrowser(browser())->SetCanFullscreen(false);
 
   EXPECT_THAT(
       zoom_view.GetChildrenInZOrder(),
@@ -356,7 +356,7 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonState) {
 
 IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonStateInFullscreen) {
   chrome::ToggleFullscreenMode(browser());
-  ASSERT_TRUE(browser()->GetBrowserView().IsFullscreen());
+  ASSERT_TRUE(BrowserView::GetBrowserViewForBrowser(browser())->IsFullscreen());
 
   menu_button()->ShowMenu(views::MenuRunner::NO_FLAGS);
   views::View& zoom_view =
@@ -374,7 +374,7 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonStateInFullscreen) {
           Property(&views::View::GetEnabled, Eq(true))))));
 
   // User should not be trapped in fullscreen mode so button is still enabled
-  browser()->GetBrowserView().SetCanFullscreen(false);
+  BrowserView::GetBrowserViewForBrowser(browser())->SetCanFullscreen(false);
 
   EXPECT_THAT(
       zoom_view.GetChildrenInZOrder(),
@@ -452,7 +452,7 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest,
                        InvokeUi_profile_menu_in_app_menu_signin_not_allowed) {
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kSigninAllowed, false);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kSigninAllowed, false);
   ShowAndVerifyUi();
 }
 
@@ -581,15 +581,15 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, Safety_Hub_shown_notification) {
 }
 
 #if !BUILDFLAG(IS_CHROMEOS)
-class AppMenuProfileAiRingBrowserTest : public AppMenuBrowserTest {
+class AppMenuProfileGradientRingBrowserTest : public AppMenuBrowserTest {
  public:
-  AppMenuProfileAiRingBrowserTest() {
+  AppMenuProfileGradientRingBrowserTest() {
     scoped_feature_list_.InitAndEnableFeature(
         switches::kEnableAiSubscriptionAvatarRing);
   }
 
   void SetAiSubscriptionTierForProfile(int32_t subscription_tier) {
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         subscription_eligibility::prefs::kAiSubscriptionTier,
         subscription_tier);
   }
@@ -627,8 +627,8 @@ class AppMenuProfileAiRingBrowserTest : public AppMenuBrowserTest {
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_F(AppMenuProfileAiRingBrowserTest,
-                       ProfileMenuIconHasAiRing) {
+IN_PROC_BROWSER_TEST_F(AppMenuProfileGradientRingBrowserTest,
+                       ProfileMenuIconHasGradientRing) {
   // Sign in with an image to get a non-placeholder avatar.
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(browser()->GetProfile());

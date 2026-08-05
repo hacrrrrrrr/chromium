@@ -22,7 +22,6 @@
 #include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/command_buffer/service/texture_manager.h"
-#include "gpu/config/gpu_finch_features.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/gpu_memory_buffer_handle.h"
 #include "ui/gfx/mac/io_surface.h"
@@ -298,11 +297,6 @@ bool IOSurfaceImageBackingFactory::IsSupported(
     }
   }
 
-  if (thread_safe &&
-      !base::FeatureList::IsEnabled(features::kIOSurfaceMultiThreading)) {
-    return false;
-  }
-
   // Never used with shared memory GMBs.
   if (gmb_type != gfx::EMPTY_BUFFER && gmb_type != gfx::IO_SURFACE_BUFFER) {
     return false;
@@ -315,6 +309,10 @@ bool IOSurfaceImageBackingFactory::IsSupported(
   }
 
   if (!IsFormatSupported(format, feature_info_->feature_flags())) {
+    return false;
+  }
+
+  if (!IsValidSize(size, max_texture_size_)) {
     return false;
   }
 
@@ -356,8 +354,7 @@ IOSurfaceImageBackingFactory::CreateSharedImageInternal(
   const auto size = si_info.size;
   const auto usage = si_info.usage;
 
-  if (!IsValidSize(size, max_texture_size_) ||
-      !IsPixelDataValid(format, size, pixel_data)) {
+  if (!IsPixelDataValid(format, size, pixel_data)) {
     return nullptr;
   }
 

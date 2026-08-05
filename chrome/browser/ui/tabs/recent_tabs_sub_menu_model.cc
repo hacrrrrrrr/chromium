@@ -510,8 +510,6 @@ void RecentTabsSubMenuModel::BuildLocalEntries() {
         }
         case sessions::tab_restore::Type::WINDOW: {
           auto& window = static_cast<sessions::tab_restore::Window&>(*entry);
-          // TODO(https://crbug.com/41227458): Consider if we should re-add the
-          // ability for single tab windows to be represented as single tabs.
           BuildLocalWindowItem(window, ++last_local_model_index_);
           break;
         }
@@ -587,7 +585,7 @@ void RecentTabsSubMenuModel::BuildTabsFromOtherDevices() {
       AddItemWithStringIdAndIcon(
           IDC_RECENT_TABS_SEE_DEVICE_TABS, IDS_RECENT_TABS_SEE_DEVICE_TABS,
           ui::ImageModel::FromVectorIcon(
-              features::IsRoundedIconsEnabled() ? kSyncIcon
+              features::IsRoundedIconsEnabled() ? vector_icons::kSyncIcon
                                                 : kSyncRefreshOldIcon,
               ui::kColorMenuIcon, ui::SimpleMenuModel::kDefaultIconSize));
     } else {
@@ -595,7 +593,7 @@ void RecentTabsSubMenuModel::BuildTabsFromOtherDevices() {
           IDC_RECENT_TABS_LOGIN_FOR_DEVICE_TABS,
           IDS_RECENT_TABS_LOGIN_FOR_DEVICE_TABS,
           ui::ImageModel::FromVectorIcon(
-              features::IsRoundedIconsEnabled() ? kSyncIcon
+              features::IsRoundedIconsEnabled() ? vector_icons::kSyncIcon
                                                 : kSyncRefreshOldIcon,
               ui::kColorMenuIcon, ui::SimpleMenuModel::kDefaultIconSize));
     }

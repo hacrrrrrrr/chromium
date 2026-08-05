@@ -191,7 +191,6 @@ class GnConfigsImpl:
             'symbol_level=1',
             'target_cpu="arm64"',
             'target_os="android"',
-            'v8_is_on_release_branch=true',
         ] + current_exec
         self.android_configs["android_compile_dbg"] = [
             'android_static_analysis="on"',
@@ -307,7 +306,6 @@ class GnConfigsImpl:
                 'symbol_level=0',
                 'target_cpu="x64"',
                 'target_os="linux"',
-                f'clang_base_path="{clang_base_path}"',
             ] + current_exec
         }
         self.angle_configs = {

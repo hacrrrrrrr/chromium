@@ -37,6 +37,9 @@ namespace extensions_features {
 // NOTE(devlin): If there are consistently enough of these in flux, it might
 // make sense to have their own file.
 
+// Controls the limit for action.setBadgeText() API input.
+BASE_DECLARE_FEATURE(kApiActionSetBadgeTextByteLimit);
+
 // Controls the limit for alarms.create() API input.
 BASE_DECLARE_FEATURE(kApiAlarmsCreateLengthLimit);
 
@@ -97,6 +100,10 @@ BASE_DECLARE_FEATURE(kApiProxyOverrideRulesPrivate);
 // runtime.getPlatformInfo() API.
 BASE_DECLARE_FEATURE(kApiRuntimeGetPlatformInfoNaClArch);
 
+// Controls the availability of runtime.sendNativeMessage and
+// runtime.connectNative on Desktop Android.
+BASE_DECLARE_FEATURE(kApiDesktopAndroidNativeMessaging);
+
 ///////////////////////////////////////////////////////////////////////////////
 // Other Features
 ///////////////////////////////////////////////////////////////////////////////
@@ -118,6 +125,10 @@ BASE_DECLARE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs);
 // URLs in worker scripts and subresources.
 BASE_DECLARE_FEATURE(kComponentExtensionAllowWorkerChromeResources);
 
+// Gates native UI affordances for leaving reviews on installed Chrome Web Store
+// extensions.
+BASE_DECLARE_FEATURE(kCWSReviewPromptingNativeUI);
+
 // If enabled, <webview>s will be allowed to request permission from an
 // embedding Chrome App to request access to Human Interface Devices.
 BASE_DECLARE_FEATURE(kEnableWebHidInWebView);
@@ -134,6 +145,11 @@ BASE_DECLARE_FEATURE(kExtensionsBackgroundCompilation);
 BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kBackgroundCompilationTimeout);
 BASE_DECLARE_FEATURE_PARAM(size_t, kMinScriptSizeForBackgroundCompilation);
 BASE_DECLARE_FEATURE_PARAM(size_t, kMaxScriptSizeForBackgroundCompilation);
+
+// If enabled, queries for external web page connections to extensions or apps
+// in incognito mode are short-circuited and automatically rejected without
+// prompting the user.
+BASE_DECLARE_FEATURE(kExtensionAutoRejectIncognitoConnectability);
 
 // If enabled, disables unpacked extensions if developer mode is off.
 BASE_DECLARE_FEATURE(kExtensionDisableUnsupportedDeveloper);
@@ -192,7 +208,6 @@ BASE_DECLARE_FEATURE(kExperimentalOmniboxLabs);
 // extensions can be disabled at ESB opt-in time or when an extension is moved
 // out of the allowlist.
 BASE_DECLARE_FEATURE(kSafeBrowsingCrxAllowlistAutoDisable);
-
 
 // Controls whether the component webstore hosted app is loaded.
 BASE_DECLARE_FEATURE(kWebstoreHostedApp);

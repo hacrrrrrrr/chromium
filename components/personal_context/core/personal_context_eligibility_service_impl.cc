@@ -5,15 +5,23 @@
 #include "components/personal_context/core/personal_context_eligibility_service_impl.h"
 
 #include <string>
+#include <utility>
 
 #include "base/containers/flat_set.h"
 #include "base/feature_list.h"
+#include "base/functional/bind.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
 #include "components/account_settings/account_setting_service.h"
+#if !BUILDFLAG(IS_IOS)
+#include "components/glic/glic_pref_names.h"
+#endif
+#include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #include "components/personal_context/core/personal_context_debug_features.h"
 #include "components/personal_context/core/personal_context_features.h"
 #include "components/personal_context/core/personal_context_prefs.h"
@@ -32,7 +40,6 @@ std::optional<PersonalContextEligibilityState> GetForcedEligibilityState() {
       features::debug::kPersonalContextForceEnablementStateParam.Get());
   switch (unsafe_type) {
     case PersonalContextEligibilityState::kDisabledNotEligible:
-    case PersonalContextEligibilityState::kDisabledNeedsOptIn:
     case PersonalContextEligibilityState::kEligible:
       return unsafe_type;
   }
@@ -101,10 +108,10 @@ SatisfiesAccountRequirements(const signin::IdentityManager* identity_manager,
   return std::pair{true, std::nullopt};
 }
 
-// Checks whether all opt-in for `AccountSettingService` state are met.
+// Checks whether all requirements for `AccountSettingService` state are met.
 [[nodiscard]] std::pair<bool,
                         std::optional<PersonalContextNonEligibilityReason>>
-SatisfiesOptInRequirements(
+SatisfiesAccountSettingRequirements(
     account_settings::AccountSettingService* account_settings,
     std::string* debug_message = nullptr) {
   if (!account_settings) {
@@ -133,6 +140,41 @@ SatisfiesOptInRequirements(
   return std::pair{true, std::nullopt};
 }
 
+// Checks whether all requirements for PrefService state are met.
+[[nodiscard]] std::pair<bool,
+                        std::optional<PersonalContextNonEligibilityReason>>
+SatisfiesPrefsRequirements(const PrefService* pref_service,
+                           std::string* debug_message = nullptr) {
+  if (!pref_service) {
+    MaybeOutputReason(debug_message, "Pref service not available.");
+    return std::pair{false, std::nullopt};
+  }
+
+#if !BUILDFLAG(IS_IOS)
+  const glic::prefs::FreStatus fre_status = static_cast<glic::prefs::FreStatus>(
+      pref_service->GetInteger(::glic::prefs::kGlicCompletedFre));
+  if (fre_status != glic::prefs::FreStatus::kCompleted) {
+    MaybeOutputReason(debug_message, "GLIC FRE not completed.");
+    return std::pair{false,
+                     PersonalContextNonEligibilityReason::kNotGlicFirstRun};
+  }
+#endif
+
+  const int policy_value = pref_service->GetInteger(
+      optimization_guide::prefs::kFindAndFillWithGeminiSettings);
+  if (policy_value ==
+      std::to_underlying(optimization_guide::model_execution::prefs::
+                             ModelExecutionEnterprisePolicyValue::kDisable)) {
+    MaybeOutputReason(
+        debug_message,
+        "Disallowed by FindAndFillWithGeminiSettings enterprise policy.");
+    return std::pair{false, PersonalContextNonEligibilityReason::
+                                kFindAndFillWithGeminiSettingsDisabled};
+  }
+
+  return std::pair{true, std::nullopt};
+}
+
 // Checks whether miscellaneous "other" requirements (e.g. Geo-IP, locale)
 // are satisfied.
 [[nodiscard]] std::pair<bool,
@@ -158,7 +200,6 @@ SatisfiesMiscellaneousRequirements(GeoIpCountryCode country_code,
 PersonalContextEligibilityServiceImpl::PersonalContextEligibilityServiceImpl(
     account_settings::AccountSettingService* account_settings_service,
     signin::IdentityManager* identity_manager,
-    // TODO(b:494149753): PrefsService is no longer needed, remove it.
     PrefService* pref_service,
     GeoIpCountryCode country_code,
     std::string locale)
@@ -172,6 +213,21 @@ PersonalContextEligibilityServiceImpl::PersonalContextEligibilityServiceImpl(
   }
   if (identity_manager) {
     identity_manager_observer_.Observe(identity_manager);
+  }
+  if (pref_service_) {
+    pref_registrar_.Init(pref_service_);
+#if !BUILDFLAG(IS_IOS)
+    pref_registrar_.Add(
+        ::glic::prefs::kGlicCompletedFre,
+        base::BindRepeating(
+            &PersonalContextEligibilityServiceImpl::UpdateEligibilityState,
+            base::Unretained(this)));
+#endif
+    pref_registrar_.Add(
+        optimization_guide::prefs::kFindAndFillWithGeminiSettings,
+        base::BindRepeating(
+            &PersonalContextEligibilityServiceImpl::UpdateEligibilityState,
+            base::Unretained(this)));
   }
   UpdateEligibilityState();
 }
@@ -191,23 +247,32 @@ void PersonalContextEligibilityServiceImpl::RemoveObserver(
 
 PersonalContextEligibilityState
 PersonalContextEligibilityServiceImpl::GetEligibilityState() {
-  if (base::FeatureList::IsEnabled(
-          features::debug::kPersonalContextForceEnablementState)) {
-    return GetForcedEligibilityState().value_or(eligibility_state_);
-  }
-
   return eligibility_state_;
+}
+
+std::optional<PersonalContextNonEligibilityReason>
+PersonalContextEligibilityServiceImpl::GetNonEligibilityReason() const {
+  return last_non_eligibility_reason_;
 }
 
 std::pair<PersonalContextEligibilityState,
           std::optional<PersonalContextNonEligibilityReason>>
 PersonalContextEligibilityServiceImpl::ComputeEligibilityState() {
   using enum PersonalContextEligibilityState;
-
   if (auto [satisfied, reason] =
           SatisfiesAccountRequirements(identity_manager_.get());
       !satisfied) {
     return std::pair{kDisabledNotEligible, reason};
+  }
+
+  if (base::FeatureList::IsEnabled(
+          features::debug::kPersonalContextForceEnablementState)) {
+    std::optional<PersonalContextEligibilityState> state =
+        GetForcedEligibilityState();
+    if (state) {
+      return std::pair{state.value(),
+                       PersonalContextNonEligibilityReason::kEligible};
+    }
   }
 
   if (auto [satisfied, reason] =
@@ -221,13 +286,15 @@ PersonalContextEligibilityServiceImpl::ComputeEligibilityState() {
   }
 
   if (auto [satisfied, reason] =
-          SatisfiesOptInRequirements(account_settings_service_.get());
+          SatisfiesAccountSettingRequirements(account_settings_service_.get());
       !satisfied) {
-    return std::pair{
-        personal_context::features::IsPersonalContextFirstRunOptInEnabled()
-            ? kDisabledNeedsOptIn
-            : kDisabledNotEligible,
-        reason};
+    return std::pair{kDisabledNotEligible, reason};
+  }
+
+  if (auto [satisfied, reason] =
+          SatisfiesPrefsRequirements(pref_service_.get());
+      !satisfied) {
+    return std::pair{kDisabledNotEligible, reason};
   }
 
   return std::pair{kEligible, PersonalContextNonEligibilityReason::kEligible};
@@ -267,6 +334,10 @@ void PersonalContextEligibilityServiceImpl::OnExtendedAccountInfoUpdated(
 
 void PersonalContextEligibilityServiceImpl::OnAccountSettingDataUpdated(
     const std::string& setting_name) {
+  UpdateEligibilityState();
+}
+
+void PersonalContextEligibilityServiceImpl::OnAccountSettingsLoaded() {
   UpdateEligibilityState();
 }
 

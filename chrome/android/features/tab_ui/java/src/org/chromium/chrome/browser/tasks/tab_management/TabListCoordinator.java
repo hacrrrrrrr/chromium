@@ -64,6 +64,8 @@ import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.TabListL
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.TabActionState;
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.UiType;
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageType;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabHoverCardController.TabHoverCardListener;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabListProperties.RailCollapseState;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.undo_tab_close_snackbar.UndoBarExplicitTrigger;
 import org.chromium.chrome.tab_ui.R;
@@ -338,6 +340,17 @@ public class TabListCoordinator implements PriceWelcomeMessageProvider, DestroyO
                     public boolean supportsMessageCards() {
                         return mMode == TabListMode.GRID;
                     }
+
+                    @Override
+                    public @Nullable NonNullObservableSupplier<@RailCollapseState Integer>
+                            getRailCollapseStateSupplier() {
+                        return null;
+                    }
+
+                    @Override
+                    public @Nullable TabHoverCardListener getTabHoverCardListener() {
+                        return null;
+                    }
                 };
 
         mMediator =
@@ -471,7 +484,8 @@ public class TabListCoordinator implements PriceWelcomeMessageProvider, DestroyO
                     }
 
                     @Override
-                    public boolean handleExternalDragEnd(float xPx, float yPx) {
+                    public boolean handleExternalDragEnd(
+                            float xPx, float yPx, boolean isOSNewWindowDrop) {
                         if (!mAllowDetachingTabsToCreateNewWindows) return false;
                         for (DragObserver observer : mDragObserverList) {
                             observer.onDragEnd();
@@ -584,7 +598,7 @@ public class TabListCoordinator implements PriceWelcomeMessageProvider, DestroyO
         // where the runnable will not be serviced downstream, dropping the runnable altogether is
         // safe.
         if (mAwaitingLayoutRunnable != null) {
-            Log.d(TAG, "Dropping AwaitingLayoutRunnable for " + mAwaitingTabId);
+            Log.d(TAG, "Dropping AwaitingLayoutRunnable for %d", mAwaitingTabId);
             mAwaitingLayoutRunnable = null;
             mAwaitingTabId = Tab.INVALID_TAB_ID;
         }

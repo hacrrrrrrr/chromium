@@ -23,7 +23,7 @@ import type {InputState} from '//resources/mojo/components/omnibox/composebox/co
 import {InputType, ModelMode, ToolMode} from '//resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 import type {UnguessableToken} from '//resources/mojo/mojo/public/mojom/base/unguessable_token.mojom-webui.js';
 
-import {getLoadTimeBoolean, recordContextAdditionMethod, TabUploadOrigin} from './common.js';
+import {getLoadTimeBoolean, recordBoolean, recordContextAdditionMethod, TabUploadOrigin} from './common.js';
 import {getCss} from './contextual_action_menu.css.js';
 import {getHtml} from './contextual_action_menu.html.js';
 import {WindowProxy} from './window_proxy.js';
@@ -187,9 +187,12 @@ export class ContextualActionMenuElement extends
   private closeTimer_: number|null = null;
   private pointerOverTrigger_: boolean = false;
   private pointerOverFlyout_: boolean = false;
+  private shouldResetFlyoutScroll_: boolean = true;
   private firstTabBeingAdded_: boolean = false;
   private pendingTabAddId_: number|null = null;
   private anchor_: HTMLElement|null = null;
+  private wasShareTabsTriggerShown_: boolean = false;
+  private wasShareTabsFlyoutOpen_: boolean = false;
 
   protected get supportedTools_(): Map<ToolMode, {
     icon: string,
@@ -287,6 +290,11 @@ export class ContextualActionMenuElement extends
       this.manageShareTabsInitialFocus_(changedProperties);
     }
 
+    if (changedProperties.has('shareTabsFlyoutOpen') &&
+        this.shareTabsFlyoutOpen) {
+      this.updateFlyoutPosition_();
+    }
+
     if (changedProperties.has('tabSuggestions') ||
         changedProperties.has('inputState')) {
       this.updateScrollable_();
@@ -303,6 +311,28 @@ export class ContextualActionMenuElement extends
         this.updateFlyoutPosition_();
       }
     }
+
+    const isShownNow = this.open &&
+        this.isInputTypeAllowed_(InputType.kBrowserTab) &&
+        this.contextManagementInComposeboxEnabled &&
+        (this.tabSuggestions?.length > 0 || this.smartTabSharingActive) &&
+        !(this.smartTabSharingVisible && this.smartTabSharingActive);
+
+    if (isShownNow && !this.wasShareTabsTriggerShown_) {
+      recordBoolean(
+          'ContextualSearch.AddTabsButton.Shown.' + this.metricsSource_, true);
+    }
+    this.wasShareTabsTriggerShown_ = isShownNow;
+
+    const isFlyoutOpenNow = this.contextManagementInComposeboxEnabled &&
+        this.shareTabsFlyoutOpen && this.tabSuggestions &&
+        this.tabSuggestions.length > 0;
+
+    if (isFlyoutOpenNow && !this.wasShareTabsFlyoutOpen_) {
+      recordBoolean(
+          'ContextualSearch.AddTabsFlyout.Shown.' + this.metricsSource_, true);
+    }
+    this.wasShareTabsFlyoutOpen_ = isFlyoutOpenNow;
   }
   get open(): boolean {
     return this.$.menu.open;
@@ -402,6 +432,7 @@ export class ContextualActionMenuElement extends
   }
 
   showAt(anchor: HTMLElement) {
+    this.shouldResetFlyoutScroll_ = true;
     this.anchor_ = anchor;
     const rect = anchor.getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0 && rect.top === 0 &&
@@ -855,9 +886,18 @@ export class ContextualActionMenuElement extends
         return;
       }
     }
+    this.recordTabSelectedMetric_();
     this.addTabContext_(tabInfo);
     recordContextAdditionMethod(
         ComposeboxContextAddedMethod.CONTEXT_MENU, this.metricsSource_);
+  }
+
+  private recordTabSelectedMetric_() {
+    if (this.contextManagementInComposeboxEnabled) {
+      recordBoolean(
+          'ContextualSearch.AddTabsFlyout.TabSelected.' + this.metricsSource_,
+          true);
+    }
   }
 
   protected maybeCloseMenuBasedOnEntrypoint_() {
@@ -895,6 +935,8 @@ export class ContextualActionMenuElement extends
     if (!this.hasTabSuggestions_) {
       return;
     }
+    recordBoolean(
+        'ContextualSearch.AddTabsButton.Hovered.' + this.metricsSource_, true);
     this.pointerOverTrigger_ = true;
     this.cancelCloseTimer_();
     this.setShareTabsFlyoutOpen_(true);
@@ -942,6 +984,9 @@ export class ContextualActionMenuElement extends
       }
       e.preventDefault();
       e.stopPropagation();
+      recordBoolean(
+          'ContextualSearch.AddTabsButton.Clicked.' + this.metricsSource_,
+          true);
       this.setShareTabsFlyoutOpen_(true);
       this.updateFlyoutPosition_();
 
@@ -1012,6 +1057,16 @@ export class ContextualActionMenuElement extends
         return;
       }
 
+      if (this.shouldResetFlyoutScroll_) {
+        flyout.scrollTop = 0;
+        requestAnimationFrame(() => {
+          if (flyout) {
+            flyout.scrollTop = 0;
+          }
+        });
+        this.shouldResetFlyoutScroll_ = false;
+      }
+
       const triggerRect = trigger.getBoundingClientRect();
       const flyoutWidth = flyout.offsetWidth || DEFAULT_FLYOUT_WIDTH_PX;
       const viewportWidth = window.innerWidth;
@@ -1019,14 +1074,13 @@ export class ContextualActionMenuElement extends
       if (flyoutWidth + SHARE_TABS_FLYOUT_GAP_PX <=
           viewportWidth - triggerRect.right) {
         this.shareTabsFlyoutPosition_ = 'right';
-        flyout.setAttribute('data-position', 'right');
       } else if (triggerRect.left >= flyoutWidth + SHARE_TABS_FLYOUT_GAP_PX) {
         this.shareTabsFlyoutPosition_ = 'left';
-        flyout.setAttribute('data-position', 'left');
       } else {
         this.shareTabsFlyoutPosition_ = 'bottom';
-        flyout.setAttribute('data-position', 'bottom');
       }
+
+      flyout.setAttribute('data-position', this.shareTabsFlyoutPosition_);
 
       let flyoutTop = triggerRect.top;
       if (this.shareTabsFlyoutPosition_ === 'bottom') {
@@ -1064,6 +1118,7 @@ export class ContextualActionMenuElement extends
     this.cancelCloseTimer_();
     this.pointerOverTrigger_ = false;
     this.pointerOverFlyout_ = false;
+    this.shouldResetFlyoutScroll_ = true;
     this.setShareTabsFlyoutOpen_(false);
 
     const flyout =
@@ -1145,6 +1200,8 @@ export class ContextualActionMenuElement extends
     this.resetShareTabsFlyout_();
     this.$.menu.style.removeProperty('--contextual-menu-max-height');
     this.$.menu.style.removeProperty('--contextual-menu-min-height');
+    this.wasShareTabsTriggerShown_ = false;
+    this.wasShareTabsFlyoutOpen_ = false;
     this.fire('close');
   }
 

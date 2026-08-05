@@ -18,6 +18,7 @@
 #include "mojo/public/cpp/bindings/message.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
+#include "services/network/public/cpp/url_util.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom.h"
@@ -51,7 +52,8 @@ DeclarativePerformanceObserver::DeclarativePerformanceObserver(
   }
 
   navigation_start_ = navigation_handle->NavigationStart();
-  committed_url_ = navigation_handle->GetURL();
+  committed_url_ =
+      network::SerializeResponseUrlForReporting(navigation_handle->GetURL());
 
   network_anonymization_key_ =
       rfh->GetIsolationInfoForSubresources().network_anonymization_key();
@@ -151,6 +153,8 @@ void DeclarativePerformanceObserver::OnDidFinishNavigation(
   DCHECK(navigation_handle->IsServedFromBackForwardCache());
 
   navigation_start_ = navigation_handle->NavigationStart();
+  committed_url_ =
+      network::SerializeResponseUrlForReporting(navigation_handle->GetURL());
   buffered_entries_.clear();
   current_buffer_bytes_ = 0;
 
@@ -329,23 +333,62 @@ void DeclarativePerformanceObserver::BindReceiver(
 void DeclarativePerformanceObserver::DidObservePerformanceEntries(
     std::vector<blink::mojom::DeclarativePerformanceEntryPtr> entries) {
   for (auto& entry : entries) {
-    if (!enabled_types_.contains(network::mojom::PerformanceEntryType::kMark)) {
-      continue;
-    }
-    if (include_user_timing_ && !include_user_timing_->contains(entry->name)) {
-      continue;
-    }
+    switch (entry->which()) {
+      case blink::mojom::DeclarativePerformanceEntry::Tag::kMark: {
+        auto& mark = *entry->get_mark();
+        if (!enabled_types_.contains(
+                network::mojom::PerformanceEntryType::kMark)) {
+          continue;
+        }
+        if (include_user_timing_ &&
+            !include_user_timing_->contains(mark.name)) {
+          continue;
+        }
 
-    base::DictValue dict;
-    dict.Set("name", entry->name);
-    dict.Set("entryType", "mark");
-    dict.Set("startTime", entry->start_time.InMillisecondsF());
-    dict.Set("duration", 0.0);
+        base::DictValue dict;
+        dict.Set("name", mark.name);
+        dict.Set("entryType", "mark");
+        dict.Set("startTime", mark.start_time.InMillisecondsF());
+        dict.Set("duration", 0.0);
 
-    if (entry->detail.has_value()) {
-      dict.Set("detail", std::move(entry->detail.value()));
+        if (mark.detail.has_value()) {
+          dict.Set("detail", std::move(mark.detail).value());
+        }
+        AddEntryToBuffer(std::move(dict));
+        break;
+      }
+      case blink::mojom::DeclarativePerformanceEntry::Tag::kLcp: {
+        auto& lcp = entry->get_lcp();
+        if (!enabled_types_.contains(network::mojom::PerformanceEntryType::
+                                         kLargestContentfulPaint)) {
+          continue;
+        }
+
+        base::DictValue dict;
+        dict.Set("name", "");
+        dict.Set("entryType", "largest-contentful-paint");
+        dict.Set("startTime", lcp->start_time.InMillisecondsF());
+        dict.Set("duration", 0.0);
+        dict.Set("size", static_cast<double>(lcp->size));
+        dict.Set("renderTime", lcp->render_time.InMillisecondsF());
+        dict.Set("loadTime", lcp->load_time.InMillisecondsF());
+        dict.Set("id", lcp->id.value_or(""));
+        std::string lcp_url = "";
+        if (lcp->url.has_value() && !lcp->url->empty()) {
+          GURL url(lcp->url.value());
+          if (url.is_valid()) {
+            lcp_url = network::SerializeResponseUrlForReporting(url).spec();
+          } else {
+            lcp_url = lcp->url.value();
+          }
+        }
+        dict.Set("url", lcp_url);
+        dict.Set("element", lcp->element.value_or(""));
+
+        AddEntryToBuffer(std::move(dict));
+        break;
+      }
     }
-    AddEntryToBuffer(std::move(dict));
   }
 }
 

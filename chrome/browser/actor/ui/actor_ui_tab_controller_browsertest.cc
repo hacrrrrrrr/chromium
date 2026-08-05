@@ -45,7 +45,6 @@ class FutureTabStripModelObserver : public TabStripModelObserver {
  public:
   // TabStripModelObserver:
   void OnTabChangedAt(tabs::TabInterface* tab,
-                      int index,
                       TabChangeType change_type) override {
     if (change_type == TabChangeType::kAll) {
       Reset();
@@ -102,7 +101,7 @@ class ActorUiTabControllerTest : public BaseActorUiTabControllerTest {
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        TabIndicatorVisibleDuringActuation) {
-  Profile* const profile = browser()->profile();
+  Profile* const profile = browser()->GetProfile();
   ActorUiStateManagerInterface* state_manager =
       actor::ActorKeyedService::Get(profile)->GetActorUiStateManager();
   ASSERT_NE(state_manager, nullptr);
@@ -258,7 +257,7 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        TabStripModelNotifiedOnUpdate) {
-  Profile* const profile = browser()->profile();
+  Profile* const profile = browser()->GetProfile();
   ActorUiStateManagerInterface* state_manager =
       actor::ActorKeyedService::Get(profile)->GetActorUiStateManager();
   ASSERT_NE(state_manager, nullptr);
@@ -298,7 +297,7 @@ class ActorUiTabControllerDisabledTest : public BaseActorUiTabControllerTest {
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerDisabledTest,
                        TabIndicatorNotVisibleWhenFeatureDisabled) {
-  Profile* const profile = browser()->profile();
+  Profile* const profile = browser()->GetProfile();
   ActorUiStateManagerInterface* state_manager =
       actor::ActorKeyedService::Get(profile)->GetActorUiStateManager();
   ASSERT_NE(state_manager, nullptr);
@@ -340,7 +339,7 @@ class ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled,
                        TabIndicatorVisibleDuringActuation) {
-  Profile* const profile = browser()->profile();
+  Profile* const profile = browser()->GetProfile();
   ActorUiStateManagerInterface* state_manager =
       actor::ActorKeyedService::Get(profile)->GetActorUiStateManager();
   ASSERT_NE(state_manager, nullptr);

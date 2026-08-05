@@ -1359,6 +1359,36 @@ TEST_F(StyleResolverTest, ComputedValueRootElement) {
   EXPECT_EQ("42px", computed_value->CssText());
 }
 
+TEST_F(StyleResolverTest, ComputedValueFontSizeRelative) {
+  Element* target = GetDocument().documentElement();
+  ASSERT_TRUE(target);
+  target->SetInlineStyleProperty(CSSPropertyID::kFontSize, "30px");
+  UpdateAllLifecyclePhasesForTest();
+  CSSPropertyID property_id = CSSPropertyID::kWidth;
+  const CSSValue* parsed_value = css_test_helpers::ParseLonghand(
+      GetDocument(), GetCSSPropertyWidth(), "2em");
+  ASSERT_TRUE(parsed_value);
+  const CSSValue* computed_value = StyleResolver::ComputeValue(
+      target, CSSPropertyName(property_id), *parsed_value);
+  ASSERT_TRUE(computed_value);
+  EXPECT_EQ("60px", computed_value->CssText());
+}
+
+TEST_F(StyleResolverTest, ComputedValueLineHeight) {
+  Element* target = GetDocument().documentElement();
+  ASSERT_TRUE(target);
+  target->SetInlineStyleProperty(CSSPropertyID::kLineHeight, "50px");
+  UpdateAllLifecyclePhasesForTest();
+  CSSPropertyID property_id = CSSPropertyID::kWidth;
+  const CSSValue* parsed_value = css_test_helpers::ParseLonghand(
+      GetDocument(), GetCSSPropertyWidth(), "2lh");
+  ASSERT_TRUE(parsed_value);
+  const CSSValue* computed_value = StyleResolver::ComputeValue(
+      target, CSSPropertyName(property_id), *parsed_value);
+  ASSERT_TRUE(computed_value);
+  EXPECT_EQ("100px", computed_value->CssText());
+}
+
 namespace {
 
 const CSSValue* ParseCustomProperty(Document& document,
@@ -4127,7 +4157,16 @@ TEST_F(StyleResolverTest, TryTacticsSet_Flip) {
   ASSERT_TRUE(try_tactics_set);
 
   AnchorEvaluatorImpl anchor_evaluator(
-      {WritingMode::kHorizontalTb, TextDirection::kLtr});
+      *div->GetLayoutBox(),
+      /*anchor_map=*/nullptr,
+      /*implicit_anchor=*/nullptr,
+      /*containing_block=*/nullptr,
+      /*actual_containing_block=*/nullptr,
+      /*grid_layout_data=*/nullptr,
+      {WritingMode::kHorizontalTb, TextDirection::kLtr},
+      /*container_size=*/LogicalSize(),
+      /*container_rect=*/LogicalRect(),
+      /*scroll_rect=*/std::nullopt);
   const ComputedStyle* try_style = StyleForId(
       "div", StyleRecalcContext{.anchor_evaluator = &anchor_evaluator,
                                 .try_set = try_set,
@@ -4817,6 +4856,34 @@ TEST_F(StyleResolverTest, FindContainerForElement_LayoutSiblings) {
   EXPECT_EQ(StyleResolver::FindContainerForElement(button, anchored_selector,
                                                    &GetDocument()),
             scroller);
+}
+
+TEST_F(StyleResolverTest, FindContainerForElement_SkeletonPseudo) {
+  ScopedDeclarativeSkeletonsForTest enable(true);
+
+  Element* root = GetDocument().documentElement();
+  root->SetInlineStyleProperty(CSSPropertyID::kContainerType, "inline-size");
+  root->SetInlineStyleProperty(CSSPropertyID::kContainerName, "--root");
+  UpdateAllLifecyclePhasesForTest();
+
+  ContainerSelector size_selector(g_null_atom, kPhysicalAxesNone,
+                                  kLogicalAxesInline,
+                                  /*scroll_state=*/false,
+                                  /*anchored_query=*/false);
+  ContainerSelector named_selector(AtomicString("--root"), kPhysicalAxesNone,
+                                   kLogicalAxesNone,
+                                   /*scroll_state=*/false,
+                                   /*anchored_query=*/false);
+
+  PseudoElement& skeleton =
+      GetDocument().documentElement()->EnsureSkeletonPseudo();
+
+  EXPECT_EQ(StyleResolver::FindContainerForElement(&skeleton, size_selector,
+                                                   &GetDocument()),
+            nullptr);
+  EXPECT_EQ(StyleResolver::FindContainerForElement(&skeleton, named_selector,
+                                                   &GetDocument()),
+            nullptr);
 }
 
 }  // namespace blink

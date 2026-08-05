@@ -383,7 +383,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Chrome.SystemNetworkContextManager.NetworkSandboxState"
-    enum="NetworkSandboxState" expires_after="2026-11-15">
+    enum="NetworkSandboxState" expires_after="2027-01-17">
   <owner>wfh@chromium.org</owner>
   <owner>mmenke@chromium.org</owner>
   <summary>
@@ -392,25 +392,6 @@ chromium-metrics-reviews@google.com.
     recorded multiple times from the same client if the network service process
     crashes or does not launch correctly. This is not recorded if the network
     service is running in-process.
-  </summary>
-</histogram>
-
-<histogram name="Chrome.Tabs.AnimationSmoothness.HoverCard.FadeIn" units="%"
-    expires_after="2027-03-02">
-  <owner>yichenz@chromium.org</owner>
-  <owner>chromeos-wmp@google.com</owner>
-  <summary>
-    Tracks the animation smoothness for the fade-in animation of tab hover card.
-  </summary>
-</histogram>
-
-<histogram name="Chrome.Tabs.AnimationSmoothness.HoverCard.FadeOut" units="%"
-    expires_after="2027-03-02">
-  <owner>yichenz@chromium.org</owner>
-  <owner>chromeos-wmp@google.com</owner>
-  <summary>
-    Tracks the animation smoothness for the fade-out animation of tab hover
-    card.
   </summary>
 </histogram>
 

@@ -10,73 +10,48 @@
 #include "base/feature_list.h"
 #include "components/metrics/metrics_features.h"
 #include "components/metrics/metrics_pref_names.h"
+#include "components/metrics/metrics_profile_pref_names.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
-#include "components/variations/synthetic_trial_registry.h"
 
 namespace metrics {
 
-namespace {
-// Cached state of the metrics consent restructure feature for the current
-// session. This is set only once and remains immutable for the session.
-std::optional<bool> g_session_feature_state;
-}  // namespace
-
 // static
-void MetricsReportingChoiceService::RegisterPrefs(
+void MetricsReportingChoiceService::RegisterProfilePrefs(
     PrefRegistrySimple* registry) {
-  registry->RegisterBooleanPref(prefs::kMetricsReportingMigrationDone, false);
-  registry->RegisterBooleanPref(prefs::kMetricsConsentRestructureFeatureState,
+  registry->RegisterBooleanPref(prefs::kAdvancedReportingEnabled, false);
+  registry->RegisterBooleanPref(prefs::kAdvancedReportingProfileMigrationDone,
                                 false);
 }
 
 // static
-void MetricsReportingChoiceService::InitSyntheticFieldTrial(
-    PrefService* local_state,
-    variations::SyntheticTrialRegistry* synthetic_trial_registry) {
-  CHECK(local_state);
-  const bool feature_enabled = base::FeatureList::IsEnabled(
+void MetricsReportingChoiceService::SetAdvancedReportingEnabled(
+    PrefService* profile_prefs,
+    bool enabled) {
+  CHECK(profile_prefs);
+  profile_prefs->SetBoolean(prefs::kAdvancedReportingEnabled, enabled);
+}
+
+// static
+bool MetricsReportingChoiceService::IsAdvancedReportingEnabled(
+    const PrefService* profile_prefs) {
+  CHECK(profile_prefs);
+  return profile_prefs->GetBoolean(prefs::kAdvancedReportingEnabled);
+}
+
+// static
+bool MetricsReportingChoiceService::IsMigrated(
+    const PrefService* profile_prefs) {
+  CHECK(profile_prefs);
+  return profile_prefs->GetBoolean(
+      prefs::kAdvancedReportingProfileMigrationDone);
+}
+
+// static
+bool MetricsReportingChoiceService::ShouldUseMetricsConsentRestructure() {
+  return base::FeatureList::IsEnabled(
       features::kRestructureMetricsConsentSettings);
-  local_state->SetBoolean(prefs::kMetricsConsentRestructureFeatureState,
-                          feature_enabled);
-  // Register the synthetic field trial so we can evaluate the impact of the
-  // feature using UMA data.
-  CHECK(synthetic_trial_registry);
-  const bool session_state =
-      IsMetricsConsentRestructureFeatureEnabled(local_state);
-  synthetic_trial_registry->RegisterSyntheticFieldTrial(
-      variations::SyntheticTrialGroup(
-          "RestructureMetricsConsent", session_state ? "Enabled" : "Disabled",
-          variations::SyntheticTrialAnnotationMode::kCurrentLog));
-}
-
-// static
-bool MetricsReportingChoiceService::IsMetricsConsentRestructureFeatureEnabled(
-    const PrefService* local_state) {
-  CHECK(local_state);
-  // Note: Since FeatureList is always initialized after this code is run for
-  // the first time, g_session_feature_state will always resolve the Finch flag
-  // state from the previous session. The benefit of doing this is that the
-  // kRestructureMetricsConsentSettings always stays resolvable and immutable
-  // throughout a single session.
-  if (!g_session_feature_state.has_value()) {
-    g_session_feature_state =
-        local_state->GetBoolean(prefs::kMetricsConsentRestructureFeatureState);
-  }
-  return g_session_feature_state.value();
-}
-
-// static
-void MetricsReportingChoiceService::ClearCachedFeatureStateForTesting() {
-  g_session_feature_state.reset();
-}
-
-// static
-bool MetricsReportingChoiceService::ShouldUseMetricsConsentRestructure(
-    const PrefService* local_state) {
-  CHECK(local_state);
-  return IsMetricsConsentRestructureFeatureEnabled(local_state) &&
-         local_state->GetBoolean(prefs::kMetricsReportingMigrationDone);
 }
 
 // static
@@ -92,6 +67,85 @@ bool MetricsReportingChoiceService::IsMetricsReportingDisabledByPolicy(
   CHECK(local_state);
   return local_state->IsManagedPreference(prefs::kMetricsReportingEnabled) &&
          !IsBasicMetricsReportingEnabled(local_state);
+}
+
+MetricsReportingChoiceService::MetricsReportingChoiceService() = default;
+MetricsReportingChoiceService::~MetricsReportingChoiceService() = default;
+
+void MetricsReportingChoiceService::MonitorAdvancedReportingPref(
+    PrefService* profile_prefs) {
+  if (ShouldUseMetricsConsentRestructure()) {
+    CHECK(IsMigrated(profile_prefs));
+  }
+
+  if (monitored_profile_prefs_.contains(profile_prefs)) {
+    return;
+  }
+
+  auto pref_registrar = std::make_unique<PrefChangeRegistrar>();
+  pref_registrar->Init(profile_prefs);
+  pref_registrar->Add(
+      prefs::kAdvancedReportingEnabled,
+      base::BindRepeating(&MetricsReportingChoiceService::OnPrefChanged,
+                          base::Unretained(this), profile_prefs));
+
+  monitored_profile_prefs_[profile_prefs] = MonitoredProfileInfo{
+      .registrar = std::move(pref_registrar),
+      .is_enabled = IsAdvancedReportingEnabled(profile_prefs),
+  };
+
+  UpdateAdvancedReportingEnabledForAllProfilesState();
+}
+
+void MetricsReportingChoiceService::StopMonitoringAdvancedReportingPref(
+    PrefService* profile_prefs) {
+  auto it = monitored_profile_prefs_.find(profile_prefs);
+  if (it == monitored_profile_prefs_.end()) {
+    return;
+  }
+  monitored_profile_prefs_.erase(it);
+
+  UpdateAdvancedReportingEnabledForAllProfilesState();
+}
+
+bool MetricsReportingChoiceService::IsAdvancedReportingEnabledForAllProfiles()
+    const {
+  return is_advanced_reporting_enabled_for_all_profiles_;
+}
+
+void MetricsReportingChoiceService::OnPrefChanged(PrefService* profile_prefs) {
+  auto it = monitored_profile_prefs_.find(profile_prefs);
+  if (it == monitored_profile_prefs_.end()) {
+    return;
+  }
+  const bool was_enabled = it->second.is_enabled;
+  const bool is_enabled = IsAdvancedReportingEnabled(profile_prefs);
+  it->second.is_enabled = is_enabled;
+
+  const bool reset_client_state = was_enabled && !is_enabled;
+  UpdateAdvancedReportingEnabledForAllProfilesState(reset_client_state);
+}
+
+void MetricsReportingChoiceService::
+    UpdateAdvancedReportingEnabledForAllProfilesState(bool reset_client_state) {
+  bool all_enabled = true;
+  if (monitored_profile_prefs_.empty()) {
+    all_enabled = false;
+  } else {
+    for (const auto& kv : monitored_profile_prefs_) {
+      if (!kv.second.is_enabled) {
+        all_enabled = false;
+        break;
+      }
+    }
+  }
+
+  if (all_enabled != is_advanced_reporting_enabled_for_all_profiles_ ||
+      reset_client_state) {
+    is_advanced_reporting_enabled_for_all_profiles_ = all_enabled;
+    OnAdvancedReportingEnabledForAllProfilesChanged(all_enabled,
+                                                    reset_client_state);
+  }
 }
 
 }  // namespace metrics

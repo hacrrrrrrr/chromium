@@ -432,7 +432,7 @@ enum {
   kPinContextualTaskButton = 100369,
   kAccessibilityReadAnythingOmniboxChipIgnoredCount = 100370,
   kAccessibilityReadAnythingLineFocus = 100371,
-  kProjectsPanelEntrypointEnabled = 100372,
+  kOrganizerPanelEntrypointEnabled = 100372,
   kDesktopToiOSTabGroupsPromoLastImpressionTimestamp = 100373,
   kDesktopToiOSTabGroupsPromoImpressionsCounter = 100374,
   kDesktopToiOSTabGroupsPromoOptOut = 100375,
@@ -647,8 +647,8 @@ constexpr auto kChromeSyncablePrefsAllowlist = base::MakeFixedFlatMap<
      {syncable_prefs_ids::kPinnedCastMigrationComplete, syncer::PREFERENCES,
       sync_preferences::PrefSensitivity::kNone,
       sync_preferences::MergeBehavior::kNone}},
-    {prefs::kProjectsPanelEntrypointEnabled,
-     {syncable_prefs_ids::kProjectsPanelEntrypointEnabled, syncer::PREFERENCES,
+    {prefs::kOrganizerPanelEntrypointEnabled,
+     {syncable_prefs_ids::kOrganizerPanelEntrypointEnabled, syncer::PREFERENCES,
       sync_preferences::PrefSensitivity::kNone,
       sync_preferences::MergeBehavior::kNone}},
 #endif  // BUILDFLAG(IS_ANDROID)
@@ -1940,14 +1940,13 @@ constexpr auto kChromeSyncablePrefsAllowlist = base::MakeFixedFlatMap<
 
 }  // namespace
 
-std::optional<sync_preferences::SyncablePrefMetadata>
+const sync_preferences::SyncablePrefMetadata*
 ChromeSyncablePrefsDatabase::GetSyncablePrefMetadata(
     std::string_view pref_name) const {
   const auto it = kChromeSyncablePrefsAllowlist.find(pref_name);
   if (it != kChromeSyncablePrefsAllowlist.end()) {
-    DCHECK(!common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name)
-                .has_value());
-    return it->second;
+    DCHECK(!common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name));
+    return &it->second;
   }
   // Check in `common_syncable_prefs_database_`.
   return common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name);

@@ -76,6 +76,7 @@
 #include "skia/ext/legacy_display_globals.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/dom/dom_node_id.h"
 #include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 #include "third_party/blink/public/common/navigation/navigation_params.h"
 #include "third_party/blink/public/common/origin_trials/scoped_test_origin_trial_policy.h"
@@ -793,6 +794,10 @@ TEST_F(RenderViewImplTest, BeginNavigation) {
   request.SetRequestContext(blink::mojom::RequestContextType::INTERNAL);
   request.SetRequestorOrigin(requestor_origin);
   auto navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   navigation_info->url_request = std::move(request);
   navigation_info->frame_type =
       blink::mojom::RequestContextFrameType::kTopLevel;
@@ -806,6 +811,10 @@ TEST_F(RenderViewImplTest, BeginNavigation) {
 
   // Form posts to WebUI URLs.
   auto form_navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  form_navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  form_navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   form_navigation_info->url_request = blink::WebURLRequest(GetWebUIURL("foo"));
   form_navigation_info->url_request.SetHttpMethod("POST");
   form_navigation_info->url_request.SetMode(
@@ -831,6 +840,10 @@ TEST_F(RenderViewImplTest, BeginNavigation) {
   // Popup links to WebUI URLs.
   blink::WebURLRequest popup_request(GetWebUIURL("foo"));
   auto popup_navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  popup_navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  popup_navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   popup_navigation_info->url_request = blink::WebURLRequest(GetWebUIURL("foo"));
   popup_navigation_info->url_request.SetMode(
       network::mojom::RequestMode::kNavigate);
@@ -866,6 +879,10 @@ TEST_F(RenderViewImplTest, BeginNavigationHandlesAllTopLevel) {
 
   for (const auto& nav_type : kNavTypes) {
     auto navigation_info = std::make_unique<blink::WebNavigationInfo>();
+    navigation_info->initiator_state_token =
+        frame()->GetWebFrame()->GetInitiatorStateToken();
+    navigation_info->initiator_document_token =
+        frame()->GetWebFrame()->GetDocument().Token();
     navigation_info->url_request = blink::WebURLRequest(GURL("http://foo.com"));
     navigation_info->url_request.SetRequestorOrigin(
         blink::WebSecurityOrigin::Create(GURL("http://foo.com")));
@@ -889,6 +906,10 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
 
   // Navigations to normal HTTP URLs.
   auto navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   navigation_info->url_request = blink::WebURLRequest(GURL("http://foo.com"));
   navigation_info->url_request.SetMode(network::mojom::RequestMode::kNavigate);
   navigation_info->url_request.SetRedirectMode(
@@ -906,6 +927,10 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
 
   // Navigations to WebUI URLs.
   auto webui_navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  webui_navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  webui_navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   webui_navigation_info->url_request = blink::WebURLRequest(GetWebUIURL("foo"));
   webui_navigation_info->url_request.SetMode(
       network::mojom::RequestMode::kNavigate);
@@ -924,6 +949,10 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
 
   // Form posts to data URLs.
   auto data_navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  data_navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  data_navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   data_navigation_info->url_request =
       blink::WebURLRequest(GURL("data:text/html,foo"));
   data_navigation_info->url_request.SetMode(
@@ -962,6 +991,10 @@ TEST_F(RenderViewImplTest, BeginNavigationForWebUI) {
       blink::AllocateSessionStorageNamespaceId(), consumed_user_gesture,
       std::nullopt, /*base_url=*/blink::WebURL());
   auto popup_navigation_info = std::make_unique<blink::WebNavigationInfo>();
+  popup_navigation_info->initiator_state_token =
+      frame()->GetWebFrame()->GetInitiatorStateToken();
+  popup_navigation_info->initiator_document_token =
+      frame()->GetWebFrame()->GetDocument().Token();
   popup_navigation_info->url_request = std::move(popup_request);
   popup_navigation_info->frame_type =
       blink::mojom::RequestContextFrameType::kAuxiliary;
@@ -1951,14 +1984,15 @@ TEST_F(RenderViewImplTest, ImeComposition) {
             base::WideToUTF16(ime_message.ime_string),
             std::vector<ui::ImeTextSpan>(), gfx::Range::InvalidRange(),
             ime_message.selection_start, ime_message.selection_end,
-            blink::mojom::ImeState::kNone, base::DoNothing());
+            blink::mojom::ImeState::kNone,
+            /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
         break;
 
       case IME_COMMITTEXT:
         GetWidgetInputHandler()->ImeCommitText(
             base::WideToUTF16(ime_message.ime_string),
             std::vector<ui::ImeTextSpan>(), gfx::Range::InvalidRange(), 0,
-            base::DoNothing());
+            /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
         break;
 
       case IME_FINISHCOMPOSINGTEXT:
@@ -1969,7 +2003,7 @@ TEST_F(RenderViewImplTest, ImeComposition) {
         GetWidgetInputHandler()->ImeSetComposition(
             std::u16string(), std::vector<ui::ImeTextSpan>(),
             gfx::Range::InvalidRange(), 0, 0, blink::mojom::ImeState::kNone,
-            base::DoNothing());
+            /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
         break;
     }
 
@@ -2230,7 +2264,8 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   const std::u16string ascii_composition = u"aiueo";
   widget_input_handler->ImeSetComposition(
       ascii_composition, empty_ime_text_span, gfx::Range::InvalidRange(), 0, 0,
-      blink::mojom::ImeState::kNone, base::DoNothing());
+      blink::mojom::ImeState::kNone,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
   bounds = LastCompositionBounds();
   ASSERT_EQ(ascii_composition.size(), bounds.size());
 
@@ -2238,33 +2273,35 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
     EXPECT_LT(0, r.width());
   widget_input_handler->ImeCommitText(
       empty_string, std::vector<ui::ImeTextSpan>(), gfx::Range::InvalidRange(),
-      0, base::DoNothing());
+      0, /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
 
   // Non surrogate pair unicode character.
   const std::u16string unicode_composition = u"あいうえお";
   widget_input_handler->ImeSetComposition(
       unicode_composition, empty_ime_text_span, gfx::Range::InvalidRange(), 0,
-      0, blink::mojom::ImeState::kNone, base::DoNothing());
+      0, blink::mojom::ImeState::kNone,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
   bounds = LastCompositionBounds();
   ASSERT_EQ(unicode_composition.size(), bounds.size());
   for (const gfx::Rect& r : bounds)
     EXPECT_LT(0, r.width());
-  widget_input_handler->ImeCommitText(empty_string, empty_ime_text_span,
-                                      gfx::Range::InvalidRange(), 0,
-                                      base::DoNothing());
+  widget_input_handler->ImeCommitText(
+      empty_string, empty_ime_text_span, gfx::Range::InvalidRange(), 0,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
 
   // Surrogate pair character.
   const std::u16string surrogate_pair_char = u"𠮟";
   widget_input_handler->ImeSetComposition(
       surrogate_pair_char, empty_ime_text_span, gfx::Range::InvalidRange(), 0,
-      0, blink::mojom::ImeState::kNone, base::DoNothing());
+      0, blink::mojom::ImeState::kNone,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
   bounds = LastCompositionBounds();
   ASSERT_EQ(surrogate_pair_char.size(), bounds.size());
   EXPECT_LT(0, bounds[0].width());
   EXPECT_EQ(0, bounds[1].width());
-  widget_input_handler->ImeCommitText(empty_string, empty_ime_text_span,
-                                      gfx::Range::InvalidRange(), 0,
-                                      base::DoNothing());
+  widget_input_handler->ImeCommitText(
+      empty_string, empty_ime_text_span, gfx::Range::InvalidRange(), 0,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
 
   // Mixed string.
   const std::u16string surrogate_pair_mixed_composition =
@@ -2277,7 +2314,7 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
   widget_input_handler->ImeSetComposition(
       surrogate_pair_mixed_composition, empty_ime_text_span,
       gfx::Range::InvalidRange(), 0, 0, blink::mojom::ImeState::kNone,
-      base::DoNothing());
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
   bounds = LastCompositionBounds();
   ASSERT_EQ(utf16_length, bounds.size());
   for (size_t i = 0; i < utf16_length; ++i) {
@@ -2287,9 +2324,9 @@ TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
       EXPECT_LT(0, bounds[i].width());
     }
   }
-  widget_input_handler->ImeCommitText(empty_string, empty_ime_text_span,
-                                      gfx::Range::InvalidRange(), 0,
-                                      base::DoNothing());
+  widget_input_handler->ImeCommitText(
+      empty_string, empty_ime_text_span, gfx::Range::InvalidRange(), 0,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
 }
 #endif
 
@@ -3193,7 +3230,8 @@ TEST_F(RenderViewImplScaleFactorTest,
   const std::u16string ascii_composition = u"aiueo";
   widget_input_handler->ImeSetComposition(
       ascii_composition, empty_ime_text_span, gfx::Range::InvalidRange(), 0, 0,
-      blink::mojom::ImeState::kNone, base::DoNothing());
+      blink::mojom::ImeState::kNone,
+      /*target_dom_node_id=*/blink::DOMNodeIdType(), base::DoNothing());
   bounds_at_1x = LastCompositionBounds();
   ASSERT_EQ(ascii_composition.size(), bounds_at_1x.size());
 

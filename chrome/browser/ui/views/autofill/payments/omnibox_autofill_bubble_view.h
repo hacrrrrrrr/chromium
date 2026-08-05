@@ -17,6 +17,7 @@ class WebContents;
 }  // namespace content
 
 namespace views {
+class ScrollView;
 class View;
 }  // namespace views
 
@@ -46,19 +47,27 @@ class OmniboxAutofillBubbleView : public AutofillLocationBarBubble {
   std::u16string GetWindowTitle() const override;
   void WindowClosing() override;
   void AddedToWidget() override;
-  views::View* GetInitiallyFocusedView() override;
 
  protected:
   // LocationBarBubbleDelegateView:
   void Init() override;
 
  private:
+  // Calculates the maximum available vertical space for the bubble (shown below
+  // the omnibox chip), bounded by both the screen display work area and the
+  // browser window.
+  int GetMaxBubbleHeight() const;
+
+  // Calculates the maximum available vertical space for the suggestion list
+  // scroll view.
+  int GetMaxScrollViewHeight() const;
+
   void OnSuggestionAccepted(const Suggestion& suggestion, size_t row_index);
   void OnSuggestionSelected(const Suggestion& suggestion);
   void OnSuggestionDeselected();
 
+  raw_ptr<views::ScrollView> scroll_view_ = nullptr;
   base::WeakPtr<OmniboxAutofillBubbleController> controller_;
-  raw_ptr<views::View> initially_focused_view_ = nullptr;
   base::WeakPtrFactory<OmniboxAutofillBubbleView> weak_ptr_factory_{this};
 };
 

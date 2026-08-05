@@ -212,18 +212,57 @@ export function getHtml(this: GlicInternalsAppElement) {
           <input id="invokePromptInput" .value="${this.invokePrompt_}"
               @input="${this.onInvokePromptInput_}">
           </input>
-          <div style="display: flex; gap: 16px; align-items: center;">
-            <label style="flex: 1;">
+          <label for="invokeTimeoutInput">Timeout Override (ms)</label>
+          <input id="invokeTimeoutInput" type="number"
+              .value="${this.invokeTimeoutMs_}"
+              @input="${this.onInvokeTimeoutMsInput_}">
+          </input>
+          <div style="display: flex; flex-wrap: wrap; gap: 16px;
+             align-items: center;">
+            <label style="flex: 1 1 calc(50% - 8px);">
               <input type="checkbox" .checked="${this.invokeAutoSubmit_}"
                   @change="${this.onInvokeAutoSubmitChange_}">
               Auto Submit
             </label>
-            <label style="flex: 1;">
+            <label style="flex: 1 1 calc(50% - 8px);">
               <input type="checkbox" .checked="${this.invokeWaitForPanelOpen_}"
                   @change="${this.onInvokeWaitForPanelOpenChange_}">
               Wait for Panel Open
             </label>
+            <label style="flex: 1 1 calc(50% - 8px);">
+              <input type="checkbox" .checked="${this.invokeFocusOnShow_}"
+                  @change="${this.onInvokeFocusOnShowChange_}">
+              Focus Panel on Show
+            </label>
+            <label style="flex: 1 1 calc(50% - 8px);">
+              <input type="checkbox"
+                  .checked="${this.invokeTakeScreenshot_}"
+                  @change="${this.onInvokeTakeScreenshotChange_}">
+              Test Take Screenshot
+            </label>
+            <label style="flex: 1 1 calc(50% - 8px);">
+              <input type="checkbox"
+                  .checked="${this.invokeSupersedeIfInProgress_}"
+                  @change="${this.onInvokeSupersedeIfInProgressChange_}">
+              Supersede if In Progress
+            </label>
           </div>
+          ${this.invokeTakeScreenshot_ ? html`
+            <div style="display: flex; flex-direction: column; gap: 8px;
+               margin: 8px 0;">
+              <label for="invokePublicKeyInput">
+                Public Key (Base64 - optional)</label>
+              <input id="invokePublicKeyInput" type="text"
+                  .value="${this.invokePublicKey_}"
+                  @input="${this.onInvokePublicKeyInput_}">
+              </input>
+              <label for="invokeAuthSecretInput">Auth Secret (optional)</label>
+              <input id="invokeAuthSecretInput" type="text"
+                  .value="${this.invokeAuthSecret_}"
+                  @input="${this.onInvokeAuthSecretInput_}">
+              </input>
+            </div>
+          ` : html``}
           <div style="display: flex; gap: 16px; align-items: center;">
             ${this.invokeAutoSubmit_ ? html`
               <label style="flex: 1;">
@@ -318,10 +357,23 @@ export function getHtml(this: GlicInternalsAppElement) {
                 .value="${this.invokeSurfaceType_}"
                 @change="${this.onInvokeSurfaceTypeChange_}">
               <option value="default">Default</option>
+              <option value="specificTab">Specific Tab</option>
               <option value="newTab">New Tab</option>
             </select>
             ${this.invokeSurfaceType_ === 'default' ? html`
               <span style="color: gray;">(Uses this window)</span>
+            ` : html``}
+            ${this.invokeSurfaceType_ === 'specificTab' ? html`
+              <select id="invokeSpecificTabIndexSelect"
+                  .value="${this.invokeSpecificTabIndex_.toString()}"
+                  @change="${this.onInvokeSpecificTabIndexChange_}">
+                ${this.availableTabs_.map((tabTitle, index) => html`
+                  <option value="${index}">${index}: ${tabTitle}</option>
+                `)}
+              </select>
+              <cr-button @click="${this.onRefreshTabsClick_}">
+                Refresh
+              </cr-button>
             ` : html``}
             ${this.invokeSurfaceType_ === 'newTab' ? html`
               <label style="display: flex; align-items: center; gap: 4px;">
@@ -331,6 +383,45 @@ export function getHtml(this: GlicInternalsAppElement) {
                 Open in Foreground
               </label>
             ` : html``}
+          </div>
+
+          <div style="display: flex; gap: 8px; align-items: flex-start;
+                      margin-top: 8px;">
+            ${this.invokeSpecificTabsToShareIndices_.length === 0 ? html`
+              <cr-button @click="${this.onAddTabsToShareIndexClick_}">
+                Add Tabs to Share
+              </cr-button>
+            ` : html`
+              <label style="margin-top: 4px;">Tabs to Share</label>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                ${this.invokeSpecificTabsToShareIndices_.map(
+                    (selectedIndex, indexInArray) => html`
+                  <div style="display: flex; gap: 4px;">
+                    <select .value="${selectedIndex.toString()}"
+                        data-index="${indexInArray}"
+                        @change="${
+                            this.onInvokeSpecificTabsToShareIndexChange_}">
+                      ${this.availableTabs_.map((tabTitle, tabIndex) => html`
+                        <option value="${tabIndex}">
+                          ${tabIndex}: ${tabTitle}
+                        </option>
+                      `)}
+                    </select>
+                    <cr-button data-index="${indexInArray}"
+                        @click="${this.onRemoveTabsToShareIndexClick_}">
+                      x
+                    </cr-button>
+                  </div>
+                `)}
+                <cr-button @click="${this.onAddTabsToShareIndexClick_}"
+                    style="align-self: flex-start;">
+                  +
+                </cr-button>
+              </div>
+              <cr-button @click="${this.onRefreshTabsClick_}">
+                Refresh Tabs
+              </cr-button>
+            `}
           </div>
 
           <div style="display: flex; gap: 8px; align-items: center;
@@ -367,9 +458,24 @@ export function getHtml(this: GlicInternalsAppElement) {
               log => html`<pre style="margin: 0;">${log}</pre>`)}
           </div>
           ${this.data_?.experimentalTriggeringEnabled ? html`
-            <h3>Experimental Opt-In</h3>
-            <div style="display: flex; gap: 16px; align-items: center;">
-              <cr-button @click="${this.onExperimentalOptInClick_}">
+            <h3>Consents</h3>
+            <div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+              <cr-checkbox ?checked="${this.data_?.enablement?.freIsConsented}"
+                           ?disabled="${!this.data_?.enablement?.freIsConsented}"
+                           @change="${this.onGlicConsentChange_}">
+                Glic Consent
+              </cr-checkbox>
+              <cr-checkbox ?checked="${this.data_?.enablement?.actuationIsConsented}"
+                           ?disabled="${!this.data_?.enablement?.actuationIsConsented}"
+                           @change="${this.onActuationConsentChange_}">
+                Actuation Consent
+              </cr-checkbox>
+              <cr-checkbox ?checked="${this.isExperimentalOptInConsentMet_()}"
+                           ?disabled="${!this.isExperimentalOptInConsentMet_()}"
+                           @change="${this.onExperimentalConsentChange_}">
+                Experimental Triggering Consent
+              </cr-checkbox>
+              <cr-button ?disabled="${this.isAllConsentMet_()}" @click="${this.onExperimentalOptInClick_}">
                 Show Experimental Opt-In
               </cr-button>
             </div>

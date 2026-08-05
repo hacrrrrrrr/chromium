@@ -31,9 +31,11 @@ void WebUIStateListener::WebUiStateChanged(mojom::WebUiState state) {
 
 void WebUIStateListener::WaitForWebUiState(mojom::WebUiState state) {
   ASSERT_TRUE(host_);
+  std::vector<mojom::WebUiState> ignored_states;
   ASSERT_TRUE(base::test::RunUntil([&]() {
     while (!states_.empty()) {
       if (states_.front() != state) {
+        ignored_states.push_back(states_.front());
         states_.pop_front();
         continue;
       }
@@ -41,7 +43,8 @@ void WebUIStateListener::WaitForWebUiState(mojom::WebUiState state) {
     }
     return false;
   })) << "Timed out waiting for WebUI state "
-      << state << ". State =" << host_->GetPrimaryWebUiState();
+      << state << ". State=" << host_->GetPrimaryWebUiState()
+      << " ignored=" << testing::PrintToString(ignored_states);
 }
 
 }  // namespace glic
@@ -134,6 +137,32 @@ base::expected<Command, std::string> DeserializeCommand(
       return base::unexpected("Missing taskId");
     }
     return MakeNavigateActionCommand{tab_handle, *url, *task_id};
+  }
+  if (*command_field == "make-attempt-otp-filling-action") {
+    ASSIGN_OR_RETURN(tabs::TabHandle tab_handle, ParseOptionalTabId(dict));
+    auto task_id = dict.FindInt("taskId");
+    if (!task_id) {
+      return base::unexpected("Missing taskId");
+    }
+    auto node_id = dict.FindInt("nodeId");
+    if (!node_id) {
+      return base::unexpected("Missing nodeId");
+    }
+    auto* document_identifier = dict.FindString("documentIdentifier");
+    if (!document_identifier) {
+      return base::unexpected("Missing documentIdentifier");
+    }
+    auto for_signin = dict.FindBool("forSignin");
+    if (!for_signin.has_value()) {
+      return base::unexpected("Missing forSignin");
+    }
+    auto otp_type = dict.FindInt("otpType");
+    if (!otp_type) {
+      return base::unexpected("Missing otpType");
+    }
+    return MakeAttemptOtpFillingActionCommand{tab_handle,  *task_id,
+                                              *node_id,    *document_identifier,
+                                              *for_signin, *otp_type};
   }
   return base::unexpected(base::StrCat({"Unknown command: ", *command_field}));
 }

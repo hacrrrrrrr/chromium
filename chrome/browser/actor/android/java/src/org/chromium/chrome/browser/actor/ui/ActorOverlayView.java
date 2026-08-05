@@ -16,6 +16,7 @@ import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
+import android.view.PointerIcon;
 import android.view.View;
 import android.view.ViewGroup.MarginLayoutParams;
 import android.widget.FrameLayout;
@@ -24,12 +25,14 @@ import androidx.core.content.ContextCompat;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.ui.util.MotionEventUtils;
 
 /**
  * The root view for the Actor Overlay. Displays the overlay content on top of the browser content.
  */
 @NullMarked
 public class ActorOverlayView extends FrameLayout {
+    private static final int[] STATE_PRESSED = new int[] {android.R.attr.state_pressed};
     private static final int[] STATE_HOVERED = new int[] {android.R.attr.state_hovered};
 
     private final Paint mSoftGlowPaint;
@@ -49,6 +52,7 @@ public class ActorOverlayView extends FrameLayout {
         super(context, attrs);
         setClickable(true);
         setFocusable(true);
+        setPointerIcon(PointerIcon.getSystemIcon(context, PointerIcon.TYPE_NO_DROP));
 
         InnerGlowDrawable normalDrawable = InnerGlowDrawable.createMainWebpageGlow(context);
         InnerGlowDrawable normalDrawableForHover = InnerGlowDrawable.createMainWebpageGlow(context);
@@ -59,6 +63,7 @@ public class ActorOverlayView extends FrameLayout {
                 new LayerDrawable(new Drawable[] {hoverHighlight, normalDrawableForHover});
 
         StateListDrawable stateListDrawable = new StateListDrawable();
+        stateListDrawable.addState(STATE_PRESSED, hoverDrawable);
         stateListDrawable.addState(STATE_HOVERED, hoverDrawable);
         stateListDrawable.addState(new int[] {}, normalDrawable);
 
@@ -93,6 +98,9 @@ public class ActorOverlayView extends FrameLayout {
     protected void onFinishInflate() {
         super.onFinishInflate();
         mButton = getTakeOverButton();
+        if (mButton != null) {
+            mButton.setPointerIcon(PointerIcon.getSystemIcon(getContext(), PointerIcon.TYPE_HAND));
+        }
     }
 
     /**
@@ -124,8 +132,41 @@ public class ActorOverlayView extends FrameLayout {
         return findViewById(R.id.take_over_task_button);
     }
 
+    private boolean isPointInView(float x, float y) {
+        return x >= 0 && x < getWidth() && y >= 0 && y < getHeight();
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        boolean handled = super.dispatchTouchEvent(event);
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            // When a click starts inside the view, we intercept the native ACTION_HOVER_EXIT
+            // event to keep the hover scrim active (dark). However, if the user drags their
+            // cursor outside the view bounds and releases the click (ACTION_UP or ACTION_CANCEL
+            // outside bounds), the hover state would remain stuck at 'true' forever since no
+            // subsequent hover exit event will be delivered by the OS.
+            // We manually clear the hover state when the touch gesture ends outside view bounds.
+            if (!isPointInView(event.getX(), event.getY())) {
+                setHovered(false);
+            }
+        }
+        return handled;
+    }
+
     @Override
     public boolean dispatchHoverEvent(MotionEvent event) {
+        // When a user clicks/taps using a trackpad or mouse, the Android framework sends an
+        // ACTION_HOVER_EXIT event *before* sending the ACTION_DOWN event. By default, this exit
+        // event clears the hover state, causing the background scrim to momentarily flicker
+        // back to normal (light) mode.
+        // We intercept and swallow ACTION_HOVER_EXIT events if the pointer is still inside the
+        // view bounds (e.g. click happened on the scrim), preventing the flicker. We only let
+        // the exit event propagate if the pointer actually leaves the view bounds.
+        if (event.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT
+                && isPointInView(event.getX(), event.getY())) {
+            return true;
+        }
         boolean handled = super.dispatchHoverEvent(event);
         boolean childHovered =
                 handled && !isHovered() && event.getActionMasked() != MotionEvent.ACTION_HOVER_EXIT;
@@ -134,6 +175,14 @@ public class ActorOverlayView extends FrameLayout {
             refreshDrawableState();
         }
         return true;
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        if (MotionEventUtils.isPointerEvent(event)) {
+            return true;
+        }
+        return super.onGenericMotionEvent(event);
     }
 
     // Overridden to preserve the overlay's hover state when a child view receives hover focus.

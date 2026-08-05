@@ -119,8 +119,9 @@ class VerticalTabStripInteractiveUiTest : public InteractiveBrowserTest {
   }
 
   bool SystemMenuContainsStringId(int message_id) {
-    ui::MenuModel* menu_model =
-        browser()->GetBrowserView().browser_widget()->GetSystemMenuModel();
+    ui::MenuModel* menu_model = BrowserView::GetBrowserViewForBrowser(browser())
+                                    ->browser_widget()
+                                    ->GetSystemMenuModel();
     for (size_t i = 0; i < menu_model->GetItemCount(); i++) {
       if (l10n_util::GetStringUTF16(message_id) == menu_model->GetLabelAt(i)) {
         return true;
@@ -391,7 +392,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripInteractiveUiTest,
 
   // Get ToastController
   ToastController* const toast_controller =
-      browser()->browser_window_features()->toast_controller();
+      browser()->GetFeatures().toast_controller();
   ASSERT_NE(toast_controller, nullptr);
   EXPECT_FALSE(toast_controller->IsShowingToast());
 
@@ -445,7 +446,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripInteractiveUiTest,
 
   // Get ToastController
   ToastController* const toast_controller =
-      browser()->browser_window_features()->toast_controller();
+      browser()->GetFeatures().toast_controller();
   ASSERT_NE(toast_controller, nullptr);
   EXPECT_FALSE(toast_controller->IsShowingToast());
 
@@ -483,15 +484,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripInteractiveUiTest,
                    ->ShouldDisplayVerticalTabs());
 }
 
-#if BUILDFLAG(IS_MAC)
-// TODO(crbug.com/532797333): Re-enable this test on Mac.
-#define MAYBE_KeyboardShortcutTogglesCollapse \
-  DISABLED_KeyboardShortcutTogglesCollapse
-#else
-#define MAYBE_KeyboardShortcutTogglesCollapse KeyboardShortcutTogglesCollapse
-#endif
 IN_PROC_BROWSER_TEST_F(VerticalTabStripInteractiveUiTest,
-                       MAYBE_KeyboardShortcutTogglesCollapse) {
+                       KeyboardShortcutTogglesCollapse) {
   base::UserActionTester user_action_tester;
   tabs::VerticalTabStripStateController* const controller =
       tabs::VerticalTabStripStateController::From(browser());

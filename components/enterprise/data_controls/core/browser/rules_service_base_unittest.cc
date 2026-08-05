@@ -4,6 +4,7 @@
 
 #include "components/enterprise/data_controls/core/browser/rules_service_base.h"
 
+#include "base/test/metrics/histogram_tester.h"
 #include "components/enterprise/data_controls/core/browser/prefs.h"
 #include "components/enterprise/data_controls/core/browser/test_utils.h"
 #include "components/prefs/testing_pref_service.h"
@@ -20,26 +21,26 @@ GURL google_url() {
   return GURL("https://google.com");
 }
 
-void ExpectBlockVerdict(Verdict verdict, bool expect_machine_source = true) {
+void ExpectBlockVerdict(Verdict verdict, bool expect_machine_scope = true) {
   ASSERT_EQ(verdict.level(), Rule::Level::kBlock);
   EXPECT_EQ(verdict.triggered_rules().size(), 1u);
 
   auto index = Verdict::TriggeredRuleKey{
       .index = kFirstRuleIndex,
-      .machine_scope = expect_machine_source,
+      .machine_scope = expect_machine_scope,
   };
   EXPECT_TRUE(verdict.triggered_rules().count(index));
   EXPECT_EQ(verdict.triggered_rules().at(index).rule_name, "block");
   EXPECT_EQ(verdict.triggered_rules().at(index).rule_id, kFirstRuleID);
 }
 
-void ExpectWarnVerdict(Verdict verdict, bool expect_machine_source = true) {
+void ExpectWarnVerdict(Verdict verdict, bool expect_machine_scope = true) {
   ASSERT_EQ(verdict.level(), Rule::Level::kWarn);
   EXPECT_EQ(verdict.triggered_rules().size(), 1u);
 
   auto index = Verdict::TriggeredRuleKey{
       .index = kFirstRuleIndex,
-      .machine_scope = expect_machine_source,
+      .machine_scope = expect_machine_scope,
   };
   EXPECT_TRUE(verdict.triggered_rules().count(index));
   EXPECT_EQ(verdict.triggered_rules().at(index).rule_name, "warn");
@@ -478,6 +479,21 @@ TEST_F(RulesServiceBaseTest, ObserverNotifiedOnUpdate) {
   ExpectBlockVerdict(service_->GetCopyRestrictedBySourceVerdict(google_url()));
 
   service_->RemoveObserver(&observer);
+}
+
+TEST_F(RulesServiceBaseTest, ScreenshotLatencyHistogramLogged) {
+  base::HistogramTester histogram_tester;
+  SetDataControls(&prefs_, {R"({
+    "name": "Block screenshot rule",
+    "rule_id": "1234",
+    "sources": { "urls": ["google.com"] },
+    "restrictions": [ {"class": "SCREENSHOT", "level": "BLOCK"} ]
+  })"});
+
+  service_->BlockScreenshots(google_url());
+
+  histogram_tester.ExpectTotalCount(
+      "Enterprise.DataControls.Screenshot.EvaluationLatency", 1);
 }
 
 }  // namespace data_controls

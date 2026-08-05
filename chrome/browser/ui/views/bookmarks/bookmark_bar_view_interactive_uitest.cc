@@ -47,11 +47,11 @@ class BookmarkBarDragAndDropInteractiveTest : public InteractiveBrowserTest {
     InteractiveBrowserTest::SetUpOnMainThread();
     if (base::FeatureList::IsEnabled(
             ntp_features::kNtpSimplificationBookmarkBar)) {
-      browser()->profile()->GetPrefs()->SetInteger(
+      browser()->GetProfile()->GetPrefs()->SetInteger(
           bookmarks::prefs::kBookmarkBarVisibilityState,
           static_cast<int>(bookmarks::BookmarkBarVisibilityState::kAlwaysShow));
     } else {
-      browser()->profile()->GetPrefs()->SetBoolean(
+      browser()->GetProfile()->GetPrefs()->SetBoolean(
           bookmarks::prefs::kShowBookmarkBar, true);
     }
   }
@@ -97,7 +97,8 @@ class BookmarkBarDragAndDropInteractiveTest : public InteractiveBrowserTest {
   auto NameBarMenuChildByTitle(std::string name, std::u16string title) {
     return NameView(
         name, base::BindLambdaForTesting([this, title]() -> views::View* {
-          auto* const bar = browser()->GetBrowserView().bookmark_bar();
+          auto* const bar =
+              BrowserView::GetBrowserViewForBrowser(browser())->bookmark_bar();
           if (!bar || !bar->GetMenu()) {
             return nullptr;
           }
@@ -247,7 +248,7 @@ class BookmarkBarSimplifiedIPHInteractiveTest
     InteractiveFeaturePromoTest::SetUpOnMainThread();
     // Simulate the state where the bookmark bar has been auto-hidden
     // due to inactivity.
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         bookmarks::prefs::kBookmarkBarVisibilityState,
         static_cast<int>(bookmarks::BookmarkBarVisibilityState::kAlwaysHide));
   }
@@ -262,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(BookmarkBarSimplifiedIPHInteractiveTest,
       PressNonDefaultPromoButton(),
       CheckResult(
           [this]() {
-            return browser()->profile()->GetPrefs()->GetInteger(
+            return browser()->GetProfile()->GetPrefs()->GetInteger(
                 bookmarks::prefs::kBookmarkBarVisibilityState);
           },
           static_cast<int>(

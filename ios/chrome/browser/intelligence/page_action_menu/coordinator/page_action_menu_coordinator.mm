@@ -14,6 +14,7 @@
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_service_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_availability.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/bwg/utils/gemini_entry_flow_result.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
@@ -25,6 +26,7 @@
 #import "ios/chrome/browser/intelligence/page_action_menu/utils/ai_hub_metrics.h"
 #import "ios/chrome/browser/reader_mode/coordinator/reader_mode_options_mediator.h"
 #import "ios/chrome/browser/reader_mode/model/features.h"
+#import "ios/chrome/browser/reader_mode/model/reader_mode_browser_agent.h"
 #import "ios/chrome/browser/reader_mode/model/reader_mode_tab_helper.h"
 #import "ios/chrome/browser/reader_mode/ui/reader_mode_options_controls_view.h"
 #import "ios/chrome/browser/reader_mode/ui/reader_mode_options_view_controller.h"
@@ -92,6 +94,8 @@ constexpr NSTimeInterval kEligibilityPollTimeout = 5.0;
 
   ReaderModeTabHelper* readerModeTabHelper =
       ReaderModeTabHelper::FromWebState(activeWebState);
+  ReaderModeBrowserAgent* readerModeBrowserAgent =
+      ReaderModeBrowserAgent::FromBrowser(self.browser);
   GeminiTabHelper* geminiTabHelper =
       GeminiTabHelper::FromWebState(activeWebState);
 
@@ -107,6 +111,7 @@ constexpr NSTimeInterval kEligibilityPollTimeout = 5.0;
                geminiService:geminiService
              geminiTabHelper:geminiTabHelper
          readerModeTabHelper:readerModeTabHelper
+      readerModeBrowserAgent:readerModeBrowserAgent
       hostContentSettingsMap:hostContentSettingsMap];
 
   id<PageActionMenuCommands> pageActionMenuHandler = HandlerForProtocol(
@@ -251,8 +256,6 @@ constexpr NSTimeInterval kEligibilityPollTimeout = 5.0;
           [[GeminiStartupState alloc]
               initWithEntryPoint:gemini::EntryPoint::AIHubSignInSheet]
                         baseViewController:_navigationController
-                               accessPoint:signin_metrics::AccessPoint::
-                                               kIosPageActionMenu
                   showSnackbarOnCompletion:YES
                                 completion:^(GeminiEntryFlowResult result) {
                                   [weakSelf handleEntryFlowResult:result];
@@ -362,12 +365,13 @@ constexpr NSTimeInterval kEligibilityPollTimeout = 5.0;
     (AccountMenuCoordinator*)coordinator {
   [self stopAccountMenu];
 
-  raw_ptr<GeminiService> geminiService =
-      GeminiServiceFactory::GetForProfile(self.profile);
-
+  web::WebState* activeWebState =
+      self.browser->GetWebStateList()->GetActiveWebState();
   // Re-check eligibility after the account menu closes.
   if ([_mediator isUserSignedIn] &&
-      geminiService->IsProfileEligibleForGemini()) {
+      gemini::IsGeminiAvailable(gemini::EntryPoint::AIHub, self.profile,
+                                activeWebState)
+          .enabled) {
     [self startGeminiSession];
     return;
   }

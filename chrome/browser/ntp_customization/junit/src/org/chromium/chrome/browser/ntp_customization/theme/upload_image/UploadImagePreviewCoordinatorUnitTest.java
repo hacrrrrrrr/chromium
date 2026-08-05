@@ -43,6 +43,7 @@ import org.robolectric.shadows.ShadowDialog;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.RobolectricUtil;
+import org.chromium.base.test.util.Features;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.browser.composeplate.ComposeplateUtils;
 import org.chromium.chrome.browser.composeplate.ComposeplateUtilsJni;
@@ -54,8 +55,8 @@ import org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBa
 import org.chromium.chrome.browser.ntp_customization.R;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeProperty;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase;
-import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase.PlatformType;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataUploadImage;
+import org.chromium.chrome.browser.ntp_customization.theme_sync.data.PlatformType;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
@@ -63,6 +64,7 @@ import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Unit tests for {@link UploadImagePreviewCoordinator}. */
+@Features.EnableFeatures(ChromeFeatureList.FEED_CONTAINMENT)
 @RunWith(BaseRobolectricTestRunner.class)
 public class UploadImagePreviewCoordinatorUnitTest {
     private static final String TEST_FILE_ID_HASH = "test_file_id_hash";
@@ -758,7 +760,7 @@ public class UploadImagePreviewCoordinatorUnitTest {
                         mPortraitMatrix, mLandscapeMatrix, PORTRAIT_POINT, LANDSCAPE_POINT);
         NtpBackgroundDataUploadImage currentUploadImage =
                 new NtpBackgroundDataUploadImage(
-                        PlatformType.ANDROID_LOCAL,
+                        PlatformType.ANDROID,
                         info,
                         mBitmap,
                         /* primaryColor= */ null,

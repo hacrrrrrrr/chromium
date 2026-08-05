@@ -497,6 +497,17 @@ const GridLayoutSubtree* GridLayoutAlgorithm::ComputeGridGeometry(
                                  &grid_sizing_tree);
   }
 
+  // A standalone subgrid's baseline depends on its own children (which may be
+  // nested subgrids), so it can't be resolved until those are finalized. Run a
+  // bottom-up pass first: by resolving the innermost subgrids first, every grid
+  // has its standalone-axis subgrid baselines populated before the final
+  // top-down pass measures it.
+  if (grid_sizing_tree.HasDeferredSubgridBaseline()) {
+    ResolveBaselinesInStandaloneAxes(GridSizingSubtree(&grid_sizing_tree),
+                                     &grid_sizing_tree,
+                                     SizingConstraint::kLayout);
+  }
+
   // Calculate final alignment baselines of the entire grid sizing tree.
   CompleteFinalBaselineAlignment(&grid_sizing_tree);
 
@@ -953,7 +964,8 @@ void GridLayoutAlgorithm::ComputeGridItemBaselines(
     const GridSizingSubtree& sizing_subtree,
     GridTrackSizingDirection track_direction,
     SizingConstraint sizing_constraint,
-    bool is_track_sizing) const {
+    bool is_track_sizing,
+    BaselineCollectionPhase phase) const {
   auto& layout_data = sizing_subtree.LayoutData();
 
   if (!layout_data.HasBaselines(track_direction)) {
@@ -962,7 +974,13 @@ void GridLayoutAlgorithm::ComputeGridItemBaselines(
 
   auto& track_collection = sizing_subtree.SizingCollection(track_direction);
   const auto writing_mode = GetConstraintSpace().GetWritingMode();
-  layout_data.ResetBaselines(track_direction, track_collection.GetSetCount());
+
+  // The bottom-up phase (`kBaselinesForStandaloneAxes`) accumulates subgrid
+  // baselines on top of the values from the previous baseline calculation pass
+  // during track sizing, so it must not reset them.
+  if (phase != BaselineCollectionPhase::kBaselinesForStandaloneAxes) {
+    layout_data.ResetBaselines(track_direction, track_collection.GetSetCount());
+  }
 
   for (auto& grid_item :
        sizing_subtree.GetGridItems().IncludeSubgriddedItems()) {
@@ -971,15 +989,36 @@ void GridLayoutAlgorithm::ComputeGridItemBaselines(
       continue;
     }
 
+    // The standalone-axes phase only fills in subgrid items and skips all leaf
+    // nodes.
+    if (phase == BaselineCollectionPhase::kBaselinesForStandaloneAxes &&
+        !grid_item.IsSubgrid()) {
+      continue;
+    }
+
     GridLayoutSubtree* subgrid_layout_subtree = nullptr;
     if (grid_item.IsSubgrid()) {
-      subgrid_layout_subtree = MakeGarbageCollected<GridLayoutSubtree>(
-          layout_tree, sizing_subtree.LookupSubgridIndex(grid_item));
+      // The standalone-axes phase re-finalizes only the current subtree, so the
+      // `layout_tree` passed in here is that subtree with its root at index 0;
+      // rebase the subgrid's absolute index to a subtree-relative one.
+      const wtf_size_t subgrid_index =
+          phase == BaselineCollectionPhase::kBaselinesForStandaloneAxes
+              ? sizing_subtree.LookupSubgridSubtreeIndex(grid_item)
+              : sizing_subtree.LookupSubgridIndex(grid_item);
+      subgrid_layout_subtree =
+          MakeGarbageCollected<GridLayoutSubtree>(layout_tree, subgrid_index);
 
       if (subgrid_layout_subtree->HasUnresolvedGeometry()) {
-        // Calling `Layout` for a nested subgrid rely on the geometry of its
-        // respective layout subtree to be fully resolved. Otherwise, the
-        // subgrid won't be able to resolve its intrinsic sizes.
+        // A subgrid's geometry can only be unresolved during the track-sizing
+        // phase; by the standalone-axes and final phases the sizing tree has
+        // been finalized, so every subgrid subtree is fully resolved.
+        CHECK_EQ(phase, BaselineCollectionPhase::kBaselinesForTrackSizing);
+        // Laying out a nested subgrid relies on its layout subtree geometry
+        // being fully resolved; otherwise it can't resolve its intrinsic sizes,
+        // so its baseline is deferred here. Flag the tree so the bottom-up
+        // standalone-axis pass resolves this subgrid's baseline and propagates
+        // it up to the ancestors that measure it.
+        sizing_subtree.SetHasDeferredSubgridBaseline();
         continue;
       }
     }
@@ -1315,7 +1354,10 @@ void GridLayoutAlgorithm::ComputeBaselineAlignment(
         } else {
           ComputeGridItemBaselines(
               layout_tree, sizing_subtree, track_direction, sizing_constraint,
-              /*is_track_sizing=*/opt_track_direction.has_value());
+              /*is_track_sizing=*/opt_track_direction.has_value(),
+              opt_track_direction.has_value()
+                  ? BaselineCollectionPhase::kBaselinesForTrackSizing
+                  : BaselineCollectionPhase::kFinalBaselines);
         }
       };
 
@@ -1329,6 +1371,37 @@ void GridLayoutAlgorithm::ComputeBaselineAlignment(
   ComputeBaselineAlignmentForEachSubgrid(sizing_subtree, *this, layout_tree,
                                          opt_track_direction,
                                          sizing_constraint);
+}
+
+void GridLayoutAlgorithm::ResolveBaselinesInStandaloneAxes(
+    const GridSizingSubtree& sizing_subtree,
+    GridSizingTree* sizing_tree,
+    SizingConstraint sizing_constraint) const {
+  ForEachSubgrid(sizing_subtree, *this,
+                 [&](const GridLayoutAlgorithm& subgrid_algorithm,
+                     const GridSizingSubtree& subgrid_subtree,
+                     const SubgriddedItemData& /*subgrid_data*/) {
+                   subgrid_algorithm.ResolveBaselinesInStandaloneAxes(
+                       subgrid_subtree, sizing_tree, sizing_constraint);
+                 });
+
+  // If both axes are subgridded, this grid inherits all its baselines top-down
+  // and has nothing to resolve here.
+  auto& layout_data = sizing_subtree.LayoutData();
+  if (layout_data.HasSubgriddedAxis(kForColumns) &&
+      layout_data.HasSubgriddedAxis(kForRows)) {
+    return;
+  }
+
+  const GridLayoutTree* layout_tree = sizing_subtree.FinalizeTree();
+  for (auto track_direction : {kForColumns, kForRows}) {
+    if (!layout_data.HasSubgriddedAxis(track_direction)) {
+      ComputeGridItemBaselines(
+          layout_tree, sizing_subtree, track_direction, sizing_constraint,
+          /*is_track_sizing=*/false,
+          BaselineCollectionPhase::kBaselinesForStandaloneAxes);
+    }
+  }
 }
 
 void GridLayoutAlgorithm::CompleteFinalBaselineAlignment(
@@ -1518,79 +1591,30 @@ class GapAccumulator {
   // See third_party/blink/renderer/core/layout/gap/README.md for more.
   void BuildMainGaps(const GridLayoutData& layout_data) {
     const auto& rows = layout_data.Rows();
-    const Vector<LayoutUnit> row_tracks =
-        LayoutGrid::ComputeExpandedPositions(rows);
+    row_gap_data_ =
+        BuildGridTrackGapData(rows, GridTrackGapType::kMain, *gap_geometry_);
     row_gutter_size_ = rows.GutterSize();
-    wtf_size_t row_track_count = row_tracks.size();
 
     // Initialize `cross_gaps_aggregator_` to track cell states along the cross
     // axis (columns). We pass in the number of row tracks because when we
     // aggregate column cell states, they are aggregated along the column for
     // each row in the grid.
     cross_gaps_aggregator_ =
-        GapSegmentStateAggregator(/*cell_count=*/row_track_count - 1);
-
-    if (row_track_count > 2) {
-      // With `n` tracks, we have `n - 1` gaps.
-      gap_geometry_->ReserveMainGaps(row_track_count - 1);
-    }
-
-    // CSS Gaps[1] defines an intersection point to exist in the center of gaps.
-    // Hence, we get the midpoint for each row gap for the derivation of
-    // intersection points. The first gap ends at the second track, and the last
-    // gap ends at the second-to-last track. So gaps are defined in the track
-    // range [1, `row_track_count` - 1).
-    //
-    // [1] https://www.w3.org/TR/css-gaps-1/#gap-intersection-point
-    if (!rows.HasNonCollapsedLine()) {
-      return;
-    }
-    ForEachNonCollapsedInnerLine(rows, [&](wtf_size_t line_index) {
-      const LayoutUnit row_midpoint =
-          LayoutUnit(row_tracks[line_index] - (row_gutter_size_ / 2.0f));
-      gap_geometry_->AddMainGap(row_midpoint);
-    });
-
-    content_block_start_ = row_tracks[0];
-    content_block_end_ = row_tracks[row_track_count - 1];
+        GapSegmentStateAggregator(/*cell_count=*/row_gap_data_.track_count);
   }
 
   void BuildCrossGaps(const GridLayoutData& layout_data) {
     const auto& columns = layout_data.Columns();
-    const Vector<LayoutUnit> col_tracks =
-        LayoutGrid::ComputeExpandedPositions(columns);
+    column_gap_data_ = BuildGridTrackGapData(columns, GridTrackGapType::kCross,
+                                             *gap_geometry_);
     col_gutter_size_ = columns.GutterSize();
-    wtf_size_t col_track_count = col_tracks.size();
 
     // Initialize `main_gaps_aggregator_` to track cell states along the main
     // axis (rows). We pass in the number of column tracks because when we
     // aggregate row cell states, they are aggregated along the row for
     // each column in the grid.
     main_gaps_aggregator_ =
-        GapSegmentStateAggregator(/*cell_count=*/col_track_count - 1);
-
-    if (col_track_count > 2) {
-      // With `n` tracks, we have `n - 1` gaps.
-      gap_geometry_->ReserveCrossGaps(col_track_count - 1);
-    }
-
-    // CSS Gaps defines an intersection point to exist in the center
-    // of gaps. Hence, we get the midpoint for each column gap for the
-    // derivation of intersection points. The first gap ends at the second
-    // track, and the last gap ends at the second-to-last track. So gaps are
-    // defined in the track range [1, `col_track_count` - 1).
-    // See: https://www.w3.org/TR/css-gaps-1/#gap-intersection-point
-    if (!columns.HasNonCollapsedLine()) {
-      return;
-    }
-    ForEachNonCollapsedInnerLine(columns, [&](wtf_size_t line_index) {
-      const LayoutUnit col_midpoint =
-          LayoutUnit(col_tracks[line_index] - (col_gutter_size_ / 2.0f));
-      gap_geometry_->AddCrossGap(LogicalOffset(col_midpoint, LayoutUnit()));
-    });
-
-    content_inline_start_ = col_tracks[0];
-    content_inline_end_ = col_tracks[col_track_count - 1];
+        GapSegmentStateAggregator(/*cell_count=*/column_gap_data_.track_count);
   }
 
   void BuildGapGeometry(const GridLayoutData& layout_data) {
@@ -1693,85 +1717,42 @@ class GapAccumulator {
       FinalizeCrossGapRanges(columns);
     }
 
-    gap_geometry_->SetContentInlineOffsets(content_inline_start_,
-                                           content_inline_end_);
-    gap_geometry_->SetContentBlockOffsets(content_block_start_,
-                                          content_block_end_);
-
-    gap_geometry_->Finalize();
+    gap_geometry_->SetContentInlineOffsets(column_gap_data_.content_start,
+                                           column_gap_data_.content_end);
+    gap_geometry_->SetContentBlockOffsets(row_gap_data_.content_start,
+                                          row_gap_data_.content_end);
 
     return gap_geometry_;
   }
 
  private:
-  // Calls `callback(line_index)` for each non-collapsed inner grid line in
-  // `tracks`, in increasing line order. The leading and trailing outer edges
-  // of the grid content are not visited, so each visited line is a gap line.
-  //
-  // Callers must ensure that `tracks` has at least one non-collapsed line.
-  template <typename Callback>
-  static void ForEachNonCollapsedInnerLine(
-      const GridLayoutTrackCollection& tracks,
-      Callback callback) {
-    const wtf_size_t first_non_collapsed_line =
-        tracks.FirstNonCollapsedLineIndex();
-    CHECK_NE(first_non_collapsed_line, kNotFound);
-    const wtf_size_t range_count = tracks.RangeCount();
-    for (wtf_size_t range_index = 0; range_index < range_count; ++range_index) {
-      // Skip collapsed ranges, as they don't contribute to the gap geometry.
-      if (tracks.RangeProperties(range_index)
-              .HasProperty(TrackSpanProperties::kIsCollapsed)) {
-        continue;
-      }
-
-      const wtf_size_t start_line = tracks.RangeStartLine(range_index);
-      const wtf_size_t end_line =
-          start_line + tracks.RangeTrackCount(range_index);
-      wtf_size_t line_index = start_line;
-
-      // The first non-collapsed range's leading line is the outer edge of
-      // the grid content, so it's not a gap and we skip it. The trailing
-      // outer edge is excluded naturally by the `line_index < end_line`
-      // bound on the inner loop below.
-      if (start_line == first_non_collapsed_line) {
-        ++line_index;
-      }
-
-      for (; line_index < end_line; ++line_index) {
-        callback(line_index);
-      }
-    }
-  }
-
   // Finalizes each main/cross gap's `GapSegmentStateRanges` using the adjacent
   // track index as the key, adjusting for collapsed tracks.
   void FinalizeMainGapRanges(const GridLayoutTrackCollection& rows) {
     CHECK_EQ(rows.Direction(), kForRows);
     wtf_size_t gap_index = 0;
-    ForEachNonCollapsedInnerLine(rows, [&](wtf_size_t line_index) {
+    for (const auto& gap : row_gap_data_.gaps) {
       main_gaps_aggregator_.FinalizeGapSegmentStateRangesFor(
-          gap_geometry_->MainGapAt(gap_index), line_index - 1);
+          gap_geometry_->MainGapAt(gap_index), gap.line_index - 1);
       ++gap_index;
-    });
+    }
     CHECK_EQ(gap_index, gap_geometry_->MainGapCount());
   }
   void FinalizeCrossGapRanges(const GridLayoutTrackCollection& columns) {
     CHECK_EQ(columns.Direction(), kForColumns);
     wtf_size_t gap_index = 0;
-    ForEachNonCollapsedInnerLine(columns, [&](wtf_size_t line_index) {
+    for (const auto& gap : column_gap_data_.gaps) {
       cross_gaps_aggregator_.FinalizeGapSegmentStateRangesFor(
-          gap_geometry_->CrossGapAt(gap_index), line_index - 1);
+          gap_geometry_->CrossGapAt(gap_index), gap.line_index - 1);
       ++gap_index;
-    });
+    }
     CHECK_EQ(gap_index, gap_geometry_->CrossGapCount());
   }
 
   GapGeometry* gap_geometry_ = nullptr;
 
-  LayoutUnit content_block_start_;
-  LayoutUnit content_block_end_;
-  LayoutUnit content_inline_start_;
-  LayoutUnit content_inline_end_;
+  GridTrackGapData row_gap_data_;
+  GridTrackGapData column_gap_data_;
 
   LayoutUnit col_gutter_size_;
   LayoutUnit row_gutter_size_;
@@ -1892,8 +1873,9 @@ void GridLayoutAlgorithm::PlaceGridItems(
     // Don't add these to the builder.
     if (out_grid_items_placement_data) {
       out_grid_items_placement_data->emplace_back(
-          containing_grid_area.offset, relative_offset,
-          result->HasDescendantThatDependsOnPercentageBlockSize());
+          containing_grid_area.offset,
+          result->HasDescendantThatDependsOnPercentageBlockSize(),
+          relative_offset);
     } else {
       container_builder_.AddResult(*result, containing_grid_area.offset,
                                    margins, relative_offset);
@@ -1954,14 +1936,14 @@ struct ResultAndOffsets {
  public:
   ResultAndOffsets(const LayoutResult* result,
                    LogicalOffset offset,
-                   LogicalOffset relative_offset)
+                   std::optional<LogicalOffset> relative_offset)
       : result(result), offset(offset), relative_offset(relative_offset) {}
 
   void Trace(Visitor* visitor) const { visitor->Trace(result); }
 
   Member<const LayoutResult> result;
   LogicalOffset offset;
-  LogicalOffset relative_offset;
+  std::optional<LogicalOffset> relative_offset;
 };
 
 void GridLayoutAlgorithm::PlaceGridItemsForFragmentation(

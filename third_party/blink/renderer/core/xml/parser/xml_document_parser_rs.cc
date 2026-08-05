@@ -54,9 +54,11 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/xml/document_xml_tree_viewer.h"
 #include "third_party/blink/renderer/core/xml/parser/xhtml_subset.h"
+#include "third_party/blink/renderer/core/xml/parser/xml_document_parser.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 
 namespace blink {
 namespace {
@@ -249,8 +251,16 @@ void XMLDocumentParserRs::HandleError(XMLErrors::ErrorType type,
 }
 
 void XMLDocumentParserRs::Append(const String& xml_string) {
-  xml_ffi::append_to_source(*read_state_,
-                            base::StringViewToRustSlice(xml_string.Utf8()));
+  if (RuntimeEnabledFeatures::XMLParserReplaceLoneSurrogatesEnabled()) {
+    // Replace lone surrogates with U+FFFD so the parser does a best-effort
+    // parse instead of rejecting the whole input (crbug.com/40814739).
+    xml_ffi::append_to_source(*read_state_,
+                              base::StringViewToRustSlice(xml_string.Utf8(
+                                  Utf8ConversionMode::kStrictReplacingErrors)));
+  } else {
+    xml_ffi::append_to_source(*read_state_,
+                              base::StringViewToRustSlice(xml_string.Utf8()));
+  }
   ProcessEvents();
 }
 
@@ -389,6 +399,11 @@ void XMLDocumentParserRs::StartElementNs(
 
   bool is_first_element = !saw_first_element_;
   saw_first_element_ = true;
+
+  if (!parsing_fragment_ && is_first_element && local_name == "alert" &&
+      has_ns && IsCAPAlertNamespace(RustStrToAtomicString(ns))) {
+    UseCounter::Count(document_, WebFeature::kXmlCAPAlert);
+  }
 
   Vector<Attribute, kAttributePrealloc> prefixed_attributes;
   bool encountered_namespace_reset = false;

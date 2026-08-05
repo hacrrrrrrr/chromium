@@ -87,6 +87,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/cookie_access_details.h"
+#include "content/public/browser/editable_level.h"
 #include "content/public/browser/frame_tree_node_id.h"
 #include "content/public/browser/frame_type.h"
 #include "content/public/browser/global_request_id.h"
@@ -124,6 +125,7 @@
 #include "net/net_buildflags.h"
 #include "services/device/public/mojom/vibration_manager.mojom.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#include "services/network/public/cpp/connection_allowlist.h"
 #include "services/network/public/cpp/cross_origin_embedder_policy.h"
 #include "services/network/public/cpp/cross_origin_opener_policy.h"
 #include "services/network/public/cpp/permissions_policy/permissions_policy.h"
@@ -269,6 +271,9 @@ namespace features {
 
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kDoNotEvictOnAXLocationChange);
 
+CONTENT_EXPORT BASE_DECLARE_FEATURE(
+    kDefaultToMainFrameFocusWhenNoSubframeFocused);
+
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kEnforceUserActivationForBeforeUnload);
 }  // namespace features
 
@@ -351,7 +356,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
       public LockManager<storage::BucketId>::Observer,
       public base::trace_event::TraceSessionObserver,
       public BucketContext,
-      public base::PassiveMemoryConsumer {
+      public base::PassiveMemoryConsumer,
+      public PolicyContainerHost::Client {
  public:
   using BeforeUnloadExecutionMode = NavigationHandle::BeforeUnloadExecutionMode;
   using JavaScriptDialogCallback =
@@ -646,6 +652,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // - the RenderFrameHost is speculative
   const blink::DocumentToken& GetDocumentToken() const;
 
+  const base::UnguessableToken& current_initiator_state_token() const {
+    return current_initiator_state_token_;
+  }
+
   // Retrieving the document token is disallowed during times when the result
   // might be misleading / confusing (kPendingCommit or kSpeculative).
   // Internally, the content implementation may still need to retrieve the
@@ -789,6 +799,15 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // ui::AXActionHandlerBase:
   void PerformAction(const ui::AXActionData& data) override;
   bool RequiresPerformActionPointInPixels() const override;
+
+  // Returns whether or not this RenderFrameHost is a descendant of |ancestor|.
+  // This is equivalent to check that |ancestor| is reached by iterating on
+  // GetParent().
+  // This is a strict relationship, a RenderFrameHost is never an ancestor of
+  // itself.
+  // This does not consider inner frame trees (i.e. not accounting for fenced
+  // frames or GuestView).
+  bool IsDescendantOfWithinFrameTree(RenderFrameHostImpl* ancestor);
 
   // Creates a RenderFrame in the renderer process.
   bool CreateRenderFrame(
@@ -1698,10 +1717,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // END IPC REVIEW BOUNDARY
 
-  // Returns whether the frame is focused. A frame is considered focused when it
-  // is the parent chain of the focused frame within the frame tree. In
-  // addition, its associated RenderWidgetHost has to be focused.
-  bool IsFocused();
+  bool IsFocused() override;
 
   // Sets the WebUI owned by `request` as the WebUI for this RenderFrameHost,
   // which is based on the provided `request`'s URL.
@@ -1742,12 +1758,16 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   void ClearFocusedElement();
 
+  EditableLevel focused_editable_level() const {
+    return focused_editable_level_;
+  }
+
   bool has_focused_editable_element() const {
-    return has_focused_editable_element_;
+    return focused_editable_level_ != EditableLevel::kNotEditable;
   }
 
   bool has_focused_richly_editable_element() const {
-    return has_focused_richly_editable_element_;
+    return focused_editable_level_ == EditableLevel::kRichlyEditable;
   }
 
   // Binds a DevToolsAgent interface for debugging.
@@ -2346,6 +2366,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
     return required_csp_.get();
   }
 
+  // The Connection-Allowlist required of documents framed by this one, via the
+  // `connectionallowlist` attribute (Connection-Allowlist embedded
+  // enforcement). Used to propagate the requirement to descendant frames.
+  const std::optional<network::ConnectionAllowlist>&
+  required_connection_allowlist() const {
+    return required_connection_allowlist_;
+  }
+
   bool IsCredentialless() const override;
 
   bool IsLastCrossDocumentNavigationStartedByUser() const override;
@@ -2637,8 +2665,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void SendLegacyTechEvent(
       const std::string& type,
       blink::mojom::LegacyTechEventCodeLocationPtr code_location) override;
-  void SendPrivateAggregationRequestsForFencedFrameEvent(
-      const std::string& event_type) override;
+
   void CreateFencedFrame(
       mojo::PendingAssociatedReceiver<blink::mojom::FencedFrameOwnerHost>
           pending_receiver,
@@ -2670,6 +2697,13 @@ class CONTENT_EXPORT RenderFrameHostImpl
       mojo::PendingAssociatedRemote<blink::mojom::UnboundedSurfaceClient>
           client,
       const gfx::Rect& bounds) override;
+  enum class UnboundedElementAuth {
+    kDenied,
+    kAllowedOpenWeb,
+    kAllowedPrivileged,
+  };
+  UnboundedElementAuth GetUnboundedElementAuth() const;
+
   UnboundedSurfaceWindow* GetUnboundedSurfaceWindow();
   RenderWidgetHostViewBase* GetUnboundedSurfaceRootView(
       RenderWidgetHostViewBase** out_parent_view = nullptr);
@@ -2711,13 +2745,22 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void DraggableRegionsChanged(
       std::vector<blink::mojom::DraggableRegionPtr> regions) override;
   void NotifyDocumentInteractive() override;
-  void OnFirstContentfulPaint(base::TimeDelta duration) override;
-  void NotifyFirstContentfulPaint();
+  void OnFirstContentfulPaint(base::TimeTicks presentation_time) override;
+  void OnLargestContentfulPaint(base::TimeTicks presentation_time) override;
   void SetStorageAccessApiStatus(net::StorageAccessApiStatus status) override;
   std::unique_ptr<download::DownloadUrlParameters> CreateDownloadUrlParameters(
       const GURL& url,
       const net::NetworkTrafficAnnotationTag& traffic_annotation)
       const override;
+
+  // Dispatches the first contentful paint notification to the delegate when
+  // this is the primary main frame. Split from the OnFirstContentfulPaint()
+  // mojo handler because it is also invoked when a prerendered page is
+  // activated (see PageImpl::MaybeDispatchLoadEventsOnPrerenderActivation()) to
+  // re-dispatch the FCP that was observed while prerendering.
+  // |presentation_time| is the renderer-side presentation timestamp of the
+  // paint.
+  void NotifyFirstContentfulPaint(base::TimeTicks presentation_time);
 
   void ReportNoBinderForInterface(const std::string& error);
 
@@ -3038,8 +3081,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // nullptr if `this` is not the main frame of an inner frame tree.
   RenderFrameProxyHost* GetProxyToOuterDelegate();
 
-  void DidChangeReferrerPolicy(network::mojom::ReferrerPolicy referrer_policy);
-
   float GetPageScaleFactor() const;
 
 #if BUILDFLAG(IS_ANDROID)
@@ -3281,15 +3322,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // beforeunload is currently in progress.
   RenderFrameHostImpl* GetBeforeUnloadInitiator();
 
-  const base::WeakPtr<PageImpl> auction_initiator_page() const {
-    return auction_initiator_page_;
-  }
-
-  void set_auction_initiator_page(base::WeakPtr<PageImpl> page_impl) {
-    auction_initiator_page_ = page_impl;
-  }
-
-  base::Uuid GetBaseAuctionNonce() const { return base_auction_nonce_; }
 
   void GetBoundInterfacesForTesting(std::vector<std::string>& out);
 
@@ -3455,6 +3487,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplTest, NavigationStateKeepAlive);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplTest,
                            CreateNewWindowInvalidDisposition);
+  FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplTest,
+                           InvalidConnectionAllowlistAttributeIsBadMessage);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplBrowserTest,
                            FindImmediateLocalRoots);
   FRIEND_TEST_ALL_PREFIXES(RenderFrameHostImplBrowserTest,
@@ -3646,14 +3680,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
       bool is_credentialless,
       std::optional<base::UnguessableToken> fenced_frame_nonce_for_navigation);
 
-  // Returns whether or not this RenderFrameHost is a descendant of |ancestor|.
-  // This is equivalent to check that |ancestor| is reached by iterating on
-  // GetParent().
-  // This is a strict relationship, a RenderFrameHost is never an ancestor of
-  // itself.
-  // This does not consider inner frame trees (i.e. not accounting for fenced
-  // frames or GuestView).
-  bool IsDescendantOfWithinFrameTree(RenderFrameHostImpl* ancestor);
 
   // mojom::FrameHost:
   void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
@@ -3989,8 +4015,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // Update this frame's last committed origin. This will also update the origin
   // and the "has_potentially_trustworthy_unique_origin" bit in the
   // FrameReplicationState.
-  void SetLastCommittedOrigin(const url::Origin& origin,
-                              bool is_potentially_trustworthy_unique_origin);
+  void SetLastCommittedOrigin(const url::Origin& origin);
 
   // Stores a snapshot of the inherited base URL from the initiator's
   // FrameLoadRequest, if this document inherited one (e.g., about:srcdoc).
@@ -4302,8 +4327,18 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Sets |policy_container_host_| and associates it with the current frame.
   // |policy_container_host| must not be nullptr.
+  // `current_initiator_state_token_` will also be set to
+  // `new_initiator_state_token` to reflect the update of policies in the
+  // RenderFrameHost.
   void SetPolicyContainerHost(
-      scoped_refptr<PolicyContainerHost> policy_container_host);
+      scoped_refptr<PolicyContainerHost> policy_container_host,
+      const base::UnguessableToken& new_initiator_state_token);
+
+  // PolicyContainerHost::Client:
+  void DidChangeReferrerPolicy(
+      network::mojom::ReferrerPolicy referrer_policy) final;
+  void DidUpdateInitiatorStateToken(
+      const base::UnguessableToken& new_initiator_state_token) final;
 
   // Initializes |local_network_access_request_policy_|. Constructor helper.
   void InitializeLocalNetworkAccessRequestPolicy();
@@ -5034,12 +5069,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // navigation requests should be queued.
   bool waiting_for_init_;
 
-  // If true then this frame's document has a focused element which is editable.
-  bool has_focused_editable_element_ = false;
-
-  // If true then this frame's document has a focused element which is richly
-  // editable.
-  bool has_focused_richly_editable_element_ = false;
+  // The editability level of the focused element in this frame's document.
+  EditableLevel focused_editable_level_ = EditableLevel::kNotEditable;
 
   std::unique_ptr<PendingNavigation> pending_navigate_;
 
@@ -5420,6 +5451,11 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // stored when the frame commits the navigation.
   network::mojom::ContentSecurityPolicyPtr required_csp_;
 
+  // The Connection-Allowlist this document requires of the documents it frames
+  // (Connection-Allowlist embedded enforcement), stored when the frame commits
+  // the navigation so descendant frames can inherit it.
+  std::optional<network::ConnectionAllowlist> required_connection_allowlist_;
+
   // The PolicyContainerHost for the current document, containing security
   // policies that apply to it. It should never be null if the RenderFrameHost
   // is displaying a document. Its lifetime should coincide with the lifetime of
@@ -5435,6 +5471,17 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // PolicyContainer. Cf. the documentation string of the PolicyContainerHost
   // class for more information.
   scoped_refptr<PolicyContainerHost> policy_container_host_;
+
+  // Used to identify the current state of the RenderFrameHost and retrieve an
+  // InitiatorNavigationState to pass to navigations started from this
+  // RenderFrameHost in this state. Note that this doesn't always correspond to
+  // the InitiatorNavigationState set at the time this document was created,
+  // because it could've changed with dynamic CSP policies set via meta tags,
+  // or the referrer policy being updated in the renderer process.
+  // TODO(crbug.com/510258191): Actually have the InitiatorNavigationState be
+  // indexed on an initiator state token, once the initiator state token is
+  // properly set in the browser and renderer processes.
+  base::UnguessableToken current_initiator_state_token_;
 
   // The current document's HTTP response head. This is used by back-forward
   // cache, for navigating a second time toward the same document.
@@ -5608,27 +5655,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   std::unique_ptr<webauthn::RemoteValidation> webauthn_remote_rp_id_validation_;
 #endif
 
-  // Tracks the page that initiates Protected Audience auction. This is set
-  // when AdAuctionServiceImpl is constructed, which is when the first call to
-  // Protected Audience API takes place on the frame.
-  //
-  // See crbug.com/1422301 for why this is needed.
-  //
-  // TODO(crbug.com/40615943): Once RenderDocument is launched, the `PageImpl`
-  // will not change. Remove this weak pointer and corresponding verification
-  // logics.
-  base::WeakPtr<PageImpl> auction_initiator_page_;
-
-  // The base auction nonce used to generate all auction nonces returned by
-  // `navigator.createAuctionNonce`. This base auction nonce is generated here
-  // in the browser process so that it can later verify that all auctions that
-  // provide a nonce in this frame provide a nonce based on this UUID, and
-  // // specifically, that all such auction nonces share the first 26
-  // hexadecimal digits (of UUIDv4's 32 hexadecimal digits) with this base
-  // auction nonce. The last six hexadecimal digits of this UUID are combined
-  // in the renderer process with a sequential value to guarantee that each
-  // nonce returned is unique.
-  base::Uuid base_auction_nonce_;
 
   // The default group for crash reports is `default`. However, if
   // `Reporting-Endpoints` response header specifies `crash-reporting`, crash

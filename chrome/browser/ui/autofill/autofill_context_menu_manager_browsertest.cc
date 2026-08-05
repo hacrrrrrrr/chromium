@@ -24,7 +24,6 @@
 #include "chrome/browser/password_manager/factories/profile_password_store_factory.h"
 #include "chrome/browser/password_manager/password_manager_uitest_util.h"
 #include "chrome/browser/password_manager/passwords_navigation_observer.h"
-#include "chrome/browser/plus_addresses/plus_address_service_factory.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/signin/signin_browser_test_base.h"
 #include "chrome/browser/sync/sync_service_factory.h"
@@ -36,6 +35,7 @@
 #include "components/autofill/content/browser/test_autofill_client_injector.h"
 #include "components/autofill/content/browser/test_autofill_driver_injector.h"
 #include "components/autofill/content/browser/test_content_autofill_client.h"
+#include "components/autofill/core/browser/foundations/autofill_manager_test_api.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager.h"
 #include "components/autofill/core/browser/foundations/test_autofill_manager_waiter.h"
 #include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
@@ -45,6 +45,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/optimization_guide/core/feature_registry/feature_registration.h"
+#include "components/optimization_guide/core/model_execution/model_execution_prefs.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -54,11 +55,6 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/personal_context/core/mock_personal_context_eligibility_service.h"
 #include "components/personal_context/core/personal_context_prefs.h"
-#include "components/plus_addresses/core/browser/grit/plus_addresses_strings.h"
-#include "components/plus_addresses/core/browser/plus_address_service.h"
-#include "components/plus_addresses/core/browser/plus_address_test_utils.h"
-#include "components/plus_addresses/core/browser/plus_address_types.h"
-#include "components/plus_addresses/core/common/features.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/sync/test/test_sync_service.h"
@@ -106,41 +102,6 @@ MATCHER(NoPasswordManagerItemsAdded, "") {
     ++count;
   }
   return count == 0;
-}
-
-// Checks if the context menu model contains any entries with plus address
-// manual fallback labels or command ids. `arg` must be of type
-// `ui::SimpleMenuModel`.
-MATCHER(ContainsAnyPlusAddressFallbackEntries, "") {
-  for (size_t i = 0; i < arg->GetItemCount(); i++) {
-    if (arg->GetCommandIdAt(i) ==
-            IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PLUS_ADDRESS ||
-        arg->GetLabelAt(i) ==
-            l10n_util::GetStringUTF16(
-                IDS_PLUS_ADDRESS_FALLBACK_LABEL_CONTEXT_MENU)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Checks if the context menu model contains the plus address manual fallback
-// entries with correct UI strings. `arg` must be of type `ui::SimpleMenuModel`.
-MATCHER(PlusAddressFallbackAdded, "") {
-  // There can be more than 2 entries, if other manual fallbacks are present
-  // too.
-  EXPECT_GE(arg->GetItemCount(), 2u);
-  EXPECT_EQ(arg->GetTypeAt(arg->GetItemCount() - 1),
-            ui::MenuModel::ItemType::TYPE_SEPARATOR);
-
-  for (size_t i = 0; i < arg->GetItemCount(); i++) {
-    if (arg->GetLabelAt(i) ==
-        l10n_util::GetStringUTF16(
-            IDS_PLUS_ADDRESS_FALLBACK_LABEL_CONTEXT_MENU)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 // Checks if the context menu model contains the passwords manual fallback
@@ -302,7 +263,7 @@ class BaseAutofillContextMenuManagerTest : public InProcessBrowserTest {
     return browser()->tab_strip_model()->GetActiveWebContents();
   }
 
-  virtual Profile* profile() { return browser()->profile(); }
+  virtual Profile* profile() { return browser()->GetProfile(); }
 
   ChromePasswordManagerClient* password_manager_client() {
     return ChromePasswordManagerClient::FromWebContents(web_contents());
@@ -365,8 +326,9 @@ class BaseAutofillContextMenuManagerTest : public InProcessBrowserTest {
     TestAutofillManagerSingleEventWaiter wait_for_forms_seen(
         autofill_manager(), &AutofillManager::Observer::OnAfterFormsSeen,
         ElementsAre(form.global_id()), IsEmpty());
-    autofill_manager().OnFormsSeen(/*updated_forms=*/{form},
-                                   /*removed_forms=*/{});
+    autofill_manager().OnFormsSeen(
+        /*updated_forms=*/{form},
+        /*removed_forms=*/{}, autofill::AutofillManagerTestApi::pass_key());
     ASSERT_TRUE(std::move(wait_for_forms_seen).Wait());
   }
 
@@ -1086,9 +1048,9 @@ class AtMemoryContextMenuManagerTest
   void SetUpOnMainThread() override {
     BaseAutofillContextMenuManagerTest::SetUpOnMainThread();
     autofill_client()->GetPrefs()->registry()->RegisterIntegerPref(
-        optimization_guide::prefs::kGeminiSettings,
-        std::to_underlying(
-            optimization_guide::prefs::GeminiSettingsPolicyState::kEnabled));
+        optimization_guide::prefs::kFindAndFillWithGeminiSettings,
+        std::to_underlying(optimization_guide::model_execution::prefs::
+                               ModelExecutionEnterprisePolicyValue::kAllow));
     autofill_client()->GetPrefs()->SetBoolean(
         personal_context::prefs::kPersonalContextInAutofillSettingsToggleStatus,
         true);
@@ -1139,7 +1101,7 @@ IN_PROC_BROWSER_TEST_F(AtMemoryContextMenuManagerTest,
   // Add a saved credential so "Select password" fallback item is shown.
   auto* password_store =
       ProfilePasswordStoreFactory::GetForProfile(
-          browser()->profile(), ServiceAccessType::IMPLICIT_ACCESS)
+          browser()->GetProfile(), ServiceAccessType::IMPLICIT_ACCESS)
           .get();
   password_manager::PasswordStoreWaiter add_waiter(password_store);
   password_manager::PasswordForm form;

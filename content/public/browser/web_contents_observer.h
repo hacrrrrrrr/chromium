@@ -184,6 +184,12 @@ class CONTENT_EXPORT WebContentsObserver : public base::CheckedObserver {
   // DidFinishNavigation is recommended).
   virtual void PrimaryPageChanged(Page& page) {}
 
+  // This method is invoked when the primary page of a WebContents is about to
+  // be deactivated. This happens when the primary page is being replaced by
+  // another page (due to a commit of a navigation). Note that this will not be
+  // called if the WebContents is being destroyed.
+  virtual void PrimaryPageWillBeDeactivated(Page& page) {}
+
   // This method is invoked when a frame is destroyed. A subframe is destroyed
   // when its parent detaches it or navigates to a different document. A main
   // frame is destroyed when the whole WebContents is going away, or, with
@@ -1020,7 +1026,18 @@ class CONTENT_EXPORT WebContentsObserver : public base::CheckedObserver {
   virtual void VibrationRequested() {}
 
   // Called when a first contentful paint happened in the primary main frame.
-  virtual void OnFirstContentfulPaintInPrimaryMainFrame() {}
+  // `presentation_time` is the renderer-side presentation timestamp of the
+  // paint.
+  virtual void OnFirstContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) {}
+
+  // Called when the largest contentful paint candidate changed in the primary
+  // main frame. May be called multiple times as larger elements paint; the
+  // last call (before user input freezes the metric) reflects the page's
+  // largest contentful paint. `presentation_time` is the renderer-side
+  // presentation timestamp of the current candidate.
+  virtual void OnLargestContentfulPaintInPrimaryMainFrame(
+      base::TimeTicks presentation_time) {}
 
   // Invoked when a fetch keepalive request is created in this WebContents.
   //

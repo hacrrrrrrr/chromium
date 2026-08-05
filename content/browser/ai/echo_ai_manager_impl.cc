@@ -9,7 +9,6 @@
 #include "base/time/time.h"
 #include "components/language/core/common/locale_util.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
-#include "content/browser/ai/echo_ai_classifier.h"
 #include "content/browser/ai/echo_ai_language_model.h"
 #include "content/browser/ai/echo_ai_proofreader.h"
 #include "content/browser/ai/echo_ai_rewriter.h"
@@ -199,9 +198,7 @@ void EchoAIManagerImpl::CreateLanguageModel(
   }
   if (options && (!AreExpectedLanguagesSupported(options->expected_inputs) ||
                   !AreExpectedLanguagesSupported(options->expected_outputs))) {
-    client_remote->OnError(
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage,
-        /*quota_error_info=*/nullptr);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
   base::flat_set<blink::mojom::AILanguageModelPromptType> enabled_input_types;
@@ -325,9 +322,7 @@ void EchoAIManagerImpl::CreateProofreader(
   if (options &&
       !SupportedLanguages(options->expected_input_languages, {},
                           options->correction_explanation_language)) {
-    client_remote->OnError(
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage,
-        /*quota_error_info=*/nullptr);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -336,23 +331,6 @@ void EchoAIManagerImpl::CreateProofreader(
       std::move(client_remote));
 }
 
-void EchoAIManagerImpl::CanCreateClassifier(
-    blink::mojom::AIClassifierCreateOptionsPtr options,
-    CanCreateClassifierCallback callback) {
-  CanCreateClient<CanCreateClassifierCallback>(std::move(callback));
-}
-
-void EchoAIManagerImpl::CreateClassifier(
-    mojo::PendingRemote<blink::mojom::AIManagerCreateClassifierClient> client,
-    blink::mojom::AIClassifierCreateOptionsPtr options,
-    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor) {
-  mojo::Remote<blink::mojom::AIManagerCreateClassifierClient> client_remote(
-      std::move(client));
-
-  CreateClient<blink::mojom::AIManagerCreateClassifierClient,
-               blink::mojom::AIClassifier, EchoAIClassifier>(
-      std::move(client_remote));
-}
 
 void EchoAIManagerImpl::CanCreateSemanticEmbedder(
     CanCreateSemanticEmbedderCallback callback) {
@@ -361,9 +339,13 @@ void EchoAIManagerImpl::CanCreateSemanticEmbedder(
 
 void EchoAIManagerImpl::CreateSemanticEmbedder(
     mojo::PendingRemote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
-        client) {
+        client,
+    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> monitor) {
   mojo::Remote<blink::mojom::AIManagerCreateSemanticEmbedderClient>
       client_remote(std::move(client));
+  if (monitor.is_valid()) {
+    download_progress_observers_.Add(std::move(monitor));
+  }
   CreateClient<blink::mojom::AIManagerCreateSemanticEmbedderClient,
                blink::mojom::AISemanticEmbedder, EchoAISemanticEmbedder>(
       std::move(client_remote));
@@ -424,9 +406,7 @@ void EchoAIManagerImpl::CreateWritingAssistanceClient(
   if (options && !SupportedLanguages(options->expected_input_languages,
                                      options->expected_context_languages,
                                      options->output_language)) {
-    client_remote->OnError(
-        blink::mojom::AIManagerCreateClientError::kUnsupportedLanguage,
-        /*quota_error_info=*/nullptr);
+    receivers_.ReportBadMessage("Unsupported language options");
     return;
   }
 
@@ -491,7 +471,14 @@ void EchoAIManagerImpl::DoMockDownloadingAndReturn(base::OnceClosure callback) {
                                        kMockModelSizeBytes);
   }
 
-  std::move(callback).Run();
+  // We use a small delay here to mitigate a Mojo IPC race condition.
+  // The progress events are fired over the download_progress_observers_ Mojo
+  // pipe, while the creation callback resolves over a separate client Mojo
+  // pipe. The delay mitigates flakiness but doesn't strictly guarantee
+  // ordering.
+  // TODO: Use a more robust synchronization method.
+  content::GetUIThreadTaskRunner()->PostDelayedTask(
+      FROM_HERE, std::move(callback), base::Milliseconds(10));
 }
 
 bool EchoAIManagerImpl::IsModelDownloadedForCurrentReciever() const {

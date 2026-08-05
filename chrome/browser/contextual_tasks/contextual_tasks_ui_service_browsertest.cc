@@ -18,17 +18,20 @@
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/lens/lens_media_link_handler.h"
-#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/contextual_tasks/public/features.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/omnibox/browser/mock_aim_eligibility_service.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_media_session.h"
@@ -433,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceTaskReuseTest,
 
   ContextualTasksUiService* ui_service =
       ContextualTasksUiServiceFactory::GetForBrowserContext(
-          browser()->profile());
+          browser()->GetProfile());
 
   // 2. Start task on Tab 1 with mstk
   GURL launch_url1("https://google.com/aim?mstk=abc");
@@ -490,7 +493,7 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceTaskReuseTest,
 
   ContextualTasksUiService* ui_service =
       ContextualTasksUiServiceFactory::GetForBrowserContext(
-          browser()->profile());
+          browser()->GetProfile());
 
   // 2. Start task on Tab 1 with mstk, flag=true (so it registers in map)
   GURL launch_url1("https://google.com/aim?mstk=abc");
@@ -535,6 +538,273 @@ IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceTaskReuseTest,
 
   std::string task_id2 = GetTaskIdFromPanel(panel_contents2);
   EXPECT_NE(task_id1, task_id2);
+}
+
+class ContextualTasksUiServiceRearchitectureEnabledTest
+    : public ContextualTasksUiServiceZeroStateTestBase {
+ public:
+  ContextualTasksUiServiceRearchitectureEnabledTest() {
+    feature_list_.InitWithFeaturesAndParameters(
+        {{contextual_tasks::kContextualTasks, {}},
+         {contextual_tasks::kContextualTasksRearchitecture, {}},
+         {contextual_tasks::kContextualTasksSidePanelRearchitecture, {}},
+         {omnibox::kWebUIOmniboxAskGAboutThisPage,
+          {{"Omnibox_AskGCoBrowse", "true"}}}},
+        {});
+  }
+
+  std::string GetExpectedCs() {
+    ThemeService* theme_service =
+        ThemeServiceFactory::GetForProfile(browser()->GetProfile());
+    return theme_service && theme_service->BrowserUsesDarkColors() ? "1" : "0";
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceRearchitectureEnabledTest,
+                       StartTaskUiInSidePanel_LoadsUrlDirectly) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://example.com/ai-page");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+  content::WaitForLoadStop(panel_contents);
+
+  GURL expected_url =
+      net::AppendOrReplaceQueryParameter(initial_url, "sourceid", "chrome");
+  expected_url = net::AppendOrReplaceQueryParameter(expected_url, "ccb", "1");
+  expected_url =
+      net::AppendOrReplaceQueryParameter(expected_url, "cs", GetExpectedCs());
+  expected_url = net::AppendOrReplaceQueryParameter(expected_url, "gsc", "2");
+  expected_url =
+      net::AppendOrReplaceQueryParameter(expected_url, "hl", "en-US");
+  EXPECT_EQ(panel_contents->GetLastCommittedURL(), expected_url);
+}
+
+IN_PROC_BROWSER_TEST_F(ContextualTasksUiServiceRearchitectureEnabledTest,
+                       StartTaskUiInSidePanel_LoadsUrlWhenPanelAlreadyOpen) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://example.com/ai-page-1");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+  content::WaitForLoadStop(panel_contents);
+
+  GURL second_url("https://example.com/ai-page-2");
+  ui_service->StartTaskUiInSidePanel(browser(), tab, second_url, nullptr);
+  content::WaitForLoadStop(panel_contents);
+
+  GURL expected_second_url =
+      net::AppendOrReplaceQueryParameter(second_url, "cs", GetExpectedCs());
+  expected_second_url =
+      net::AppendOrReplaceQueryParameter(expected_second_url, "gsc", "2");
+  expected_second_url =
+      net::AppendOrReplaceQueryParameter(expected_second_url, "hl", "en-US");
+  EXPECT_EQ(panel_contents->GetLastCommittedURL(), expected_second_url);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ContextualTasksUiServiceRearchitectureEnabledTest,
+    SidePanelNavigation_PostRearchitecture_AIMUrl_AppendsGscParams) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://www.google.com/search?q=test");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+
+  GURL aim_url("https://www.google.com/search?q=aim_test");
+  content::OpenURLParams params(aim_url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK,
+                                /*is_renderer_initiated=*/false);
+
+  bool handled = ui_service->HandleNavigation(
+      params, panel_contents, /*is_from_embedded_page=*/true,
+      /*from_can_create_window=*/false, /*is_same_site_or_from_ui=*/true,
+      /*is_mobile_ua=*/false, std::nullopt, std::nullopt,
+      blink::mojom::WindowFeatures());
+  EXPECT_TRUE(handled);
+
+  std::string gsc_val;
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    content::NavigationEntry* entry =
+        panel_contents->GetController().GetPendingEntry()
+            ? panel_contents->GetController().GetPendingEntry()
+            : panel_contents->GetController().GetVisibleEntry();
+    return entry &&
+           net::GetValueForKeyInQuery(entry->GetURL(), "gsc", &gsc_val) &&
+           gsc_val == "2";
+  }));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ContextualTasksUiServiceRearchitectureEnabledTest,
+    SidePanelNavigation_PostRearchitecture_LensUrl_AppendsGscParams) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://www.google.com/search?q=test");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+
+  GURL lens_url("https://www.google.com/search?q=lens_test&lns_mode=un");
+  content::OpenURLParams params(lens_url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK,
+                                /*is_renderer_initiated=*/false);
+
+  bool handled = ui_service->HandleNavigation(
+      params, panel_contents, /*is_from_embedded_page=*/true,
+      /*from_can_create_window=*/false, /*is_same_site_or_from_ui=*/true,
+      /*is_mobile_ua=*/false, std::nullopt, std::nullopt,
+      blink::mojom::WindowFeatures());
+  EXPECT_TRUE(handled);
+
+  std::string gsc_val;
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    content::NavigationEntry* entry =
+        panel_contents->GetController().GetPendingEntry()
+            ? panel_contents->GetController().GetPendingEntry()
+            : panel_contents->GetController().GetVisibleEntry();
+    return entry &&
+           net::GetValueForKeyInQuery(entry->GetURL(), "gsc", &gsc_val) &&
+           gsc_val == "2";
+  }));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ContextualTasksUiServiceRearchitectureEnabledTest,
+    PrimaryTabNavigation_PostRearchitecture_DoesNotAddSidePanelParams) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  content::WebContents* tab_contents =
+      browser()->tab_strip_model()->GetActiveTab()->GetContents();
+
+  GURL url("https://www.google.com/search?q=tab_test");
+  content::OpenURLParams params(url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK,
+                                /*is_renderer_initiated=*/false);
+
+  bool handled = ui_service->HandleNavigation(
+      params, tab_contents, /*is_from_embedded_page=*/false,
+      /*from_can_create_window=*/false, /*is_same_site_or_from_ui=*/true,
+      /*is_mobile_ua=*/false, std::nullopt, std::nullopt,
+      blink::mojom::WindowFeatures());
+  EXPECT_FALSE(handled);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ContextualTasksUiServiceRearchitectureEnabledTest,
+    SidePanelNavigation_WithGscParams_ProceedsWithoutInterception) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://www.google.com/search?q=test");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+
+  GURL url("https://www.google.com/search?q=aim_test&gsc=2&hl=en&cs=0");
+  content::OpenURLParams params(url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK,
+                                /*is_renderer_initiated=*/false);
+
+  bool handled = ui_service->HandleNavigation(
+      params, panel_contents, /*is_from_embedded_page=*/true,
+      /*from_can_create_window=*/false, /*is_same_site_or_from_ui=*/true,
+      /*is_mobile_ua=*/false, std::nullopt, std::nullopt,
+      blink::mojom::WindowFeatures());
+  EXPECT_FALSE(handled);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    ContextualTasksUiServiceRearchitectureEnabledTest,
+    SidePanelNavigation_ThirdPartyUrl_DoesNotAddSidePanelParams) {
+  ContextualTasksUiService* ui_service =
+      ContextualTasksUiServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
+  GURL initial_url("https://www.google.com/search?q=test");
+  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
+
+  ui_service->StartTaskUiInSidePanel(browser(), tab, initial_url, nullptr);
+
+  auto* controller = ContextualTasksPanelController::From(browser());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return controller && controller->IsPanelOpenForContextualTask();
+  }));
+
+  content::WebContents* panel_contents = controller->GetActiveWebContents();
+  ASSERT_TRUE(panel_contents);
+
+  auto* aim_service = static_cast<MockAimEligibilityService*>(
+      AimEligibilityServiceFactory::GetForProfile(browser()->GetProfile()));
+  GURL third_party_url("https://example.com/article");
+  EXPECT_CALL(*aim_service, IsAimUrl(third_party_url, testing::_))
+      .WillRepeatedly(testing::Return(false));
+
+  content::OpenURLParams params(third_party_url, content::Referrer(),
+                                WindowOpenDisposition::CURRENT_TAB,
+                                ui::PAGE_TRANSITION_LINK,
+                                /*is_renderer_initiated=*/false);
+
+  bool handled = ui_service->HandleNavigation(
+      params, panel_contents, /*is_from_embedded_page=*/true,
+      /*from_can_create_window=*/false, /*is_same_site_or_from_ui=*/true,
+      /*is_mobile_ua=*/false, std::nullopt, std::nullopt,
+      blink::mojom::WindowFeatures());
+  EXPECT_FALSE(handled);
 }
 
 }  // namespace contextual_tasks

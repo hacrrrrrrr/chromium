@@ -464,7 +464,7 @@ class CreditCardSuggestionGeneratorTest
 
   CreditCard CreateLocalCard(
       const std::string& guid = "00000000-0000-0000-0000-000000000001") {
-    CreditCard local_card(guid, test::kEmptyOrigin);
+    CreditCard local_card(guid);
     test::SetCreditCardInfo(&local_card, "Elvis Presley", "4111111111111111",
                             test::NextMonth().c_str(), test::NextYear().c_str(),
                             "1", /*cvc=*/u"123");
@@ -1807,7 +1807,7 @@ TEST_F(CreditCardSuggestionGeneratorBnplTest,
                     bnpl_issuers[0].GetDisplayName()))}}),
             EqualSuggestionTabIndex(kDefaultSuggestionTabIndex)));
   EXPECT_EQ(updated_suggestions[current_suggestion_index++].acceptability,
-            Suggestion::Acceptability::kAcceptable);
+            Suggestion::Acceptability::kSelectableAndAcceptable);
 
   // Checks the footer suggestions stayed in the same order after the insertion.
   EXPECT_THAT(updated_suggestions[current_suggestion_index++],
@@ -1820,7 +1820,8 @@ TEST_F(CreditCardSuggestionGeneratorBnplTest,
 }
 
 // Ensures that `GetSuggestionsForBnpl` sets the acceptability to
-// `kUnacceptableWithDeactivatedStyle` when there is an amount extraction error.
+// `kUnselectableAndUnacceptable` when there is an amount
+// extraction error.
 TEST_F(CreditCardSuggestionGeneratorBnplTest,
        GetSuggestionsForBnpl_AmountExtractionError) {
   payments::BnplIssuerContext issuer_context(
@@ -1834,7 +1835,7 @@ TEST_F(CreditCardSuggestionGeneratorBnplTest,
 
   ASSERT_EQ(suggestions.size(), 1U);
   EXPECT_EQ(suggestions[0].acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
 }
 
 // Ensures that the separator and pay over time option is generated with
@@ -2397,7 +2398,7 @@ TEST_F(
           Suggestion::Text(l10n_util::GetStringUTF16(
               IDS_AUTOFILL_CARD_BNPL_PAY_LATER_CLEAR_FORM_TO_ENABLE))}));
   EXPECT_EQ(disabled_bnpl_suggestion->acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
   EXPECT_TRUE(std::holds_alternative<Suggestion::BnplIssuer>(
       disabled_bnpl_suggestion->payload));
   EXPECT_EQ(std::get<Suggestion::BnplIssuer>(disabled_bnpl_suggestion->payload)
@@ -2461,7 +2462,7 @@ TEST_F(
       << "Expected a BNPL suggestion to be generated.";
 
   EXPECT_EQ(disabled_bnpl_suggestion->acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
 }
 
 TEST_F(
@@ -2573,7 +2574,7 @@ TEST_F(
       << "Expected a Loading Throbber suggestion to be generated.";
 
   EXPECT_EQ(loading_throbber_finder->acceptability,
-            Suggestion::Acceptability::kUnacceptable);
+            Suggestion::Acceptability::kSelectableButUnacceptable);
   EXPECT_EQ(loading_throbber_finder->tab_index, kPayLaterSuggestionTabIndex);
 
   // 3 BNPL issuers were added.
@@ -2737,7 +2738,7 @@ TEST_F(
   EXPECT_EQ(suggestions[0].type, SuggestionType::kCreditCardEntry);
   EXPECT_EQ(suggestions[1].type, SuggestionType::kBnplEntry);
   EXPECT_EQ(suggestions[1].acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
   EXPECT_EQ(suggestions[2].type, SuggestionType::kBnplFootnote);
   EXPECT_EQ(suggestions[3].type, SuggestionType::kSeparator);
   EXPECT_EQ(suggestions[4].type, SuggestionType::kManageCreditCard);
@@ -2783,7 +2784,7 @@ TEST_F(
       << "Expected a BNPL footnote suggestion to be generated.";
 
   EXPECT_EQ(bnpl_footnote->acceptability,
-            Suggestion::Acceptability::kUnacceptable);
+            Suggestion::Acceptability::kSelectableButUnacceptable);
   EXPECT_EQ(bnpl_footnote->tab_index, kPayLaterSuggestionTabIndex);
 }
 
@@ -3031,7 +3032,7 @@ TEST_F(CreditCardSuggestionGeneratorBnplTest,
 
   EXPECT_EQ(loading_suggestion.type, SuggestionType::kLoadingThrobber);
   EXPECT_EQ(loading_suggestion.acceptability,
-            Suggestion::Acceptability::kUnacceptable);
+            Suggestion::Acceptability::kSelectableButUnacceptable);
   EXPECT_EQ(loading_suggestion.tab_index, kPayLaterSuggestionTabIndex);
   EXPECT_EQ(loading_suggestion.expected_number_of_suggestions, 2u);
 }
@@ -3202,6 +3203,8 @@ TEST_F(
   EXPECT_EQ(suggestions[0].type, SuggestionType::kCreditCardEntry);
   EXPECT_EQ(suggestions[1].type, SuggestionType::kCreditCardEntry);
   EXPECT_EQ(suggestions[2].type, SuggestionType::kBnplEntry);
+  EXPECT_TRUE(payments::test_api(*autofill_manager().GetPaymentsBnplManager())
+                  .GetIsCardNumberFieldEmpty());
 }
 
 TEST_F(
@@ -3291,7 +3294,8 @@ TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_OneIssuer) {
           /*icon=*/Suggestion::Icon::kBnplGeneric,
           /*labels=*/
           {{Suggestion::Text(bnpl_issuers[0].GetDisplayName())}}));
-  EXPECT_EQ(suggestion.acceptability, Suggestion::Acceptability::kAcceptable);
+  EXPECT_EQ(suggestion.acceptability,
+            Suggestion::Acceptability::kSelectableAndAcceptable);
 }
 
 TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_TwoIssuers) {
@@ -3317,7 +3321,8 @@ TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_TwoIssuers) {
               // Affirm comes before Zip.
               bnpl_issuers[1].GetDisplayName(),
               bnpl_issuers[0].GetDisplayName()))}}));
-  EXPECT_EQ(suggestion.acceptability, Suggestion::Acceptability::kAcceptable);
+  EXPECT_EQ(suggestion.acceptability,
+            Suggestion::Acceptability::kSelectableAndAcceptable);
 }
 
 TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_ThreeIssuers) {
@@ -3345,7 +3350,8 @@ TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_ThreeIssuers) {
               bnpl_issuers[2].GetDisplayName(),
               bnpl_issuers[0].GetDisplayName(),
               bnpl_issuers[1].GetDisplayName()))}}));
-  EXPECT_EQ(suggestion.acceptability, Suggestion::Acceptability::kAcceptable);
+  EXPECT_EQ(suggestion.acceptability,
+            Suggestion::Acceptability::kSelectableAndAcceptable);
 }
 
 TEST_F(CreditCardSuggestionGeneratorTest,
@@ -3366,7 +3372,7 @@ TEST_F(CreditCardSuggestionGeneratorTest,
           l10n_util::GetStringUTF16(IDS_AUTOFILL_BNPL_PAY_LATER_OPTIONS_TEXT),
           /*icon=*/Suggestion::Icon::kBnplGeneric));
   EXPECT_EQ(suggestion.acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
 }
 
 TEST_F(CreditCardSuggestionGeneratorTest,
@@ -3387,7 +3393,7 @@ TEST_F(CreditCardSuggestionGeneratorTest,
           l10n_util::GetStringUTF16(IDS_AUTOFILL_BNPL_PAY_LATER_OPTIONS_TEXT),
           /*icon=*/Suggestion::Icon::kBnplGeneric));
   EXPECT_EQ(suggestion.acceptability,
-            Suggestion::Acceptability::kUnacceptableWithDeactivatedStyle);
+            Suggestion::Acceptability::kUnselectableAndUnacceptable);
 }
 
 TEST_F(CreditCardSuggestionGeneratorTest, CreateBnplSuggestion_FlagDisabled) {
@@ -4433,13 +4439,13 @@ TEST_P(
   EXPECT_EQ(virtual_card_name_field_suggestion.IsAcceptable(),
             !is_merchant_opted_out());
 
-  // `HasDeactivatedStyle()` returns true only when merchant has opted out of
+  // `IsSelectable()` returns false only when merchant has opted out of
   // VCN.
-  EXPECT_EQ(virtual_card_name_field_suggestion.HasDeactivatedStyle(),
+  EXPECT_EQ(!virtual_card_name_field_suggestion.IsSelectable(),
             is_merchant_opted_out());
   EXPECT_EQ(
       virtual_card_name_field_suggestion.iph_metadata.feature,
-      virtual_card_name_field_suggestion.HasDeactivatedStyle()
+      !virtual_card_name_field_suggestion.IsSelectable()
           ? &feature_engagement::
                 kIPHAutofillDisabledVirtualCardSuggestionFeature
           : &feature_engagement::kIPHAutofillVirtualCardSuggestionFeature);
@@ -4496,13 +4502,13 @@ TEST_P(
   // opted out of VCN.
   EXPECT_EQ(virtual_card_number_field_suggestion.IsAcceptable(),
             !is_merchant_opted_out());
-  // `HasDeactivatedStyle()` returns true only when merchant has opted out of
+  // `IsSelectable()` returns false only when merchant has opted out of
   // VCN.
-  EXPECT_EQ(virtual_card_number_field_suggestion.HasDeactivatedStyle(),
+  EXPECT_EQ(!virtual_card_number_field_suggestion.IsSelectable(),
             is_merchant_opted_out());
   EXPECT_EQ(
       virtual_card_number_field_suggestion.iph_metadata.feature,
-      virtual_card_number_field_suggestion.HasDeactivatedStyle()
+      !virtual_card_number_field_suggestion.IsSelectable()
           ? &feature_engagement::
                 kIPHAutofillDisabledVirtualCardSuggestionFeature
           : &feature_engagement::kIPHAutofillVirtualCardSuggestionFeature);
@@ -5588,16 +5594,16 @@ TEST_P(AutofillCreditCardSuggestionContentForTouchToFillTest,
             virtual_card.CardNameForAutofillDisplay(virtual_card.nickname()));
   EXPECT_EQ(suggestions[0].minor_texts[0].value,
             virtual_card.ObfuscatedNumberWithVisibleLastFourDigits());
-  // `HasDeactivatedStyle()` returns true only when merchant has opted out of
+  // `IsSelectable()` returns false only when merchant has opted out of
   // VCN.
-  EXPECT_EQ(suggestions[0].HasDeactivatedStyle(), is_merchant_opted_out());
+  EXPECT_EQ(!suggestions[0].IsSelectable(), is_merchant_opted_out());
 
   EXPECT_EQ(suggestions[1].main_text.value,
             server_card.CardNameForAutofillDisplay(server_card.nickname()));
   EXPECT_EQ(suggestions[1].minor_texts[0].value,
             server_card.ObfuscatedNumberWithVisibleLastFourDigits());
-  // `HasDeactivatedStyle()` is false for the real card.
-  EXPECT_EQ(suggestions[1].HasDeactivatedStyle(), false);
+  // `IsSelectable()` is true for the real card.
+  EXPECT_EQ(suggestions[1].IsSelectable(), true);
 }
 
 TEST_P(AutofillCreditCardSuggestionContentForTouchToFillTest,
@@ -5744,8 +5750,7 @@ class CreditCardSuggestionGeneratorTestForSharingNickname
         expected_nickname_(GetParam().expected_nickname) {}
 
   CreditCard GetLocalCard() {
-    CreditCard local_card("287151C8-6AB1-487C-9095-28E80BE5DA15",
-                          test::kEmptyOrigin);
+    CreditCard local_card("287151C8-6AB1-487C-9095-28E80BE5DA15");
     test::SetCreditCardInfo(&local_card, "Clyde Barrow",
                             "378282246310005" /* American Express */, "04",
                             "2910", "1");
@@ -5852,12 +5857,12 @@ TEST_P(CreditCardSuggestionGeneratorTestForSharingNickname,
 TEST_F(CreditCardSuggestionGeneratorTest, EmptyValue) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -5900,12 +5905,12 @@ TEST_F(CreditCardSuggestionGeneratorTest, EmptyValue) {
 TEST_F(CreditCardSuggestionGeneratorTest, Whitespace) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -5948,12 +5953,12 @@ TEST_F(CreditCardSuggestionGeneratorTest, Whitespace) {
 TEST_F(CreditCardSuggestionGeneratorTest, StopCharsOnly) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -5996,12 +6001,12 @@ TEST_F(CreditCardSuggestionGeneratorTest, StopCharsOnly) {
 TEST_F(CreditCardSuggestionGeneratorTest, InvisibleUnicodeOnly) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -6045,17 +6050,17 @@ TEST_F(CreditCardSuggestionGeneratorTest, InvisibleUnicodeOnly) {
 TEST_F(CreditCardSuggestionGeneratorTest, StopCharsWithInput) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
 
-  CreditCard master_card_2(test::MakeGuid(7), test::kEmptyOrigin);
+  CreditCard master_card_2(test::MakeGuid(7));
   test::SetCreditCardInfo(&master_card_2, "John Smith", "5255667890168765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card_2);
@@ -6099,12 +6104,12 @@ TEST_F(CreditCardSuggestionGeneratorTest, StopCharsWithInput) {
 TEST_F(CreditCardSuggestionGeneratorTest, MatchCharacter) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -6148,14 +6153,14 @@ TEST_F(CreditCardSuggestionGeneratorTest, ExpiredCards) {
   payments_data().ClearCreditCards();
 
   // Add a never used non expired credit card.
-  CreditCard credit_card0(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard credit_card0(test::MakeGuid(1));
   test::SetCreditCardInfo(&credit_card0, "Bonnie Parker",
                           "5105105105108765" /* Mastercard */, "10", "2098",
                           "1");
   payments_data().AddCreditCard(credit_card0);
 
   // Add an expired card with a higher ranking score.
-  CreditCard credit_card1(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard credit_card1(test::MakeGuid(2));
   test::SetCreditCardInfo(&credit_card1, "Clyde Barrow",
                           "378282246310005" /* American Express */, "04",
                           "2010", "1");
@@ -6164,7 +6169,7 @@ TEST_F(CreditCardSuggestionGeneratorTest, ExpiredCards) {
   payments_data().AddCreditCard(credit_card1);
 
   // Add an expired card with a lower ranking score.
-  CreditCard credit_card2(test::MakeGuid(3), test::kEmptyOrigin);
+  CreditCard credit_card2(test::MakeGuid(3));
   test::SetCreditCardInfo(&credit_card2, "John Dillinger",
                           "4234567890123456" /* Visa */, "04", "2011", "1");
   credit_card2.usage_history().set_use_count(3);
@@ -6217,7 +6222,7 @@ TEST_F(CreditCardSuggestionGeneratorTest,
   payments_data().ClearCreditCards();
 
   // Add a never used non expired local credit card.
-  CreditCard credit_card0(test::MakeGuid(0), test::kEmptyOrigin);
+  CreditCard credit_card0(test::MakeGuid(0));
   test::SetCreditCardInfo(&credit_card0, "Bonnie Parker",
                           "5105105105105100" /* Mastercard */, "04", "2999",
                           "1");
@@ -6226,14 +6231,14 @@ TEST_F(CreditCardSuggestionGeneratorTest,
   auto now = base::Time::Now();
 
   // Add an expired local card last used 10 days ago
-  CreditCard credit_card1(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard credit_card1(test::MakeGuid(1));
   test::SetCreditCardInfo(&credit_card1, "Clyde Barrow",
                           "4234567890123456" /* Visa */, "04", "2010", "1");
   credit_card1.usage_history().set_use_date(now - base::Days(10));
   payments_data().AddCreditCard(credit_card1);
 
   // Add an expired local card last used 182 days ago.
-  CreditCard credit_card2(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard credit_card2(test::MakeGuid(2));
   test::SetCreditCardInfo(&credit_card2, "John Dillinger",
                           "378282246310005" /* American Express */, "01",
                           "2010", "1");
@@ -6350,14 +6355,14 @@ TEST_F(CreditCardSuggestionGeneratorTest,
 TEST_F(CreditCardSuggestionGeneratorTest, NumberMissing) {
   payments_data().ClearCreditCards();
 
-  CreditCard credit_card0(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard credit_card0(test::MakeGuid(1));
   test::SetCreditCardInfo(&credit_card0, "Clyde Barrow",
                           "378282246310005" /* American Express */, "04",
                           "2910", "1");
   credit_card0.usage_history().set_use_date(base::Time::Now() - base::Days(1));
   payments_data().AddCreditCard(credit_card0);
 
-  CreditCard credit_card1(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard credit_card1(test::MakeGuid(2));
   test::SetCreditCardInfo(&credit_card1, "John Dillinger", "", "01", "2999",
                           "1");
   payments_data().AddCreditCard(credit_card1);
@@ -6434,12 +6439,12 @@ TEST_F(CreditCardSuggestionGeneratorTest, NumberMissing) {
 TEST_F(CreditCardSuggestionGeneratorTest, ForNumberSplitAcrossFields) {
   payments_data().ClearCreditCards();
   // Set up local Visa and MasterCard credit cards.
-  CreditCard visa_card(test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);
 
-  CreditCard master_card(test::MakeGuid(2), test::kEmptyOrigin);
+  CreditCard master_card(test::MakeGuid(2));
   test::SetCreditCardInfo(&master_card, "Elvis Presley", "5111111111118765",
                           "10", "2098", "1");
   payments_data().AddCreditCard(master_card);
@@ -6570,7 +6575,7 @@ TEST_F(CreditCardSuggestionGeneratorTest, AutofillSettingsBlocked) {
       features::kAutofillEnableAutofillSettingsEnterprisePolicy};
 
   payments_data().ClearCreditCards();
-  CreditCard visa_card(autofill::test::MakeGuid(1), test::kEmptyOrigin);
+  CreditCard visa_card(autofill::test::MakeGuid(1));
   test::SetCreditCardInfo(&visa_card, "Elvis Presley", "4111111111113456", "04",
                           "2099", "1");
   payments_data().AddCreditCard(visa_card);

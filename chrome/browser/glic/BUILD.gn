@@ -17,6 +17,9 @@ import("//mojo/public/tools/bindings/mojom.gni")
 source_set("glic") {
   sources = [
     "common/local_hotkey_manager.h",
+    "experimental_triggering/glic_experimental_triggering_coordinator.h",
+    "experimental_triggering/glic_experimental_triggering_metrics.h",
+    "experimental_triggering/glic_experimental_triggering_types.h",
     "gemini_act_on_web_settings_policy_handler.h",
     "glic_hotkey.h",
     "glic_metrics.h",
@@ -47,9 +50,9 @@ source_set("glic") {
     "host/glic_skills_manager.h",
     "host/glic_ui.h",
     "host/glic_web_client_access.h",
+    "host/glic_web_client_responsiveness_monitor.h",
     "host/guest_util.h",
     "host/host.h",
-    "public/glic_actuation_tracker.h",
     "public/glic_close_options.h",
     "public/glic_context_menu_invocation_helper.cc",
     "public/glic_context_menu_invocation_helper.h",
@@ -64,8 +67,11 @@ source_set("glic") {
     "public/glic_keyed_service.h",
     "public/glic_keyed_service_factory.h",
     "public/glic_passkeys.h",
+    "public/glic_perf_traits_tracker.h",
     "public/glic_side_panel_coordinator.cc",
     "public/glic_side_panel_coordinator.h",
+    "public/glic_submit_query_cui_tracker.cc",
+    "public/glic_submit_query_cui_tracker.h",
     "public/glic_window_invocation_tracker.cc",
     "public/glic_window_invocation_tracker.h",
     "public/service/glic_instance_coordinator.h",
@@ -99,6 +105,7 @@ source_set("glic") {
     "//components/policy/core/browser",
     "//components/prefs",
     "//components/signin/public/identity_manager",
+    "//components/skills/public",
     "//components/tabs:public",
     "//components/variations",
     "//content/public/browser",
@@ -144,6 +151,7 @@ source_set("glic") {
     deps += [
       "//chrome/browser:primitives",
       "//chrome/browser/actor:types",
+      "//chrome/browser/ui/tabs",
     ]
   } else {  # is_android
     sources += [
@@ -300,8 +308,14 @@ source_set("impl") {
     "common/panel_focus_dependent_hotkey_manager.h",
     "common/panel_visibility_dependent_hotkey_manager.cc",
     "common/panel_visibility_dependent_hotkey_manager.h",
+    "common/view_scoped_registration_delegate.h",
+    "experimental_opt_in/glic_experimental_opt_in_controller.cc",
+    "experimental_opt_in/glic_experimental_opt_in_controller.h",
+    "experimental_opt_in/glic_experimental_opt_in_ui_host.h",
+    "experimental_triggering/glic_experimental_triggering_coordinator.cc",
     "experimental_triggering/glic_experimental_triggering_manager.cc",
     "experimental_triggering/glic_experimental_triggering_manager.h",
+    "experimental_triggering/glic_experimental_triggering_metrics.cc",
     "gemini_act_on_web_settings_policy_handler.cc",
     "glic_hotkey.cc",
     "glic_metrics.cc",
@@ -357,6 +371,8 @@ source_set("impl") {
     "host/glic_annotation_manager.cc",
     "host/glic_cookie_synchronizer.cc",
     "host/glic_cookie_synchronizer.h",
+    "host/glic_guest_observer.cc",
+    "host/glic_guest_observer.h",
     "host/glic_internals_page_handler.cc",
     "host/glic_page_handler.cc",
     "host/glic_skills_manager_impl.cc",
@@ -364,6 +380,9 @@ source_set("impl") {
     "host/glic_synthetic_trial_manager.cc",
     "host/glic_synthetic_trial_manager.h",
     "host/glic_ui.cc",
+    "host/glic_web_client_handler.cc",
+    "host/glic_web_client_handler.h",
+    "host/glic_web_client_responsiveness_monitor.cc",
     "host/glic_web_contents_warming_pool.cc",
     "host/glic_web_contents_warming_pool.h",
     "host/guest_util.cc",
@@ -373,11 +392,11 @@ source_set("impl") {
     "host/webui_contents_container.cc",
     "host/webui_contents_container.h",
     "public/context/glic_sharing_manager.cc",
-    "public/glic_actuation_tracker.cc",
     "public/glic_enabling.cc",
     "public/glic_invoke_options.cc",
     "public/glic_keyed_service.cc",
     "public/glic_keyed_service_factory.cc",
+    "public/glic_perf_traits_tracker.cc",
     "service/glic_instance_coordinator_impl.cc",
     "service/glic_instance_coordinator_impl.h",
     "service/glic_instance_helper.cc",
@@ -391,6 +410,10 @@ source_set("impl") {
     "service/glic_onboarding_status.h",
     "service/glic_onboarding_tracker.cc",
     "service/glic_onboarding_tracker.h",
+    "service/glic_tab_contents_swapper.cc",
+    "service/glic_tab_contents_swapper.h",
+    "service/glic_tab_group_utils.cc",
+    "service/glic_tab_group_utils.h",
     "service/glic_ui_embedder.h",
     "service/glic_ui_types.cc",
     "service/metrics/glic_instance_coordinator_metrics.cc",
@@ -401,6 +424,10 @@ source_set("impl") {
     "widget/browser_conditions.h",
     "widget/conversions.cc",
     "widget/conversions.h",
+    "widget/glic_inactive_tab_ui.cc",
+    "widget/glic_inactive_tab_ui.h",
+    "widget/glic_tab_ui.cc",
+    "widget/glic_tab_ui.h",
   ]
 
   public_deps = [
@@ -424,6 +451,7 @@ source_set("impl") {
     "//chrome/browser/glic/common",
     "//chrome/browser/glic/media",
     "//chrome/browser/glic/suggestions",
+    "//chrome/browser/lifetime",
     "//chrome/browser/lifetime:termination_notification",
     "//chrome/browser/media",
     "//chrome/browser/media/webrtc",
@@ -484,6 +512,7 @@ source_set("impl") {
     "//ui/base",
     "//ui/base/clipboard:file_info",
     "//ui/base/interaction",
+    "//ui/content_accelerators",
     "//ui/gfx",
     "//ui/snapshot",
     "//ui/webui",
@@ -493,9 +522,9 @@ source_set("impl") {
   if (!is_android) {
     # TODO(b/470059315): Make these work on Android, or move them to the
     # desktop-only section.
+    public_deps += [ "//chrome/browser/glic/selection" ]
     sources += [
-      "experimental_opt_in/glic_experimental_opt_in_controller.cc",
-      "experimental_opt_in/glic_experimental_opt_in_controller.h",
+      "common/view_scoped_registration_delegate_impl.cc",
       "experimental_opt_in/glic_experimental_opt_in_dialog_view.cc",
       "experimental_opt_in/glic_experimental_opt_in_dialog_view.h",
       "experimental_opt_in/glic_experimental_opt_in_metrics.cc",
@@ -504,6 +533,7 @@ source_set("impl") {
       "experimental_opt_in/glic_experimental_opt_in_page_handler.h",
       "experimental_opt_in/glic_experimental_opt_in_ui.cc",
       "experimental_opt_in/glic_experimental_opt_in_ui.h",
+      "experimental_opt_in/glic_experimental_opt_in_ui_host_desktop.cc",
       "experimental_opt_in/glic_experimental_opt_in_util.cc",
       "experimental_opt_in/glic_experimental_opt_in_util.h",
       "gemini_spark_settings_policy_handler.cc",
@@ -562,6 +592,8 @@ source_set("impl") {
     ]
   } else {  # is_android
     sources += [
+      "common/view_scoped_registration_delegate_android.cc",
+      "experimental_opt_in/glic_experimental_opt_in_ui_host_android.cc",
       "glic_settings_util_android.cc",
       "host/context/favicon_impl/glic_tab_favicon_adapter_android.cc",
       "host/context/favicon_impl/glic_tab_favicon_adapter_android.h",
@@ -589,6 +621,10 @@ source_set("impl") {
       "//components/password_manager/core/browser/features:password_features",
       "//ui/android",
     ]
+  }
+
+  if (!is_android || enable_extensions_core) {
+    deps += [ "//chrome/browser/ui/webui:theme_source" ]
   }
 
   if (enable_guest_view) {
@@ -682,11 +718,15 @@ mojom("mojo_bindings") {
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "experimental_triggering/glic_experimental_triggering_coordinator_unittest.cc",
     "glic_settings_util_unittest.cc",
+    "host/auth_controller_unittest.cc",
     "host/context/glic_sharing_utils_unittest.cc",
+    "host/glic_web_client_responsiveness_monitor_unittest.cc",
     "host/glic_web_contents_warming_pool_unittest.cc",
     "public/glic_cui_tracker_unittest.cc",
     "public/glic_enabling_unittest.cc",
+    "service/glic_invoke_handler_unittest.cc",
     "service/glic_invoke_task_unittest.cc",
   ]
   deps = [
@@ -697,6 +737,7 @@ source_set("unit_tests") {
     "//chrome/browser:global_features",
     "//chrome/browser/background/glic",
     "//chrome/browser/glic/test_support",
+    "//chrome/browser/sync",
     "//chrome/browser/ui:ui_features",
     "//components/tabs:test_support",
     "//testing/gmock",
@@ -706,11 +747,9 @@ source_set("unit_tests") {
   if (!is_android) {
     sources += [
       "common/local_hotkey_manager_unittest.cc",
-      "common/panel_focus_dependent_hotkey_manager_unittest.cc",
       "glic_metrics_provider_unittest.cc",
       "glic_metrics_unittest.cc",
       "glic_selection_observer_unittest.cc",
-      "host/auth_controller_unittest.cc",
       "host/context/glic_page_features_manager_unittest.cc",
       "host/context/glic_pin_candidate_comparator_unittest.cc",
       "host/context/glic_screenshot_capturer_unittest.cc",
@@ -724,6 +763,7 @@ source_set("unit_tests") {
       "service/glic_onboarding_tracker_unittest.cc",
       "service/metrics/glic_instance_coordinator_metrics_unittest.cc",
       "service/metrics/glic_instance_metrics_unittest.cc",
+      "service/metrics/glic_invoke_metrics_unittest.cc",
       "service/metrics/glic_metrics_session_manager_unittest.cc",
       "service/metrics/metrics_types_unittest.cc",
       "suggestions/caching_zero_state_suggestions_manager_unittest.cc",
@@ -764,13 +804,21 @@ source_set("browser_tests") {
   testonly = true
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
   sources = [
+    "actor/glic_actor_policy_checker_browsertest.cc",
+    "common/instance_independent_hotkey_manager_browsertest.cc",
+    "common/panel_focus_dependent_hotkey_manager_browsertest.cc",
+    "common/panel_visibility_dependent_hotkey_manager_browsertest.cc",
     "glic_tab_restore_helper_browsertest.cc",
+    "host/context/glic_active_pinned_focused_tab_manager_browsertest.cc",
     "host/context/glic_delegating_sharing_manager_browsertest.cc",
     "host/context/glic_pinned_tab_manager_browsertest.cc",
+    "host/glic_permission_enforcement_browsertest.cc",
     "host/glic_web_contents_warming_pool_browsertest.cc",
     "host/new_glic_api_browsertest.cc",
     "service/glic_instance_coordinator_browsertest.cc",
+    "service/glic_instance_helper_browsertest.cc",
     "service/glic_invoke_browsertest.cc",
+    "service/glic_tab_group_browsertest.cc",
     "service/metrics/glic_instance_coordinator_metrics_browsertest.cc",
     "suggestions/contextual_cueing_helper_browsertest.cc",
   ]
@@ -782,6 +830,7 @@ source_set("browser_tests") {
     "//chrome/app:command_ids",
     "//chrome/browser:browser_features",
     "//chrome/browser/actor",
+    "//chrome/browser/actor:test_support",
     "//chrome/browser/background/glic",
     "//chrome/browser/contextual_tasks:ui",
     "//chrome/browser/glic/actor",
@@ -789,6 +838,7 @@ source_set("browser_tests") {
     "//chrome/browser/glic/common",
     "//chrome/browser/glic/common:browser_tests",
     "//chrome/browser/glic/test_support",
+    "//chrome/browser/performance_manager",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/skills",
     "//chrome/browser/skills:public",
@@ -816,8 +866,6 @@ source_set("browser_tests") {
 
   if (!is_android) {
     sources += [
-      "actor/glic_actor_policy_checker_browsertest.cc",
-      "common/instance_independent_hotkey_manager_browsertest.cc",
       "experimental_opt_in/glic_experimental_opt_in_dialog_browsertest.cc",
       "glic_browsertest.cc",
       "glic_context_menu_browsertest.cc",
@@ -829,10 +877,9 @@ source_set("browser_tests") {
       "glic_user_status_browsertest.cc",
       "glic_zoom_browsertest.cc",
       "host/context/glic_active_instance_sharing_manager_browsertest.cc",
-      "host/context/glic_active_pinned_focused_tab_manager_browsertest.cc",
       "host/context/glic_tab_data_browsertest.cc",
       "host/glic_api_browsertest.cc",
-      "host/glic_permission_enforcement_browsertest.cc",
+      "host/glic_paste_eligibility_browsertest.cc",
       "host/glic_webui_browsertest.cc",
       "host/guest_util_browsertest.cc",
       "public/glic_enabling_browsertest.cc",
@@ -840,7 +887,6 @@ source_set("browser_tests") {
       "suggestions/glic_cue_target_browsertest.cc",
       "suggestions/zero_state_suggestions_browsertest.cc",
       "widget/glic_side_panel_coordinator_browsertest.cc",
-      "widget/panel_visibility_dependent_hotkey_manager_browsertest.cc",
     ]
 
     if (!is_mac && enterprise_cloud_content_analysis) {
@@ -908,9 +954,11 @@ source_set("browser_tests") {
     sources += [
       "browser_ui/glic_nudge_controller_android_browsertest.cc",
       "widget/glic_side_panel_coordinator_android_browsertest.cc",
+      "widget/glic_side_panel_coordinator_desktop_android_browsertest.cc",
     ]
     deps += [
       "//chrome/browser/glic/browser_ui",
+      "//chrome/browser/ui/omnibox",
       "//chrome/browser/ui/side_panel",
       "//chrome/browser/ui/side_panel/android",
       "//chrome/test:test_support_ui_android",
@@ -985,7 +1033,7 @@ if (!is_android) {
       "//chrome/browser/actor",
       "//chrome/browser/actor:test_support",
       "//chrome/browser/actor:tools_test_support",
-      "//chrome/browser/autofill/actor:test_support",
+      "//chrome/browser/autofill",
       "//chrome/browser/background/glic",
       "//chrome/browser/compose",
       "//chrome/browser/contextual_tasks:ui",
@@ -993,6 +1041,7 @@ if (!is_android) {
       "//chrome/browser/download:test_support",
       "//chrome/browser/enterprise/connectors/test:test_support",
       "//chrome/browser/glic:mojo_bindings",
+      "//chrome/browser/glic/actor:test_support",
       "//chrome/browser/glic/browser_ui:interactive_ui_tests",
       "//chrome/browser/glic/public:features",
       "//chrome/browser/glic/selection:interactive_ui_tests",
@@ -1010,6 +1059,7 @@ if (!is_android) {
       "//chrome/common",
       "//chrome/test:test_support",
       "//chrome/test/user_education:impl",
+      "//components/autofill/core/browser/actor:test_support",
       "//components/optimization_guide/core",
       "//content/test:test_support",
       "//ui/display:test_support",

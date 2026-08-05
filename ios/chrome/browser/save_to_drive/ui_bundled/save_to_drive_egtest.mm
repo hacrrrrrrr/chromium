@@ -16,6 +16,7 @@
 #import "ios/chrome/browser/authentication/test/signin_matchers.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_constants.h"
 #import "ios/chrome/browser/authentication/ui_bundled/views/views_constants.h"
+#import "ios/chrome/test/earl_grey/earl_grey_scoped_block_swizzler.h"
 #import "ios/chrome/browser/download/ui/download_manager_constants.h"
 #import "ios/chrome/browser/drive/model/drive_metrics.h"
 #import "ios/chrome/browser/drive/model/drive_policy.h"
@@ -34,8 +35,10 @@
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
 #import "ios/public/provider/chrome/browser/google_one/google_one_api.h"
+#import "ios/testing/earl_grey/app_launch_manager.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
 #import "ios/testing/embedded_test_server_handlers.h"
+#import "net/base/url_util.h"
 #import "net/test/embedded_test_server/embedded_test_server.h"
 #import "net/test/embedded_test_server/request_handler_util.h"
 #import "ui/base/l10n/l10n_util.h"
@@ -86,6 +89,13 @@ id<GREYMatcher> FileDestinationDriveButton() {
 id<GREYMatcher> DownloadManagerGetTheAppButton() {
   return grey_allOf(
       grey_accessibilityID(kDownloadManagerInstallAppAccessibilityIdentifier),
+      grey_enabled(), grey_interactable(), nil);
+}
+
+// Matcher for "OPEN" (in Drive) button on Download Manager UI.
+id<GREYMatcher> DownloadManagerOpenInDriveButton() {
+  return grey_allOf(
+      grey_accessibilityID(kDownloadManagerOpenInDriveAccessibilityIdentifier),
       grey_enabled(), grey_interactable(), nil);
 }
 
@@ -161,8 +171,11 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
     const net::test_server::HttpRequest& request) {
   auto result = std::make_unique<net::test_server::BasicHttpResponse>();
   result->set_code(net::HTTP_OK);
-  result->set_content(
-      "<a id='download' href='/download-example?50000'>Download</a>");
+  std::string size = "50000";
+  net::GetValueForKeyInQuery(request.GetURL(), "size", &size);
+  result->set_content(base::StringPrintf(
+      "<a id='download' href='/download-example?%s'>Download</a>",
+      size.c_str()));
   return result;
 }
 
@@ -735,8 +748,10 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
   FakeSystemIdentity* fakeIdentity = [FakeSystemIdentity fakeIdentity1];
   [SigninEarlGrey signinWithFakeIdentity:fakeIdentity];
 
-  // Load a page with a download button and tap the download button.
-  [ChromeEarlGrey loadURL:self.testServer->GetURL("/")];
+  // Load a page with a download button and tap the download button. Use a
+  // larger size so the download is still in progress when the identity is
+  // removed.
+  [ChromeEarlGrey loadURL:self.testServer->GetURL("/?size=100000")];
   [ChromeEarlGrey waitForWebStateContainingText:"Download"];
   [ChromeEarlGrey tapWebStateElementWithID:@"download"];
 
@@ -768,6 +783,14 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
 
   // While download is in progress, remove account.
   [SigninEarlGrey forgetFakeIdentity:fakeIdentity];
+
+  // Wait for the identity to be fully removed from the system.
+  ConditionBlock condition = ^bool {
+    return ![SigninEarlGrey isIdentityAdded:fakeIdentity];
+  };
+  GREYAssert(base::test::ios::WaitUntilConditionOrTimeout(
+                 base::test::ios::kWaitForActionTimeout, condition),
+             @"Identity was not removed.");
 
   // Verify that the user is signed out.
   [SigninEarlGrey verifySignedOut];
@@ -835,11 +858,9 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
                  chrome_test_util::AlertItemWithAccessibilityLabelId(
                      IDS_CANCEL)] performAction:grey_tap()];
 
-  // Check the alert disappeared but the sign-in promo (account picker) stays on
-  // screen.
+  // Check that the alert and the sign-in promo disappear.
   [ChromeEarlGrey waitForUIElementToDisappearWithMatcher:titleMatcher];
-  [[EarlGrey selectElementWithMatcher:SigninPromo()]
-      assertWithMatcher:grey_sufficientlyVisible()];
+  [ChromeEarlGrey waitForUIElementToDisappearWithMatcher:SigninPromo()];
 }
 
 // Tests that when the user is signed-out and has a managed account on device,
@@ -897,6 +918,55 @@ std::unique_ptr<net::test_server::HttpResponse> GetResponse(
 
   // Wait for the history sync screen.
   [ChromeEarlGrey waitForUIElementToAppearWithMatcher:HistoryScreenMatcher()];
+}
+
+// Tests that uninstalling the Google Drive app while download manager UI is shown
+// updates the button from "OPEN" in Drive to "GET THE APP".
+- (void)testDownloadToDriveAppUninstalledUpdatesButton {
+  auto canOpenURLSwizzler = std::make_unique<EarlGreyScopedBlockSwizzler>(
+      @"UIApplication", @"canOpenURL:", ^BOOL(id blockSelf, NSURL* url) {
+        if ([url.scheme isEqualToString:@"googledrive"]) {
+          return YES;
+        }
+        return NO;
+      });
+
+  // Sign-in.
+  FakeSystemIdentity* fakeIdentity = [FakeSystemIdentity fakeIdentity1];
+  [SigninEarlGrey signinWithFakeIdentity:fakeIdentity];
+  // Load a page with a download button and tap the download button.
+  [ChromeEarlGrey loadURL:self.testServer->GetURL("/")];
+  [ChromeEarlGrey waitForWebStateContainingText:"Download"];
+  [ChromeEarlGrey tapWebStateElementWithID:@"download"];
+  // Check that the "SAVE..." button is presented and tap it.
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:SaveEllipsisButton()];
+  [[EarlGrey selectElementWithMatcher:SaveEllipsisButton()]
+      performAction:grey_tap()];
+  // Wait for the account picker to appear, select "Drive" and tap "Save".
+  [ChromeEarlGrey waitForUIElementToAppearWithMatcher:AccountPicker()];
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:FileDestinationDriveButton()];
+  [[EarlGrey selectElementWithMatcher:FileDestinationDriveButton()]
+      performAction:grey_tap()];
+  [[EarlGrey selectElementWithMatcher:AccountPickerPrimaryButton()]
+      performAction:grey_tap()];
+  // Wait for the account picker to disappear.
+  [ChromeEarlGrey waitForUIElementToDisappearWithMatcher:AccountPicker()];
+  // Check that after a few seconds, the "OPEN" (in Drive) button appears.
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:DownloadManagerOpenInDriveButton()
+                                  timeout:base::test::ios::
+                                              kWaitForDownloadTimeout];
+
+  // Simulate Drive app being uninstalled.
+  canOpenURLSwizzler.reset();
+  [[AppLaunchManager sharedManager] backgroundAndForegroundApp];
+
+  // Check that the "GET THE APP" button appears.
+  [ChromeEarlGrey
+      waitForUIElementToAppearWithMatcher:DownloadManagerGetTheAppButton()
+                                  timeout:base::test::ios::
+                                              kWaitForDownloadTimeout];
 }
 
 @end

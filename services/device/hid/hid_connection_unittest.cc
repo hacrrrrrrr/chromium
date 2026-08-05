@@ -279,7 +279,10 @@ class TestHidConnection : public HidConnection {
 class HidConnectionProtectedReportTest : public testing::Test,
                                          HidConnection::Client {
  public:
-  HidConnectionProtectedReportTest() = default;
+  HidConnectionProtectedReportTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        features::kWebHidRecursiveFiltering);
+  }
   HidConnectionProtectedReportTest(const HidConnectionProtectedReportTest&) =
       delete;
   HidConnectionProtectedReportTest& operator=(
@@ -353,6 +356,7 @@ class HidConnectionProtectedReportTest : public testing::Test,
   scoped_refptr<TestHidConnection> connection_;
   base::test::TestFuture<scoped_refptr<base::RefCountedBytes>, size_t>
       input_report_future_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 TEST_F(HidConnectionProtectedReportTest, UnprotectedReadWrite) {
@@ -597,6 +601,149 @@ TEST_F(HidConnectionProtectedReportTest, InvisibleConstFeatureReport) {
   // Close the connection.
   connection().Close();
   EXPECT_TRUE(connection().closed());
+}
+
+TEST_F(HidConnectionProtectedReportTest, FidoReportsInNestedCollectionBlocked) {
+  // Simulate a device with a vendor-defined top-level collection containing a
+  // nested FIDO application collection that defines input and output reports.
+  auto device_info =
+      CreateHidDeviceInfo(TestReportDescriptors::VendorWithNestedFido());
+  ASSERT_TRUE(device_info);
+  ASSERT_EQ(device_info->collections().size(), 1u);
+  EXPECT_EQ(device_info->collections()[0]->usage->usage_page,
+            mojom::kPageVendor);
+  CreateConnection(device_info);
+
+  SetConnectionClient();
+
+  // Simulate an input report from the nested FIDO collection. It should not be
+  // received by the client.
+  auto buffer =
+      base::MakeRefCounted<base::RefCountedBytes>(std::vector<uint8_t>{1});
+  connection().SimulateInputReport(buffer);
+  EXPECT_FALSE(HasNextInputReport());
+
+  // Try to write an output report to the nested FIDO collection. It should be
+  // blocked.
+  TestFuture<bool> write_future;
+  connection().Write(buffer, write_future.GetCallback());
+  EXPECT_FALSE(write_future.Get());
+
+  // Close the connection.
+  connection().Close();
+  EXPECT_TRUE(connection().closed());
+}
+
+TEST_F(HidConnectionProtectedReportTest,
+       AllowFidoReportsAllowsFidoInNestedCollection) {
+  // Simulate a device with a vendor-defined top-level collection containing a
+  // nested FIDO application collection that defines input and output reports.
+  auto device_info =
+      CreateHidDeviceInfo(TestReportDescriptors::VendorWithNestedFido());
+  ASSERT_TRUE(device_info);
+
+  // Simulate a connection from a FIDO-privileged origin.
+  CreateConnection(device_info, /*allow_protected_reports=*/false,
+                   /*allow_fido_reports=*/true);
+
+  // Simulate an input report.
+  TestFuture<bool, scoped_refptr<base::RefCountedBytes>, size_t> read_future;
+  auto buffer =
+      base::MakeRefCounted<base::RefCountedBytes>(std::vector<uint8_t>{1});
+  connection().SimulateInputReport(buffer);
+  connection().Read(read_future.GetCallback());
+  EXPECT_TRUE(read_future.Get<0>());
+
+  // Simulate an output report.
+  TestFuture<bool> write_future;
+  connection().Write(buffer, write_future.GetCallback());
+  EXPECT_TRUE(write_future.Get());
+
+  // Close the connection.
+  connection().Close();
+  EXPECT_TRUE(connection().closed());
+}
+
+TEST_F(HidConnectionProtectedReportTest,
+       KeyboardReportsInNestedCollectionBlocked) {
+  // Simulate a device with a vendor-defined top-level collection containing a
+  // nested keyboard application collection that defines an input report.
+  auto device_info =
+      CreateHidDeviceInfo(TestReportDescriptors::VendorWithNestedKeyboard());
+  ASSERT_TRUE(device_info);
+  ASSERT_EQ(device_info->collections().size(), 1u);
+  EXPECT_EQ(device_info->collections()[0]->usage->usage_page,
+            mojom::kPageVendor);
+  CreateConnection(device_info);
+
+  SetConnectionClient();
+
+  // Simulate an input report from the nested keyboard collection. It should
+  // not be received by the client.
+  auto buffer =
+      base::MakeRefCounted<base::RefCountedBytes>(std::vector<uint8_t>{1});
+  connection().SimulateInputReport(buffer);
+  EXPECT_FALSE(HasNextInputReport());
+
+  // Close the connection.
+  connection().Close();
+  EXPECT_TRUE(connection().closed());
+}
+
+TEST_F(HidConnectionProtectedReportTest, CollectionTypeAffectsProtection) {
+  constexpr uint8_t kTestReportId = 1;
+
+  // Case 1: Collection type is Physical (0). Reports should NOT be protected.
+  {
+    auto collection = mojom::HidCollectionInfo::New();
+    collection->usage = mojom::HidUsageAndPage::New(
+        mojom::kGenericDesktopKeyboard, mojom::kPageGenericDesktop);
+    collection->collection_type = mojom::kHIDCollectionTypePhysical;
+    collection->report_ids.push_back(kTestReportId);
+    auto report = mojom::HidReportDescription::New();
+    report->report_id = kTestReportId;
+    collection->input_reports.push_back(std::move(report));
+
+    auto device_info = CreateHidDeviceInfo(std::move(collection),
+                                           /*max_input_report_size=*/1,
+                                           /*max_output_report_size=*/0,
+                                           /*max_feature_report_size=*/0);
+    CreateConnection(device_info);
+
+    TestFuture<bool, scoped_refptr<base::RefCountedBytes>, size_t> read_future;
+    auto buffer = base::MakeRefCounted<base::RefCountedBytes>(
+        std::vector<uint8_t>{kTestReportId});
+    connection().SimulateInputReport(buffer);
+    connection().Read(read_future.GetCallback());
+    EXPECT_TRUE(read_future.Get<0>());
+    connection().Close();
+  }
+
+  // Case 2: Collection type is Application (1). Reports SHOULD be protected.
+  {
+    auto collection = mojom::HidCollectionInfo::New();
+    collection->usage = mojom::HidUsageAndPage::New(
+        mojom::kGenericDesktopKeyboard, mojom::kPageGenericDesktop);
+    collection->collection_type = mojom::kHIDCollectionTypeApplication;
+    collection->report_ids.push_back(kTestReportId);
+    auto report = mojom::HidReportDescription::New();
+    report->report_id = kTestReportId;
+    collection->input_reports.push_back(std::move(report));
+
+    auto device_info = CreateHidDeviceInfo(std::move(collection),
+                                           /*max_input_report_size=*/1,
+                                           /*max_output_report_size=*/0,
+                                           /*max_feature_report_size=*/0);
+    CreateConnection(device_info);
+
+    TestFuture<bool, scoped_refptr<base::RefCountedBytes>, size_t> read_future;
+    auto buffer = base::MakeRefCounted<base::RefCountedBytes>(
+        std::vector<uint8_t>{kTestReportId});
+    connection().SimulateInputReport(buffer);
+    connection().Read(read_future.GetCallback());
+    EXPECT_FALSE(read_future.IsReady());
+    connection().Close();
+  }
 }
 
 }  // namespace device

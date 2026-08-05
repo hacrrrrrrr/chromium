@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/cfi_buildflags.h"
+#include "base/command_line.h"
 #include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
@@ -38,6 +39,7 @@
 #include "chrome/browser/policy/profile_policy_connector_builder.h"
 #include "chrome/browser/policy/schema_registry_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/platform_browser_test.h"
@@ -87,6 +89,10 @@
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/features/simple_feature.h"
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
+#include "chrome/browser/enterprise/reporting/browser_launch/scoped_initial_command_line.h"
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS)
 
 using testing::_;
 using testing::Return;
@@ -387,8 +393,10 @@ bool PolicyUIStatusTest::ReadStatusFor(
     (function() {
       function readStatus() {
         // Wait for the status box to appear in case page just loaded.
-        const statusSection = document.getElementById('status-section');
-        if (statusSection.hidden) {
+        const app = document.querySelector('policy-app');
+        const statusSection = app && app.shadowRoot ?
+            app.shadowRoot.querySelector('#status-section') : null;
+        if (!statusSection || statusSection.hidden) {
           return new Promise(resolve => {
             window.requestIdleCallback(resolve);
           }).then(readStatus);
@@ -441,26 +449,7 @@ bool PolicyUIStatusTest::ReloadPolicies() {
 }
 
 bool PolicyUIStatusTest::ReloadPolicies(content::WebContents* contents) {
-  const std::string javascript = R"JS(
-    (function() {
-      const reloadPoliciesBtn = document.getElementById('reload-policies');
-      reloadPoliciesBtn.click();
-      // Wait until reload button becomes enabled again, i.e. policies reloaded.
-      function waitForPoliciesToReload() {
-        if (reloadPoliciesBtn.disabled) {
-          return new Promise(resolve => {
-            window.requestIdleCallback(resolve);
-          }).then(waitForPoliciesToReload);
-        } else {
-          return true;
-        }
-      }
-      return new Promise(resolve => {
-        window.requestIdleCallback(resolve);
-      }).then(waitForPoliciesToReload);
-    })();
-  )JS";
-  return content::ExecJs(contents, javascript);
+  return content::ExecJs(contents, "reloadPolicies()");
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -862,8 +851,17 @@ class PolicyPrecedenceUITest
 
   // Used to retrieve the contents of the policy precedence rows.
   const std::string kJavaScript =
-      "var precedence_row = getPrecedenceRowValue();"
-      "precedence_row.textContent;";
+      "new Promise(resolve => {"
+      "  const check = () => {"
+      "    const precedence_row = getPrecedenceRowValue();"
+      "    if (precedence_row && precedence_row.textContent.trim() !== '') {"
+      "      resolve(precedence_row.textContent.trim());"
+      "    } else {"
+      "      setTimeout(check, 50);"
+      "    }"
+      "  };"
+      "  check();"
+      "});";
 
  private:
   base::test::ScopedFeatureList feature_list_;
@@ -1150,5 +1148,67 @@ INSTANTIATE_TEST_SUITE_P(All,
                              testing::Values(false),
 #endif
                              testing::Bool()));
+
+#if !BUILDFLAG(IS_CHROMEOS)
+constexpr char kCheckBannerJs[] =
+    "(() => {"
+    "  const app = document.querySelector('policy-app');"
+    "  return !!app && "
+    "!!app.shadowRoot.querySelector('#command-line-flags-warning');"
+    "})();";
+
+IN_PROC_BROWSER_TEST_F(PolicyUITestBase, NoWarningWithoutCommandLineFlags) {
+  base::CommandLine empty_command_line(
+      base::FilePath(FILE_PATH_LITERAL("chrome")));
+  enterprise_reporting::ScopedInitialCommandLine override_cli(
+      &empty_command_line);
+
+  ASSERT_TRUE(
+      content::NavigateToURL(web_contents(), GURL(chrome::kChromeUIPolicyURL)));
+
+  EXPECT_EQ(false, content::EvalJs(web_contents(), kCheckBannerJs));
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyUITestBase, ShowsWarningWithCommandLineFlags) {
+  base::CommandLine custom_command_line(
+      base::FilePath(FILE_PATH_LITERAL("chrome")));
+  custom_command_line.AppendSwitch("test-custom-flag");
+  enterprise_reporting::ScopedInitialCommandLine override_cli(
+      &custom_command_line);
+
+  ASSERT_TRUE(
+      content::NavigateToURL(web_contents(), GURL(chrome::kChromeUIPolicyURL)));
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(), kCheckBannerJs));
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyUITestBase, NoWarningWithIgnoredCommandLineFlags) {
+  base::CommandLine custom_command_line(
+      base::FilePath(FILE_PATH_LITERAL("chrome")));
+  custom_command_line.AppendSwitchASCII(switches::kProfileDirectory, "Default");
+  enterprise_reporting::ScopedInitialCommandLine override_cli(
+      &custom_command_line);
+
+  ASSERT_TRUE(
+      content::NavigateToURL(web_contents(), GURL(chrome::kChromeUIPolicyURL)));
+
+  EXPECT_EQ(false, content::EvalJs(web_contents(), kCheckBannerJs));
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyUITestBase,
+                       ShowsWarningWithCustomAndIgnoredCommandLineFlags) {
+  base::CommandLine custom_command_line(
+      base::FilePath(FILE_PATH_LITERAL("chrome")));
+  custom_command_line.AppendSwitchASCII(switches::kProfileDirectory, "Default");
+  custom_command_line.AppendSwitch("test-custom-flag");
+  enterprise_reporting::ScopedInitialCommandLine override_cli(
+      &custom_command_line);
+
+  ASSERT_TRUE(
+      content::NavigateToURL(web_contents(), GURL(chrome::kChromeUIPolicyURL)));
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(), kCheckBannerJs));
+}
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
 #endif  // !BUILDFLAG(IS_ANDROID)

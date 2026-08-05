@@ -104,6 +104,10 @@ struct GPU_CONFIG_EXPORT SkiaGraphiteFeatureParams {
 
   // Whether the Dawn D3D11 flush should be delayed until the end of the frame.
   bool dawn_d3d11_delay_flush = true;
+
+  // If this param is enabled, FlushTileRasterGraphiteCommandsCHROMIUM will
+  // also flush the D3D11 commands to the driver (if delay flush is enabled).
+  bool flush_d3d11_tile_raster_commands_to_driver = false;
 #endif
 };
 
@@ -153,6 +157,10 @@ inline bool SkiaGraphiteDawnDisableD3DShaderOptimizations() {
 }
 inline bool SkiaGraphiteDawnD3D11DelayFlush() {
   return GetSkiaGraphiteFeatureParams().dawn_d3d11_delay_flush;
+}
+inline bool SkiaGraphiteFlushD3D11TileRasterCommandsToDriver() {
+  return GetSkiaGraphiteFeatureParams()
+      .flush_d3d11_tile_raster_commands_to_driver;
 }
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kSkiaGraphiteDawnUseD3D12);
@@ -210,10 +218,6 @@ GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kIncreasedCmdBufferParseSlice);
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kDeferredOverlaysRelease);
 
-#if BUILDFLAG(IS_WIN)
-GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kD3DBackingUploadWithUpdateSubresource);
-#endif
-
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kGPUBlockListTestGroup);
 GPU_CONFIG_EXPORT extern const base::FeatureParam<int> kGPUBlockListTestGroupId;
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kGPUDriverBugListTestGroup);
@@ -246,10 +250,6 @@ GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kSyncPointGraphValidation);
 GPU_CONFIG_EXPORT bool IsSyncPointGraphValidationEnabled();
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kANGLEPerContextBlobCache);
-
-#if BUILDFLAG(IS_APPLE)
-GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kIOSurfaceMultiThreading);
-#endif
 
 GPU_CONFIG_EXPORT BASE_DECLARE_FEATURE(kConfigurableGPUWatchdogTimeout);
 GPU_CONFIG_EXPORT extern const base::FeatureParam<int>

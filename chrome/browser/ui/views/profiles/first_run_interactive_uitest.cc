@@ -16,6 +16,7 @@
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
+#include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "base/test/with_feature_override.h"
@@ -49,7 +50,6 @@
 #include "chrome/browser/ui/views/profiles/profile_picker_toolbar.h"
 #include "chrome/browser/ui/views/profiles/profile_picker_view.h"
 #include "chrome/browser/ui/webui/intro/intro_ui.h"
-#include "chrome/browser/ui/webui/signin/managed_user_profile_notice_ui.h"
 #include "chrome/browser/ui/webui/signin/signin_ui_error.h"
 #include "chrome/browser/ui/webui/signin/signin_url_utils.h"
 #include "chrome/browser/ui/webui/whats_new/whats_new_fetcher.h"
@@ -83,7 +83,6 @@
 #include "components/variations/variations_switches.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/base/url_util.h"
 #include "services/audio/public/cpp/sounds/sounds_manager.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -168,6 +167,7 @@ struct FirstRunVersion {
   struct Revamped {
     switches::FirstRunDesktopSignInPromoVariation variant =
         switches::FirstRunDesktopSignInPromoVariation::kDefault;
+    bool sound_enabled = true;
   };
 
   using Value = std::variant<Legacy, Refreshed, Revamped>;
@@ -221,8 +221,8 @@ void ConfigureTestSyncService(
 std::string VersionSuffix(const FirstRunVersion::Value& version) {
   return std::visit(
       absl::Overload{
-          [](FirstRunVersion::Legacy) { return "LegacyView"; },
-          [](FirstRunVersion::Refreshed refreshed) {
+          [](FirstRunVersion::Legacy) -> std::string { return "LegacyView"; },
+          [](FirstRunVersion::Refreshed refreshed) -> std::string {
             switch (refreshed.variant) {
               case switches::FirstRunDesktopSignInPromoVariation::kDefault:
                 return "RefreshedViewDefault";
@@ -235,16 +235,21 @@ std::string VersionSuffix(const FirstRunVersion::Value& version) {
             }
           },
           [](FirstRunVersion::Revamped revamped) {
+            std::string base_suffix;
             switch (revamped.variant) {
               case switches::FirstRunDesktopSignInPromoVariation::kDefault:
-                return "RevampedViewDefault";
+                base_suffix = "RevampedViewDefault";
+                break;
               case switches::FirstRunDesktopSignInPromoVariation::
                   kDontSignInInTheTopCorner:
-                return "RevampedViewDontSignInTopCorner";
+                base_suffix = "RevampedViewDontSignInTopCorner";
+                break;
               case switches::FirstRunDesktopSignInPromoVariation::
                   kDontSignInOnGaiaPage:
-                return "RevampedViewDontSignInGaiaPage";
+                base_suffix = "RevampedViewDontSignInGaiaPage";
+                break;
             }
+            return base_suffix + (revamped.sound_enabled ? "" : "NoSound");
           }},
       version);
   NOTREACHED();
@@ -346,6 +351,14 @@ class FirstRunInteractiveUiBaseTest
                   {switches::kFirstRunDesktopChoiceScreenRefresh, {}});
               enabled_features.push_back(
                   {switches::kFirstRunDesktopRevamp, {}});
+
+              if (revamped.sound_enabled) {
+                enabled_features.push_back(
+                    {switches::kFirstRunDesktopRevampSound, {}});
+              } else {
+                disabled_features.push_back(
+                    switches::kFirstRunDesktopRevampSound);
+              }
             }},
         params_.flow_version);
     scoped_feature_list_.InitWithFeaturesAndParameters(enabled_features,
@@ -516,6 +529,13 @@ class FirstRunInteractiveUiBaseTest
     static const base::NoDestructor<DeepQuery> kQuery(
         {"search-engine-choice-app", "cr-radio-button"});
     return *kQuery;
+  }
+
+  GURL GetFinishOrContinueURL() {
+    return net::AppendQueryParameter(
+        GURL(chrome::kChromeUIIntroURL)
+            .Resolve(chrome::kChromeUIIntroFinishOrContinueSubPage),
+        "showcase", base::ToString(!GetForcedFeatureShowcaseSteps().empty()));
   }
 
   virtual std::vector<std::string> GetForcedFeatureShowcaseSteps() const {
@@ -727,6 +747,21 @@ class FirstRunInteractiveUiBaseTest
     }
   }
 
+  auto SelectDefaultSearchEngine() {
+    return Steps(
+        // Click on "More" to scroll to the bottom of the search engine list.
+        PressJsButton(kWebContentsId, GetSearchEngineChoiceActionButtonQuery()),
+        // The button should become disabled because we didn't make a choice.
+        WaitForButtonDisabled(kWebContentsId,
+                              GetSearchEngineChoiceActionButtonQuery()),
+        PressJsButton(kWebContentsId,
+                      GetSearchEngineChoiceCrRadioButtonQuery()),
+        WaitForButtonEnabled(kWebContentsId,
+                             GetSearchEngineChoiceActionButtonQuery()),
+        PressJsButton(kWebContentsId,
+                      GetSearchEngineChoiceActionButtonQuery()));
+  }
+
   auto CompleteSearchEngineChoiceStep() {
     return Steps(
         WaitForWebContentsNavigation(
@@ -741,17 +776,7 @@ class FirstRunInteractiveUiBaseTest
                         "SearchEngineChoiceScreenShown"),
                     1);
         }),
-        // Click on "More" to scroll to the bottom of the search engine list.
-        PressJsButton(kWebContentsId, GetSearchEngineChoiceActionButtonQuery()),
-        // The button should become disabled because we didn't make a choice.
-        WaitForButtonDisabled(kWebContentsId,
-                              GetSearchEngineChoiceActionButtonQuery()),
-        PressJsButton(kWebContentsId,
-                      GetSearchEngineChoiceCrRadioButtonQuery()),
-        WaitForButtonEnabled(kWebContentsId,
-                             GetSearchEngineChoiceActionButtonQuery()),
-        PressJsButton(kWebContentsId,
-                      GetSearchEngineChoiceActionButtonQuery()));
+        SelectDefaultSearchEngine());
   }
 
   void ExpectStepHistograms(Step step,
@@ -802,15 +827,11 @@ class FirstRunInteractiveUiBaseTest
   }
 
   auto CompleteFinishOrContinueStep(bool start_browsing = true) {
-    const GURL finish_or_continue_url = net::AppendQueryParameter(
-        GURL(chrome::kChromeUIIntroURL)
-            .Resolve(chrome::kChromeUIIntroFinishOrContinueSubPage),
-        "showcase", base::ToString(!GetForcedFeatureShowcaseSteps().empty()));
     const DeepQuery& button =
         start_browsing ? GetFinishOrContinueStartBrowsingButtonQuery()
                        : GetFinishOrContinueEducationButtonQuery();
     return Steps(
-        WaitForWebContentsNavigation(kWebContentsId, finish_or_continue_url),
+        WaitForWebContentsNavigation(kWebContentsId, GetFinishOrContinueURL()),
         EnsurePresent(kWebContentsId, button),
         PressJsButton(kWebContentsId, button));
   }
@@ -907,6 +928,109 @@ IN_PROC_BROWSER_TEST_P(FirstRunInteractiveUiTest, ExitAtSignIn) {
 
 INSTANTIATE_TEST_SUITE_P(,
                          FirstRunInteractiveUiTest,
+                         Values(FirstRunVersion::Legacy{},
+                                FirstRunVersion::Refreshed{},
+                                FirstRunVersion::Revamped{}),
+                         [](const TestParamInfo<FirstRunVersion::Value>& info) {
+                           return VersionSuffix(info.param);
+                         });
+
+class FirstRunBackNavigationInteractiveUiTest
+    : public FirstRunInteractiveUiTest {
+ public:
+  FirstRunBackNavigationInteractiveUiTest() {
+    scoped_chrome_build_override_ = std::make_unique<base::AutoReset<bool>>(
+        SearchEngineChoiceDialogServiceFactory::
+            ScopedChromeBuildOverrideForTesting(
+                /*force_chrome_build=*/true));
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    FirstRunInteractiveUiTest::SetUpCommandLine(command_line);
+
+    SetUpCommandLineForChoiceScreen(command_line);
+
+    command_line->AppendSwitch(switches::kForceFreDefaultBrowserStep);
+  }
+
+  void SetUpOnMainThread() override {
+    FirstRunInteractiveUiTest::SetUpOnMainThread();
+
+    SearchEngineChoiceDialogService::SetDialogDisabledForTests(
+        /*dialog_disabled=*/false);
+  }
+
+ private:
+  std::unique_ptr<base::AutoReset<bool>> scoped_chrome_build_override_;
+};
+
+// TODO(crbug.com/366119368): Re-enable this test
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_BackNavigationDisabledOnSteps \
+  DISABLED_BackNavigationDisabledOnSteps
+#else
+#define MAYBE_BackNavigationDisabledOnSteps BackNavigationDisabledOnSteps
+#endif
+IN_PROC_BROWSER_TEST_P(FirstRunBackNavigationInteractiveUiTest,
+                       MAYBE_BackNavigationDisabledOnSteps) {
+  base::test::TestFuture<bool> proceed_future;
+
+  ASSERT_TRUE(IsProfileNameDefault());
+  ASSERT_TRUE(fre_service()->ShouldOpenFirstRun());
+
+  OpenFirstRun(proceed_future.GetCallback());
+  RunTestSequenceInContext(
+      views::ElementTrackerViews::GetContextForView(view()),
+
+      // Intro step: back navigation should be ignored.
+      WaitForShow(kProfilePickerViewId),
+      InstrumentNonTabWebView(kWebContentsId, web_view()),
+      WaitForWebContentsReady(kWebContentsId, GURL(chrome::kChromeUIIntroURL)),
+      WaitForStateChange(kWebContentsId, IsVisible(GetDontSignInButtonQuery())),
+      EnsurePresent(kWebContentsId, GetDontSignInButtonQuery()),
+      SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+      EnsurePresent(kWebContentsId, GetDontSignInButtonQuery()),
+      PressJsButton(kWebContentsId, GetDontSignInButtonQuery()),
+
+      // Search engine choice step: back navigation should be ignored.
+      WaitForWebContentsNavigation(
+          kWebContentsId, GURL(chrome::kChromeUISearchEngineChoiceURL)),
+      EnsurePresent(kWebContentsId, GetSearchEngineChoiceActionButtonQuery()),
+      SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+      SelectDefaultSearchEngine(),
+
+      // Default Browser step: back navigation should be ignored.
+      If([this]() { return !UseRevampedView(); },
+         Then(Steps(
+             WaitForWebContentsNavigation(
+                 kWebContentsId, GURL(chrome::kChromeUIIntroDefaultBrowserURL)),
+             EnsurePresent(kWebContentsId,
+                           GetConfirmDefaultBrowserButtonQuery()),
+             SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+             EnsurePresent(kWebContentsId,
+                           GetConfirmDefaultBrowserButtonQuery()),
+             PressJsButton(kWebContentsId,
+                           GetConfirmDefaultBrowserButtonQuery())))),
+
+      // Finish or Continue step: back navigation should be ignored.
+      If([this]() { return UseRevampedView(); },
+         Then(Steps(
+             WaitForWebContentsNavigation(kWebContentsId,
+                                          GetFinishOrContinueURL()),
+             EnsurePresent(kWebContentsId,
+                           GetFinishOrContinueStartBrowsingButtonQuery()),
+             SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+             EnsurePresent(kWebContentsId,
+                           GetFinishOrContinueStartBrowsingButtonQuery()),
+             PressJsButton(kWebContentsId,
+                           GetFinishOrContinueStartBrowsingButtonQuery())))));
+
+  WaitForPickerClosed();
+  EXPECT_TRUE(proceed_future.Get());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         FirstRunBackNavigationInteractiveUiTest,
                          Values(FirstRunVersion::Legacy{},
                                 FirstRunVersion::Refreshed{},
                                 FirstRunVersion::Revamped{}),
@@ -1445,10 +1569,8 @@ IN_PROC_BROWSER_TEST_P(FirstRunParameterizedInteractiveUiTest,
       // is managed and requiring to show the enterprise management opt-in.
       WaitForWebContentsNavigation(
           kWebContentsId,
-          UseRefreshedView()
-              ? ManagedUserProfileNoticeUI::GetURLForType(
-                    ManagedUserProfileNoticeUI::ScreenType::kFirstRun)
-              : GURL(chrome::kChromeUIManagedUserProfileNoticeUrl)),
+          UseRefreshedView() ? GURL(chrome::kChromeUIManagedUserProfileNoticeRefreshURL)
+                             : GURL(chrome::kChromeUIManagedUserProfileNoticeUrl)),
       EnsurePresent(kWebContentsId, GetDeclineManagementButtonQuery()),
       PressJsButton(kWebContentsId, GetDeclineManagementButtonQuery()),
 
@@ -1898,7 +2020,7 @@ class FirstRunWithHatsInteractiveUiTest
     FirstRunInteractiveUiBaseTest::SetUpOnMainThread();
     mock_hats_service_ = static_cast<MockHatsService*>(
         HatsServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-            CHECK_DEREF(browser()).profile(),
+            CHECK_DEREF(browser()).GetProfile(),
             base::BindRepeating(&BuildMockHatsService)));
   }
 
@@ -2145,8 +2267,7 @@ IN_PROC_BROWSER_TEST_P(FirstRunWithHatsInteractiveUiTestWithSyncService,
       WaitForWebContentsNavigation(
           kWebContentsId,
           UseRefreshedView()
-              ? ManagedUserProfileNoticeUI::GetURLForType(
-                    ManagedUserProfileNoticeUI::ScreenType::kFirstRun)
+              ? GURL(chrome::kChromeUIManagedUserProfileNoticeRefreshURL)
               : GURL(chrome::kChromeUIManagedUserProfileNoticeUrl)),
       EnsurePresent(kWebContentsId, GetAcceptManagementButtonQuery()),
       PressJsButton(kWebContentsId, GetAcceptManagementButtonQuery()),
@@ -2414,6 +2535,11 @@ class FirstRunRevampInteractiveUiTest : public FirstRunInteractiveUiBaseTest {
             fixture_enabled_features,
             fixture_disabled_features) {}
 
+  explicit FirstRunRevampInteractiveUiTest(bool sound_enabled)
+      : FirstRunInteractiveUiBaseTest(TestParam{
+            .flow_version =
+                FirstRunVersion::Revamped{.sound_enabled = sound_enabled}}) {}
+
  protected:
   GURL GetFeatureShowcaseUrl() const {
     return net::AppendQueryParameter(
@@ -2607,8 +2733,7 @@ class FirstRunRevampPostSignInInteractiveUiTest
 
   GURL GetPostSignInPageUrl() const {
     if (is_managed()) {
-      return ManagedUserProfileNoticeUI::GetURLForType(
-          ManagedUserProfileNoticeUI::ScreenType::kFirstRun);
+      return GURL(chrome::kChromeUIManagedUserProfileNoticeRefreshURL);
     }
     return GURL(chrome::kChromeUIIntroURL)
         .Resolve(chrome::kChromeUIIntroSignInCelebrationSubPage);
@@ -2875,6 +3000,44 @@ IN_PROC_BROWSER_TEST_F(FirstRunRevampInteractiveUiTest,
 }
 
 IN_PROC_BROWSER_TEST_F(FirstRunRevampInteractiveUiTest,
+                       BackNavigationDisabledDuringFeatureShowcase) {
+  ASSERT_TRUE(fre_service()->ShouldOpenFirstRun());
+
+  base::test::TestFuture<bool> proceed_future;
+  OpenFirstRun(proceed_future.GetCallback());
+  RunTestSequenceInContext(
+      views::ElementTrackerViews::GetContextForView(view()),
+      WaitForShow(kProfilePickerViewId),
+      InstrumentNonTabWebView(kWebContentsId, web_view()),
+      CompleteIntroStep(/*sign_in=*/false),
+
+      WaitForWebContentsNavigation(kWebContentsId, GetFeatureShowcaseUrl()),
+      WaitForButtonEnabled(kWebContentsId,
+                           GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+      EnsurePresent(kWebContentsId,
+                    GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+      // Send back accelerator on Default Browser step; should be ignored.
+      SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+      PressJsButton(kWebContentsId,
+                    GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+
+      WaitForButtonEnabled(kWebContentsId,
+                           GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+      EnsurePresent(kWebContentsId,
+                    GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+      // Send back accelerator on Google Lens step; should be ignored.
+      SendAccelerator(kProfilePickerViewId, GetAccelerator(IDC_BACK)),
+      PressJsButton(kWebContentsId,
+                    GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+
+      CompleteFinishOrContinueStep());
+
+  WaitForPickerClosed();
+
+  EXPECT_TRUE(proceed_future.Get());
+}
+
+IN_PROC_BROWSER_TEST_F(FirstRunRevampInteractiveUiTest,
                        AllSetSoundPlaysOnFinishOrContinueStep) {
   ASSERT_TRUE(fre_service()->ShouldOpenFirstRun());
 
@@ -3038,6 +3201,69 @@ IN_PROC_BROWSER_TEST_F(FirstRunRevampInteractiveUiTest,
       GURL(whats_new::kChromeWhatsNewURL).Resolve("archive/"));
 }
 
+class FirstRunRevampSoundDisabledInteractiveUiTest
+    : public FirstRunRevampInteractiveUiTest {
+ public:
+  FirstRunRevampSoundDisabledInteractiveUiTest()
+      : FirstRunRevampInteractiveUiTest(/*sound_enabled=*/false) {}
+};
+
+IN_PROC_BROWSER_TEST_F(FirstRunRevampSoundDisabledInteractiveUiTest,
+                       EffectsButtonHiddenAndNoSound) {
+  ASSERT_TRUE(fre_service()->ShouldOpenFirstRun());
+
+  base::MockCallback<FirstRunFlowController::SoundsManagerFactory>
+      mock_sounds_factory;
+  EXPECT_CALL(mock_sounds_factory, Run).Times(0);
+
+  base::AutoReset<FirstRunFlowController::SoundsManagerFactory>
+      sounds_factory_reset =
+          FirstRunFlowController::SetSoundsManagerFactoryForTesting(
+              mock_sounds_factory.Get());
+
+  // No sounds should play since `kFirstRunDesktopRevampSound` is disabled (i.e.
+  // the factory should never be called).
+
+  base::test::TestFuture<bool> proceed_future;
+  OpenFirstRun(proceed_future.GetCallback());
+
+  RunTestSequenceInContext(
+      views::ElementTrackerViews::GetContextForView(view()),
+      WaitForShow(kProfilePickerViewId),
+      InstrumentNonTabWebView(kWebContentsId, web_view()),
+      // Effects button should be present on the intro step (to disable
+      // animations).
+      WaitForShow(kProfilePickerToolbarEffectsControlButtonElementId),
+      CompleteIntroStep(/*sign_in=*/false),
+      WaitForWebContentsNavigation(kWebContentsId, GetFeatureShowcaseUrl()),
+      // Effects button should not be present on the feature showcase step.
+      EnsureNotPresent(kProfilePickerToolbarEffectsControlButtonElementId),
+      WaitForButtonEnabled(kWebContentsId,
+                           GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+      EnsurePresent(kWebContentsId,
+                    GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+      PressJsButton(kWebContentsId,
+                    GetFeatureShowcaseDefaultBrowserSkipButtonQuery()),
+      WaitForButtonEnabled(kWebContentsId,
+                           GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+      EnsurePresent(kWebContentsId,
+                    GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+      PressJsButton(kWebContentsId,
+                    GetFeatureShowcaseGoogleLensSkipButtonQuery()),
+      // Now wait for navigation to finish or continue step.
+      WaitForWebContentsNavigation(kWebContentsId, GetFinishOrContinueURL()),
+      // Effects button should be present on the finish or continue step (to
+      // disable animations).
+      WaitForShow(kProfilePickerToolbarEffectsControlButtonElementId),
+      EnsurePresent(kWebContentsId,
+                    GetFinishOrContinueStartBrowsingButtonQuery()),
+      PressJsButton(kWebContentsId,
+                    GetFinishOrContinueStartBrowsingButtonQuery()));
+
+  WaitForPickerClosed();
+  EXPECT_TRUE(proceed_future.Get());
+}
+
 class FirstRunRevampTurnOnSyncCelebrationInteractiveUiTest
     : public FirstRunRevampInteractiveUiTest {
  public:
@@ -3092,9 +3318,7 @@ IN_PROC_BROWSER_TEST_F(
       // bypassing Sign-in Celebration.
       WaitForWebContentsNavigation(
           kWebContentsId,
-          ManagedUserProfileNoticeUI::GetURLForType(
-              ManagedUserProfileNoticeUI::ScreenType::
-                  kConsumerAccountSyncDisabled)),
+          GURL(chrome::kChromeUIManagedUserProfileNoticeRefreshURL)),
       WaitForStateChange(
           kWebContentsId,
           IsVisible({"managed-user-profile-notice-app-refresh"})),

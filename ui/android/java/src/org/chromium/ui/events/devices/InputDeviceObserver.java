@@ -9,7 +9,6 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import android.content.Context;
 import android.hardware.input.InputManager;
 import android.hardware.input.InputManager.InputDeviceListener;
-import android.util.ArrayMap;
 import android.view.InputDevice;
 
 import org.jni_zero.CalledByNative;
@@ -18,25 +17,19 @@ import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 
+import java.util.ArrayList;
+
 /**
- * A singleton that helps detecting changes in input devices through the interface
- * {@link InputDeviceObserver}.
+ * A singleton that helps detecting changes in input devices through the interface {@link
+ * InputDeviceObserver}.
  */
 @JNINamespace("ui")
 @NullMarked
 public class InputDeviceObserver implements InputDeviceListener {
     private static final InputDeviceObserver INSTANCE = new InputDeviceObserver();
-    private static final String KEYBOARD_CONNECTION_HISTOGRAM_NAME =
-            "Android.InputDevice.Keyboard.Active";
-    private static final String MOUSE_CONNECTION_HISTOGRAM_NAME =
-            "Android.InputDevice.Mouse.Active";
-
-    // Map to store the <deviceId, InputDevice.SOURCE*> information for an active/connected device.
-    private final ArrayMap<Integer, Integer> mActiveDeviceMap = new ArrayMap<>();
 
     /**
      * Notifies the InputDeviceObserver that an observer is attached and it
@@ -67,29 +60,11 @@ public class InputDeviceObserver implements InputDeviceListener {
     @Override
     public void onInputDeviceRemoved(int deviceId) {
         InputDeviceObserverJni.get().inputConfigurationChanged();
-        // InputDevice#getDevice() returns null for a removed device, and therefore we will use the
-        // |mActiveDeviceMap| to determine the source type of the removed device.
-        if (!mActiveDeviceMap.containsKey(deviceId)) return;
-        if (mActiveDeviceMap.get(deviceId) == InputDevice.SOURCE_KEYBOARD) {
-            RecordHistogram.recordBooleanHistogram(KEYBOARD_CONNECTION_HISTOGRAM_NAME, false);
-        } else if (mActiveDeviceMap.get(deviceId) == InputDevice.SOURCE_MOUSE) {
-            RecordHistogram.recordBooleanHistogram(MOUSE_CONNECTION_HISTOGRAM_NAME, false);
-        }
-        mActiveDeviceMap.remove(deviceId);
     }
 
     @Override
     public void onInputDeviceAdded(int deviceId) {
         InputDeviceObserverJni.get().inputConfigurationChanged();
-        var device = InputDevice.getDevice(deviceId);
-        if (device == null) return;
-        if ((device.getSources() & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD) {
-            mActiveDeviceMap.put(deviceId, InputDevice.SOURCE_KEYBOARD);
-            RecordHistogram.recordBooleanHistogram(KEYBOARD_CONNECTION_HISTOGRAM_NAME, true);
-        } else if ((device.getSources() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) {
-            mActiveDeviceMap.put(deviceId, InputDevice.SOURCE_MOUSE);
-            RecordHistogram.recordBooleanHistogram(MOUSE_CONNECTION_HISTOGRAM_NAME, true);
-        }
     }
 
     private void attachObserver() {
@@ -107,6 +82,142 @@ public class InputDeviceObserver implements InputDeviceListener {
             assumeNonNull(mInputManager);
             mInputManager.unregisterInputDeviceListener(this);
             mInputManager = null;
+        }
+    }
+
+    @CalledByNative
+    public static InputDeviceData[] getKeyboards() {
+        ArrayList<InputDeviceData> devices = new ArrayList<>();
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice device = getValidDevice(deviceId);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+                    && device.getKeyboardType() == InputDevice.KEYBOARD_TYPE_ALPHABETIC) {
+                devices.add(createDeviceData(device));
+            }
+        }
+        return devices.toArray(new InputDeviceData[0]);
+    }
+
+    @CalledByNative
+    public static InputDeviceData[] getMice() {
+        ArrayList<InputDeviceData> devices = new ArrayList<>();
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice device = getValidDevice(deviceId);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) {
+                devices.add(createDeviceData(device));
+            }
+        }
+        return devices.toArray(new InputDeviceData[0]);
+    }
+
+    @CalledByNative
+    public static InputDeviceData[] getTouchpads() {
+        ArrayList<InputDeviceData> devices = new ArrayList<>();
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice device = getValidDevice(deviceId);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD) {
+                devices.add(createDeviceData(device));
+            }
+        }
+        return devices.toArray(new InputDeviceData[0]);
+    }
+
+    @CalledByNative
+    public static InputDeviceData[] getTouchscreens() {
+        ArrayList<InputDeviceData> devices = new ArrayList<>();
+        for (int deviceId : InputDevice.getDeviceIds()) {
+            InputDevice device = getValidDevice(deviceId);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_TOUCHSCREEN) == InputDevice.SOURCE_TOUCHSCREEN) {
+                devices.add(createDeviceData(device));
+            }
+        }
+        return devices.toArray(new InputDeviceData[0]);
+    }
+
+    private static @Nullable InputDevice getValidDevice(int deviceId) {
+        assert deviceId < 1000000 : "Device ID " + deviceId + " exceeds 1M limit!";
+        InputDevice device = null;
+        try {
+            device = InputDevice.getDevice(deviceId);
+        } catch (RuntimeException e) {
+            // Swallow the exception. See crbug.com/781377.
+        }
+        if (device == null || !device.isEnabled()) {
+            return null;
+        }
+        return device;
+    }
+
+    private static InputDeviceData createDeviceData(InputDevice device) {
+        return new InputDeviceData(
+                device.getId(),
+                device.getName(),
+                device.isExternal(),
+                device.isVirtual(),
+                device.getVendorId(),
+                device.getProductId());
+    }
+
+    public static class InputDeviceData {
+        private final int mId;
+        private final String mName;
+        private final boolean mIsExternal;
+        private final boolean mIsVirtual;
+        private final int mVendorId;
+        private final int mProductId;
+
+        @CalledByNative
+        public InputDeviceData(
+                int id,
+                String name,
+                boolean isExternal,
+                boolean isVirtual,
+                int vendorId,
+                int productId) {
+            mId = id;
+            mName = name;
+            mIsExternal = isExternal;
+            mIsVirtual = isVirtual;
+            mVendorId = vendorId;
+            mProductId = productId;
+        }
+
+        @CalledByNative
+        public int getId() {
+            return mId;
+        }
+
+        @CalledByNative
+        public String getName() {
+            return mName;
+        }
+
+        @CalledByNative
+        public boolean isExternal() {
+            return mIsExternal;
+        }
+
+        @CalledByNative
+        public boolean isVirtual() {
+            return mIsVirtual;
+        }
+
+        @CalledByNative
+        public int getVendorId() {
+            return mVendorId;
+        }
+
+        @CalledByNative
+        public int getProductId() {
+            return mProductId;
         }
     }
 

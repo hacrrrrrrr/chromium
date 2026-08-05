@@ -49,6 +49,20 @@ BASE_FEATURE(kCustomizeChromeWallpaperSearchInspirationCard,
 // If enabled, the EnergyEffect for Realbox will be shown.
 BASE_FEATURE(kEnergyEffect, base::FEATURE_DISABLED_BY_DEFAULT);
 
+const base::FeatureParam<EnergyEffectVariant>::Option
+    kEnergyEffectVariantOptions[] = {
+        {EnergyEffectVariant::kEnergyEffectOriginal, "energy-effect-original"},
+        {EnergyEffectVariant::kEnergyEffectDarkerShadow,
+         "energy-effect-darker-shadow"},
+        {EnergyEffectVariant::kPreEnergyEffectWithBorder,
+         "pre-energy-effect-with-border"},
+        {EnergyEffectVariant::kEnergyEffectFusebox, "energy-effect-fusebox"},
+};
+
+const base::FeatureParam<EnergyEffectVariant> kEnergyEffectVariantParam{
+    &kEnergyEffect, "EnergyEffectVariantParam",
+    EnergyEffectVariant::kEnergyEffectOriginal, &kEnergyEffectVariantOptions};
+
 // If enabled, the EnergyEffect animation for Realbox will be shown.
 BASE_FEATURE(kEnergyEffectAnimation, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -122,6 +136,9 @@ BASE_FEATURE(kNtpDriveModuleLink, base::FEATURE_DISABLED_BY_DEFAULT);
 // show the Drive module.
 BASE_FEATURE(kNtpDriveModuleSegmentation, base::FEATURE_DISABLED_BY_DEFAULT);
 
+// If enabled, branded NTPs use the 2026 version of the Google logo.
+BASE_FEATURE(kNtpGoogleLogo26, base::FEATURE_DISABLED_BY_DEFAULT);
+
 // If enabled, logo will be shown.
 // This is a kill switch. Keep indefinitely.
 BASE_FEATURE(kNtpLogo, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -180,6 +197,14 @@ BASE_FEATURE(kNtpOutlookCalendarModule,
 #else
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
+
+// If enabled, scaled merchandising action chips (e.g., dynamic tool
+// suggestions and resource pickers) will be shown on the NTP.
+BASE_FEATURE(kNtpScaledActionChips, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, scaled merchandising action chips will be in a smaller format.
+// Requires #ntp-scaled-action-chips to be enabled too.
+BASE_FEATURE(kNtpScaledActionChipsSmall, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, sharepoint module will be shown.
 BASE_FEATURE(kNtpSharepointModule,
@@ -245,7 +270,7 @@ BASE_FEATURE(kNtpMicrosoftAuthenticationModule,
 #endif
 
 // If enabled, the features of NTP Next (AI action chips etc.) will be shown.
-BASE_FEATURE(kNtpNextFeatures, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kNtpNextFeatures, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the Canvas action chip will be shown.
 BASE_FEATURE(kNtpNextCanvasChip, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -304,7 +329,7 @@ BASE_FEATURE(kNtpDoodleMurals, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kNtpAnimatedCaret, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, adds a Whats New Page Edition for Next Features.
-BASE_FEATURE(kLightningTakeoverEdition, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kLightningTakeoverEdition, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // If enabled, the shortcuts will be redesigned.
 BASE_FEATURE(kNtpShortcutsRedesign, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -406,6 +431,10 @@ const base::FeatureParam<bool> kAddTabUploadDelayOnActionChipClick(
     &ntp_features::kNtpNextFeatures,
     "AddTabUploadDelayOnActionChipClick",
     false);
+const base::FeatureParam<int> kNtpMaxSmallChips(
+    &ntp_features::kNtpScaledActionChipsSmall,
+    "kNtpMaxSmallChips",
+    6);
 
 const base::FeatureParam<int> kNtpCustomizeChromeAutoShownMaxCount(
     &ntp_features::kNtpCustomizeChromeAutoOpen,

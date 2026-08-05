@@ -84,6 +84,7 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_handle.h"
 #include "net/base/network_isolation_key.h"
+#include "net/base/pickle.h"
 #include "net/base/proxy_chain.h"
 #include "net/base/proxy_server.h"
 #include "net/base/proxy_string_util.h"
@@ -128,6 +129,7 @@
 #include "net/dns/resolve_context.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_cache.h"
+#include "net/http/http_cache_invalidation_pickle_traits.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_server_properties_manager.h"
@@ -370,12 +372,23 @@ disk_cache::Backend* WaitForCacheBackend(NetworkContext& network_context) {
                               ->GetCache();
   EXPECT_TRUE(cache);
 
-  net::TestGetBackendCompletionCallback callback;
-  net::HttpCache::GetBackendResult result =
-      cache->GetBackend(callback.callback());
-  result = callback.GetResult(result);
-  EXPECT_EQ(net::OK, result.first);
-  return result.second;
+  disk_cache::Backend* backend = cache->GetCurrentBackend();
+  if (!backend) {
+    base::test::TestFuture<disk_cache::Backend*> future;
+    auto [rv, got_backend] = cache->GetBackend(base::BindOnce(
+        [](base::OnceCallback<void(disk_cache::Backend*)> cb,
+           net::HttpCache::GetBackendResult result) {
+          std::move(cb).Run(result.second);
+        },
+        future.GetCallback()));
+    if (rv == net::OK) {
+      backend = got_backend;
+    } else {
+      backend = future.Get();
+    }
+  }
+  EXPECT_TRUE(backend);
+  return backend;
 }
 
 // proxy_resolver::mojom::ProxyResolverFactory that captures the most recent PAC
@@ -2609,6 +2622,44 @@ TEST_F(NetworkContextTest, MultipleClearHttpCacheCalls) {
   // If all the callbacks were invoked, we should terminate.
 }
 
+TEST_F(NetworkContextTest, DestroyWithPendingHttpCacheDataRemovers) {
+  // Force Simple Cache to avoid memory leaks reported on Fuchsia and Windows
+  // ASan bots. The legacy Blockfile backend intentionally drops in-flight tasks
+  // during non-test teardown via DropPendingIO(), which AddressSanitizer flags
+  // as leaks. Using Simple Cache tests NetworkContext teardown without legacy
+  // blockfile interference.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      net::features::kDiskCacheBackendExperiment, {{"backend", "simple"}});
+
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  context_params->file_paths->http_cache_directory = temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  bool callback_called = false;
+  network_context->ClearHttpCache(
+      base::Time(), base::Time(), nullptr /* filter */,
+      base::BindOnce([](bool* called) { *called = true; }, &callback_called));
+
+  // Destroy the NetworkContext while HttpCacheDataRemover operations are
+  // in-flight.
+  network_context.reset();
+
+  // Run pending tasks to ensure clean teardown without dangling pointers or
+  // races.
+  task_environment_.RunUntilIdle();
+
+  EXPECT_FALSE(callback_called);
+}
+
 TEST_F(NetworkContextTest, LogicalClearHttpCache) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(net::features::kLogicalClearHttpCache);
@@ -2635,6 +2686,411 @@ TEST_F(NetworkContextTest, LogicalClearHttpCache) {
                                   physical_future.GetCallback());
   EXPECT_TRUE(physical_future.Wait());
   histograms.ExpectBucketCount("NetworkService.ClearHttpCacheMode", 0, 1);
+}
+
+namespace {
+
+void WritePickleFiltersToFile(
+    const base::FilePath& path,
+    const std::vector<net::HttpCache::InvalidationFilter>& filters) {
+  base::Pickle pickle;
+  net::WriteToPickle(pickle, filters);
+  ASSERT_TRUE(base::WriteFile(path, pickle.AsBytes()));
+}
+
+std::string GetRequestCacheKey(const std::string& url_string) {
+  net::HttpRequestInfo request_info;
+  request_info.url = GURL(url_string);
+  return net::HttpCache::GenerateCacheKeyForRequest(&request_info).value_or("");
+}
+
+void CreateCacheEntry(disk_cache::Backend* backend, const std::string& key) {
+  base::test::TestFuture<disk_cache::EntryResult> future;
+  disk_cache::EntryResult result =
+      backend->CreateEntry(key, net::HIGHEST, future.GetCallback());
+  if (result.net_error() == net::ERR_IO_PENDING) {
+    result = future.Take();
+  }
+  ASSERT_EQ(net::OK, result.net_error());
+  result.ReleaseEntry()->Close();
+}
+
+int OpenEntryError(disk_cache::Backend* backend, const std::string& key) {
+  base::test::TestFuture<disk_cache::EntryResult> future;
+  disk_cache::EntryResult result =
+      backend->OpenEntry(key, net::HIGHEST, future.GetCallback());
+  if (result.net_error() == net::ERR_IO_PENDING) {
+    result = future.Take();
+  }
+  int error = result.net_error();
+  if (error == net::OK) {
+    result.ReleaseEntry()->Close();
+  }
+  return error;
+}
+
+std::vector<net::HttpCache::InvalidationFilter> LoadFiltersFromStore(
+    LogicalInvalidationStore* store) {
+  base::test::TestFuture<LogicalInvalidationStore::LoadResult,
+                         std::vector<net::HttpCache::InvalidationFilter>>
+      future;
+  store->Load(future.GetCallback());
+  EXPECT_EQ(LogicalInvalidationStore::LoadResult::kSuccess, future.Get<0>());
+  return future.Get<1>();
+}
+
+}  // namespace
+
+TEST_F(NetworkContextTestWithMockTime, LogicalInvalidationStartupPurge) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(net::features::kLogicalClearHttpCache);
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // 1. Write a persistent invalidation filter targeting stale.example.com to
+  // disk.
+  base::FilePath invalidation_file =
+      temp_dir.GetPath().AppendASCII("invalidation_filters");
+
+  net::HttpCache::InvalidationFilter filter;
+  filter.begin_time = base::Time();
+  filter.end_time = base::Time::Max();
+  filter.filter_type = net::UrlFilterType::kTrueIfMatches;
+  filter.origins.insert(url::Origin::Create(GURL("https://stale.example.com")));
+
+  WritePickleFiltersToFile(invalidation_file, {filter});
+
+  // 2. Create a NetworkContext with this persistent directory and cache
+  // enabled.
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+  context_params->file_paths->logical_invalidation_directory =
+      temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  net::HttpCache* cache = network_context->url_request_context()
+                              ->http_transaction_factory()
+                              ->GetCache();
+  ASSERT_TRUE(cache);
+
+  // 1. Get the HTTP cache backend. This initializes it, but the Load() task is
+  // still blocked/queued in the ThreadPool!
+  disk_cache::Backend* backend = WaitForCacheBackend(*network_context);
+  ASSERT_TRUE(backend);
+
+  // Create two entries in the cache backend:
+  // entry1: https://stale.example.com/index.html (should be purged)
+  // entry2: https://fresh.example.com/index.html (should remain)
+  std::string url1 = GetRequestCacheKey("https://stale.example.com/index.html");
+  std::string url2 = GetRequestCacheKey("https://fresh.example.com/index.html");
+  CreateCacheEntry(backend, url1);
+  CreateCacheEntry(backend, url2);
+
+  // Confirm both entries are currently in the backend.
+  {
+    base::test::TestFuture<int32_t> future;
+    base::expected<int32_t, net::Error> entry_count =
+        backend->GetEntryCount(future.GetCallback());
+    if (!entry_count.has_value()) {
+      entry_count = base::ok(future.Get());
+    }
+    EXPECT_EQ(2, entry_count.value());
+  }
+
+  // 3. Now flush the ThreadPool to let the startup Load() task finish reading.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+
+  // 4. Execute the Load reply (OnInvalidationFiltersLoaded) on the main thread.
+  // This merges filters and starts the physical dooming tasks synchronously
+  // (since the cache backend is already fully initialized!).
+  base::RunLoop run_loop_load;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, run_loop_load.QuitClosure());
+  run_loop_load.Run();
+
+  // 4. Verify entry1 (stale.example.com) was physically purged!
+  task_environment_.RunUntilIdle();
+  EXPECT_EQ(net::ERR_FAILED, OpenEntryError(backend, url1));
+  EXPECT_EQ(net::OK, OpenEntryError(backend, url2));
+
+  EXPECT_EQ(0u, cache->GetInvalidationFilterCountForTesting());
+
+  // 5. Verify that the persistence file on disk was updated to contain 0
+  // filters.
+  EXPECT_TRUE(LoadFiltersFromStore(network_context->logical_invalidation_store())
+                  .empty());
+}
+
+TEST_F(NetworkContextTestWithMockTime, LogicalInvalidationStartupAddRace) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(net::features::kLogicalClearHttpCache);
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Pre-populate disk with filter_old targeting stale.example.com.
+  base::FilePath invalidation_file =
+      temp_dir.GetPath().AppendASCII("invalidation_filters");
+
+  net::HttpCache::InvalidationFilter filter_old;
+  filter_old.begin_time = base::Time();
+  filter_old.end_time = base::Time::Max();
+  filter_old.filter_type = net::UrlFilterType::kTrueIfMatches;
+  filter_old.origins.insert(
+      url::Origin::Create(GURL("https://stale.example.com")));
+
+  WritePickleFiltersToFile(invalidation_file, {filter_old});
+
+  // 1. Initialize NetworkContext. This starts async Load() (queued on
+  // ThreadPool).
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+  context_params->file_paths->logical_invalidation_directory =
+      temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  net::HttpCache* cache = network_context->url_request_context()
+                              ->http_transaction_factory()
+                              ->GetCache();
+  ASSERT_TRUE(cache);
+
+  // 2. Get the HTTP cache backend immediately to create entries before startup
+  // Load() completes.
+  disk_cache::Backend* backend = WaitForCacheBackend(*network_context);
+  ASSERT_TRUE(backend);
+
+  // 3. Create three entries in the cache backend:
+  // entry1: https://stale.example.com/index.html (should be purged via
+  // filter_old)
+  // entry2: https://dynamic.example.com/index.html (should be purged via
+  // filter_new)
+  // entry3: https://fresh.example.com/index.html (should remain)
+  std::string url1 = GetRequestCacheKey("https://stale.example.com/index.html");
+  std::string url2 =
+      GetRequestCacheKey("https://dynamic.example.com/index.html");
+  std::string url3 = GetRequestCacheKey("https://fresh.example.com/index.html");
+  CreateCacheEntry(backend, url1);
+  CreateCacheEntry(backend, url2);
+  CreateCacheEntry(backend, url3);
+
+  // 4. IMMEDIATELY dynamically add filter_new (still loading!).
+  // Since Load() hasn't run, this will be queued in pending_additions_!
+  mojom::ClearDataFilterPtr filter_new = mojom::ClearDataFilter::New();
+  filter_new->type = mojom::ClearDataFilter_Type::DELETE_MATCHES;
+  filter_new->origins.push_back(
+      url::Origin::Create(GURL("https://dynamic.example.com")));
+  network_context->ClearHttpCacheLogically(base::Time(), base::Time::Max(),
+                                           std::move(filter_new),
+                                           base::DoNothing());
+
+  // 5. Flush ThreadPool to let startup Load() finish reading and post its
+  // reply.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+
+  // 6. Run the message loop until the Load reply executes.
+  base::RunLoop run_loop_load;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, run_loop_load.QuitClosure());
+  run_loop_load.Run();
+
+  // Verify entry1 (stale) and entry2 (dynamic) were physically purged!
+  task_environment_.RunUntilIdle();
+  EXPECT_EQ(net::ERR_FAILED, OpenEntryError(backend, url1));
+  EXPECT_EQ(net::ERR_FAILED, OpenEntryError(backend, url2));
+
+  // Verify entry3 (fresh) remains active!
+  EXPECT_EQ(net::OK, OpenEntryError(backend, url3));
+
+  // Verify memory has cleanly cleared both filters.
+  EXPECT_EQ(0u, cache->GetInvalidationFilterCountForTesting());
+
+  // Verify disk file is updated and empty.
+  EXPECT_TRUE(LoadFiltersFromStore(network_context->logical_invalidation_store())
+                  .empty());
+}
+
+TEST_F(NetworkContextTestWithMockTime, LogicalInvalidationStartupRemoveRace) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(net::features::kLogicalClearHttpCache);
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Pre-populate disk with filter2 (example2.com).
+  base::FilePath invalidation_file =
+      temp_dir.GetPath().AppendASCII("invalidation_filters");
+
+  auto create_filter = [](const std::string& url_str) {
+    net::HttpCache::InvalidationFilter filter;
+    filter.begin_time = base::Time();
+    filter.end_time = base::Time::Max();
+    filter.filter_type = net::UrlFilterType::kTrueIfMatches;
+    filter.origins.insert(url::Origin::Create(GURL(url_str)));
+    return filter;
+  };
+
+  net::HttpCache::InvalidationFilter filter2 =
+      create_filter("https://example2.com");
+  WritePickleFiltersToFile(invalidation_file, {filter2});
+
+  // Initialize NetworkContext.
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+  context_params->file_paths->logical_invalidation_directory =
+      temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  net::HttpCache* cache = network_context->url_request_context()
+                              ->http_transaction_factory()
+                              ->GetCache();
+  ASSERT_TRUE(cache);
+
+  // 2. Get the HTTP cache backend immediately to create entries.
+  disk_cache::Backend* backend = WaitForCacheBackend(*network_context);
+  ASSERT_TRUE(backend);
+
+  // 3. Create two entries in cache immediately (at mock time T_0).
+  std::string url1 = GetRequestCacheKey("https://example1.com/index.html");
+  std::string url2 = GetRequestCacheKey("https://example2.com/index.html");
+  CreateCacheEntry(backend, url1);
+  CreateCacheEntry(backend, url2);
+
+  // 4. IMMEDIATELY dynamically add filter1 (example1.com) and remove filter2
+  // (example2.com) before startup load completes!
+  mojom::ClearDataFilterPtr filter_ptr = mojom::ClearDataFilter::New();
+  filter_ptr->type = mojom::ClearDataFilter_Type::DELETE_MATCHES;
+  filter_ptr->origins.push_back(
+      url::Origin::Create(GURL("https://example1.com")));
+
+  network_context->ClearHttpCacheLogically(base::Time(), base::Time::Max(),
+                                           std::move(filter_ptr),
+                                           base::DoNothing());
+
+  network_context->OnLogicalFilterRemoved(filter2);
+  cache->RemoveInvalidationFilter(filter2);
+
+  // 5. Advance mock time and flush ThreadPool to let startup Load() and physical
+  // dooming complete.
+  task_environment_.FastForwardBy(base::Seconds(1));
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+
+  // 6. Execute the Load reply (OnInvalidationFiltersLoaded) on the main thread.
+  base::RunLoop run_loop_load;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, run_loop_load.QuitClosure());
+  run_loop_load.Run();
+
+  // Verify entry1 (example1) was purged and entry2 (example2) was preserved!
+  task_environment_.RunUntilIdle();
+  EXPECT_EQ(net::ERR_FAILED, OpenEntryError(backend, url1));
+  EXPECT_EQ(net::OK, OpenEntryError(backend, url2));
+
+  // Verify memory is clean.
+  EXPECT_EQ(0u, cache->GetInvalidationFilterCountForTesting());
+
+  // Verify disk file is clean.
+  EXPECT_TRUE(LoadFiltersFromStore(network_context->logical_invalidation_store())
+                  .empty());
+}
+
+TEST_F(NetworkContextTestWithMockTime, LogicalInvalidationStartupBatchSaves) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(net::features::kLogicalClearHttpCache);
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  // Pre-populate disk with filter_old.
+  base::FilePath invalidation_file =
+      temp_dir.GetPath().AppendASCII("invalidation_filters");
+
+  auto create_filter = [](const std::string& url_str) {
+    net::HttpCache::InvalidationFilter filter;
+    filter.begin_time = base::Time();
+    filter.end_time = base::Time::Max();
+    filter.filter_type = net::UrlFilterType::kTrueIfMatches;
+    filter.origins.insert(url::Origin::Create(GURL(url_str)));
+    return filter;
+  };
+
+  net::HttpCache::InvalidationFilter filter_old =
+      create_filter("https://stale.example.com");
+
+  WritePickleFiltersToFile(invalidation_file, {filter_old});
+
+  // Initialize NetworkContext.
+  mojom::NetworkContextParamsPtr context_params =
+      CreateNetworkContextParamsForTesting();
+  context_params->file_paths = mojom::NetworkContextFilePaths::New();
+  context_params->http_cache_enabled = true;
+  context_params->file_paths->logical_invalidation_directory =
+      temp_dir.GetPath();
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(std::move(context_params));
+
+  net::HttpCache* cache = network_context->url_request_context()
+                              ->http_transaction_factory()
+                              ->GetCache();
+  ASSERT_TRUE(cache);
+
+  // Setup Histogram Tester to monitor write operations.
+  base::HistogramTester histograms;
+
+  // IMMEDIATELY perform multiple dynamic changes (during startup load).
+  mojom::ClearDataFilterPtr filter_new1 = mojom::ClearDataFilter::New();
+  filter_new1->type = mojom::ClearDataFilter_Type::KEEP_MATCHES;
+  filter_new1->origins.push_back(url::Origin::Create(GURL("https://new1.com")));
+
+  mojom::ClearDataFilterPtr filter_new2 = mojom::ClearDataFilter::New();
+  filter_new2->type = mojom::ClearDataFilter_Type::KEEP_MATCHES;
+  filter_new2->origins.push_back(url::Origin::Create(GURL("https://new2.com")));
+
+  network_context->ClearHttpCacheLogically(base::Time(), base::Time::Max(),
+                                           std::move(filter_new1),
+                                           base::DoNothing());
+  network_context->ClearHttpCacheLogically(base::Time(), base::Time::Max(),
+                                           std::move(filter_new2),
+                                           base::DoNothing());
+  cache->RemoveInvalidationFilter(filter_old);
+
+  // 1. Flush ThreadPool to let startup Load() finish reading.
+  base::ThreadPoolInstance::Get()->FlushForTesting();
+
+  // 2. Run message loop until the Load reply executes.
+  // This executes OnInvalidationFiltersLoaded.
+  base::RunLoop run_loop4;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, run_loop4.QuitClosure());
+  run_loop4.Run();
+
+  task_environment_.RunUntilIdle();
+
+  // Verify Batch Save:
+  // Assert that the "PersistenceWriteDuration" metric was recorded between 1
+  // and 3 times! (If it was not batched, it would have recorded 7 saves).
+  const char kMetric[] =
+      "Net.HttpCache.LogicalInvalidation.PersistenceWriteDuration";
+  auto counts = histograms.GetTotalCountsForPrefix(kMetric);
+  auto it = counts.find(kMetric);
+  EXPECT_TRUE(it != counts.end() && it->second >= 1);
+
+  // Verify final list on disk matches.
+  EXPECT_TRUE(LoadFiltersFromStore(network_context->logical_invalidation_store())
+                  .empty());
 }
 
 #if BUILDFLAG(ENTERPRISE_CACHE_ENCRYPTION)
@@ -4443,7 +4899,8 @@ TEST_F(NetworkContextTest, CreateNetLogExporter) {
   net::TestCompletionCallback start_callback;
   net_log_exporter->Start(
       std::move(out_file), base::DictValue().Set(kKeyEarly, kValEarly),
-      net::NetLogCaptureMode::kDefault, 100 * 1024, start_callback.callback());
+      net::NetLogCaptureMode::kDefault, net::NetLogFileFormat::kJson,
+      100 * 1024, start_callback.callback());
   EXPECT_EQ(net::OK, start_callback.WaitForResult());
 
   const char kKeyLate[] = "late";
@@ -4469,6 +4926,57 @@ TEST_F(NetworkContextTest, CreateNetLogExporter) {
   EXPECT_NE(std::string::npos, contents.find(kValLate)) << contents;
 }
 
+TEST_F(NetworkContextTest, CreateNetLogExporterNdjson) {
+  // Basic flow around start/stop for NDJSON.
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(CreateNetworkContextParamsForTesting());
+
+  mojo::Remote<mojom::NetLogExporter> net_log_exporter;
+  network_context->CreateNetLogExporter(
+      net_log_exporter.BindNewPipeAndPassReceiver());
+
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  base::FilePath out_path(temp_dir.GetPath().AppendASCII("out.jsonl"));
+  base::File out_file(out_path,
+                      base::File::FLAG_CREATE | base::File::FLAG_WRITE);
+  ASSERT_TRUE(out_file.IsValid());
+
+  const char kKeyEarly[] = "early";
+  const char kValEarly[] = "morning";
+
+  net::TestCompletionCallback start_callback;
+  net_log_exporter->Start(
+      std::move(out_file), base::DictValue().Set(kKeyEarly, kValEarly),
+      net::NetLogCaptureMode::kDefault, net::NetLogFileFormat::kNdjson,
+      100 * 1024, start_callback.callback());
+  EXPECT_EQ(net::OK, start_callback.WaitForResult());
+
+  const char kKeyLate[] = "late";
+  const char kValLate[] = "snowval";
+
+  net::TestCompletionCallback stop_callback;
+  net_log_exporter->Stop(base::DictValue().Set(kKeyLate, kValLate),
+                         stop_callback.callback());
+  EXPECT_EQ(net::OK, stop_callback.WaitForResult());
+
+  // Check that file got written.
+  std::string contents;
+  ASSERT_TRUE(base::ReadFileToString(out_path, &contents));
+
+  // Contents should have net constants in NDJSON format.
+  EXPECT_NE(std::string::npos, contents.find("{\"type\":\"constants\""))
+      << contents;
+  EXPECT_NE(std::string::npos, contents.find("ERR_IO_PENDING")) << contents;
+
+  // The additional stuff inject should also occur.
+  EXPECT_NE(std::string::npos, contents.find(kKeyEarly)) << contents;
+  EXPECT_NE(std::string::npos, contents.find(kValEarly)) << contents;
+  EXPECT_NE(std::string::npos, contents.find(kKeyLate)) << contents;
+  EXPECT_NE(std::string::npos, contents.find(kValLate)) << contents;
+  EXPECT_NE(std::string::npos, contents.find("{\"type\":\"end\"}")) << contents;
+}
+
 TEST_F(NetworkContextTest, CreateNetLogExporterUnbounded) {
   // Make sure that exporting without size limit works.
   std::unique_ptr<NetworkContext> network_context =
@@ -4487,7 +4995,8 @@ TEST_F(NetworkContextTest, CreateNetLogExporterUnbounded) {
   net::TestCompletionCallback start_callback;
   net_log_exporter->Start(
       std::move(out_file), base::DictValue(), net::NetLogCaptureMode::kDefault,
-      mojom::NetLogExporter::kUnlimitedFileSize, start_callback.callback());
+      net::NetLogFileFormat::kJson, mojom::NetLogExporter::kUnlimitedFileSize,
+      start_callback.callback());
   EXPECT_EQ(net::OK, start_callback.WaitForResult());
 
   net::TestCompletionCallback stop_callback;
@@ -4525,9 +5034,9 @@ TEST_F(NetworkContextTest, CreateNetLogExporterErrors) {
   ASSERT_TRUE(temp_file.IsValid());
 
   net::TestCompletionCallback start_callback;
-  net_log_exporter->Start(std::move(temp_file), base::DictValue(),
-                          net::NetLogCaptureMode::kDefault, 100 * 1024,
-                          start_callback.callback());
+  net_log_exporter->Start(
+      std::move(temp_file), base::DictValue(), net::NetLogCaptureMode::kDefault,
+      net::NetLogFileFormat::kJson, 100 * 1024, start_callback.callback());
   EXPECT_EQ(net::OK, start_callback.WaitForResult());
 
   // Can't start twice.
@@ -4539,7 +5048,8 @@ TEST_F(NetworkContextTest, CreateNetLogExporterErrors) {
 
   net::TestCompletionCallback start_callback2;
   net_log_exporter->Start(std::move(temp_file2), base::DictValue(),
-                          net::NetLogCaptureMode::kDefault, 100 * 1024,
+                          net::NetLogCaptureMode::kDefault,
+                          net::NetLogFileFormat::kJson, 100 * 1024,
                           start_callback2.callback());
   EXPECT_EQ(net::ERR_UNEXPECTED, start_callback2.WaitForResult());
 
@@ -4582,9 +5092,9 @@ TEST_F(NetworkContextTest, DestroyNetLogExporterWhileCreatingScratchDir) {
                        base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
   ASSERT_TRUE(temp_file.IsValid());
 
-  net_log_exporter->Start(std::move(temp_file), base::DictValue(),
-                          net::NetLogCaptureMode::kDefault, 100,
-                          base::BindOnce([](int) {}));
+  net_log_exporter->Start(
+      std::move(temp_file), base::DictValue(), net::NetLogCaptureMode::kDefault,
+      net::NetLogFileFormat::kJson, 100, base::BindOnce([](int) {}));
   net_log_exporter = nullptr;
   block_mktemp.Signal();
 
@@ -5932,7 +6442,7 @@ TEST_F(NetworkContextCreateHostResolverTest, WithConfigOverrides) {
                      false /* delay */);
   auto mock_dns_client = std::make_unique<net::MockDnsClient>(
       base_configuration, std::move(rules));
-  mock_dns_client->SetInsecureEnabled(/*enabled=*/true,
+  mock_dns_client->SetInsecureEnabled(net::InsecureDnsMode::kEnabledBuiltIn,
                                       /*additional_types_enabled=*/false);
   mock_dns_client->set_ignore_system_config_changes(true);
   auto* mock_dns_client_ptr = mock_dns_client.get();
@@ -7053,6 +7563,7 @@ TEST_F(NetworkContextTest, ForceReloadProxyConfig) {
     net_log_exporter->Start(
         std::move(net_log_file),
         /*extra_constants=*/base::DictValue(), net::NetLogCaptureMode::kDefault,
+        net::NetLogFileFormat::kJson,
         network::mojom::NetLogExporter::kUnlimitedFileSize, start_callback);
     run_loop.Run();
     EXPECT_EQ(net::OK, start_param);
@@ -10457,11 +10968,69 @@ TEST_F(NetworkContextTest, Prefetch) {
 
   network_context->Prefetch(
       /*request_id=*/0, mojom::kURLLoadOptionNone, request,
-      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
+      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS),
+      GetTestNetworkRestrictionsId());
 
   auto received_request = future.Take();
   EXPECT_EQ(received_request.GetURL(), url);
   EXPECT_EQ(received_request.method, net::test_server::METHOD_GET);
+}
+
+TEST_F(NetworkContextTest, PrefetchBlockedByConnectionAllowlist) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures({features::kNetworkContextPrefetch,
+                                 network::features::kConnectionAllowlists},
+                                {});
+
+  net::EmbeddedTestServer test_server;
+  net::test_server::RegisterDefaultHandlers(&test_server);
+  base::test::TestFuture<const net::test_server::HttpRequest&> request_future;
+  test_server.RegisterRequestMonitor(
+      request_future.GetSequenceBoundRepeatingCallback());
+  ASSERT_TRUE(test_server.Start());
+
+  std::unique_ptr<NetworkContext> network_context =
+      CreateContextWithParams(CreateNetworkContextParamsForTesting());
+
+  const base::UnguessableToken network_restrictions_id =
+      base::UnguessableToken::Create();
+
+  // Create an empty connection allowlist associated with the network
+  // restriction id (blocking everything).
+  base::test::TestFuture<void> revoked;
+  auto revoked_nonce_pattern =
+      CreateIdAndAllowlistedPatterns(network_restrictions_id);
+  std::vector<network::mojom::IdAndAllowlistedPatternsPtr> nonces_to_urls;
+  nonces_to_urls.push_back(std::move(revoked_nonce_pattern));
+  network_context->RestrictNetworkForIds(std::move(nonces_to_urls),
+                                         base::BindOnce(revoked.GetCallback()));
+  EXPECT_TRUE(revoked.Wait());
+
+  const auto url = test_server.GetURL("/echo");
+  auto origin = url::Origin::Create(test_server.GetURL("/"));
+  auto isolation_info = net::IsolationInfo::CreateForInternalRequest(origin);
+
+  ASSERT_FALSE(network_context->IsNetworkForNetworkRestrictionsIdAndUrlAllowed(
+      network_restrictions_id, url,
+      isolation_info.network_anonymization_key()));
+
+  ResourceRequest request = CreateResourceRequest("GET", url);
+  request.trusted_params = ResourceRequest::TrustedParams();
+  request.trusted_params->isolation_info = isolation_info;
+  request.site_for_cookies = isolation_info.site_for_cookies();
+
+  network_context->Prefetch(
+      /*request_id=*/0, mojom::kURLLoadOptionNone, request,
+      net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS),
+      network_restrictions_id);
+
+  // Wait to see if any request arrives. Since it's blocked, it shouldn't.
+  base::RunLoop run_loop;
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(100));
+  run_loop.Run();
+
+  EXPECT_FALSE(request_future.IsReady());
 }
 
 class NetworkContextBrowserCookieTest

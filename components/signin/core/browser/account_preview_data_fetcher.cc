@@ -153,9 +153,29 @@ std::string_view GetBaseUrl(version_info::Channel channel) {
   return kStagingPreviewUrl;
 }
 
+// The list of data types to fetch statistics for. This list explicitly requests
+// only the data types currently used by metrics.
+// The comma-separated integer values map to the data type's specifics field.
+// 31729: AUTOFILL
+// 32904: BOOKMARKS
+// 37702: PREFERENCES
+// 41210: THEMES
+// 45873: PASSWORDS
+// 48119: EXTENSIONS
+// 48364: APPS
+// 50119: SESSIONS
+// 154522: DEVICE_INFO
+// 330441: AUTOFILL_WALLET_METADATA
+// 411028: READING_LIST
+// 1164238: AUTOFILL_WALLET_CREDENTIAL
 GURL GetStatsUrlForChannel(version_info::Channel channel) {
-  return GURL(
+  GURL url(
       base::StrCat({GetBaseUrl(channel), "/dataTypes/-/dataTypesStatistics"}));
+  for (int data_type : signin::kRequestedDataTypes) {
+    url = net::AppendQueryParameter(url, "dataTypes",
+                                    base::NumberToString(data_type));
+  }
+  return url;
 }
 
 GURL GetPreviewsUrlForChannel(version_info::Channel channel) {
@@ -179,6 +199,16 @@ AccountPreviewDataFetcher::AccountPreviewDataFetcher(
       channel_(channel),
       callback_(std::move(callback)) {
   CHECK(identity_manager_);
+}
+
+AccountPreviewDataFetcher::~AccountPreviewDataFetcher() = default;
+
+void AccountPreviewDataFetcher::Start() {
+  if (is_started_) {
+    return;
+  }
+  is_started_ = true;
+
   AccountInfo account_info =
       identity_manager_->FindExtendedAccountInfoByGaiaId(gaia_id_);
   if (account_info.IsEmpty()) {
@@ -194,8 +224,6 @@ AccountPreviewDataFetcher::AccountPreviewDataFetcher(
                      weak_ptr_factory_.GetWeakPtr()),
       AccessTokenFetcher::Mode::kImmediate);
 }
-
-AccountPreviewDataFetcher::~AccountPreviewDataFetcher() = default;
 
 void AccountPreviewDataFetcher::OnAccessTokenReceived(
     GoogleServiceAuthError error,

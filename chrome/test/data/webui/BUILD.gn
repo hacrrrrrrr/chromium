@@ -30,6 +30,7 @@ source_set("browser_tests") {
     "flags/flags_browsertest.cc",
     "js/js_browsertest.cc",
     "location_internals/location_internals_browsertest.cc",
+    "notebooks_internals/notebooks_internals_browsertest.cc",
     "sync_internals/sync_internals_browsertest.cc",
     "usb_internals/usb_internals_browsertest.cc",
   ]
@@ -39,11 +40,13 @@ source_set("browser_tests") {
     "//chrome/browser:chrome_content_browser_client",
     "//chrome/browser/autocomplete:aim_eligibility_service",
     "//chrome/browser/bookmarks",
+    "//chrome/browser/ui:ui_features",
     "//chrome/browser/ui/tabs/tab_group_home:constants",
     "//chrome/test:test_support",
     "//components/commerce/core:commerce_constants",
     "//components/contextual_tasks/public",
     "//components/metrics_services_manager",
+    "//components/notebooks/public",
     "//components/ukm",
     "//components/ukm:ukm_test_helper",
     "//components/webui/chrome_urls/",
@@ -93,11 +96,11 @@ source_set("browser_tests") {
       "new_tab_page/new_tab_page_a11y_browsertest.cc",
       "new_tab_page/new_tab_page_browsertest.cc",
       "new_tab_shared/new_tab_shared_browsertest.cc",
+      "omnibox_everywhere/omnibox_everywhere_browsertest.cc",
       "omnibox_popup/omnibox_popup_browsertest.cc",
       "optimization_guide_internals/optimization_guide_internals_browsertest.cc",
       "password_manager/password_manager_browsertest.cc",
       "password_manager_internals/password_manager_internals_browsertest.cc",
-      "personal_context_notice/personal_context_notice_browsertest.cc",
       "sandbox/sandbox_browsertest.cc",
       "settings/settings_browsertest.cc",
       "side_panel/commerce/commerce_browsertest.cc",
@@ -107,6 +110,7 @@ source_set("browser_tests") {
       "side_panel/reading_list/reading_list_browsertest.cc",
       "subresource_filter/subresource_filter_internals_browsertest.cc",
       "tab_group_home/tab_group_home_browsertest.cc",
+      "tab_search/split_view_browsertest.cc",
       "tab_search/tab_search_browsertest.cc",
       "web_app_internals/web_app_internals_browsertest.cc",
       "webnn_internals/webnn_internals_browsertest.cc",
@@ -122,6 +126,7 @@ source_set("browser_tests") {
       "//chrome/browser/preloading",
       "//chrome/browser/signin:signin_promo",
       "//chrome/browser/subscription_eligibility",
+      "//chrome/browser/ui/webui/settings",
     ]
 
     if (is_chrome_branded) {
@@ -472,13 +477,6 @@ source_set("interactive_ui_tests") {
   }
 }
 
-if (is_chromeos) {
-  group("closure_compile") {
-    testonly = true
-    deps = [ "chromeos:closure_compile" ]
-  }
-}
-
 grit("resources") {
   testonly = true
   defines = chrome_grit_defines
@@ -602,6 +600,7 @@ generate_grd("build_grd") {
     "flags:build_grdp",
     "js:build_grdp",
     "location_internals:build_grdp",
+    "notebooks_internals:build_grdp",
     "sync_internals:build_grdp",
     "usb_internals:build_grdp",
   ]
@@ -612,6 +611,7 @@ generate_grd("build_grd") {
     "$target_gen_dir/chrome_urls/resources.grdp",
     "$target_gen_dir/commerce_internals/resources.grdp",
     "$target_gen_dir/contextual_tasks/resources.grdp",
+    "$target_gen_dir/notebooks_internals/resources.grdp",
     "$target_gen_dir/cr_elements/resources.grdp",
     "$target_gen_dir/flags/resources.grdp",
     "$target_gen_dir/js/resources.grdp",
@@ -665,11 +665,11 @@ generate_grd("build_grd") {
       "new_tab_footer:build_grdp",
       "new_tab_page:build_grdp",
       "new_tab_shared:build_grdp",
+      "omnibox_everywhere:build_grdp",
       "omnibox_popup:build_grdp",
       "optimization_guide_internals:build_grdp",
       "password_manager:build_grdp",
       "password_manager_internals:build_grdp",
-      "personal_context_notice:build_grdp",
       "sandbox:build_grdp",
       "settings:build_grdp",
       "side_panel:build_grdp",
@@ -725,11 +725,11 @@ generate_grd("build_grd") {
       "$target_gen_dir/new_tab_footer/resources.grdp",
       "$target_gen_dir/new_tab_shared/resources.grdp",
       "$target_gen_dir/new_tab_page/resources.grdp",
+      "$target_gen_dir/omnibox_everywhere/resources.grdp",
       "$target_gen_dir/omnibox_popup/resources.grdp",
       "$target_gen_dir/optimization_guide_internals/resources.grdp",
       "$target_gen_dir/password_manager/resources.grdp",
       "$target_gen_dir/password_manager_internals/resources.grdp",
-      "$target_gen_dir/personal_context_notice/resources.grdp",
       "$target_gen_dir/sandbox/resources.grdp",
       "$target_gen_dir/settings/resources.grdp",
       "$target_gen_dir/side_panel/customize_chrome/resources.grdp",

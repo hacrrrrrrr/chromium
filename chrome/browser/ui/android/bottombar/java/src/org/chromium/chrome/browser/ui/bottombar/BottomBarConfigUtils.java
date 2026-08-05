@@ -12,7 +12,10 @@ import org.chromium.base.DeviceInfo;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.ui.base.DeviceFormFactor;
 
 /** Utility class for determining the configuration of the bottom bar. */
@@ -68,8 +71,8 @@ public class BottomBarConfigUtils {
     /**
      * Whether to force {@link BrowserControlsState#BOTH} constraints for the bottom controls.
      *
-     * <p>When the current tab is on an NTP, the constraints emitted for the bottom bar are
-     * overridden and forced to {@link BrowserControlsState#BOTH}. This ensures that
+     * <p>When the current tab is on an NTP or other native page, the constraints emitted for the
+     * bottom bar are overridden and forced to {@link BrowserControlsState#BOTH}. This ensures that
      * ScrollingBottomViewResourceFrameLayout allows screenshot updates, preventing stale
      * screenshots. It does not affect the physical scroll behavior of the bottom bar, which is
      * driven by the actual tab constraints.
@@ -77,7 +80,10 @@ public class BottomBarConfigUtils {
     public static boolean shouldForceBothConstraintsForBottomControls(
             @Nullable Tab tab, @Nullable Context context) {
         if (tab == null || context == null) return false;
-        return isNtpWithBottomBar(tab, context);
+
+        if (isNtp(tab) && !tab.isIncognito() && shouldDisableOnNtp()) return false;
+
+        return tab.isNativePage() || UrlUtilities.isInternalScheme(tab.getUrl());
     }
 
     /** Whether the given tab is a regular NTP (excludes incognito). */
@@ -111,5 +117,23 @@ public class BottomBarConfigUtils {
         return tab != null
                 && tab.getNativePage() != null
                 && "newtab".equals(tab.getNativePage().getHost());
+    }
+
+    /** Whether the feature parameter to show the GLIC setting toggle is enabled. */
+    public static boolean isGlicSettingToggleParamEnabled() {
+        return ChromeFeatureList.sAndroidBottomBarShowGlicSettingToggle.getValue();
+    }
+
+    /** Returns whether the GLIC button is enabled by the user in the bottom bar. */
+    public static boolean isGlicButtonEnabled() {
+        if (!isGlicSettingToggleParamEnabled()) return true;
+        return ChromeSharedPreferences.getInstance()
+                .readBoolean(ChromePreferenceKeys.BOTTOM_BAR_GLIC_BUTTON_ENABLED, true);
+    }
+
+    /** Sets whether the GLIC button is enabled in the bottom bar. */
+    public static void setGlicButtonEnabled(boolean enabled) {
+        ChromeSharedPreferences.getInstance()
+                .writeBoolean(ChromePreferenceKeys.BOTTOM_BAR_GLIC_BUTTON_ENABLED, enabled);
     }
 }

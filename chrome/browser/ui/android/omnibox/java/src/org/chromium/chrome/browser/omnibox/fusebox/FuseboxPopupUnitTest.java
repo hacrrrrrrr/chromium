@@ -18,7 +18,6 @@ import android.app.Activity;
 import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
 import android.graphics.Rect;
-import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -49,6 +48,7 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.PopupState;
 import org.chromium.components.omnibox.OmniboxCapabilities;
@@ -113,6 +113,7 @@ public class FuseboxPopupUnitTest {
 
     @After
     public void tearDown() {
+        RobolectricUtil.runAllBackgroundAndUi();
         WindowMetricsCalculator.overrideDecorator(
                 new WindowMetricsCalculatorDecorator() {
                     @Override
@@ -160,15 +161,15 @@ public class FuseboxPopupUnitTest {
         competingChild.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         competingChild.setAccessibilityDelegate(mAccessibilityDelegate);
 
-        View cameraButton = mContentView.findViewById(R.id.fusebox_camera_button);
-        cameraButton.setVisibility(View.VISIBLE);
-        cameraButton.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
-        cameraButton.setAccessibilityDelegate(mAccessibilityDelegate);
+        View galleryButton = mContentView.findViewById(R.id.fusebox_pick_picture_button);
+        galleryButton.setVisibility(View.VISIBLE);
+        galleryButton.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        galleryButton.setAccessibilityDelegate(mAccessibilityDelegate);
 
         mFuseboxPopup.focusFirstViewForAccessibility();
 
         verify(mAccessibilityDelegate, atLeastOnce())
-                .sendAccessibilityEvent(cameraButton, AccessibilityEvent.TYPE_VIEW_FOCUSED);
+                .sendAccessibilityEvent(galleryButton, AccessibilityEvent.TYPE_VIEW_FOCUSED);
         verify(mAccessibilityDelegate, never())
                 .sendAccessibilityEvent(competingChild, AccessibilityEvent.TYPE_VIEW_FOCUSED);
     }
@@ -224,7 +225,7 @@ public class FuseboxPopupUnitTest {
     @Test
     public void testSetPopupState_Floating() {
         mFuseboxPopup.setPopupState(PopupState.FLOATING);
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mDynamicRectProvider).setPopupState(PopupState.FLOATING);
         verify(mPopupWindow).show();
     }
@@ -232,6 +233,7 @@ public class FuseboxPopupUnitTest {
     @Test
     public void testSetPopupState_Bottom() {
         mFuseboxPopup.setPopupState(PopupState.BOTTOM);
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mDynamicRectProvider).setPopupState(PopupState.BOTTOM);
         verify(mPopupWindow).show();
     }
@@ -325,7 +327,7 @@ public class FuseboxPopupUnitTest {
 
         mFuseboxPopup.setPopupState(PopupState.FLOATING);
 
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mPopupWindow, atLeastOnce()).updateDesiredContentSize(100, 0, true);
     }
@@ -435,7 +437,7 @@ public class FuseboxPopupUnitTest {
 
         recreateFuseboxPopup(/* isBottomSheet= */ false);
 
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(View.LAYOUT_DIRECTION_RTL, mFuseboxPopup.mScrollView.getLayoutDirection());
     }
 
@@ -452,7 +454,7 @@ public class FuseboxPopupUnitTest {
 
         recreateFuseboxPopup(/* isBottomSheet= */ false);
 
-        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(View.LAYOUT_DIRECTION_LTR, mFuseboxPopup.mScrollView.getLayoutDirection());
     }
 

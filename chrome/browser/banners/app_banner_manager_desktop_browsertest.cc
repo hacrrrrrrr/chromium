@@ -235,7 +235,8 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   }
 
   // Install the app via the menu instead of the banner.
-  browser()->command_controller()->ExecuteCommand(IDC_INSTALL_PWA);
+  chrome::BrowserCommandController::From(browser())->ExecuteCommand(
+      IDC_INSTALL_PWA);
   manager->AwaitAppInstall();
 
   EXPECT_FALSE(manager->IsPromptAvailableForTesting());
@@ -264,12 +265,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   }
 
   // Install the app via the menu instead of the banner.
-  if (IsPageActionMigrated(PageActionIconType::kPwaInstall)) {
-    actions::ActionManager::Get().FindAction(kActionInstallPwa)->InvokeAction();
-  } else {
-    BrowserWindow::FromBrowser(browser())->ExecutePageActionIconForTesting(
-        PageActionIconType::kPwaInstall);
-  }
+  actions::ActionManager::Get().FindAction(kActionInstallPwa)->InvokeAction();
 
   manager->AwaitAppInstall();
 
@@ -312,7 +308,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   TestAppBannerManagerDesktop* manager =
       TestAppBannerManagerDesktop::FromWebContents(
           browser()->tab_strip_model()->GetActiveWebContents());
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // Install web app by policy.
   web_app::ExternalInstallOptions options =
@@ -380,7 +376,8 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   }
 
   // Install the app via the menu instead of the banner.
-  browser()->command_controller()->ExecuteCommand(IDC_INSTALL_PWA);
+  chrome::BrowserCommandController::From(browser())->ExecuteCommand(
+      IDC_INSTALL_PWA);
   manager->AwaitAppInstall();
 
   EXPECT_FALSE(manager->IsPromptAvailableForTesting());

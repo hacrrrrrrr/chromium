@@ -49,6 +49,7 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Features;
 import org.chromium.base.test.util.MaxAndroidSdkLevel;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.components.external_intents.ExternalNavigationHandler.IncognitoDialogDelegateWithFallback;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
@@ -56,6 +57,8 @@ import org.chromium.components.external_intents.ExternalNavigationParams.AsyncAc
 import org.chromium.components.external_intents.ExternalNavigationParams.AsyncActionTakenParams.AsyncActionTakenType;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.test.NativeLibraryTestUtils;
+import org.chromium.content_public.common.Referrer;
+import org.chromium.network.mojom.ReferrerPolicy;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
@@ -1135,6 +1138,24 @@ public class ExternalNavigationHandlerTest {
         Assert.assertNull(mUrlHandler.mStartActivityIntent);
         Assert.assertEquals(IMDB_WEBPAGE_FOR_TOM_HANKS, mUrlHandler.mNewUrlAfterClobbering);
         Assert.assertEquals(SEARCH_RESULT_URL_FOR_TOM_HANKS, mUrlHandler.mReferrerUrlForClobbering);
+    }
+
+    @Test
+    @SmallTest
+    public void testFallbackUrl_WithReferrerPolicy() {
+        mDelegate.setCanResolveActivityForExternalSchemes(false);
+
+        // Use a non-default referrer policy.
+        int policy = ReferrerPolicy.ORIGIN;
+        checkUrl(INTENT_URL_WITH_FALLBACK_URL, redirectHandlerForLinkClick())
+                .withReferrer(SEARCH_RESULT_URL_FOR_TOM_HANKS, policy)
+                .expecting(OverrideUrlLoadingResultType.OVERRIDE_WITH_NAVIGATE_TAB, IGNORE);
+
+        Assert.assertNull(mUrlHandler.mStartActivityIntent);
+        Assert.assertEquals(IMDB_WEBPAGE_FOR_TOM_HANKS, mUrlHandler.mNewUrlAfterClobbering);
+        Assert.assertEquals(SEARCH_RESULT_URL_FOR_TOM_HANKS, mUrlHandler.mReferrerUrlForClobbering);
+        Assert.assertNotNull(mUrlHandler.mReferrerForClobbering);
+        Assert.assertEquals(policy, mUrlHandler.mReferrerForClobbering.getPolicy());
     }
 
     @Test
@@ -3331,6 +3352,24 @@ public class ExternalNavigationHandlerTest {
                 "tel:012345678", mDelegate.intentReportedToSafeBrowsing().getDataString());
     }
 
+    @Test
+    @SmallTest
+    public void testHttpBlockBypassedByMarketCategory() {
+        mDelegate.setAllowExternalNavigationForHttpProtocols(false);
+
+        // 1. Resolve to a specialized app (not market). It should be blocked.
+        mDelegate.add(new IntentActivity("https://example.com", "com.example.app"));
+        checkUrl("https://example.com", redirectHandlerForLinkClick())
+                .expecting(OverrideUrlLoadingResultType.NO_OVERRIDE, IGNORE);
+
+        // 2. Resolve to a market app. It should NOT be blocked.
+        mDelegate.setResolvesToMarketApp(true);
+        checkUrl("https://example.com", redirectHandlerForLinkClick())
+                .expecting(
+                        OverrideUrlLoadingResultType.OVERRIDE_WITH_EXTERNAL_INTENT,
+                        START_OTHER_ACTIVITY);
+    }
+
     private static List<ResolveInfo> makeResolveInfos(ResolveInfo... infos) {
         return Arrays.asList(infos);
     }
@@ -3343,6 +3382,13 @@ public class ExternalNavigationHandlerTest {
         ResolveInfo ri = new ResolveInfo();
         ri.activityInfo = ai;
         return ri;
+    }
+
+    private static ResolveInfo newMarketResolveInfo(String packageName) {
+        ResolveInfo info = newResolveInfo(packageName);
+        info.filter = new IntentFilter(Intent.ACTION_VIEW);
+        info.filter.addCategory(Intent.CATEGORY_APP_MARKET);
+        return info;
     }
 
     private static ResolveInfo newSpecializedResolveInfo(
@@ -3394,6 +3440,7 @@ public class ExternalNavigationHandlerTest {
         public boolean mShouldRequestFileAccess;
         public String mNewUrlAfterClobbering;
         public String mReferrerUrlForClobbering;
+        public @Nullable Referrer mReferrerForClobbering;
         public boolean mRequestFilePermissionsCalled;
         public Intent mStartActivityInIncognitoIntent;
         public boolean mStartIncognitoIntentCalled;
@@ -3535,6 +3582,7 @@ public class ExternalNavigationHandlerTest {
 
     private static class TestExternalNavigationDelegate implements ExternalNavigationDelegate {
         private WindowAndroid mWindowAndroid;
+        private boolean mAllowExternalNavigationForHttpProtocols = true;
 
         public List<ResolveInfo> queryIntentActivities(Intent intent) {
             List<ResolveInfo> list = new ArrayList<>();
@@ -3569,6 +3617,9 @@ public class ExternalNavigationHandlerTest {
             if (mResolvesToOtherBrowser) {
                 list.add(newResolveInfo(OTHER_BROWSER_PACKAGE));
             }
+            if (mResolvesToMarketApp) {
+                list.add(newMarketResolveInfo("com.example.market"));
+            }
             return list;
         }
 
@@ -3578,6 +3629,9 @@ public class ExternalNavigationHandlerTest {
             }
             if (mResolvesToOtherBrowser) {
                 return newResolveInfo(OTHER_BROWSER_PACKAGE);
+            }
+            if (mResolvesToMarketApp) {
+                return newMarketResolveInfo("com.example.market");
             }
 
             List<ResolveInfo> list = queryIntentActivities(intent);
@@ -3748,9 +3802,13 @@ public class ExternalNavigationHandlerTest {
         @Override
         public void setExternalNavigationHelper(ExternalNavigationHelper helper) {}
 
+        public void setAllowExternalNavigationForHttpProtocols(boolean value) {
+            mAllowExternalNavigationForHttpProtocols = value;
+        }
+
         @Override
         public boolean allowExternalNavigationForHttpProtocols(GURL url) {
-            return false;
+            return mAllowExternalNavigationForHttpProtocols;
         }
 
         public void reset() {
@@ -3821,6 +3879,10 @@ public class ExternalNavigationHandlerTest {
             mResolvesToOtherBrowser = value;
         }
 
+        public void setResolvesToMarketApp(boolean value) {
+            mResolvesToMarketApp = value;
+        }
+
         public void setWindowAndroid(WindowAndroid windowAndroid) {
             mWindowAndroid = windowAndroid;
         }
@@ -3857,6 +3919,7 @@ public class ExternalNavigationHandlerTest {
         private boolean mWillResolveToDisambiguationDialog;
         private Context mContext;
         private boolean mResolvesToOtherBrowser;
+        private boolean mResolvesToMarketApp;
         private boolean mShouldDisableAllExternalIntents;
         private boolean mShouldReturnAsActivityResult;
         private Intent mSafeBrowsingIntent;
@@ -3879,6 +3942,7 @@ public class ExternalNavigationHandlerTest {
         private final String mUrl;
 
         private String mReferrerUrl;
+        private int mReferrerPolicy = ReferrerPolicy.DEFAULT;
         private boolean mIsIncognito;
         private int mPageTransition = PageTransition.LINK;
         private boolean mIsRedirect;
@@ -3899,6 +3963,12 @@ public class ExternalNavigationHandlerTest {
 
         public ExternalNavigationTestParams withReferrer(String referrerUrl) {
             mReferrerUrl = referrerUrl;
+            return this;
+        }
+
+        public ExternalNavigationTestParams withReferrer(String referrerUrl, int policy) {
+            mReferrerUrl = referrerUrl;
+            mReferrerPolicy = policy;
             return this;
         }
 
@@ -3982,6 +4052,8 @@ public class ExternalNavigationHandlerTest {
                                 mUrlHandler.mNewUrlAfterClobbering = params.targetUrl.getSpec();
                                 mUrlHandler.mReferrerUrlForClobbering =
                                         params.externalNavigationParams.getReferrerUrl().getSpec();
+                                mUrlHandler.mReferrerForClobbering =
+                                        params.externalNavigationParams.getReferrer();
                             }
                         }
                     };
@@ -3989,7 +4061,9 @@ public class ExternalNavigationHandlerTest {
                     new ExternalNavigationParams.Builder(
                                     new GURL(mUrl),
                                     mIsIncognito,
-                                    new GURL(mReferrerUrl),
+                                    mReferrerUrl == null
+                                            ? null
+                                            : new Referrer(mReferrerUrl, mReferrerPolicy),
                                     mPageTransition,
                                     mIsRedirect)
                             .setRedirectHandler(mRedirectHandler)
@@ -4010,6 +4084,7 @@ public class ExternalNavigationHandlerTest {
                 mUrlHandler.mNewUrlAfterClobbering = result.mTargetUrl.getSpec();
                 mUrlHandler.mReferrerUrlForClobbering =
                         result.mExternalNavigationParams.getReferrerUrl().getSpec();
+                mUrlHandler.mReferrerForClobbering = result.mExternalNavigationParams.getReferrer();
             }
             if (result.getResultType() == OverrideUrlLoadingResultType.OVERRIDE_WITH_ASYNC_ACTION) {
                 mUrlHandler.mAsyncActionCallback = params.getRequiredAsyncActionTakenCallback();

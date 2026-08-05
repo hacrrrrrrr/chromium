@@ -8,7 +8,7 @@ import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {TestBrowserProxy} from 'chrome://webui-test/test_browser_proxy.js';
 import {microtasksFinished} from 'chrome://webui-test/test_util.js';
 import {BrowserProxyImpl, PageActionId, PageActionTrigger} from 'chrome://webui-toolbar.top-chrome/app.js';
-import type {PageActionIconElement, PageActionState} from 'chrome://webui-toolbar.top-chrome/app.js';
+import type {LhsChipIdentifier, PageActionIconElement, PageActionState} from 'chrome://webui-toolbar.top-chrome/app.js';
 import type {BrowserProxy} from 'chrome://webui-toolbar.top-chrome/browser_proxy.js';
 import type {ToolbarUIServiceInterface} from 'chrome://webui-toolbar.top-chrome/shared/toolbar_ui_api.mojom-webui.js';
 
@@ -28,6 +28,7 @@ class TestToolbarUiHandler extends TestBrowserProxy implements
     return new Promise<never>(() => {});
   }
   onPageInitialized() {}
+  onContentSettingImagePointerDown() {}
   showContentSettingsBubble() {
     return new Promise<never>(() => {});
   }
@@ -58,6 +59,8 @@ class TestToolbarUiHandler extends TestBrowserProxy implements
   onLhsChipDrag() {}
   movePinnedToolbarAction(_actionId: any, _targetIndex: any) {}
   movePinnedToolbarActionBy(_actionId: any, _delta: any) {}
+  moveExtensionAction(_extensionId: string, _targetIndex: number) {}
+  moveExtensionActionBy(_extensionId: string, _delta: number) {}
 
   onPageActionClick(actionId: PageActionId, trigger: PageActionTrigger) {
     this.methodCalled('onPageActionClick', [actionId, trigger]);
@@ -76,8 +79,13 @@ class TestToolbarUiHandler extends TestBrowserProxy implements
     return Promise.resolve({
       adjustedText: text,
       adjustedUrl: null,
+      pageTitle: null,
     });
   }
+
+  onPerformanceInterventionButtonClicked(_isMouseInteraction: boolean) {}
+
+  onPerformanceInterventionButtonMousePressed() {}
 }
 
 class TestToolbarBrowserProxy extends TestBrowserProxy implements BrowserProxy {
@@ -98,6 +106,13 @@ class TestToolbarBrowserProxy extends TestBrowserProxy implements BrowserProxy {
   }
   removeNavigationStateListener() {}
   removeFocusRequestListener() {}
+
+  onChipClicked(_chip: LhsChipIdentifier, _isPointerClick: boolean) {}
+  onChipPointerEntered(_chip: LhsChipIdentifier) {}
+  onChipPointerExited(_chip: LhsChipIdentifier) {}
+  onChipMousePressed(_chip: LhsChipIdentifier) {}
+  onChipExpandAnimationEnded(_chip: LhsChipIdentifier) {}
+  onChipCollapseAnimationEnded(_chip: LhsChipIdentifier) {}
 }
 
 suite('PageActionIconTest', function() {
@@ -110,6 +125,7 @@ suite('PageActionIconTest', function() {
       pageActionId: PageActionId.kActionShowTranslate,
       accessibleName: 'Translate',
       tooltipText: 'Translate this page',
+      icon: {handleId: 0n},
     };
   }
 

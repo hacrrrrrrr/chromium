@@ -41,6 +41,7 @@ import static org.chromium.components.browser_ui.styles.SemanticColorUtils.getDe
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.content.res.Resources;
@@ -70,6 +71,10 @@ import androidx.core.widget.ImageViewCompat;
 import com.google.android.material.color.DynamicColors;
 import com.google.android.material.color.DynamicColorsOptions;
 
+import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
+import org.jni_zero.NativeMethods;
+
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
@@ -90,7 +95,7 @@ import org.chromium.chrome.browser.ntp_customization.theme.daily_refresh.NtpThem
 import org.chromium.chrome.browser.ntp_customization.theme.theme_collections.CustomBackgroundInfo;
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.BackgroundImageInfo;
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.CropImageUtils;
-import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataBase;
+import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataImageBase;
 import org.chromium.chrome.browser.ntp_customization.theme_sync.data.NtpBackgroundDataUtils;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
@@ -103,12 +108,14 @@ import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
 import org.chromium.components.image_fetcher.ImageFetcher;
 import org.chromium.components.image_fetcher.ImageFetcherConfig;
 import org.chromium.components.image_fetcher.ImageFetcherFactory;
+import org.chromium.components.omnibox.OmniboxCapabilities;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.edge_to_edge.EdgeToEdgeStateProvider;
 import org.chromium.ui.util.ColorUtils;
 import org.chromium.url.GURL;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -119,6 +126,7 @@ import java.util.concurrent.Executor;
 
 /** Utility class of the NTP customization. */
 @NullMarked
+@JNINamespace("ntp_customization")
 public class NtpCustomizationUtils {
 
     // LINT.IfChange(NtpBackgroundType)
@@ -161,14 +169,22 @@ public class NtpCustomizationUtils {
     }
 
     private static class ImageLoadResult {
-        public final @Nullable Bitmap bitmap;
+        public final byte @Nullable [] data;
         public final String fileIdHash;
 
-        ImageLoadResult(@Nullable Bitmap bitmap, String fileIdHash) {
-            this.bitmap = bitmap;
+        ImageLoadResult(byte @Nullable [] data, String fileIdHash) {
+            this.data = data;
             this.fileIdHash = fileIdHash;
         }
     }
+
+    // Maximum allowed byte size for user-uploaded custom background images (25 MiB) to prevent
+    // memory exhaustion.
+    private static final int MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+    // Initial in-memory buffer capacity when reading background image stream (1 MiB).
+    private static final int INITIAL_BUFFER_CAPACITY_BYTES = 1024 * 1024;
+    // Chunk size used to read the background image stream (8 KiB).
+    private static final int READ_BUFFER_SIZE_BYTES = 8192;
 
     public static final String NTP_UPLOAD_IMAGES_DIR = "upload_images";
     public static final String NTP_THEME_COLLECTION_IMAGES_DIR = "theme_collection_images";
@@ -179,7 +195,6 @@ public class NtpCustomizationUtils {
     static final String NTP_BACKGROUND_IMAGE_FILE_FOR_DAILY_REFRESH =
             "ntp_background_image_for_daily_refresh";
 
-    private static final int MAX_IMAGE_SIZE = 2556;
     private static final int IMAGE_SIZE_FOR_EXTRACTING_COLOR = 100;
     private static final String TAG = "NtpCustomization";
     private static final String DELIMITER = "|";
@@ -502,13 +517,15 @@ public class NtpCustomizationUtils {
     /**
      * Saves the background image.
      *
+     * @param imageData The instance of the {@link NtpBackgroundDataImageBase}.
      * @param backgroundImageBitmap The bitmap of the theme collection or uploaded image.
      */
-    @VisibleForTesting
-    static void saveBackgroundImageFile(
-            @Nullable String filePath, @Nullable Bitmap backgroundImageBitmap) {
+    public static void saveBackgroundImageFile(
+            NtpBackgroundDataImageBase imageData, @Nullable Bitmap backgroundImageBitmap) {
+        String filePath = imageData.getLastUploadImageFilePath();
         File file = getBackgroundImageFileFromPath(filePath);
         saveBitmapImageToFile(backgroundImageBitmap, file);
+        imageData.setIsBitmapSaved(backgroundImageBitmap != null);
     }
 
     /**
@@ -581,17 +598,26 @@ public class NtpCustomizationUtils {
 
     /** Returns whether a white background should be applied on fake search box. */
     public static boolean shouldApplyWhiteBackgroundOnSearchBox() {
+        if (ChromeFeatureList.sNtpAurora.isEnabled() && !OmniboxCapabilities.isDesktopPlatform())
+            return true;
+
+        return shouldApplyWhiteBackgroundOnComposeplate();
+    }
+
+    /** Returns whether a white background should be applied on the composeplate. */
+    public static boolean shouldApplyWhiteBackgroundOnComposeplate() {
         if (!NtpCustomizationUtils.isNtpThemeCustomizationEnabled()) return false;
 
-        return shouldApplyWhiteBackgroundOnSearchBox(
+        return shouldApplyWhiteBackgroundForNtpBackgroundType(
                 NtpCustomizationConfigManager.getInstance().getBackgroundType());
     }
 
     /**
-     * Returns whether a white background should be applied on fake search box based on the provided
-     * background image type.
+     * Returns whether a white background should be applied based on the provided background image
+     * type.
      */
-    public static boolean shouldApplyWhiteBackgroundOnSearchBox(@NtpBackgroundType int type) {
+    @VisibleForTesting
+    static boolean shouldApplyWhiteBackgroundForNtpBackgroundType(@NtpBackgroundType int type) {
         return type == NtpBackgroundType.IMAGE_FROM_DISK
                 || type == NtpBackgroundType.THEME_COLLECTION;
     }
@@ -889,7 +915,7 @@ public class NtpCustomizationUtils {
      *
      * @param bitmap The bitmap from which to extract and save the primary color.
      */
-    static @Nullable @ColorInt Integer pickAndSavePrimaryColor(Bitmap bitmap) {
+    public static @Nullable @ColorInt Integer pickAndSavePrimaryColor(Bitmap bitmap) {
         @ColorInt Integer primaryColor = getContentBasedSeedColor(bitmap);
         if (primaryColor != null) {
             setCustomizedPrimaryColorToSharedPreference(primaryColor.intValue());
@@ -1483,37 +1509,36 @@ public class NtpCustomizationUtils {
      * Updates the necessary preferences and files for theme collection image or user uploaded
      * image.
      *
-     * @param customBackgroundInfo The {@link CustomBackgroundInfo} containing the theme collection
-     *     info if passed in a theme collection image.
+     * @param imageData The instance of the {@link NtpBackgroundDataImageBase}.
      * @param bitmap The bitmap of the theme collection or uploaded image.
      * @param backgroundImageInfo The {@link BackgroundImageInfo} containing the portrait and
      *     landscape transformation matrices of the image.
      * @param skipSavingPrimaryColor True if color selection and saving are deferred until the
      *     bottom sheet is dismissed.
-     * @param primaryColor The previously picked primary color if not null.
-     * @param filePath The instance of the {@link NtpBackgroundDataBase}.
      */
     public static @Nullable @ColorInt Integer saveBackgroundInfo(
-            @Nullable CustomBackgroundInfo customBackgroundInfo,
+            NtpBackgroundDataImageBase imageData,
             @Nullable Bitmap bitmap,
             BackgroundImageInfo backgroundImageInfo,
-            boolean skipSavingPrimaryColor,
-            @Nullable @ColorInt Integer primaryColor,
-            @Nullable String filePath) {
+            boolean skipSavingPrimaryColor) {
         if (bitmap != null) {
-            saveBackgroundImageFile(filePath, bitmap);
+            saveBackgroundImageFile(imageData, bitmap);
         }
 
+        CustomBackgroundInfo customBackgroundInfo = imageData.getCustomBackgroundInfo();
         if (customBackgroundInfo != null) {
             setCustomBackgroundInfoToSharedPreference(customBackgroundInfo);
         } else {
             removeCustomBackgroundInfoFromSharedPreference();
         }
 
+        @ColorInt Integer primaryColor = imageData.getPrimaryColor();
         @ColorInt Integer primaryColorPicked = null;
-        if (!skipSavingPrimaryColor && bitmap != null) {
-            primaryColorPicked = pickAndSavePrimaryColor(bitmap);
-        } else if (primaryColor != null) {
+        if (primaryColor == null) {
+            if (!skipSavingPrimaryColor && bitmap != null) {
+                primaryColorPicked = pickAndSavePrimaryColor(bitmap);
+            }
+        } else {
             setCustomizedPrimaryColorToSharedPreference(primaryColor);
         }
 
@@ -1675,18 +1700,15 @@ public class NtpCustomizationUtils {
     }
 
     /**
-     * Calculates the adjusted bottom margin for the Logo view in pixels.
-     *
-     * <p>If a shadow is applied to the search box, this method subtracts the shadow's padding from
-     * the margin. This ensures the perceived visual gap between the logo and the search box remains
-     * consistent, regardless of whether the shadow is present.
+     * Calculates the adjusted bottom margin for the Logo view in pixels. Offsets the standard logo
+     * margin against the vertical shadow padding to prevent visual layout shifts regardless of
+     * whether the shadow is visible or not.
      *
      * @param resources Android resources.
      * @return The final adjusted bottom margin in pixels.
      */
     public static int getLogoViewBottomMarginPx(Resources resources) {
-        int bottomMargin = resources.getDimensionPixelSize(R.dimen.ntp_logo_margin_bottom);
-        return bottomMargin;
+        return resources.getDimensionPixelSize(R.dimen.ntp_logo_margin_bottom);
     }
 
     /**
@@ -1773,25 +1795,41 @@ public class NtpCustomizationUtils {
             @Override
             protected ImageLoadResult doInBackground() {
                 String fileIdHash = NtpBackgroundDataUtils.getMetadataFingerprint(context, uri);
-                try {
-                    // 1. Decode with inJustDecodeBounds=true to check dimensions
-                    BitmapFactory.Options options = new BitmapFactory.Options();
-                    options.inJustDecodeBounds = true;
-                    try (var inputStream = context.getContentResolver().openInputStream(uri)) {
-                        BitmapFactory.decodeStream(inputStream, null, options);
-                    }
-
-                    // 2. Calculate inSampleSize
-                    options.inSampleSize =
-                            calculateInSampleSize(options, MAX_IMAGE_SIZE, MAX_IMAGE_SIZE);
-
-                    // 3. Decode bitmap with inSampleSize set
-                    options.inJustDecodeBounds = false;
-                    try (var inputStream = context.getContentResolver().openInputStream(uri)) {
-                        return new ImageLoadResult(
-                                BitmapFactory.decodeStream(inputStream, null, options), fileIdHash);
+                try (AssetFileDescriptor afd =
+                        context.getContentResolver().openAssetFileDescriptor(uri, "r")) {
+                    if (afd != null) {
+                        long fileLength = afd.getLength();
+                        if (fileLength != AssetFileDescriptor.UNKNOWN_LENGTH
+                                && fileLength > MAX_IMAGE_BYTES) {
+                            Log.w(TAG, "Image exceeds maximum allowed size cap of 25 MiB.");
+                            return new ImageLoadResult(null, fileIdHash);
+                        }
                     }
                 } catch (Exception e) {
+                    // Ignore and proceed to stream read, as some content providers might not
+                    // support openAssetFileDescriptor.
+                }
+
+                try (var inputStream = context.getContentResolver().openInputStream(uri)) {
+                    if (inputStream == null) {
+                        return new ImageLoadResult(null, fileIdHash);
+                    }
+
+                    ByteArrayOutputStream buffer =
+                            new ByteArrayOutputStream(INITIAL_BUFFER_CAPACITY_BYTES);
+                    byte[] data = new byte[READ_BUFFER_SIZE_BYTES];
+                    int nRead;
+                    int totalRead = 0;
+                    while ((nRead = inputStream.read(data, 0, data.length)) != -1) {
+                        totalRead += nRead;
+                        if (totalRead > MAX_IMAGE_BYTES) {
+                            Log.w(TAG, "Image exceeds maximum allowed size cap of 25 MiB.");
+                            return new ImageLoadResult(null, fileIdHash);
+                        }
+                        buffer.write(data, 0, nRead);
+                    }
+                    return new ImageLoadResult(buffer.toByteArray(), fileIdHash);
+                } catch (Exception | OutOfMemoryError e) {
                     Log.e(TAG, "Error reading bitmap from URI", e);
                     return new ImageLoadResult(null, fileIdHash);
                 }
@@ -1799,30 +1837,17 @@ public class NtpCustomizationUtils {
 
             @Override
             protected void onPostExecute(ImageLoadResult result) {
-                callback.onImageLoaded(result.bitmap, result.fileIdHash);
+                byte @Nullable [] data = result.data;
+                if (data == null) {
+                    callback.onImageLoaded(null, result.fileIdHash);
+                    return;
+                }
+
+                NtpCustomizationUtilsJni.get()
+                        .decodeImage(
+                                data, bitmap -> callback.onImageLoaded(bitmap, result.fileIdHash));
             }
         }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-    }
-
-    @VisibleForTesting
-    static int calculateInSampleSize(BitmapFactory.Options options, int reqWidth, int reqHeight) {
-        // Raw height and width of image
-        final int height = options.outHeight;
-        final int width = options.outWidth;
-        int inSampleSize = 1;
-
-        if (height > reqHeight || width > reqWidth) {
-            final int halfHeight = height / 2;
-            final int halfWidth = width / 2;
-
-            // Calculate the largest inSampleSize value that is a power of 2 and keeps height or
-            // width larger than the requested height and width.
-            while ((halfHeight / inSampleSize) >= reqHeight
-                    || (halfWidth / inSampleSize) >= reqWidth) {
-                inSampleSize *= 2;
-            }
-        }
-        return inSampleSize;
     }
 
     /** Returns whether the theme tip bottom sheet has been shown before. */
@@ -1855,5 +1880,31 @@ public class NtpCustomizationUtils {
      */
     public static File createThemeCollectionImageFileInDirForTesting(String fileName) {
         return createThemeImageFileInDir(fileName, NTP_THEME_COLLECTION_IMAGES_DIR);
+    }
+
+    @NativeMethods
+    public interface Natives {
+        void decodeImage(@JniType("std::vector<uint8_t>") byte[] data, Callback<Bitmap> callback);
+    }
+
+    /**
+     * Applies or removes a drop shadow on the given view. When enabled, sets elevation and tints
+     * the shadow with the primary theme color at 30% opacity.
+     *
+     * @param context Context used to retrieve color and dimension resources.
+     * @param view The target view to apply or remove the shadow from.
+     * @param enableShadow Whether the drop shadow should be applied.
+     */
+    public static void applyShadow(Context context, View view, boolean enableShadow) {
+        if (enableShadow) {
+            float elevation =
+                    context.getResources().getDimensionPixelSize(R.dimen.fake_search_box_elevation);
+            view.setElevation(elevation);
+            int shadowColor = context.getColor(R.color.color_primary_with_alpha_30);
+            view.setOutlineAmbientShadowColor(shadowColor);
+            view.setOutlineSpotShadowColor(shadowColor);
+        } else {
+            view.setElevation(0f);
+        }
     }
 }

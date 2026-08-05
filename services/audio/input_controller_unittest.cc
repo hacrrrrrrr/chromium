@@ -5,9 +5,14 @@
 #include "services/audio/input_controller.h"
 
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
+#include "base/base_paths.h"
+#include "base/compiler_specific.h"
+#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
@@ -27,22 +32,32 @@
 #include "media/base/audio_glitch_info.h"
 #include "media/base/audio_processing.h"
 #include "media/base/media_switches.h"
+#include "third_party/tflite/src/tensorflow/lite/model_builder.h"
 #if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 #include "media/webrtc/voice_isolation/voice_isolation.h"
 #endif
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/audio/audio_processor_handler.h"
 #include "services/audio/loopback_signal_provider.h"
-#include "services/audio/ml_model_manager.h"
 #include "services/audio/processing_audio_fifo.h"
 #include "services/audio/reference_output.h"
 #include "services/audio/reference_signal_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/flatbuffers/src/include/flatbuffers/flatbuffers.h"
+#include "third_party/tflite/src/tensorflow/lite/model_builder.h"
+
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
+#include "media/webrtc/ml_model_handle.h"  // nogncheck
+#include "media/webrtc/voice_isolation/voice_isolation.h"
+#include "services/audio/ml_model_manager.h"
+#endif
 
 using ::testing::_;
 using ::testing::AtLeast;
+using ::testing::Contains;
 using ::testing::Exactly;
+using ::testing::HasSubstr;
 using ::testing::InvokeWithoutArgs;
 using ::testing::NiceMock;
 using ::testing::NotNull;
@@ -77,14 +92,29 @@ std::unique_ptr<LoopbackMixin> DoNotCreateLoopbackMixin(
   return nullptr;
 }
 
-class FakeMlModelHandle : public MlModelHandle {
- public:
-  FakeMlModelHandle() = default;
-  ~FakeMlModelHandle() override = default;
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 
-  const tflite::FlatBufferModel* Get() override {
-    return reinterpret_cast<const tflite::FlatBufferModel*>(0x1234);
+class FakeMlModelHandle : public media::MlModelHandle {
+ public:
+  FakeMlModelHandle() {
+    base::FilePath source_root;
+    CHECK(base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &source_root));
+    source_root = source_root.AppendASCII("media")
+                      .AppendASCII("webrtc")
+                      .AppendASCII("voice_isolation")
+                      .AppendASCII("test_model_1_2_160_2.tflite");
+
+    model_ = tflite::FlatBufferModel::BuildFromFile(
+        source_root.AsUTF8Unsafe().c_str());
+    CHECK(model_);
   }
+
+  const tflite::FlatBufferModel& Get() override { return *model_; }
+
+ private:
+  ~FakeMlModelHandle() override = default;
+  std::vector<uint8_t> buffer_;
+  std::unique_ptr<tflite::FlatBufferModel> model_;
 };
 
 class FakeMlModelManager : public MlModelManager {
@@ -92,11 +122,11 @@ class FakeMlModelManager : public MlModelManager {
   FakeMlModelManager() = default;
   ~FakeMlModelManager() override = default;
 
-  std::unique_ptr<MlModelHandle> GetModel(
+  scoped_refptr<media::MlModelHandle> GetModel(
       mojom::MlModelType model_type) override {
     if (model_type == mojom::MlModelType::kVoiceIsolationDenoiser &&
         !return_null_model_) {
-      return std::make_unique<FakeMlModelHandle>();
+      return base::MakeRefCounted<FakeMlModelHandle>();
     }
     return nullptr;
   }
@@ -106,6 +136,8 @@ class FakeMlModelManager : public MlModelManager {
  private:
   bool return_null_model_ = false;
 };
+
+#endif  // BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
 }  // namespace
 
 class MockInputControllerEventHandler : public InputController::EventHandler {
@@ -117,11 +149,18 @@ class MockInputControllerEventHandler : public InputController::EventHandler {
   MockInputControllerEventHandler& operator=(
       const MockInputControllerEventHandler&) = delete;
 
-  void OnLog(std::string_view) override {}
+  void OnLog(std::string_view message) override {
+    log_messages_.emplace_back(message);
+  }
+
+  const std::vector<std::string>& log_messages() const { return log_messages_; }
 
   MOCK_METHOD1(OnCreated, void(bool initially_muted));
   MOCK_METHOD1(OnError, void(InputController::ErrorCode error_code));
   MOCK_METHOD1(OnMuted, void(bool is_muted));
+
+ private:
+  std::vector<std::string> log_messages_;
 };
 
 class MockSyncWriter : public InputController::SyncWriter {
@@ -256,6 +295,7 @@ class TimeSourceInputControllerTest : public ::testing::Test {
       const TimeSourceInputControllerTest&) = delete;
 
   ~TimeSourceInputControllerTest() override {
+    controller_.reset();
     audio_manager_->Shutdown();
     task_environment_.RunUntilIdle();
   }
@@ -409,6 +449,41 @@ TEST_F(InputControllerTestWithMockAudioManager, PropagatesGlitchInfo) {
   controller_->Close();
 }
 
+TEST_F(InputControllerTestWithMockAudioManager, LogsStatsInDestructor) {
+  MockAudioInputStream mock_stream;
+  static_cast<media::MockAudioManager*>(audio_manager_.get())
+      ->SetMakeInputStreamCB(base::BindRepeating(
+          [](media::AudioInputStream* stream,
+             const media::AudioParameters& params,
+             const std::string& device_id) { return stream; },
+          &mock_stream));
+  auto audio_bus = media::AudioBus::Create(params_);
+
+  CreateAudioController();
+  ASSERT_TRUE(controller_.get());
+  controller_->Record();
+
+  ASSERT_TRUE(mock_stream.captured_callback_);
+  media::AudioInputStream::AudioInputCallback* callback =
+      *mock_stream.captured_callback_;
+
+  const media::AudioGlitchInfo audio_glitch_info{
+      .duration = base::Milliseconds(123), .count = 5};
+  EXPECT_CALL(sync_writer_, Write(NotNull(), _, _, audio_glitch_info));
+  callback->OnData(audio_bus.get(), base::TimeTicks::Now(), 1,
+                   audio_glitch_info);
+  testing::Mock::VerifyAndClearExpectations(&sync_writer_);
+
+  EXPECT_CALL(sync_writer_, Close());
+  controller_->Close();
+  controller_.reset();
+
+  EXPECT_THAT(event_handler_.log_messages(),
+              Contains(HasSubstr("AIC::Dtor => (duration=")));
+  EXPECT_THAT(event_handler_.log_messages(),
+              Contains(HasSubstr("AIC::Dtor => (glitches=")));
+}
+
 TEST_F(InputControllerTest, RecordTwice) {
   EXPECT_CALL(event_handler_, OnCreated(_));
   CreateAudioController();
@@ -541,13 +616,20 @@ class TimeSourceInputControllerTestWithReferenceSignalProvider
     this->controller_ = InputController::Create(
         this->audio_manager_.get(), &this->event_handler_, &this->sync_writer_,
         std::move(reference_signal_provider_unique_),
-        &this->aecdump_recording_manager_, &ml_model_manager_,
+        &this->aecdump_recording_manager_,
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
+        /*ml_model_manager=*/&ml_model_manager_,
+#else
+        /*ml_model_manager=*/nullptr,
+#endif
         std::move(processing_config_),
         base::BindOnce(&DoNotCreateLoopbackMixin), this->params_,
         media::AudioDeviceDescription::kDefaultDeviceId, false);
 
-    helper_ =
-        std::make_unique<InputControllerTestHelper>(this->controller_.get());
+    if (this->controller_) {
+      helper_ =
+          std::make_unique<InputControllerTestHelper>(this->controller_.get());
+    }
   }
 
   enum class AudioProcessingType {
@@ -598,7 +680,9 @@ class TimeSourceInputControllerTestWithReferenceSignalProvider
       reference_signal_provider_ = reference_signal_provider_unique_.get();
   media::mojom::AudioProcessingConfigPtr processing_config_;
   mojo::Remote<media::mojom::AudioProcessorControls> remote_controls_;
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
   FakeMlModelManager ml_model_manager_;
+#endif
   std::unique_ptr<InputControllerTestHelper> helper_;
 };
 

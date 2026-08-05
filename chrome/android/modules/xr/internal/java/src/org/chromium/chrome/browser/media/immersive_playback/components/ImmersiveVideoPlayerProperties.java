@@ -9,6 +9,7 @@ import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.ReadableObjectPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableIntPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
+import org.chromium.ui.xr.scenecore.XrPose;
 
 /** Properties for the immersive video player panel. */
 @NullMarked
@@ -16,6 +17,8 @@ public class ImmersiveVideoPlayerProperties {
     public static final ReadableObjectPropertyKey<Float> DEFAULT_ASPECT_RATIO =
             new ReadableObjectPropertyKey<>();
     public static final ReadableObjectPropertyKey<Float> DEFAULT_CURVE_RADIUS =
+            new ReadableObjectPropertyKey<>();
+    public static final ReadableObjectPropertyKey<Float> DEFAULT_FEATHER_RADIUS =
             new ReadableObjectPropertyKey<>();
     public static final ReadableObjectPropertyKey<Float> DEFAULT_MAX_WIDTH =
             new ReadableObjectPropertyKey<>();
@@ -25,10 +28,7 @@ public class ImmersiveVideoPlayerProperties {
             new ReadableObjectPropertyKey<>();
     public static final WritableIntPropertyKey PIXEL_HEIGHT = new WritableIntPropertyKey();
     public static final WritableIntPropertyKey PIXEL_WIDTH = new WritableIntPropertyKey();
-    public static final WritableObjectPropertyKey<float[]> POSE_ROTATION =
-            new WritableObjectPropertyKey<>();
-    public static final WritableObjectPropertyKey<float[]> POSE_TRANSLATION =
-            new WritableObjectPropertyKey<>();
+    public static final WritableObjectPropertyKey<XrPose> POSE = new WritableObjectPropertyKey<>();
     public static final WritableIntPropertyKey SHAPE = new WritableIntPropertyKey();
     public static final WritableIntPropertyKey STEREO_MODE = new WritableIntPropertyKey();
 
@@ -36,13 +36,13 @@ public class ImmersiveVideoPlayerProperties {
             new PropertyKey[] {
                 DEFAULT_ASPECT_RATIO,
                 DEFAULT_CURVE_RADIUS,
+                DEFAULT_FEATHER_RADIUS,
                 DEFAULT_MAX_WIDTH,
                 DEFAULT_MIN_WIDTH,
                 DEFAULT_SPATIAL_WIDTH,
                 PIXEL_HEIGHT,
                 PIXEL_WIDTH,
-                POSE_ROTATION,
-                POSE_TRANSLATION,
+                POSE,
                 SHAPE,
                 STEREO_MODE,
             };

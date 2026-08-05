@@ -4,6 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/main_menu_builder.h"
 
+#include <AvailabilityVersions.h>
+
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/mac/mac_util.h"
@@ -27,17 +29,22 @@
 #import "ui/base/l10n/l10n_util_mac.h"
 #include "ui/strings/grit/ui_strings.h"
 
-@interface NSImage (SPI)
+#if !defined(__MAC_27_0)
 
-// Creates a system symbol image from SF Symbols with the specified name and
-// value. Differs from +imageWithSystemSymbolName:accessibilityDescription: in
-// that it allows instantiation of private symbols, those intended for
-// Apple-only usage (see the SFSymbols.framework's bundles CoreGlyphs vs
-// CoreGlyphsPrivate).
-+ (instancetype)imageWithPrivateSystemSymbolName:(NSString*)name
-                        accessibilityDescription:(NSString*)description;
+@interface NSMenuItem (macOS27SDK)
+
+typedef NS_ENUM(NSInteger, NSMenuItemImageVisibility) {
+  NSMenuItemImageVisibilityAutomatic = 0,
+  NSMenuItemImageVisibilityVisible = 1,
+  NSMenuItemImageVisibilityHidden = 2
+} API_AVAILABLE(macos(27.0));
+
+@property NSMenuItemImageVisibility preferredImageVisibility API_AVAILABLE(
+    macos(27.0));
 
 @end
+
+#endif
 
 namespace chrome {
 namespace {
@@ -305,8 +312,10 @@ NSMenuItem* BuildViewMenu(NSApplication* nsapp,
                   .command_id(IDC_SHOW_FULL_URLS),
               Item(IDS_CONTEXT_MENU_SHOW_GOOGLE_LENS_SHORTCUT)
                   .command_id(IDC_SHOW_GOOGLE_LENS_SHORTCUT),
-              Item(IDS_CONTEXT_MENU_SHOW_AI_MODE_OMNIBOX_BUTTON)
-                  .command_id(IDC_SHOW_AI_MODE_OMNIBOX_BUTTON),
+               Item(IDS_AI_MODE_ENTRYPOINT_CONTEXT_MENU_SHOW)
+                   .string_format_1(
+                       l10n_util::GetStringUTF16(IDS_AI_MODE_ENTRYPOINT_LABEL))
+                   .command_id(IDC_SHOW_AI_MODE_OMNIBOX_BUTTON),
               Item(IDS_CONTEXT_MENU_SHOW_SEARCH_TOOLS)
                   .command_id(IDC_SHOW_SEARCH_TOOLS),
               Item(IDS_SWITCH_TO_VERTICAL_TAB)
@@ -445,31 +454,6 @@ NSMenuItem* BuildBookmarksMenu(NSApplication* nsapp,
   return item;
 }
 
-NSMenuItem* BuildGroupsMenu(NSApplication* nsapp,
-                            id app_delegate,
-                            const std::u16string& product_name,
-                            bool is_pwa,
-                            bool is_rtl) {
-  if (!features::IsShowTabGroupsMacSystemMenuEnabled()) {
-    return nil;
-  }
-
-  if (is_pwa) {
-    return nil;
-  }
-
-  // clang-format off
-  NSMenuItem* item =
-      Item(IDS_SAVED_TAB_GROUPS_MENU)
-          .tag(AppMenuModel::kSavedTabGroupsMenuPlaceholder)
-          .submenu({
-              Item(IDS_CREATE_NEW_TAB_GROUP)
-                  .command_id(IDC_CREATE_NEW_TAB_GROUP),
-          })
-          .Build();
-  // clang-format on
-  return item;
-}
 
 NSMenuItem* BuildPeopleMenu(NSApplication* nsapp,
                             id app_delegate,
@@ -550,10 +534,13 @@ NSMenuItem* BuildTabMenu(NSApplication* nsapp,
               Item(is_rtl ? IDS_TAB_CXMENU_NEWTABTOLEFT
                           : IDS_TAB_CXMENU_NEWTABTORIGHT)
                   .command_id(IDC_NEW_TAB_TO_RIGHT),
+              Item(IDS_TAB_CXMENU_NEWTABBELOW)
+                  .command_id(IDC_NEW_TAB_TO_RIGHT)
+                  .set_hidden(true),
               Item(IDS_NEXT_TAB_MAC)
-                  .command_id(IDC_SELECT_NEXT_TAB),
+                  .command_id(IDC_CYCLE_TO_NEXT_TAB),
               Item(IDS_PREV_TAB_MAC)
-                  .command_id(IDC_SELECT_PREVIOUS_TAB),
+                  .command_id(IDC_CYCLE_TO_PREV_TAB),
               Item(IDS_DUPLICATE_TAB_MAC)
                   .command_id(IDC_DUPLICATE_TAB),
               Item(IDS_DUPLICATE_TARGET_TAB_MAC)
@@ -583,8 +570,13 @@ NSMenuItem* BuildTabMenu(NSApplication* nsapp,
               Item(is_rtl ? IDS_TAB_CXMENU_CLOSETABSTOLEFT
                           : IDS_TAB_CXMENU_CLOSETABSTORIGHT)
                   .command_id(IDC_WINDOW_CLOSE_TABS_TO_RIGHT),
+              Item(IDS_TAB_CXMENU_CLOSETABSBELOW)
+                  .command_id(IDC_WINDOW_CLOSE_TABS_TO_RIGHT)
+                  .set_hidden(true),
               Item(IDS_MOVE_TAB_TO_NEW_WINDOW)
                   .command_id(IDC_MOVE_TAB_TO_NEW_WINDOW),
+              Item(IDS_TAB_CXMENU_ADD_TAB_TO_NEW_SPLIT)
+                  .command_id(IDC_NEW_SPLIT_TAB),
               Item(IDS_SEARCH_TABS)
                   .command_id(IDC_TAB_SEARCH),
               Item().is_separator(),
@@ -647,7 +639,6 @@ NSMenu* BuildMainMenu(NSApplication* nsapp,
            &BuildViewMenu,
            &BuildHistoryMenu,
            &BuildBookmarksMenu,
-           &BuildGroupsMenu,
            &BuildPeopleMenu,
            &BuildTabMenu,
            &BuildWindowMenu,
@@ -746,12 +737,12 @@ NSMenuItem* MenuItemBuilder::Build() const {
   item.keyEquivalentModifierMask = key_equivalent_flags;
   item.alternate = is_alternate_;
   item.hidden = is_hidden_;
-  if (@available(macOS 26, *)) {
-    if (sf_symbol_name_) {
-      // Some action images that macOS uses by default are private and aren't
-      // accessible via normal lookup, so use SPI.
-      item.image = [NSImage imageWithPrivateSystemSymbolName:sf_symbol_name_
-                                    accessibilityDescription:nil];
+  if (sf_symbol_name_) {
+    item.image = [NSImage imageWithSystemSymbolName:sf_symbol_name_
+                           accessibilityDescription:nil];
+    if (@available(macOS 27, *)) {
+      // No, really, please actually show the set image.
+      item.preferredImageVisibility = NSMenuItemImageVisibilityVisible;
     }
   }
 

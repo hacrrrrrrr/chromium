@@ -202,6 +202,7 @@ void H265Decoder::Reset() {
   parser_.Reset();
   accelerator_->Reset();
 
+  active_sps_.reset();
   decoder_buffer_.reset();
   secure_handle_ = 0;
 
@@ -311,6 +312,7 @@ H265Decoder::DecodeResult H265Decoder::Decode() {
             break;
           }
           case H265NALU::SPS_NUT: {
+            CHECK_ACCELERATOR_RESULT(FinishPrevFrameIfPresent());
             int sps_id;
             par_res = parser_.ParseSPS(&sps_id);
             if (par_res != H265Parser::kOk) {
@@ -320,6 +322,7 @@ H265Decoder::DecodeResult H265Decoder::Decode() {
             break;
           }
           case H265NALU::PPS_NUT: {
+            CHECK_ACCELERATOR_RESULT(FinishPrevFrameIfPresent());
             int pps_id;
             par_res = parser_.ParsePPS(*curr_nalu_, &pps_id);
             if (par_res != H265Parser::kOk) {
@@ -594,6 +597,10 @@ bool H265Decoder::ProcessPPS(int pps_id, bool* need_new_buffers) {
 
   gfx::Size new_pic_size = sps->GetCodedSize();
   gfx::Rect new_visible_rect = sps->GetVisibleRect();
+  // H265Parser::ParseSPS guarantees that the crop window (and VUI display
+  // window) parameters fit within the coded picture size and are non-empty.
+  CHECK(gfx::Rect(new_pic_size).Contains(new_visible_rect));
+  CHECK(!new_visible_rect.IsEmpty());
   if (visible_rect_ != new_visible_rect) {
     DVLOG(2) << "New visible rect: " << new_visible_rect.ToString();
     visible_rect_ = new_visible_rect;
@@ -648,10 +655,15 @@ bool H265Decoder::ProcessPPS(int pps_id, bool* need_new_buffers) {
                             new_color_space != picture_color_space_;
   }
 
-  const bool is_config_change =
-      pic_size_ != new_pic_size || dpb_.max_num_pics() != sps->max_dpb_size ||
-      profile_ != new_profile || bit_depth_ != new_bit_depth ||
-      chroma_sampling_ != new_chroma_sampling;
+  bool is_config_change = false;
+  if (parser_.validate_extended_bitstream()) {
+    is_config_change = !active_sps_ || *active_sps_ != *sps;
+  } else {
+    is_config_change = pic_size_ != new_pic_size ||
+                       dpb_.max_num_pics() != sps->max_dpb_size ||
+                       profile_ != new_profile || bit_depth_ != new_bit_depth ||
+                       chroma_sampling_ != new_chroma_sampling;
+  }
 
   if (is_config_change) {
     // Only color space changes are allowed on non-IRAP pictures.
@@ -675,6 +687,7 @@ bool H265Decoder::ProcessPPS(int pps_id, bool* need_new_buffers) {
              << VideoChromaSamplingToString(new_chroma_sampling);
     profile_ = new_profile;
     bit_depth_ = new_bit_depth;
+    active_sps_ = std::make_unique<H265SPS>(*sps);
     pic_size_ = new_pic_size;
     chroma_sampling_ = new_chroma_sampling;
     picture_color_space_ = new_color_space;
@@ -697,6 +710,10 @@ H265Decoder::H265Accelerator::Status H265Decoder::PreprocessCurrentSlice() {
       return result;
 
     DCHECK(!curr_pic_);
+  } else if (!curr_pic_) {
+    DVLOG(1) << "Received slice segment with first_slice_segment_in_pic_flag "
+             << "equal to 0 without an active picture";
+    return H265Accelerator::Status::kFail;
   }
 
   return H265Accelerator::Status::kOk;

@@ -55,6 +55,10 @@
 #include "chrome/grit/guest_view_shared_resources_map.h"  // nogncheck
 #endif  // !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 
+#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+#include "chrome/browser/ui/webui/theme_source.h"
+#endif
+
 namespace glic {
 
 // Sets the maximum number of in-flight requests to the guest.
@@ -194,6 +198,10 @@ GlicUI::GlicUI(content::WebUI* web_ui)
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
       browser_context, chrome::kChromeUIGlicHost);
 
+#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
+#endif
+
   // Add required resources.
   webui::SetupWebUIDataSource(source, kGlicResources, IDR_GLIC_GLIC_HTML);
 
@@ -290,15 +298,7 @@ GlicUI::GlicUI(content::WebUI* web_ui)
           IDR_GLIC_GLIC_API_IMPL_GLIC_API_INJECTED_CLIENT_ROLLUP_JS));
 
   std::string allowed_origins =
-      command_line->GetSwitchValueASCII(::switches::kGlicAllowedOrigins);
-  if (allowed_origins.empty()) {
-    allowed_origins = features::kGlicAllowedOriginsOverride.Get();
-  }
-
-  // Allow corp origins for @google accounts.
-  if (is_internal_google_account) {
-    allowed_origins += " https://*.corp.google.com";
-  }
+      glic::GetGlicAllowedOrigins(is_internal_google_account);
 
   source->AddString("glicAllowedOrigins", allowed_origins);
   source->AddString("glicApiAllowedOrigins",
@@ -318,20 +318,6 @@ GlicUI::GlicUI(content::WebUI* web_ui)
   source->AddBoolean(
       "noLoader", base::FeatureList::IsEnabled(features::kGlicNoWebUiLoader));
 
-  // Set up for periodic web client responsiveness check and its interval,
-  // timeout, and max unresponsive ui time.
-  source->AddBoolean(
-      "isClientResponsivenessCheckEnabled",
-      base::FeatureList::IsEnabled(features::kGlicClientResponsivenessCheck));
-  source->AddInteger("clientResponsivenessCheckIntervalMs",
-                     features::kGlicClientResponsivenessCheckIntervalMs.Get());
-  source->AddInteger("clientResponsivenessCheckTimeoutMs",
-                     features::kGlicClientResponsivenessCheckTimeoutMs.Get());
-  source->AddInteger("clientUnresponsiveUiMaxTimeMs",
-                     features::kGlicClientUnresponsiveUiMaxTimeMs.Get());
-  source->AddBoolean(
-      "clientResponsivenessCheckIgnoreWhenDebuggerAttached",
-      features::kGlicClientResponsivenessCheckIgnoreWhenDebuggerAttached.Get());
   source->AddBoolean("enableWebClientUnresponsiveMetrics",
                      base::FeatureList::IsEnabled(
                          features::kGlicWebClientUnresponsiveMetrics));
@@ -354,6 +340,9 @@ GlicUI::GlicUI(content::WebUI* web_ui)
   source->AddBoolean(
       "glicPopupWindowsEnabled",
       base::FeatureList::IsEnabled(features::kGlicPopupWindowsEnabled));
+  source->AddBoolean(
+      "enableStructuredYieldMetadata",
+      base::FeatureList::IsEnabled(features::kGlicStructuredYieldMetadata));
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(GlicUI)

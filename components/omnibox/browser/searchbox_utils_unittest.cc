@@ -30,11 +30,11 @@ namespace searchbox {
 
 class SearchboxUtilsTest : public testing::Test {
  protected:
-  SearchboxUtilsTest() : controller_(&task_environment_) {}
+  SearchboxUtilsTest() : autocomplete_controller_(&task_environment_) {}
 
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
-  FakeAutocompleteController controller_;
+  FakeAutocompleteController autocomplete_controller_;
   TestOmniboxClient client_;
 };
 
@@ -54,25 +54,27 @@ TEST_F(SearchboxUtilsTest, OpenMatchNormal) {
                           AutocompleteMatchType::URL_WHAT_YOU_TYPED);
   match.destination_url = GURL("https://example.com");
 
-  controller_.internal_result_.AppendMatches({match});
+  autocomplete_controller_.internal_result_.AppendMatches({match});
 
   // Set timestamps to satisfy DCHECK:
   // first_modification_timestamp <= last_time_default_match_changed_
   base::TimeTicks now = base::TimeTicks::Now();
-  controller_.last_time_default_match_changed_ = now - base::Seconds(1);
-  base::TimeTicks first_modification_timestamp = now - base::Seconds(2);
-  base::TimeTicks searchbox_focused_timestamp = now - base::Seconds(3);
-  base::TimeTicks match_selection_timestamp = now;
+  autocomplete_controller_.last_time_default_match_changed_ =
+      now - base::Seconds(1);
+  InteractionMetricsTracker metrics_tracker;
+  metrics_tracker.set_last_omnibox_focus(now - base::Seconds(3));
+  metrics_tracker.set_time_user_first_modified_omnibox(now - base::Seconds(2));
+  metrics_tracker.set_match_selection_timestamp(now);
 
   EXPECT_CALL(client_, OnAutocompleteAccept(GURL("https://example.com"), _,
                                             WindowOpenDisposition::CURRENT_TAB,
                                             _, _, _, _, _, _, _, _))
       .Times(1);
 
-  OpenMatch(&controller_, &client_, OmniboxPopupSelection(0), match,
-            WindowOpenDisposition::CURRENT_TAB, searchbox_focused_timestamp,
-            first_modification_timestamp, match_selection_timestamp,
-            metrics::OmniboxEventProto::INVALID);
+  OpenMatch(&autocomplete_controller_, &client_,
+            autocomplete_controller_.input(), OmniboxPopupSelection(0), match,
+            WindowOpenDisposition::CURRENT_TAB, metrics_tracker,
+            metrics::OmniboxEventProto::INVALID, u"");
 }
 
 TEST_F(SearchboxUtilsTest, OpenMatchWithAction) {
@@ -83,15 +85,17 @@ TEST_F(SearchboxUtilsTest, OpenMatchWithAction) {
       base::MakeRefCounted<MockOmniboxAction>(GURL("chrome://settings"));
   match.actions.push_back(action);
 
-  controller_.internal_result_.AppendMatches({match});
+  autocomplete_controller_.internal_result_.AppendMatches({match});
 
   // Set timestamps to satisfy DCHECK:
   // first_modification_timestamp <= last_time_default_match_changed_
   base::TimeTicks now = base::TimeTicks::Now();
-  controller_.last_time_default_match_changed_ = now - base::Seconds(1);
-  base::TimeTicks first_modification_timestamp = now - base::Seconds(2);
-  base::TimeTicks searchbox_focused_timestamp = now - base::Seconds(3);
-  base::TimeTicks match_selection_timestamp = now;
+  autocomplete_controller_.last_time_default_match_changed_ =
+      now - base::Seconds(1);
+  InteractionMetricsTracker metrics_tracker;
+  metrics_tracker.set_last_omnibox_focus(now - base::Seconds(3));
+  metrics_tracker.set_time_user_first_modified_omnibox(now - base::Seconds(2));
+  metrics_tracker.set_match_selection_timestamp(now);
 
   EXPECT_CALL(client_, OnAutocompleteAccept(_, _, _, _, _, _, _, _, _, _, _))
       .Times(0);
@@ -100,10 +104,10 @@ TEST_F(SearchboxUtilsTest, OpenMatchWithAction) {
   OmniboxPopupSelection selection(
       0, OmniboxPopupSelection::FOCUSED_BUTTON_ACTION, 0);
 
-  OpenMatch(&controller_, &client_, selection, match,
-            WindowOpenDisposition::CURRENT_TAB, searchbox_focused_timestamp,
-            first_modification_timestamp, match_selection_timestamp,
-            metrics::OmniboxEventProto::INVALID);
+  OpenMatch(&autocomplete_controller_, &client_,
+            autocomplete_controller_.input(), selection, match,
+            WindowOpenDisposition::CURRENT_TAB, metrics_tracker,
+            metrics::OmniboxEventProto::INVALID, u"");
 }
 
 TEST_F(SearchboxUtilsTest, ComputeOpenDispositionFromModifiers) {
@@ -143,6 +147,57 @@ TEST_F(SearchboxUtilsTest, ComputeOpenDispositionFromModifiers) {
         "Omnibox.OpenMatchWithKeyboardModifiers",
         test_case.expected_metric_value, 1);
   }
+}
+
+TEST_F(SearchboxUtilsTest, CanPasteAndGo) {
+  EXPECT_TRUE(CanPasteAndGo(&client_, u"https://example.com"));
+  EXPECT_FALSE(CanPasteAndGo(&client_, u""));
+}
+
+TEST_F(SearchboxUtilsTest, FocusChanged) {
+  base::HistogramTester histogram_tester;
+  InteractionMetricsTracker tracker;
+
+  EXPECT_TRUE(tracker.last_omnibox_focus().is_null());
+  EXPECT_FALSE(tracker.focus_resulted_in_navigation());
+  EXPECT_TRUE(tracker.match_selection_timestamp().is_null());
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  tracker.set_match_selection_timestamp(now);
+  EXPECT_EQ(tracker.match_selection_timestamp(), now);
+
+  tracker.FocusChanged(true);
+  EXPECT_FALSE(tracker.last_omnibox_focus().is_null());
+  EXPECT_FALSE(tracker.focus_resulted_in_navigation());
+
+  tracker.set_focus_resulted_in_navigation(true);
+  EXPECT_TRUE(tracker.focus_resulted_in_navigation());
+
+  tracker.FocusChanged(false);
+  EXPECT_TRUE(tracker.last_omnibox_focus().is_null());
+  histogram_tester.ExpectUniqueSample("Omnibox.FocusResultedInNavigation", true,
+                                      1);
+}
+
+TEST_F(SearchboxUtilsTest, GenerateDotComMatch) {
+  AutocompleteInput original_input(u"example", 7,
+                                   metrics::OmniboxEventProto::NTP,
+                                   client_.GetSchemeClassifier());
+  original_input.set_prevent_inline_autocomplete(true);
+  original_input.set_allow_exact_keyword_match(true);
+
+  AutocompleteInput generated_input;
+  AutocompleteMatch match =
+      GenerateDotComMatch(&client_, &autocomplete_controller_, original_input,
+                          u"example", &generated_input);
+
+  EXPECT_EQ(u"example", generated_input.text());
+  EXPECT_TRUE(generated_input.prevent_inline_autocomplete());
+  EXPECT_TRUE(generated_input.allow_exact_keyword_match());
+
+  EXPECT_EQ(AutocompleteMatchType::URL_WHAT_YOU_TYPED, match.type);
+  EXPECT_TRUE(match.destination_url.is_valid());
+  EXPECT_EQ(GURL("http://www.example.com/"), match.destination_url);
 }
 
 }  // namespace searchbox

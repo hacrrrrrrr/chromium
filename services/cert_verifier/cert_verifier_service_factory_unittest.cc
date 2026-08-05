@@ -39,6 +39,7 @@
 #include "net/net_buildflags.h"
 #include "net/test/cert_builder.h"
 #include "net/test/cert_test_util.h"
+#include "net/test/chrome_root_store_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
 #include "services/cert_verifier/public/mojom/cert_verifier_service_factory.mojom.h"
@@ -512,17 +513,6 @@ TEST(CertVerifierServiceFactoryTest, RootStoreInfoWithUpdatedRootStore) {
       root->GetCertBuffer()));
 }
 
-void SetFakeProtoTrustedSubtreeData(
-    chrome_root_store::MtcAnchorData* mtc_anchor_metadata) {
-  chrome_root_store::MtcSubTree* subtree =
-      mtc_anchor_metadata->add_trusted_subtrees();
-  subtree->set_start_inclusive(1);
-  subtree->set_end_exclusive(2);
-  std::array<uint8_t, crypto::hash::kSha256Size> hash;
-  hash.fill(0);
-  subtree->set_hash(base::as_string_view(hash));
-}
-
 TEST(CertVerifierServiceFactoryTest, RootStoreInfoWithMerkleTreeCertAnchors) {
   base::test::ScopedFeatureList feature_list_{net::features::kVerifyMTCs};
 
@@ -543,31 +533,31 @@ TEST(CertVerifierServiceFactoryTest, RootStoreInfoWithMerkleTreeCertAnchors) {
   int64_t kRootStoreVersion = net::CompiledChromeRootStoreVersion() + 1;
 
   {
-    // Create updated Chrome Root Store with a regular anchor and 2 MTC anchors.
+    // Create updated Chrome Root Store with a regular anchor so parsing
+    // succeeds.
     chrome_root_store::RootStore root_store;
     root_store.set_version_major(kRootStoreVersion);
     chrome_root_store::TrustAnchor* anchor = root_store.add_trust_anchors();
     anchor->set_der(root->GetDER());
 
-    // Two anchors that will have matching MTC metadata
-    chrome_root_store::MtcAnchor* mtc_anchor = root_store.add_mtc_anchors();
-    mtc_anchor->set_log_id({0x01, 0x02, 0x03});
-    mtc_anchor->set_tls_trust_anchor(true);
-
-    mtc_anchor = root_store.add_mtc_anchors();
-    mtc_anchor->set_log_id({0x21, 0x22});
-    mtc_anchor->set_tls_trust_anchor(true);
+    chrome_root_store::MtcConfig mtc_config;
+    mtc_config.mutable_signer_set()->mutable_timestamp()->set_seconds(
+        base::Time::Now().InSecondsFSinceUnixEpoch());
+    // Two anchors that will have matching MTC metadata.
+    net::AddSignerSetIssuer(*mtc_config.mutable_signer_set(),
+                            {0x01, 0x02, 0x03}, "op1", std::nullopt);
+    net::AddSignerSetIssuer(*mtc_config.mutable_signer_set(), {0x21, 0x22},
+                            "op2", std::nullopt);
 
     // One anchor that doesn't match the MTC metadata.
-    mtc_anchor = root_store.add_mtc_anchors();
-    mtc_anchor->set_log_id({0x31, 0x32});
-    mtc_anchor->set_tls_trust_anchor(true);
+    net::AddSignerSetIssuer(*mtc_config.mutable_signer_set(), {0x31, 0x32},
+                            "op3", std::nullopt);
 
     // Feed factory the new Chrome Root Store.
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
-        mojo_base::ProtoWrapper(root_store), std::nullopt,
-        update_run_loop.QuitClosure());
+        mojo_base::ProtoWrapper(root_store),
+        mojo_base::ProtoWrapper(mtc_config), update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
 
@@ -593,37 +583,8 @@ TEST(CertVerifierServiceFactoryTest, RootStoreInfoWithMerkleTreeCertAnchors) {
         now.InMillisecondsSinceUnixEpoch() / 1000);
 
     // Two anchor metadatas that match the MTC anchors above.
-    chrome_root_store::MtcAnchorData* mtc_anchor_metadata =
-        mtc_metadata_proto.add_mtc_anchor_data();
-    mtc_anchor_metadata->set_log_id({0x01, 0x02, 0x03});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()->set_base_id(
-        {0x04, 0x05});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_min_active_landmark_inclusive(1);
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_last_landmark_inclusive(42);
-    SetFakeProtoTrustedSubtreeData(mtc_anchor_metadata);
-
-    mtc_anchor_metadata = mtc_metadata_proto.add_mtc_anchor_data();
-    mtc_anchor_metadata->set_log_id({0x21, 0x22});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()->set_base_id(
-        {0x24, 0x25});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_min_active_landmark_inclusive(21);
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_last_landmark_inclusive(242);
-    SetFakeProtoTrustedSubtreeData(mtc_anchor_metadata);
-
-    // One anchor metadata that doesn't match the MTC anchors above.
-    mtc_anchor_metadata = mtc_metadata_proto.add_mtc_anchor_data();
-    mtc_anchor_metadata->set_log_id({0x41, 0x42});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()->set_base_id(
-        {0x44, 0x45});
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_min_active_landmark_inclusive(41);
-    mtc_anchor_metadata->mutable_trusted_landmark_ids_range()
-        ->set_last_landmark_inclusive(442);
-    SetFakeProtoTrustedSubtreeData(mtc_anchor_metadata);
+    // TODO(crbug.com/462227032): Restore tests of MTC info once plants-05
+    // style MTC CAs are supported in GetChromeRootStoreInfo.
 
     // Feed factory the new MTC metadata.
     base::RunLoop update_run_loop;
@@ -646,21 +607,9 @@ TEST(CertVerifierServiceFactoryTest, RootStoreInfoWithMerkleTreeCertAnchors) {
 
     EXPECT_EQ(info_ptr->mtc_metadata_update_time, now_truncated_to_seconds);
 
-    // root_mtc_info only includes anchors that were present in both the root
-    // store mtc_anchors and the mtc metadata.
-    ASSERT_EQ(info_ptr->root_mtc_info.size(), 2u);
-    {
-      const auto& mtc_info = *info_ptr->root_mtc_info[0];
-      EXPECT_EQ(mtc_info.log_id_text, "1.2.3");
-      EXPECT_EQ(mtc_info.min_landmark_id_text, "4.5.1");
-      EXPECT_EQ(mtc_info.last_landmark_id_text, "4.5.42");
-    }
-    {
-      const auto& mtc_info = *info_ptr->root_mtc_info[1];
-      EXPECT_EQ(mtc_info.log_id_text, "33.34");
-      EXPECT_EQ(mtc_info.min_landmark_id_text, "36.37.21");
-      EXPECT_EQ(mtc_info.last_landmark_id_text, "36.37.242");
-    }
+    // TODO(crbug.com/462227032): Restore tests of MTC info once plants-05
+    // style MTC CAs are supported in GetChromeRootStoreInfo.
+    ASSERT_EQ(info_ptr->root_mtc_info.size(), 0u);
   }
 }
 
@@ -1644,28 +1593,31 @@ TEST(CertVerifierServiceFactoryTest, UpdateSignerSetChecksVersion) {
   int64_t compiled_seconds = net::CompiledSignerSetTimestampSeconds();
 
   // 1. Update with timestamp <= compiled-in should be ignored.
-  chrome_root_store::SignerSet signer_set_proto_old;
-  signer_set_proto_old.mutable_timestamp()->set_seconds(compiled_seconds - 10);
-  signer_set_proto_old.set_version("0.9.0");
+  chrome_root_store::MtcConfig mtc_config_old;
+  chrome_root_store::SignerSet* signer_set_proto_old =
+      mtc_config_old.mutable_signer_set();
+  signer_set_proto_old->mutable_timestamp()->set_seconds(compiled_seconds - 10);
+  signer_set_proto_old->set_version("0.9.0");
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto),
-        mojo_base::ProtoWrapper(signer_set_proto_old),
-        update_run_loop.QuitClosure());
+        mojo_base::ProtoWrapper(mtc_config_old), update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
 
-  chrome_root_store::SignerSet signer_set_proto_equal;
-  signer_set_proto_equal.mutable_timestamp()->set_seconds(compiled_seconds);
-  signer_set_proto_equal.set_version("0.9.0");
+  chrome_root_store::MtcConfig mtc_config_equal;
+  chrome_root_store::SignerSet* signer_set_proto_equal =
+      mtc_config_equal.mutable_signer_set();
+  signer_set_proto_equal->mutable_timestamp()->set_seconds(compiled_seconds);
+  signer_set_proto_equal->set_version("0.9.0");
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto),
-        mojo_base::ProtoWrapper(signer_set_proto_equal),
+        mojo_base::ProtoWrapper(mtc_config_equal),
         update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
@@ -1678,16 +1630,17 @@ TEST(CertVerifierServiceFactoryTest, UpdateSignerSetChecksVersion) {
   EXPECT_NE(params1.root_store_data->signer_set()->version(), "0.9.0");
 
   // 2. Update with timestamp > compiled-in should be applied.
-  chrome_root_store::SignerSet signer_set_proto_new;
-  signer_set_proto_new.mutable_timestamp()->set_seconds(compiled_seconds + 20);
-  signer_set_proto_new.set_version(GetNonCompiledSignerSetVersion());
+  chrome_root_store::MtcConfig mtc_config_new;
+  chrome_root_store::SignerSet* signer_set_proto_new =
+      mtc_config_new.mutable_signer_set();
+  signer_set_proto_new->mutable_timestamp()->set_seconds(compiled_seconds + 20);
+  signer_set_proto_new->set_version(GetNonCompiledSignerSetVersion());
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto),
-        mojo_base::ProtoWrapper(signer_set_proto_new),
-        update_run_loop.QuitClosure());
+        mojo_base::ProtoWrapper(mtc_config_new), update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
 
@@ -1701,16 +1654,17 @@ TEST(CertVerifierServiceFactoryTest, UpdateSignerSetChecksVersion) {
 
   // 3. Update with timestamp > compiled-in but < currently active should be
   // applied (since we allow downgrades).
-  chrome_root_store::SignerSet signer_set_proto_mid;
-  signer_set_proto_mid.mutable_timestamp()->set_seconds(compiled_seconds + 10);
-  signer_set_proto_mid.set_version("1.5.0");
+  chrome_root_store::MtcConfig mtc_config_mid;
+  chrome_root_store::SignerSet* signer_set_proto_mid =
+      mtc_config_mid.mutable_signer_set();
+  signer_set_proto_mid->mutable_timestamp()->set_seconds(compiled_seconds + 10);
+  signer_set_proto_mid->set_version("1.5.0");
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto),
-        mojo_base::ProtoWrapper(signer_set_proto_mid),
-        update_run_loop.QuitClosure());
+        mojo_base::ProtoWrapper(mtc_config_mid), update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
 
@@ -1753,21 +1707,23 @@ TEST(CertVerifierServiceFactoryTest, ParseChromeRootStoreProto) {
   EXPECT_EQ(parsed->version(), compiled_version + 1);
 }
 
-TEST(CertVerifierServiceFactoryTest, ParseSignerSetProto) {
+TEST(CertVerifierServiceFactoryTest, ParseMtcConfigProto) {
   base::test::TaskEnvironment task_environment;
 
   int64_t compiled_seconds = net::CompiledSignerSetTimestampSeconds();
 
-  chrome_root_store::SignerSet signer_set_proto;
-  signer_set_proto.mutable_timestamp()->set_seconds(compiled_seconds + 10);
-  signer_set_proto.set_version(GetNonCompiledSignerSetVersion());
+  chrome_root_store::MtcConfig mtc_config_proto;
+  chrome_root_store::SignerSet* signer_set_proto =
+      mtc_config_proto.mutable_signer_set();
+  signer_set_proto->mutable_timestamp()->set_seconds(compiled_seconds + 10);
+  signer_set_proto->set_version(GetNonCompiledSignerSetVersion());
 
   // Test with disabled VerifyMTCs feature
   {
     base::test::ScopedFeatureList feature_list;
     feature_list.InitAndDisableFeature(net::features::kVerifyMTCs);
-    EXPECT_FALSE(CertVerifierServiceFactoryImpl::ParseSignerSetProto(
-                     mojo_base::ProtoWrapper(signer_set_proto))
+    EXPECT_FALSE(CertVerifierServiceFactoryImpl::ParseMtcConfigProto(
+                     mojo_base::ProtoWrapper(mtc_config_proto))
                      .has_value());
   }
 
@@ -1777,26 +1733,19 @@ TEST(CertVerifierServiceFactoryTest, ParseSignerSetProto) {
 
     // Empty input
     EXPECT_FALSE(
-        CertVerifierServiceFactoryImpl::ParseSignerSetProto(std::nullopt)
+        CertVerifierServiceFactoryImpl::ParseMtcConfigProto(std::nullopt)
             .has_value());
 
     // Passing an invalid proto should return nullopt.
     chrome_root_store::RootStore root_store_proto;
-    EXPECT_FALSE(CertVerifierServiceFactoryImpl::ParseSignerSetProto(
+    EXPECT_FALSE(CertVerifierServiceFactoryImpl::ParseMtcConfigProto(
                      mojo_base::ProtoWrapper(root_store_proto))
                      .has_value());
 
-    // Check we don't overwrite a newer compiled-in version.
-    chrome_root_store::SignerSet signer_set_old = signer_set_proto;
-    signer_set_old.mutable_timestamp()->set_seconds(compiled_seconds - 10);
-    EXPECT_FALSE(CertVerifierServiceFactoryImpl::ParseSignerSetProto(
-                     mojo_base::ProtoWrapper(signer_set_old))
-                     .has_value());
-
-    auto parsed = CertVerifierServiceFactoryImpl::ParseSignerSetProto(
-        mojo_base::ProtoWrapper(signer_set_proto));
+    auto parsed = CertVerifierServiceFactoryImpl::ParseMtcConfigProto(
+        mojo_base::ProtoWrapper(mtc_config_proto));
     ASSERT_TRUE(parsed.has_value());
-    EXPECT_EQ(parsed->version(), GetNonCompiledSignerSetVersion());
+    EXPECT_EQ(parsed->signer_set().version(), GetNonCompiledSignerSetVersion());
   }
 }
 
@@ -1816,16 +1765,18 @@ TEST(CertVerifierServiceFactoryTest, UpdateSignerSetWithOldRootStore) {
   chrome_root_store::RootStore root_store_proto_old;
   root_store_proto_old.set_version_major(compiled_crs_version);
   // And a SignerSet with timestamp > compiled-in.
-  chrome_root_store::SignerSet signer_set_proto_new;
-  signer_set_proto_new.mutable_timestamp()->set_seconds(
+  chrome_root_store::MtcConfig mtc_config_proto_new;
+  chrome_root_store::SignerSet* signer_set_proto_new =
+      mtc_config_proto_new.mutable_signer_set();
+  signer_set_proto_new->mutable_timestamp()->set_seconds(
       compiled_signer_seconds + 10);
-  signer_set_proto_new.set_version(GetNonCompiledSignerSetVersion());
+  signer_set_proto_new->set_version(GetNonCompiledSignerSetVersion());
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto_old),
-        mojo_base::ProtoWrapper(signer_set_proto_new),
+        mojo_base::ProtoWrapper(mtc_config_proto_new),
         update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
@@ -1863,16 +1814,18 @@ TEST(CertVerifierServiceFactoryTest, UpdateRootStoreWithOldSignerSet) {
   anchor->set_der(root->GetDER());
 
   // And a SignerSet with timestamp <= compiled-in.
-  chrome_root_store::SignerSet signer_set_proto_old;
-  signer_set_proto_old.mutable_timestamp()->set_seconds(
+  chrome_root_store::MtcConfig mtc_config_proto_old;
+  chrome_root_store::SignerSet* signer_set_proto_old =
+      mtc_config_proto_old.mutable_signer_set();
+  signer_set_proto_old->mutable_timestamp()->set_seconds(
       compiled_signer_seconds - 10);
-  signer_set_proto_old.set_version(GetNonCompiledSignerSetVersion());
+  signer_set_proto_old->set_version(GetNonCompiledSignerSetVersion());
 
   {
     base::RunLoop update_run_loop;
     cv_service_factory_impl.UpdateChromeRootStore(
         mojo_base::ProtoWrapper(root_store_proto_new),
-        mojo_base::ProtoWrapper(signer_set_proto_old),
+        mojo_base::ProtoWrapper(mtc_config_proto_old),
         update_run_loop.QuitClosure());
     update_run_loop.Run();
   }
@@ -1889,6 +1842,167 @@ TEST(CertVerifierServiceFactoryTest, UpdateRootStoreWithOldSignerSet) {
                 .InSecondsFSinceUnixEpoch(),
             compiled_signer_seconds);
 }
+TEST(CertVerifierServiceFactoryTest, UpdateMtcConfigDisableFlag) {
+  base::test::TaskEnvironment task_environment;
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(net::features::kVerifyMTCs);
+
+  mojo::Remote<mojom::CertVerifierServiceFactory> cv_service_factory_remote;
+  CertVerifierServiceFactoryImpl cv_service_factory_impl(
+      cv_service_factory_remote.BindNewPipeAndPassReceiver());
+
+  int64_t compiled_signer_seconds = net::CompiledSignerSetTimestampSeconds();
+  int64_t compiled_crs_version = net::CompiledChromeRootStoreVersion();
+  auto [leaf, root] = net::CertBuilder::CreateSimpleChain2();
+
+  chrome_root_store::RootStore root_store_proto;
+  root_store_proto.set_version_major(compiled_crs_version + 10);
+  chrome_root_store::TrustAnchor* anchor = root_store_proto.add_trust_anchors();
+  anchor->set_der(root->GetDER());
+
+  // Initial update without any MtcConfig, to initialize the root store and
+  // verify the initial state of the disable flag.
+  {
+    base::RunLoop update_run_loop;
+    cv_service_factory_impl.UpdateChromeRootStore(
+        mojo_base::ProtoWrapper(root_store_proto), std::nullopt,
+        update_run_loop.QuitClosure());
+    update_run_loop.Run();
+  }
+
+  const net::CertVerifyProc::ImplParams& initial_params =
+      cv_service_factory_impl.get_impl_params();
+  ASSERT_TRUE(initial_params.root_store_data);
+  EXPECT_FALSE(
+      initial_params.root_store_data->disable_mtc_mirroring_requirements());
+
+  // Update with an MtcConfig that doesn't have a SignerSet, but has the
+  // disable flag set to true.
+  chrome_root_store::MtcConfig mtc_config_no_signer_set;
+  mtc_config_no_signer_set.set_disable_mtc_mirroring_requirements(true);
+
+  {
+    base::RunLoop update_run_loop;
+    cv_service_factory_impl.UpdateChromeRootStore(
+        mojo_base::ProtoWrapper(root_store_proto),
+        mojo_base::ProtoWrapper(mtc_config_no_signer_set),
+        update_run_loop.QuitClosure());
+    update_run_loop.Run();
+  }
+
+  const net::CertVerifyProc::ImplParams& params1 =
+      cv_service_factory_impl.get_impl_params();
+  ASSERT_TRUE(params1.root_store_data);
+  EXPECT_TRUE(params1.root_store_data->disable_mtc_mirroring_requirements());
+  // The signer set should still be the compiled in version.
+  ASSERT_TRUE(params1.root_store_data->signer_set().has_value());
+  EXPECT_EQ(params1.root_store_data->signer_set()
+                ->timestamp()
+                .InSecondsFSinceUnixEpoch(),
+            compiled_signer_seconds);
+
+  // Update with an MtcConfig that turns the flag back off.
+  chrome_root_store::MtcConfig mtc_config_disable_off;
+  mtc_config_disable_off.set_disable_mtc_mirroring_requirements(false);
+
+  {
+    base::RunLoop update_run_loop;
+    cv_service_factory_impl.UpdateChromeRootStore(
+        mojo_base::ProtoWrapper(root_store_proto),
+        mojo_base::ProtoWrapper(mtc_config_disable_off),
+        update_run_loop.QuitClosure());
+    update_run_loop.Run();
+  }
+
+  const net::CertVerifyProc::ImplParams& params2 =
+      cv_service_factory_impl.get_impl_params();
+  ASSERT_TRUE(params2.root_store_data);
+  EXPECT_FALSE(params2.root_store_data->disable_mtc_mirroring_requirements());
+  // The signer set should still be the compiled in version.
+  ASSERT_TRUE(params2.root_store_data->signer_set().has_value());
+  EXPECT_EQ(params2.root_store_data->signer_set()
+                ->timestamp()
+                .InSecondsFSinceUnixEpoch(),
+            compiled_signer_seconds);
+}
 #endif  // BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+
+TEST_F(CertVerifierServiceFactoryBuiltinVerifierTest,
+       UpdateNetworkTime_Applied) {
+  auto [leaf, root] = net::CertBuilder::CreateSimpleChain2();
+  base::Time now = base::Time::Now();
+  base::TimeTicks ticks_now = base::TimeTicks::Now();
+  // Configure the leaf certificate so it is no longer valid according to the
+  // system time.
+  leaf->SetValidity(now - base::Days(3), now - base::Days(1));
+  leaf->SetSubjectAltName("host.test");
+  net::ScopedTestRoot scoped_test_root(root->GetX509Certificate());
+
+  mojo::Remote<mojom::CertVerifierServiceFactory> cv_service_factory_remote;
+  CertVerifierServiceFactoryImpl cv_service_factory_impl(
+      cv_service_factory_remote.BindNewPipeAndPassReceiver());
+  EnableChromeRootStoreIfOptional(&cv_service_factory_impl);
+
+  // Update the time tracker with uncertainty exactly at the threshold (45s).
+  // This should be applied.
+  cv_service_factory_impl.UpdateNetworkTime(now, ticks_now, now - base::Days(2),
+                                            base::Seconds(45));
+
+  mojo::Remote<mojom::CertVerifierService> cv_service_remote;
+  DummyCVServiceClient cv_service_client;
+  mojom::CertVerifierCreationParamsPtr cv_creation_params =
+      mojom::CertVerifierCreationParams::New();
+
+  cv_service_factory_remote->GetNewCertVerifier(
+      cv_service_remote.BindNewPipeAndPassReceiver(),
+      /*updater=*/mojo::NullReceiver(),
+      cv_service_client.client_.BindNewPipeAndPassRemote(),
+      std::move(cv_creation_params));
+
+  auto [net_error, result] =
+      Verify(cv_service_remote, leaf->GetX509Certificate(), "host.test");
+  EXPECT_THAT(net_error, IsError(net::OK));
+  EXPECT_FALSE(net::IsCertStatusError(result.cert_status));
+}
+
+TEST_F(CertVerifierServiceFactoryBuiltinVerifierTest,
+       UpdateNetworkTime_Ignored) {
+  auto [leaf, root] = net::CertBuilder::CreateSimpleChain2();
+  base::Time now = base::Time::Now();
+  base::TimeTicks ticks_now = base::TimeTicks::Now();
+  // Configure the leaf certificate so it is no longer valid according to the
+  // system time.
+  leaf->SetValidity(now - base::Days(3), now - base::Days(1));
+  leaf->SetSubjectAltName("host.test");
+  net::ScopedTestRoot scoped_test_root(root->GetX509Certificate());
+
+  mojo::Remote<mojom::CertVerifierServiceFactory> cv_service_factory_remote;
+  CertVerifierServiceFactoryImpl cv_service_factory_impl(
+      cv_service_factory_remote.BindNewPipeAndPassReceiver());
+  EnableChromeRootStoreIfOptional(&cv_service_factory_impl);
+
+  // Update the time tracker with uncertainty just above the threshold (46s).
+  // This should be ignored.
+  cv_service_factory_impl.UpdateNetworkTime(now, ticks_now, now - base::Days(2),
+                                            base::Seconds(46));
+
+  mojo::Remote<mojom::CertVerifierService> cv_service_remote;
+  DummyCVServiceClient cv_service_client;
+  mojom::CertVerifierCreationParamsPtr cv_creation_params =
+      mojom::CertVerifierCreationParams::New();
+
+  cv_service_factory_remote->GetNewCertVerifier(
+      cv_service_remote.BindNewPipeAndPassReceiver(),
+      /*updater=*/mojo::NullReceiver(),
+      cv_service_client.client_.BindNewPipeAndPassRemote(),
+      std::move(cv_creation_params));
+
+  auto [net_error, result] =
+      Verify(cv_service_remote, leaf->GetX509Certificate(), "host.test");
+  // Should fail because the network time update was ignored, so it used
+  // system time (which is expired).
+  EXPECT_THAT(net_error, IsError(net::ERR_CERT_DATE_INVALID));
+  EXPECT_TRUE(net::IsCertStatusError(result.cert_status));
+}
 
 }  // namespace cert_verifier

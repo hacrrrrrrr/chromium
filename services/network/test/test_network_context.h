@@ -20,6 +20,7 @@
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/isolation_info.h"
+#include "net/http/http_request_headers.h"
 #include "net/net_buildflags.h"
 #include "net/storage_access_api/status.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -61,6 +62,8 @@ class TestNetworkContext : public mojom::NetworkContext {
 
   void SetClient(
       mojo::PendingRemote<mojom::NetworkContextClient> client) override {}
+  void CreateSocketFactory(
+      mojo::PendingReceiver<mojom::SocketFactory> receiver) override {}
   void CreateURLLoaderFactory(
       mojo::PendingReceiver<mojom::URLLoaderFactory> receiver,
       mojom::URLLoaderFactoryParamsPtr params) override {}
@@ -232,6 +235,8 @@ class TestNetworkContext : public mojom::NetworkContext {
           anticipated_concurrent_incoming_unidirectional_streams,
       std::optional<uint16_t>
           anticipated_concurrent_incoming_bidirectional_streams,
+      std::vector<net::HttpRequestHeaders::HeaderKeyValuePair>
+          additional_headers,
       mojo::PendingRemote<mojom::WebTransportHandshakeClient> handshake_client,
       mojo::PendingRemote<mojom::URLLoaderNetworkServiceObserver>
           url_loader_network_observer,
@@ -393,11 +398,12 @@ class TestNetworkContext : public mojom::NetworkContext {
       RestrictNetworkForIdsCallback callback) override {}
   void ClearNetworkRestrictions(const std::vector<base::UnguessableToken>&
                                     network_restrictions_ids) override {}
-  void Prefetch(int32_t request_id,
-                uint32_t options,
-                const ResourceRequest& request,
-                const net::MutableNetworkTrafficAnnotationTag&
-                    traffic_annotation) override {}
+  void Prefetch(
+      int32_t request_id,
+      uint32_t options,
+      const ResourceRequest& request,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      const base::UnguessableToken& network_restrictions_id) override {}
   void GetBoundNetworkForTesting(
       GetBoundNetworkForTestingCallback callback) override {}
   void GetDeviceBoundSessionManager(

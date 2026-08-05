@@ -63,8 +63,6 @@ inline constexpr char kChromeUIBatchUploadURL[] = "chrome://batch-upload/";
 inline constexpr char kChromeUIBluetoothInternalsHost[] = "bluetooth-internals";
 inline constexpr char kChromeUIBookmarksHost[] = "bookmarks";
 inline constexpr char kChromeUIBookmarksURL[] = "chrome://bookmarks/";
-inline constexpr char kChromeUIBrowsingTopicsInternalsHost[] =
-    "topics-internals";
 inline constexpr char kChromeUICertificateViewerHost[] = "view-cert";
 inline constexpr char kChromeUICertificateViewerURL[] = "chrome://view-cert/";
 inline constexpr char kChromeUIChromeFindsInternalsHost[] =
@@ -96,6 +94,8 @@ inline constexpr char kChromeUIContextualCueingInternalsHost[] =
 inline constexpr char kChromeUIContextualTasksHost[] = "contextual-tasks";
 inline constexpr char kChromeUIContextualTasksURL[] =
     "chrome://contextual-tasks/";
+inline constexpr char kChromeUIContextualTasksToolbarURL[] =
+    "chrome://contextual-tasks/toolbar.html";
 inline constexpr char kChromeUIContentSettingsURL[] =
     "chrome://settings/content";
 inline constexpr char16_t kChromeUICookieSettingsURL[] =
@@ -240,6 +240,10 @@ inline constexpr char kChromeUIOmniboxPopupURL[] =
 inline constexpr char kChromeUIOmniboxPopupAimURL[] =
     "chrome://omnibox-popup.top-chrome/omnibox_popup_aim.html";
 inline constexpr char kChromeUIOmniboxURL[] = "chrome://omnibox/";
+inline constexpr char kChromeUIOrganizerPanelHost[] =
+    "organizer-panel.top-chrome";
+inline constexpr char kChromeUIOrganizerPanelURL[] =
+    "chrome://organizer-panel.top-chrome/";
 inline constexpr char kChromeUIOnDeviceTranslationInternalsHost[] =
     "on-device-translation-internals";
 inline constexpr char kChromeUIPasswordManagerCheckupURL[] =
@@ -252,8 +256,6 @@ inline constexpr char kChromeUIPasswordManagerURL[] =
     "chrome://password-manager";
 inline constexpr char kChromeUiPasswordChangeUrl[] =
     "chrome://password-manager/settings/password-change";
-inline constexpr char kChromeUIPersonalContextInternalsHost[] =
-    "personal-context-internals";
 inline constexpr char kChromeUIPolicyHost[] = "policy";
 inline constexpr char kChromeUIPolicyLogsURL[] = "chrome://policy/logs";
 inline constexpr char kChromeUIPolicyTestURL[] = "chrome://policy/test";
@@ -498,6 +500,8 @@ inline constexpr char kChromeUIProfileCustomizationURL[] =
 inline constexpr char kChromeUIProfilePickerHost[] = "profile-picker";
 inline constexpr char kChromeUIProfilePickerStartupQuery[] = "startup";
 inline constexpr char kChromeUIProfilePickerGlicQuery[] = "glic";
+inline constexpr char kChromeUIProfilePickerOmniboxEverywhereQuery[] =
+    "omnibox-everywhere";
 inline constexpr char kChromeUIProfilePickerUrl[] = "chrome://profile-picker/";
 inline constexpr char kChromeUIHistorySyncOptinHost[] = "history-sync-optin";
 inline constexpr char kChromeUIHistorySyncOptinURL[] =
@@ -564,6 +568,7 @@ inline constexpr char kPasswordManagerSubPage[] = "passwords";
 inline constexpr char kPaymentsSubPage[] = "payments";
 inline constexpr char kIdentityDocsSubPage[] = "identityDocs";
 inline constexpr char kTravelSubPage[] = "travel";
+inline constexpr char kShoppingSubPage[] = "shopping";
 inline constexpr char kPeopleSubPage[] = "people";
 inline constexpr char kPerformanceSubPage[] = "performance";
 inline constexpr char kPrivacyGuideSubPage[] = "privacy/guide";
@@ -581,7 +586,7 @@ inline constexpr char kSearchSubPage[] = "search";
 inline constexpr char kSecuritySubPage[] = "security";
 inline constexpr char kSignOutSubPage[] = "signOut";
 inline constexpr char kSiteDetailsSubpage[] = "content/siteDetails";
-inline constexpr char kSuggestionsFromGeminiSubPage[] = "suggestionsFromGemini";
+inline constexpr char kSuggestionsFromGeminiSubPage[] = "enhancedAutofill";
 inline constexpr char kSuggestionsSubPage[] = "ai/suggestions";
 inline constexpr char kSyncSetupSubPage[] = "syncSetup";
 inline constexpr char kSyncSetupAdvancedSubPage[] = "syncSetup/advanced";

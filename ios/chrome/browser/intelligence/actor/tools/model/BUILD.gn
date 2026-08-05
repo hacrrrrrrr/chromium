@@ -13,6 +13,7 @@ source_set("actor_tool_factory") {
   public_deps = [ "//ios/chrome/browser/intelligence/actor/tools/utils:profile_context_resolver" ]
   deps = [
     ":actor_tool_interface",
+    ":attempt_form_filling_tool",
     ":attempt_login_tool",
     ":click_tool",
     ":history_tool",
@@ -27,11 +28,17 @@ source_set("actor_tool_factory") {
     "//components/optimization_guide/proto:optimization_guide_proto",
     "//ios/chrome/browser/intelligence/actor/tools/public",
     "//ios/chrome/browser/intelligence/features",
+    "//ios/chrome/browser/shared/model/web_state_list",
+    "//ios/web/public",
   ]
 }
 
 source_set("actor_tool_interface") {
   sources = [
+    "actor_form_suggestion.h",
+    "actor_form_suggestion.mm",
+    "actor_task_form_filling_handler.h",
+    "actor_task_form_filling_handler.mm",
     "actor_tool.h",
     "actor_tool.mm",
     "actor_tool_java_script_feature_util.h",
@@ -43,8 +50,14 @@ source_set("actor_tool_interface") {
 
   deps = [
     "//base",
+    "//components/actor/core:journal",
+    "//components/autofill/core/browser",
+    "//components/autofill/core/browser/actor",
+    "//components/autofill/ios/browser",
     "//components/optimization_guide/proto:optimization_guide_proto",
+    "//components/password_manager/core/browser/actor_login:actor_login_service_impl",
     "//components/password_manager/core/browser/actor_login:common",
+    "//ios/chrome/browser/intelligence/actor/public:actor_task_ui_protocols",
     "//ios/chrome/browser/intelligence/actor/public:actor_types",
     "//ios/chrome/browser/intelligence/actor/tools/public",
     "//ios/chrome/browser/intelligence/actor/tools/utils:actor_browser_utils",
@@ -147,6 +160,22 @@ source_set("attempt_login_tool") {
     "//ios/chrome/browser/optimization_guide/model",
     "//ios/chrome/browser/passwords/model/actor_login",
     "//ios/chrome/browser/shared/model/application_context",
+    "//ios/web/public",
+  ]
+}
+
+source_set("attempt_form_filling_tool") {
+  sources = [
+    "attempt_form_filling_tool.h",
+    "attempt_form_filling_tool.mm",
+  ]
+
+  deps = [
+    ":actor_tool_interface",
+    "//base",
+    "//components/optimization_guide/proto:optimization_guide_proto",
+    "//ios/chrome/browser/intelligence/actor/tools/public",
+    "//ios/chrome/browser/intelligence/actor/tools/utils:profile_context_resolver",
     "//ios/web/public",
   ]
 }
@@ -451,7 +480,6 @@ source_set("unit_tests") {
     "history_tool_unittest.mm",
     "navigate_tool_unittest.mm",
     "observation_delay_controller_unittest.mm",
-    "page_stability_java_script_feature_unittest.mm",
     "page_stability_js_unittest.mm",
     "page_stability_monitor_unittest.mm",
     "scroll_to_tool_unittest.mm",
@@ -492,6 +520,7 @@ source_set("unit_tests") {
     ":type_tool_ts",
     ":wait_tool",
     "//base/test:test_support",
+    "//components/autofill/core/browser/actor",
     "//components/autofill/ios/browser:util",
     "//components/autofill/ios/common",
     "//components/autofill/ios/form_util",
@@ -501,6 +530,7 @@ source_set("unit_tests") {
     "//components/optimization_guide/proto:optimization_guide_proto",
     "//components/password_manager/core/browser/actor_login:actor_login_service_impl",
     "//components/password_manager/core/browser/actor_login:common",
+    "//ios/chrome/browser/intelligence/actor/public:actor_task_ui_protocols",
     "//ios/chrome/browser/intelligence/actor/public:actor_types",
     "//ios/chrome/browser/intelligence/actor/tools/public",
     "//ios/chrome/browser/intelligence/actor/tools/utils:actor_browser_utils",

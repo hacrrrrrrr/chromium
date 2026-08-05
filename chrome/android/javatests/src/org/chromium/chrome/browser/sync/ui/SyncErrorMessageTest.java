@@ -54,7 +54,7 @@ import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.password_manager.PasswordManagerUtilBridge;
 import org.chromium.chrome.browser.password_manager.PasswordManagerUtilBridgeJni;
-import org.chromium.chrome.browser.settings.SettingsActivity;
+import org.chromium.chrome.browser.settings.SettingsIntentUtil;
 import org.chromium.chrome.browser.sync.FakeSyncServiceImpl;
 import org.chromium.chrome.browser.sync.SyncTestRule;
 import org.chromium.chrome.browser.sync.settings.ManageSyncSettings;
@@ -78,6 +78,7 @@ import java.io.IOException;
 @RunWith(ChromeJUnit4ClassRunner.class)
 @DoNotBatch(reason = "TODO(crbug.com/40743432): SyncTestRule doesn't support batching.")
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@DisableFeatures(ChromeFeatureList.SETTINGS_IN_TAB) // crbug.com/521895796
 public class SyncErrorMessageTest {
 
     @Mock private PasswordManagerUtilBridge.Natives mPasswordManagerUtilBridgeJniMock;
@@ -448,7 +449,8 @@ public class SyncErrorMessageTest {
         onViewWaiting(allOf(withText("Enter"), isDisplayed())).perform(click());
         intended(
                 IntentMatchers.hasExtra(
-                        SettingsActivity.EXTRA_SHOW_FRAGMENT, ManageSyncSettings.class.getName()));
+                        SettingsIntentUtil.EXTRA_SHOW_FRAGMENT,
+                        ManageSyncSettings.class.getName()));
         Intents.release();
 
         histogramWatcher.assertExpected();

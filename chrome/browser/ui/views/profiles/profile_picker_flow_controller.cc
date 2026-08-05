@@ -14,6 +14,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service.h"
 #include "chrome/browser/enterprise/signin/profile_management_disclaimer_service_factory.h"
+#include "chrome/browser/enterprise/signin/signals_disclaimer_metrics.h"
 #include "chrome/browser/metrics/first_web_contents_profiler_base.h"
 #include "chrome/browser/profiles/delete_profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -33,6 +34,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/profiles/profile_customization_util.h"
+#include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/signin/signin_view_controller.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -95,6 +97,7 @@ GURL GetInitialURL(ProfilePicker::EntryPoint entry_point) {
       return base_url.Resolve("new-profile");
     case ProfilePicker::EntryPoint::kFirstRun:
     case ProfilePicker::EntryPoint::kGlicManager:
+    case ProfilePicker::EntryPoint::kOmniboxEverywhere:
       // Should not be used for this entry point.
       NOTREACHED();
   }
@@ -299,6 +302,12 @@ class ReauthFlowStepController : public ProfileManagementStepController {
 
   void OnHidden() override {
     host()->SetNativeToolbarSigninButtonsVisible(false);
+  }
+
+  bool CanNavigateBack() const override {
+    return reauth_provider_
+               ? CanNavigateBackInternal(reauth_provider_->contents())
+               : false;
   }
 
   void OnNavigateBackRequested() override {
@@ -641,6 +650,7 @@ void ProfilePickerFlowController::CancelSigninFlow() {
     }
     case ProfilePicker::EntryPoint::kFirstRun:
     case ProfilePicker::EntryPoint::kGlicManager:
+    case ProfilePicker::EntryPoint::kOmniboxEverywhere:
       NOTREACHED() << "CancelSigninFlow() is not reachable from "
                       "this entry point";
   }
@@ -649,6 +659,15 @@ void ProfilePickerFlowController::CancelSigninFlow() {
 std::u16string ProfilePickerFlowController::GetFallbackAccessibleWindowTitle()
     const {
   return l10n_util::GetStringUTF16(IDS_PROFILE_PICKER_MAIN_VIEW_TITLE);
+}
+
+void ProfilePickerFlowController::OnWindowClosing() {
+  if (current_step() == Step::kDeviceSignalsDisclaimer &&
+      !signals_disclaimer_result_recorded_) {
+    base::UmaHistogramEnumeration(
+        kEnterpriseSignalsDisclaimerProfilePickerResult,
+        EnterpriseSignalsDisclaimerProfilePickerResult::kProfilePickerClosed);
+  }
 }
 
 std::unique_ptr<ProfilePickerPostSignInAdapter>
@@ -893,20 +912,16 @@ void ProfilePickerFlowController::OnProfileLoadedForPicking(
   ProfileManagementDisclaimerService* disclaimer_service =
       ProfileManagementDisclaimerServiceFactory::GetForProfile(profile);
   if (disclaimer_service &&
-      disclaimer_service->IsDeviceSignalsDisclaimerRequired()) {
+      disclaimer_service->IsDeviceSignalsDisclaimerRequired(nullptr)) {
     // Cleanup the step controller if already initialized.
     if (IsStepInitialized(Step::kDeviceSignalsDisclaimer)) {
       UnregisterStep(Step::kDeviceSignalsDisclaimer);
     }
 
-    // Despite the name we can use these WebContents for our needs,
-    // there is nothing signout specific about them.
-    CreateSignedOutFlowWebContents(profile);
-
     RegisterStep(
         Step::kDeviceSignalsDisclaimer,
         ProfileManagementStepController::CreateForDeviceSignalsDisclaimer(
-            host(), GetSignedOutFlowWebContents(),
+            host(), profile,
             base::BindOnce(
                 &ProfilePickerFlowController::OnDeviceSignalsDisclaimerResult,
                 weak_ptr_factory_.GetWeakPtr(), profile, open_command_line_urls,
@@ -926,8 +941,13 @@ void ProfilePickerFlowController::OnDeviceSignalsDisclaimerResult(
     bool open_command_line_urls,
     base::OnceCallback<void(Browser*)> pick_profile_complete_callback,
     signin::DeviceSignalsDisclaimerResult result) {
+  signals_disclaimer_result_recorded_ = true;
   switch (result) {
     case signin::DeviceSignalsDisclaimerResult::kAccepted:
+      base::UmaHistogramEnumeration(
+          kEnterpriseSignalsDisclaimerProfilePickerResult,
+          EnterpriseSignalsDisclaimerProfilePickerResult::kAccepted);
+
       ProfileManagementDisclaimerServiceFactory::GetForProfile(profile)
           ->OnDeviceSignalsCollectionConsentGranted();
 
@@ -936,6 +956,10 @@ void ProfilePickerFlowController::OnDeviceSignalsDisclaimerResult(
           /*is_new_profile=*/false, open_command_line_urls, profile);
       break;
     case signin::DeviceSignalsDisclaimerResult::kCanceled:
+      base::UmaHistogramEnumeration(
+          kEnterpriseSignalsDisclaimerProfilePickerResult,
+          EnterpriseSignalsDisclaimerProfilePickerResult::kDeclined);
+
       SwitchToStep(Step::kProfilePicker, /*reset_state=*/true);
       UnregisterStep(Step::kDeviceSignalsDisclaimer);
       if (pick_profile_complete_callback) {
@@ -943,8 +967,15 @@ void ProfilePickerFlowController::OnDeviceSignalsDisclaimerResult(
       }
       break;
     case signin::DeviceSignalsDisclaimerResult::kDismissed:
-      // signin::DeviceSignalsDisclaimerResult::kDismissed is caused by the
-      // destruction of WebUI.
+      base::UmaHistogramEnumeration(
+          kEnterpriseSignalsDisclaimerProfilePickerResult,
+          EnterpriseSignalsDisclaimerProfilePickerResult::
+              kDismissedWithoutExplicitUserAction);
+
+      // kDismissed is caused by the destruction of WebUI.
+      // However it will not be trigger if `this` is destroyed because `this`
+      // owns the webcontents hosting the dialog, so by the time WebUI is
+      // destroyed the WeakPtr will already have been invalidated.
       if (pick_profile_complete_callback) {
         std::move(pick_profile_complete_callback).Run(nullptr);
       }

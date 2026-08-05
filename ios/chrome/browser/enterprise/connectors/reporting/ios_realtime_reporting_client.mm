@@ -155,7 +155,7 @@ std::string IOSRealtimeReportingClient::GetBrowserClientId() {
 }
 
 bool IOSRealtimeReportingClient::ShouldIncludeDeviceInfo(bool per_profile) {
-  return IncludeDeviceInfo(profile_, per_profile);
+  return IncludeDeviceInfo(per_profile, IsProfileAffilicated(profile_));
 }
 
 void IOSRealtimeReportingClient::UploadCallbackDeprecated(
@@ -186,7 +186,6 @@ void IOSRealtimeReportingClient::UploadCallbackDeprecated(
 }
 
 void IOSRealtimeReportingClient::UploadCallback(
-    ::chrome::cros::reporting::proto::UploadEventsRequest request,
     bool per_profile,
     policy::CloudPolicyClient* client,
     EnterpriseReportingEventType event_type,

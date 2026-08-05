@@ -78,7 +78,6 @@
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/test_launcher_utils.h"
-#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/captive_portal/core/buildflags.h"
 #include "components/feature_engagement/public/feature_list.h"
@@ -663,7 +662,7 @@ void InProcessBrowserTest::SetUpLocalStatePrefService(
 }
 
 Profile* InProcessBrowserTest::GetProfile() const {
-  return browser() ? browser()->profile() : nullptr;
+  return browser() ? browser()->GetProfile() : nullptr;
 }
 
 TabListInterface* InProcessBrowserTest::GetTabListInterface() const {
@@ -787,7 +786,7 @@ Browser* InProcessBrowserTest::CreateBrowser(Profile* profile) {
 Browser* InProcessBrowserTest::CreateIncognitoBrowser(Profile* profile) {
   // Use active profile if default nullptr was passed.
   if (!profile) {
-    profile = browser()->profile();
+    profile = browser()->GetProfile();
   }
   // Create a new browser with using the incognito profile.
   Browser* incognito = Browser::Create(Browser::CreateParams(
@@ -885,7 +884,8 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
 
   auto ensure_browser_visible = [](Browser* browser) {
 #if defined(TOOLKIT_VIEWS)
-    if (browser && browser->is_type_normal()) {
+    if (browser &&
+        browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
       if (auto* browser_view = BrowserView::GetBrowserViewForBrowser(browser)) {
         if (auto* widget = browser_view->GetWidget()) {
           if (!widget->IsVisible()) {
@@ -905,7 +905,7 @@ void InProcessBrowserTest::PreRunTestOnMainThread() {
     Browser* normal_browser = nullptr;
     for (auto* window_interface : browsers) {
       if (Browser* browser = window_interface->GetBrowserForMigrationOnly()) {
-        if (browser->is_type_normal()) {
+        if (browser->GetType() == BrowserWindowInterface::Type::TYPE_NORMAL) {
           normal_window_interface = window_interface;
           normal_browser = browser;
           break;

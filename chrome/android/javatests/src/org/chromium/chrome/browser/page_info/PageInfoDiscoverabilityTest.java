@@ -52,6 +52,8 @@ import org.chromium.chrome.browser.profiles.ProfileManager;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.batch.BlankCTATabInitialStateRule;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
+import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.components.content_settings.ContentSetting;
 import org.chromium.components.content_settings.ContentSettingsType;
 import org.chromium.components.location.LocationUtils;
@@ -72,16 +74,20 @@ import java.util.List;
 // TODO(crbug.com/344672094): Failing when batched, batch this again.
 public class PageInfoDiscoverabilityTest {
     @ClassRule
-    public static final PermissionTestRule sPermissionTestRule = new PermissionTestRule();
+    public static final AutoResetCtaTransitTestRule sActivityTestRule =
+            ChromeTransitTestRules.autoResetCtaActivityRule();
+
+    @ClassRule
+    public static final PermissionTestRule sPermissionTestRule =
+            new PermissionTestRule(sActivityTestRule.getActivityTestRule());
 
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     @Rule
     public final BlankCTATabInitialStateRule mInitialStateRule =
-            new BlankCTATabInitialStateRule(sPermissionTestRule, false);
+            new BlankCTATabInitialStateRule(sActivityTestRule.getActivityTestRule(), false);
 
-    private static final String GEOLOCATION_TEST =
-            "/chrome/test/data/geolocation/geolocation_on_load.html";
+    private static final String GEOLOCATION_TEST = "/chrome/test/data/geolocation/geolocation.html";
 
     /**
      * Parameter provider for testing the different |RequestType|s that affect discoverability. The
@@ -258,8 +264,7 @@ public class PageInfoDiscoverabilityTest {
                                             FuseboxCoordinator.FuseboxState.DISABLED),
                                     ObservableSuppliers.createNonNull(
                                             FuseboxCoordinator.FuseboxLayoutMode.TOOLBAR),
-                                    CallbackUtils.emptyRunnable(),
-                                    ObservableSuppliers.createNullable());
+                                    CallbackUtils.emptyRunnable());
                     mPermissionStatusHandler = mMediator.getPermissionStatusHandlerForTesting();
                 });
     }
@@ -318,7 +323,7 @@ public class PageInfoDiscoverabilityTest {
                 /* promptDecision= */ PermissionTestRule.PromptDecision.ALLOW,
                 /* waitForMissingPermissionPrompt= */ false,
                 /* waitForUpdater= */ true,
-                /* javascriptToExecute= */ null,
+                "initiate_geolocation()",
                 /* missingPermissionPromptTextId= */ 0);
 
         Assert.assertEquals(
@@ -353,7 +358,7 @@ public class PageInfoDiscoverabilityTest {
                 /* promptDecision= */ PermissionTestRule.PromptDecision.DENY,
                 /* waitForMissingPermissionPrompt= */ false,
                 /* waitForUpdater= */ true,
-                /* javascriptToExecute= */ null,
+                "initiate_geolocation()",
                 /* missingPermissionPromptTextId= */ 0);
 
         Assert.assertEquals(

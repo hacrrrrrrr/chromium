@@ -1494,6 +1494,14 @@ targets.binaries.generated_script(
 )
 
 targets.binaries.generated_script(
+    name = "ios_web_content_unittests",
+    label = "//ios/web/content:ios_web_content_unittests",
+    # All references have been moved to starlark
+    skip_usage_check = True,
+    module_scheme = "gtest",
+)
+
+targets.binaries.generated_script(
     name = "ios_web_inttests",
     label = "//ios/web:ios_web_inttests",
     # All references have been moved to starlark
@@ -1694,6 +1702,18 @@ targets.binaries.generated_script(
     module_scheme = "junit",
 )
 
+targets.binaries.console_test_launcher(
+    name = "mojo_legacy_unittests",
+    label = "//chromeos/ash/components/mojo_proxy/mojo_core:mojo_legacy_unittests",
+    module_scheme = "gtest",
+)
+
+targets.binaries.console_test_launcher(
+    name = "mojo_proxy_unittests",
+    label = "//chromeos/ash/components/mojo_proxy/service:mojo_proxy_unittests",
+    module_scheme = "gtest",
+)
+
 targets.binaries.script(
     name = "mojo_python_unittests",
     label = "//mojo/public/tools:mojo_python_unittests",
@@ -1787,12 +1807,6 @@ targets.binaries.generated_script(
 targets.binaries.generated_script(
     name = "ondevice_stability_tests_light",
     label = "//components/optimization_guide/internal/testing:ondevice_stability_tests_light",
-    module_scheme = "flat",
-)
-
-targets.binaries.generated_script(
-    name = "ondevice_model_benchmark_tests",
-    label = "//components/optimization_guide/internal/testing:ondevice_model_benchmark_tests",
     module_scheme = "flat",
 )
 
@@ -2070,6 +2084,13 @@ targets.binaries.generated_script(
         result_format = "single",
     ),
     module_scheme = "single",
+)
+
+targets.binaries.console_test_launcher(
+    name = "rlz_unittests",
+    label = "//rlz:rlz_unittests",
+    module_scheme = "gtest",
+    skip_usage_check = True,
 )
 
 targets.binaries.console_test_launcher(
@@ -2688,6 +2709,19 @@ targets.binaries.generated_script(
     # All references have been moved to starlark
     skip_usage_check = True,
     module_scheme = "junit",
+)
+
+targets.binaries.generated_script(
+    name = "webdriver_bidi_unittests",
+    label = "//third_party/chromium-bidi:webdriver_bidi_unittests",
+    skip_usage_check = True,
+    module_scheme = "mocha",
+)
+
+targets.binaries.generated_script(
+    name = "webdriver_bidi_e2e_tests",
+    label = "//third_party/chromium-bidi:webdriver_bidi_e2e_tests",
+    skip_usage_check = True,
 )
 
 targets.binaries.generated_script(

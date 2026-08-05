@@ -81,6 +81,7 @@ import org.chromium.components.ukm.UkmRecorder;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.display.DisplayUtil;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.widget.Toast;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -646,11 +647,16 @@ public class MultiWindowUtils implements ActivityStateListener {
         return count;
     }
 
+    /* package */ static boolean isWindowManagerDeprecated() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)
+                || DeviceInfo.isDesktop();
+    }
+
     /**
      * @return Whether the app menu 'Manage windows' should be shown.
      */
     public static boolean shouldShowManageWindowsMenu() {
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)) {
+        if (isWindowManagerDeprecated()) {
             return false;
         }
         return getInstanceCount(PersistedInstanceType.ANY) > 1;
@@ -660,9 +666,25 @@ public class MultiWindowUtils implements ActivityStateListener {
      * @return Whether the IPH for Chrome's window manager should be shown.
      */
     public static boolean shouldShowInstanceSwitcherIph() {
+        if (isWindowManagerDeprecated()) {
+            return false;
+        }
         int instanceCount = getInstanceCount(PersistedInstanceType.ANY);
         int threshold = DeviceInfo.isDesktop() ? 10 : 1;
         return instanceCount > threshold;
+    }
+
+    /**
+     * Determines whether the IPH for the Recent Tabs UI that lists closed windows, should be shown.
+     *
+     * @return Whether the IPH for Recent Tabs should be shown.
+     */
+    public static boolean shouldShowRecentTabsIph() {
+        if (!isWindowManagerDeprecated()) {
+            return false;
+        }
+        int inactiveInstanceCount = getInstanceCount(PersistedInstanceType.INACTIVE);
+        return inactiveInstanceCount > 0;
     }
 
     static boolean isRestorableInstance(Set<Integer> appTaskIds, int index) {
@@ -1602,6 +1624,18 @@ public class MultiWindowUtils implements ActivityStateListener {
     }
 
     /**
+     * Shows a toast notifying the user that the maximum number of windows has been reached.
+     *
+     * @param context The context to show the toast with.
+     */
+    public static void showInstanceCreationLimitToast(Context context) {
+        String text =
+                context.getString(
+                        R.string.multi_instance_creation_limit_message_toast, getMaxInstances());
+        Toast.makeText(context, text, Toast.LENGTH_LONG).show();
+    }
+
+    /**
      * Creates and shows a message to notify a user that a new window cannot be created because
      * {@link MultiWindowUtils#getMaxInstances()} activities already exist.
      *
@@ -1706,6 +1740,15 @@ public class MultiWindowUtils implements ActivityStateListener {
         return null;
     }
 
+    /**
+     * Returns whether the new startup window policy feature is enabled.
+     *
+     * @return {@code true} if the feature is enabled; {@code false} otherwise.
+     */
+    public static boolean isNewStartupWindowPolicyEnabled() {
+        return ChromeFeatureList.sOnStartupWindowPolicy.isEnabled() && DeviceInfo.isDesktop();
+    }
+
     /* package */ static int getRunningTabbedActivityCount() {
         int numActivities = 0;
         List<Activity> activities = ApplicationStatus.getRunningActivities();
@@ -1729,6 +1772,15 @@ public class MultiWindowUtils implements ActivityStateListener {
             if (info != null) results.add(info.taskId);
         }
         return results;
+    }
+
+    /* package */ static boolean hasNoNormalTabs(int windowId) {
+        return ChromeMultiInstancePersistentStore.readNormalTabCount(windowId) == 0;
+    }
+
+    /* package */ static boolean isTaskAlive(int windowId, Map<Integer, AppTask> appTasksById) {
+        int taskId = ChromeMultiInstancePersistentStore.readTaskId(windowId);
+        return appTasksById.containsKey(taskId);
     }
 
     /* package */ static Map<Integer, AppTask> getAppTasksById(Context context) {

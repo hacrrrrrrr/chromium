@@ -8,6 +8,9 @@
 #include "base/feature_list.h"
 #include "base/notimplemented.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/global_keyboard_shortcuts_mac.h"
+#endif
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/custom_theme_supplier.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -578,6 +581,11 @@ ui::RendererColorMap WebUIBrowserWindow::GetRendererColorMap(
 bool WebUIBrowserWindow::GetAcceleratorForCommandId(
     int command_id,
     ui::Accelerator* accelerator) const {
+#if BUILDFLAG(IS_MAC)
+  if (GetDefaultMacAcceleratorForCommandId(command_id, accelerator)) {
+    return true;
+  }
+#endif
   // Search for the accelerator in our table.
   for (const auto& entry : accelerator_table_) {
     if (entry.second == command_id) {
@@ -662,8 +670,10 @@ void WebUIBrowserWindow::LoadAccelerators() {
   for (const auto& entry : GetAcceleratorList()) {
     // In app mode, only allow accelerators of allowlisted commands to pass
     // through.
-    if (is_app_mode && !IsCommandAllowedInAppMode(entry.command_id,
-                                                  browser_->is_type_popup())) {
+    if (is_app_mode &&
+        !IsCommandAllowedInAppMode(
+            entry.command_id,
+            browser_->GetType() == BrowserWindowInterface::Type::TYPE_POPUP)) {
       continue;
     }
 
@@ -737,9 +747,6 @@ void WebUIBrowserWindow::UpdateLoadingAnimations(bool is_visible) {
   NOTIMPLEMENTED_LOG_ONCE();
 }
 
-void WebUIBrowserWindow::SetStarredState(bool is_starred) {
-  NOTIMPLEMENTED_LOG_ONCE();
-}
 
 void WebUIBrowserWindow::OnActiveTabChanged(content::WebContents* old_contents,
                                             content::WebContents* new_contents,
@@ -806,19 +813,10 @@ void WebUIBrowserWindow::OnContentsElementShown(ui::TrackedElement* element) {
   }
 }
 
-void WebUIBrowserWindow::UpdatePageActionIcon(PageActionIconType type) {
-  NOTIMPLEMENTED_LOG_ONCE();
-}
-
 autofill::AutofillBubbleHandler*
 WebUIBrowserWindow::GetAutofillBubbleHandler() {
   NOTIMPLEMENTED_LOG_ONCE();
   return nullptr;
-}
-
-void WebUIBrowserWindow::ExecutePageActionIconForTesting(
-    PageActionIconType type) {
-  NOTIMPLEMENTED_LOG_ONCE();
 }
 
 LocationBar* WebUIBrowserWindow::GetLocationBar() const {
@@ -1011,7 +1009,8 @@ WebUIBrowserWindow::PreHandleKeyboardEvent(
   // - If the |browser_| is not for an app, and the |accelerator| is associated
   //   with the browser, and it is not a reserved one, do nothing.
 
-  if (browser_->is_type_app() || browser_->is_type_app_popup()) {
+  if (browser_->GetType() == BrowserWindowInterface::Type::TYPE_APP ||
+      browser_->GetType() == BrowserWindowInterface::Type::TYPE_APP_POPUP) {
     // Let all keys fall through to a v1 app's web content, even accelerators.
     // We don't use NOT_HANDLED_IS_SHORTCUT here. If we do that, the app
     // might not be able to see a subsequent Char event. See
@@ -1296,5 +1295,5 @@ void WebUIBrowserWindow::CloseSidePanel() {
 
 WebUIBrowserSidePanelUI* WebUIBrowserWindow::GetWebUIBrowserSidePanelUI() {
   return static_cast<WebUIBrowserSidePanelUI*>(
-      browser_->browser_window_features()->side_panel_ui());
+      browser_->GetFeatures().side_panel_ui());
 }

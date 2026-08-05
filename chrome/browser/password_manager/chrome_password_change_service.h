@@ -64,7 +64,8 @@ enum class PasswordChangeAvailability {
   kThrottled = 10,
   kSignupForm = 11,
   kNonPasswordLogin = 12,
-  kMaxValue = kNonPasswordLogin,
+  kInvisiblePasswordField = 13,
+  kMaxValue = kInvisiblePasswordField,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/password/enums.xml:PasswordChangeAvailability)
 
@@ -110,6 +111,9 @@ class ChromePasswordChangeService
       content::WebContents* web_contents,
       PasswordChangeFromCheckupDelegate::StateChangeCallback callback =
           base::DoNothing());
+
+  // Stops the password change flow from the Password Checkup page.
+  virtual void StopPasswordChangeFromCheckup();
 #endif
 
   // PasswordChangeServiceInterface implementation.

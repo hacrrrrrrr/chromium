@@ -50,6 +50,7 @@ source_set("tabs_impl") {
     "//chrome/browser/preloading/new_tab_page_preload",
     "//chrome/browser/sync",
     "//chrome/browser/ui/contextual_search",
+    "//chrome/browser/ui/side_panel",
     "//chrome/browser/ui/side_panel/android",
     "//chrome/browser/ui/webui:webui_util",
 
@@ -602,7 +603,6 @@ if (is_android) {
       "//chrome/browser/webauthn:webauthn_request_delegate_android",
       "//chrome/browser/webauthn:webauthn_request_delegate_android_impl",
       "//chrome/common:non_code_constants",
-      "//chrome/services/media_gallery_util/public/cpp",
       "//components/android_autofill/browser:android",
       "//components/android_autofill/browser:features",
       "//components/autofill/android:keyboard_suppressor",
@@ -657,8 +657,10 @@ if (is_android) {
       "//components/javascript_dialogs/android:jni_headers",
       "//components/language/android:language_bridge",
       "//components/location/android:settings",
+      "//components/media_gallery_util",
       "//components/messages/android",
       "//components/messages/android:feature_flags",
+      "//components/metrics/private_metrics",
       "//components/module_installer/android:native",
       "//components/offline_pages/task",
       "//components/omnibox/browser",
@@ -799,6 +801,7 @@ if (is_android) {
       "//chrome/browser/profiles:misc",
       "//chrome/browser/profiles:profiles_extra_parts_impl",
       "//chrome/browser/push_messaging:impl",
+      "//chrome/browser/renderer_host",
       "//chrome/browser/resource_coordinator",
       "//chrome/browser/safe_browsing",
       "//chrome/browser/search_engines",
@@ -999,4 +1002,19 @@ if (is_android) {
       }
     }
   }
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "webapps/twa_launch_queue_tab_helper_unittest.cc" ]
+  deps = [
+    ":android",
+    "//chrome/browser:chrome_content_browser_client",
+    "//chrome/browser/renderer_host",
+    "//chrome/test:test_support",
+    "//components/webapps/browser",
+    "//content/test:test_support",
+    "//testing/gtest",
+    "//url",
+  ]
 }

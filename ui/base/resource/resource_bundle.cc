@@ -22,6 +22,7 @@
 #include "base/debug/crash_logging.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/i18n/bcp47_extensions.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
@@ -396,10 +397,10 @@ void ResourceBundle::LoadAdditionalLocaleDataWithPakFileRegion(
 
 #if !BUILDFLAG(IS_ANDROID)
 // static
-bool ResourceBundle::LocaleDataPakExists(std::string_view locale,
+bool ResourceBundle::LocaleDataPakExists(const base::i18n::LanguageTag& locale,
                                          Gender gender) {
   // TODO: Support gender translations on non-Android platforms.
-  const auto path = GetLocaleFilePath(locale);
+  const auto path = GetLocaleFilePath(locale.tag_string());
   if (path.empty()) {
     return false;
   }
@@ -460,7 +461,7 @@ void ResourceBundle::AddOptionalDataPackFromPath(
 
 void ResourceBundle::AddDataPackFromBuffer(base::span<const uint8_t> buffer,
                                            ResourceScaleFactor scale_factor) {
-  std::unique_ptr<DataPack> data_pack(new DataPack(scale_factor));
+  auto data_pack = std::make_unique<DataPack>(scale_factor);
   if (data_pack->LoadFromBuffer(buffer)) {
     AddResourceHandle(std::move(data_pack));
   } else {
@@ -729,6 +730,7 @@ bool ResourceBundle::HasDataResource(int resource_id) const {
   if (delegate_ && delegate_->HasDataResource(resource_id)) {
     return true;
   }
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& resource_handle : resource_handles_) {
     if (resource_handle->HasResource(static_cast<uint16_t>(resource_id))) {
       return true;
@@ -737,12 +739,13 @@ bool ResourceBundle::HasDataResource(int resource_id) const {
   return false;
 }
 
-base::RefCountedMemory* ResourceBundle::LoadDataResourceBytes(
+scoped_refptr<base::RefCountedMemory> ResourceBundle::LoadDataResourceBytes(
     int resource_id) const {
   return LoadDataResourceBytesForScale(resource_id, ui::kScaleFactorNone);
 }
 
-base::RefCountedMemory* ResourceBundle::LoadDataResourceBytesForScale(
+scoped_refptr<base::RefCountedMemory>
+ResourceBundle::LoadDataResourceBytesForScale(
     int resource_id,
     ResourceScaleFactor scale_factor) const {
   TRACE_EVENT("ui", "ResourceBundle::LoadDataResourceBytesForScale",
@@ -754,7 +757,7 @@ base::RefCountedMemory* ResourceBundle::LoadDataResourceBytesForScale(
               });
 
   if (delegate_) {
-    base::RefCountedMemory* bytes =
+    scoped_refptr<base::RefCountedMemory> bytes =
         delegate_->LoadDataResourceBytes(resource_id, scale_factor);
     if (bytes)
       return bytes;
@@ -766,12 +769,13 @@ base::RefCountedMemory* ResourceBundle::LoadDataResourceBytesForScale(
 
   if (net::GZipHeader::HasGZipHeader(base::as_byte_span(data)) ||
       HasBrotliHeader(data)) {
-    base::RefCountedString* bytes_string = new base::RefCountedString();
+    auto bytes_string = base::MakeRefCounted<base::RefCountedString>();
     DecompressIfNeeded(data, &bytes_string->as_string());
     return bytes_string;
   }
 
-  return new base::RefCountedStaticMemory(base::as_byte_span(data));
+  return base::MakeRefCounted<base::RefCountedStaticMemory>(
+      base::as_byte_span(data));
 }
 
 std::string_view ResourceBundle::GetRawDataResource(int resource_id) const {
@@ -791,6 +795,8 @@ std::string_view ResourceBundle::GetRawDataResourceForScale(
       return data;
     }
   }
+
+  base::AutoLock lock_scope(*resource_handles_lock_);
 
   if (scale_factor != ui::k100Percent) {
     for (const auto& resource_handle : resource_handles_) {
@@ -896,8 +902,8 @@ std::u16string ResourceBundle::GetLocalizedString(int resource_id) {
   return GetLocalizedStringImpl(resource_id);
 }
 
-base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
-    int resource_id) const {
+scoped_refptr<base::RefCountedMemory>
+ResourceBundle::LoadLocalizedResourceBytes(int resource_id) const {
   {
     base::AutoLock lock_scope(*locale_resources_data_lock_);
 
@@ -905,7 +911,8 @@ base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
       auto data =
           locale_data->GetStringView(static_cast<uint16_t>(resource_id));
       if (data.has_value() && !data->empty()) {
-        return new base::RefCountedStaticMemory(base::as_byte_span(*data));
+        return base::MakeRefCounted<base::RefCountedStaticMemory>(
+            base::as_byte_span(*data));
       }
     }
   }
@@ -1012,7 +1019,8 @@ void ResourceBundle::CheckCanOverrideStringResources() {
 
 ResourceBundle::ResourceBundle(Delegate* delegate)
     : delegate_(delegate),
-      locale_resources_data_lock_(new base::Lock),
+      locale_resources_data_lock_(std::make_unique<base::Lock>()),
+      resource_handles_lock_(std::make_unique<base::Lock>()),
       max_scale_factor_(k100Percent) {
   mangle_localized_strings_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kMangleLocalizedStrings);
@@ -1104,6 +1112,7 @@ void ResourceBundle::AddDataPackFromPathInternal(
 
 void ResourceBundle::AddResourceHandle(
     std::unique_ptr<ResourceHandle> resource_handle) {
+  base::AutoLock lock_scope(*resource_handles_lock_);
 #if DCHECK_IS_ON()
   resource_handle->CheckForDuplicateResources(resource_handles_);
 #endif
@@ -1137,7 +1146,13 @@ void ResourceBundle::InitDefaultFontList() {
 }
 
 gfx::ImageSkia ResourceBundle::CreateImageSkia(int resource_id) {
-  DCHECK(!resource_handles_.empty()) << "Missing call to SetResourcesDataDLL?";
+#if DCHECK_IS_ON()
+  {
+    base::AutoLock lock_scope(*resource_handles_lock_);
+    DCHECK(!resource_handles_.empty())
+        << "Missing call to SetResourcesDataDLL?";
+  }
+#endif
 
   std::optional<LottieData> data = GetLottieData(resource_id);
   if (data) {
@@ -1196,6 +1211,7 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
+  base::AutoLock lock_scope(*resource_handles_lock_);
   for (const auto& pack : resource_handles_) {
     if (pack->GetResourceScaleFactor() == ui::kScaleFactorNone &&
         LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {

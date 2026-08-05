@@ -45,6 +45,9 @@ class GlicInvokeHandler {
 
   using ResolvedTarget = std::variant<TabSurface, Floating>;
 
+  static bool RequiresClientInvoke(const mojom::InvokeOptionsPtr& mojo_options,
+                                   bool has_auto_submit_passkey);
+
   // Resolves the target surface to a specific tab.
   static ResolvedTarget ResolveTargetSurface(Profile* profile,
                                              const Target& target);
@@ -70,6 +73,10 @@ class GlicInvokeHandler {
   // Cancels the invocation, generating an error callback.
   void Cancel(GlicInvokeError error);
 
+  void set_completion_callback(CompletionCallback completion_callback) {
+    completion_callback_ = std::move(completion_callback);
+  }
+
  private:
   bool IsFloatingTarget() const;
   bool IsTabTarget() const;
@@ -85,6 +92,7 @@ class GlicInvokeHandler {
                        tabs::TabInterface::DetachReason reason);
   void OnInstanceWillBeDestroyed(GlicInstance* instance);
   void OnConversationInfoChanged(const mojom::ConversationInfo& info);
+  void OnActuatingChanged(bool actuating);
   const base::raw_ref<GlicInstanceImpl> instance_;
   ResolvedTarget resolved_target_;
   GlicInvokeOptions options_;
@@ -97,6 +105,7 @@ class GlicInvokeHandler {
   base::CallbackListSubscription instance_destruction_subscription_;
   base::CallbackListSubscription tab_destruction_subscription_;
   base::CallbackListSubscription conversation_subscription_;
+  base::CallbackListSubscription actuating_subscription_;
   base::OneShotTimer timeout_timer_;
 
   std::unique_ptr<SequentialTaskGroup> main_task_;

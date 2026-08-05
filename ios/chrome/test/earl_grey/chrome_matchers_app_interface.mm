@@ -402,6 +402,25 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
   return imageMatcher;
 }
 
++ (id<GREYMatcher>)imageViewWithSymbol:(Symbol)symbol
+                             pointSize:(CGFloat)pointSize {
+  UIImage* expectedImage = SymbolTemplateWithPointSize(symbol, pointSize);
+  GREYMatchesBlock matches = ^BOOL(UIImageView* imageView) {
+    return ui::test::uiimage_utils::UIImagesAreEqual(expectedImage,
+                                                     imageView.image);
+  };
+  NSString* descriptionString =
+      [NSString stringWithFormat:@"Images matching symbol enum %d of size %f",
+                                 static_cast<int>(symbol), pointSize];
+  GREYDescribeToBlock describe = ^(id<GREYDescription> description) {
+    [description appendText:descriptionString];
+  };
+  id<GREYMatcher> imageMatcher =
+      [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
+                                           descriptionBlock:describe];
+  return imageMatcher;
+}
+
 + (id<GREYMatcher>)imageViewWithImage:(UIImage*)image {
   GREYMatchesBlock matches = ^BOOL(UIImageView* imageView) {
     return ui::test::uiimage_utils::UIImagesAreEqual(image, imageView.image);
@@ -1505,15 +1524,15 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
                                    UIUserInterfaceSizeClassRegular;
 
       if (isRegularXRegular) {
-        id<GREYMatcher> tabGridDoneMatcher =
-            grey_allOf(grey_accessibilityID(kTabGridDoneButtonIdentifier),
-                       grey_sufficientlyVisible(), nil);
+        id<GREYMatcher> tabGridDoneMatcher = grey_allOf(
+            grey_accessibilityID(kTabGridExitTabGridButtonIdentifier),
+            grey_sufficientlyVisible(), nil);
         return [tabGridDoneMatcher matches:element];
       }
       return [[ChromeMatchersAppInterface showTabsButton] matches:element];
     } else {
       id<GREYMatcher> doneButtonMatcher =
-          grey_allOf(grey_accessibilityID(kTabGridDoneButtonIdentifier),
+          grey_allOf(grey_accessibilityID(kTabGridExitTabGridButtonIdentifier),
                      grey_sufficientlyVisible(), nil);
       return [doneButtonMatcher matches:element];
     }
@@ -1525,11 +1544,6 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 
   return [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
                                               descriptionBlock:describe];
-}
-
-+ (id<GREYMatcher>)tabGridUndoCloseAllButton {
-  return grey_allOf(grey_accessibilityID(kTabGridUndoCloseAllButtonIdentifier),
-                    grey_sufficientlyVisible(), nil);
 }
 
 + (id<GREYMatcher>)tabGridSelectShowHistoryCell {
@@ -1889,18 +1903,6 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 + (id<GREYMatcher>)tabGridOverflowMenuButton {
   return grey_allOf(grey_accessibilityID(kTabGridOverflowMenuButtonIdentifier),
                     grey_sufficientlyVisible(), nil);
-}
-
-+ (id<GREYMatcher>)tabGridEditButton {
-  return grey_allOf(grey_accessibilityID(kTabGridEditButtonIdentifier),
-                    grey_sufficientlyVisible(), nil);
-}
-
-+ (id<GREYMatcher>)tabGridEditMenuCloseAllButton {
-  int ID = IDS_IOS_CONTENT_CONTEXT_CLOSEALLTABSANDGROUPS;
-  return grey_allOf(
-      [ChromeMatchersAppInterface contextMenuItemWithAccessibilityLabelID:ID],
-      grey_sufficientlyVisible(), nil);
 }
 
 + (id<GREYMatcher>)tabGridOverflowMenuCloseAllButton {

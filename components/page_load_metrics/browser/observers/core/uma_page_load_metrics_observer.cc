@@ -27,7 +27,6 @@
 #include "components/page_load_metrics/browser/features.h"
 #include "components/page_load_metrics/browser/observers/core/largest_contentful_paint_handler.h"
 #include "components/page_load_metrics/browser/page_load_metrics_util.h"
-#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/preloading_data.h"
 #include "content/public/browser/tracing_support.h"
@@ -431,6 +430,13 @@ UmaPageLoadMetricsObserver::OnCommit(
       navigation_handle_timing_.navigation_commit_sent_time,
       navigation_handle_timing_.before_unload_dialog_duration);
 
+  auto track = GetTracingTrack("PageLoad: Timelines",
+                               "CommitSentToFirstSubresourceLoadStart");
+  TRACE_EVENT_BEGIN("loading", "CommitSentToFirstSubresourceLoadStart", track,
+                    navigation_handle_timing_.navigation_commit_sent_time,
+                    perfetto::protos::pbzero::ChromeTrackEvent::kPageLoad,
+                    *this);
+
   EmitPageLoadTimelineTraceEventBegin(
       "NavigationCommitSentToParseStart",
       navigation_handle_timing_.navigation_commit_sent_time);
@@ -624,14 +630,6 @@ void UmaPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
     EmitFCPTraceEvent(timing);
     PAGE_LOAD_HISTOGRAM(internal::kHistogramFirstContentfulPaint,
                         timing.paint_timing->first_contentful_paint.value());
-
-#if !BUILDFLAG(IS_ANDROID)
-    startup_metric_utils::GetBrowser()
-        .RecordFirstWebContentsFirstContentfulPaint(
-            GetDelegate().GetNavigationStart(),
-            GetDelegate().GetNavigationStart() +
-                timing.paint_timing->first_contentful_paint.value());
-#endif
 
     PAGE_LOAD_HISTOGRAM(internal::kHistogramParseStartToFirstContentfulPaint,
                         timing.paint_timing->first_contentful_paint.value() -
@@ -827,13 +825,13 @@ void UmaPageLoadMetricsObserver::OnParseStart(
       "navigation", "ParseStartToDOMContentLoaded", track1, parse_start,
       perfetto::protos::pbzero::ChromeTrackEvent::kPageLoad, *this);
 
-  auto track2 = GetTracingTrack("PageLoad: Timelines", "ParseStartToFCP");
-  TRACE_EVENT_BEGIN("navigation", "ParseStartToFCP", track2, parse_start,
+  auto track2 = GetTracingTrack("PageLoad: Timelines", "ParseStartToLCP");
+  TRACE_EVENT_BEGIN("navigation", "ParseStartToLCP", track2, parse_start,
                     perfetto::protos::pbzero::ChromeTrackEvent::kPageLoad,
                     *this);
 
-  auto track3 = GetTracingTrack("PageLoad: Timelines", "ParseStartToLCP");
-  TRACE_EVENT_BEGIN("navigation", "ParseStartToLCP", track3, parse_start,
+  auto track3 = GetTracingTrack("PageLoad: Timelines", "ParseStartToFCP");
+  TRACE_EVENT_BEGIN("navigation", "ParseStartToFCP", track3, parse_start,
                     perfetto::protos::pbzero::ChromeTrackEvent::kPageLoad,
                     *this);
 
@@ -973,10 +971,6 @@ void UmaPageLoadMetricsObserver::OnLoadedResource(
 
     auto track = GetTracingTrack("PageLoad: Timelines",
                                  "CommitSentToFirstSubresourceLoadStart");
-    TRACE_EVENT_BEGIN("loading", "CommitSentToFirstSubresourceLoadStart", track,
-                      commit_sent_time,
-                      perfetto::protos::pbzero::ChromeTrackEvent::kPageLoad,
-                      *this);
     TRACE_EVENT_END("loading", track, timing_info.request_start);
   }
 }
@@ -1155,13 +1149,6 @@ void UmaPageLoadMetricsObserver::RecordTimingHistograms(
     if (WasStartedInForegroundOptionalEventInForeground(
             all_frames_largest_contentful_paint.Time(), GetDelegate())) {
       PAGE_LOAD_HISTOGRAM(internal::kHistogramLargestContentfulPaint, lcp_time);
-
-#if !BUILDFLAG(IS_ANDROID)
-      startup_metric_utils::GetBrowser()
-          .RecordFirstWebContentsLargestContentfulPaint(
-              GetDelegate().GetNavigationStart(),
-              GetDelegate().GetNavigationStart() + lcp_time);
-#endif
 
       if (std::optional<base::TimeDelta> actual_navigation_offset =
               CalculateActualNavigationOffset(GetDelegate(),
@@ -1489,6 +1476,12 @@ void UmaPageLoadMetricsObserver::CloseIncompleteTimelineTraceEvents(
   if (!main_frame_timing.paint_timing->first_contentful_paint.has_value()) {
     auto track = GetTracingTrack("PageLoad: Timelines", "ParseStartToFCP");
     TRACE_EVENT_END("navigation", track, navigation_end);
+  }
+
+  if (!received_first_subresource_load_) {
+    auto track = GetTracingTrack("PageLoad: Timelines",
+                                 "CommitSentToFirstSubresourceLoadStart");
+    TRACE_EVENT_END("loading", track, navigation_end);
   }
 
   if (!lcp_trace_ended_) {

@@ -377,7 +377,8 @@ bool GeminiTabHelper::IsGeminiChatAvailableForWebState() {
   }
 
   // By default, the NTP is ineligible, and only extractable pages are eligible.
-  return !is_ntp && CanExtractPageContextForWebState(web_state_);
+  return !is_ntp && CanExtractPageContextForWebState(web_state_,
+                                                     IsPageContextPDFEnabled());
 }
 
 IOSGeminiInvocationPageType GeminiTabHelper::GetCurrentPageType() {
@@ -414,7 +415,7 @@ void GeminiTabHelper::WasShown(web::WebState* web_state) {
   // visible tab.
   if (IsNextIaOrLiveMode()) {
     NotifyPageContextUpdated(web_state);
-  } else {
+  } else if (IsPageActionMenuEnabled()) {
     [gemini_handler_
         updateFloatyVisibilityIfEligibleAnimated:NO
                                       fromSource:gemini::FloatyUpdateSource::
@@ -428,7 +429,7 @@ void GeminiTabHelper::WasHidden(web::WebState* web_state) {
   // immediately to ensure the hidden tab's content is detached and blocked.
   if (IsNextIaOrLiveMode()) {
     NotifyPageContextUpdated(web_state);
-  } else {
+  } else if (IsPageActionMenuEnabled()) {
     [gemini_handler_
         hideFloatyIfInvokedAnimated:NO
                          fromSource:gemini::FloatyUpdateSource::WebNavigation];
@@ -506,10 +507,12 @@ void GeminiTabHelper::DidFinishNavigation(
   } else {
     RecordGeminiPageAvailability(IOSGeminiPageAvailability::kUnavailable);
   }
-  [gemini_handler_
-      updateFloatyVisibilityIfEligibleAnimated:NO
-                                    fromSource:gemini::FloatyUpdateSource::
-                                                   WebNavigation];
+  if (IsPageActionMenuEnabled()) {
+    [gemini_handler_
+        updateFloatyVisibilityIfEligibleAnimated:NO
+                                      fromSource:gemini::FloatyUpdateSource::
+                                                     WebNavigation];
+  }
 
   const GURL& current_url = navigation_context->GetUrl().GetWithoutRef();
   if (previous_main_frame_url_ == current_url) {
@@ -574,8 +577,7 @@ void GeminiTabHelper::FaviconUrlUpdated(
         configurationWithPointSize:gfx::kFaviconSize
                             weight:UIImageSymbolWeightBold
                              scale:UIImageSymbolScaleMedium];
-    new_favicon =
-        DefaultSymbolWithConfiguration(kGlobeAmericasSymbol, configuration);
+    new_favicon = SymbolWithConfiguration(SymbolGlobeAmericas, configuration);
   }
 
   if (new_favicon != current_favicon_ &&
@@ -605,10 +607,7 @@ void GeminiTabHelper::PopulatePageContextFields() {
 
   PageContextWrapperConfig config =
       PageContextWrapperConfigBuilder()
-          .SetUseRefactoredExtractor(IsPageContextExtractorRefactoredEnabled())
-          .SetGraftCrossOriginFrameContent(IsGeminiRichAPCExtractionEnabled())
-          .SetUseRichExtraction(IsGeminiRichAPCExtractionEnabled())
-          .SetExtractPaidContent(IsGeminiRichAPCExtractionEnabled())
+          .SetDefaultRichExtraction(IsGeminiRichAPCExtractionEnabled())
           .Build();
 
   // Create a new wrapper.
@@ -618,8 +617,15 @@ void GeminiTabHelper::PopulatePageContextFields() {
       completionCallback:base::BindRepeating(
                              &GeminiTabHelper::OnPageContextWrapperResponse,
                              weak_ptr_factory_.GetWeakPtr())];
-  [page_context_wrapper_ setShouldGetAnnotatedPageContent:YES];
-  [page_context_wrapper_ setShouldGetSnapshot:YES];
+  const bool is_pdf = base::EqualsCaseInsensitiveASCII(
+      web_state_->GetContentsMimeType(), kAdobePortableDocumentFormatMimeType);
+  if (is_pdf) {
+    page_context_wrapper_.shouldGetFullPagePDF = YES;
+    page_context_wrapper_.shouldGetAnnotatedPageContent = NO;
+  } else {
+    page_context_wrapper_.shouldGetAnnotatedPageContent = YES;
+  }
+  page_context_wrapper_.shouldGetSnapshot = YES;
   [page_context_wrapper_ populatePageContextFieldsAsync];
 }
 
@@ -700,8 +706,8 @@ void GeminiTabHelper::OnCanApplyContextualCueingDecision(
   UIImage* badge_image;
   BOOL should_hide_badge_after_chip_collapse = NO;
   if (IsChromeNextIaEnabled()) {
-    badge_image = CustomSymbolTemplateWithPointSize(kTextSparkSymbol,
-                                                    kBadgeSymbolPointSize);
+    badge_image =
+        SymbolTemplateWithPointSize(SymbolTextSpark, kBadgeSymbolPointSize);
     should_hide_badge_after_chip_collapse = NO;
   } else {
     badge_image =
@@ -835,7 +841,8 @@ void GeminiTabHelper::OnGeminiEligibilityOnDemandDecision(
 }
 
 bool GeminiTabHelper::CanExtractPageContextForGemini(bool is_background_tab) {
-  return CanExtractPageContextForWebState(web_state_) &&
+  return CanExtractPageContextForWebState(web_state_,
+                                          IsPageContextPDFEnabled()) &&
          (is_background_tab || !IsNextIaOrLiveMode() ||
           web_state_->IsVisible());
 }

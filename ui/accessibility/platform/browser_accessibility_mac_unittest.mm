@@ -4,12 +4,14 @@
 
 #include "ui/accessibility/platform/browser_accessibility_mac.h"
 
+#include <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "base/apple/bridging.h"
 #include "base/apple/foundation_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -26,6 +28,9 @@
 #include "ui/accessibility/platform/test_ax_node_id_delegate.h"
 #include "ui/accessibility/test_ax_tree_update.h"
 #import "ui/base/test/cocoa_helper.h"
+
+using base::apple::CFToNSPtrCast;
+using base::apple::ObjCCastStrict;
 
 namespace ui {
 
@@ -164,7 +169,7 @@ class BrowserAccessibilityMacTest : public CocoaTest {
     manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
         MakeAXTreeUpdateForTesting(root_, child1, child2), node_id_delegate_,
         nullptr);
-    accessibility_ = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+    accessibility_ = ObjCCastStrict<BrowserAccessibilityCocoa>(
         manager_->GetBrowserAccessibilityRoot()
             ->GetNativeViewAccessible()
             .Get());
@@ -230,13 +235,53 @@ TEST_F(BrowserAccessibilityMacTest, RetainedDetachedObjectsReturnNil) {
   EXPECT_NSEQ(nil, retainedFirstChild.accessibilityLabel);
 }
 
+// AppKit may retain a wrapper and key it in a hash-based collection, so
+// -hash must remain stable for the lifetime of the wrapper, and distinct
+// wrappers must never compare equal even if their backing nodes happen to
+// share the same per-tree id.
+TEST_F(BrowserAccessibilityMacTest, IdentityIsPerWrapperAndStable) {
+  // Build a second, independent tree whose root re-uses the same per-tree id
+  // as a node in the fixture's tree.
+  AXNodeData other_root;
+  other_root.id = 1000;
+  other_root.role = ax::mojom::Role::kRootWebArea;
+  TestAXNodeIdDelegate other_node_id_delegate;
+  std::unique_ptr<BrowserAccessibilityManager> other_manager =
+      std::make_unique<BrowserAccessibilityManagerMac>(
+          MakeAXTreeUpdateForTesting(other_root), other_node_id_delegate,
+          nullptr);
+  BrowserAccessibilityCocoa* other_wrapper =
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
+          other_manager->GetBrowserAccessibilityRoot()
+              ->GetNativeViewAccessible()
+              .Get());
+
+  ASSERT_NE(accessibility_, other_wrapper);
+  EXPECT_FALSE([accessibility_ isEqual:other_wrapper]);
+  EXPECT_FALSE([other_wrapper isEqual:accessibility_]);
+
+  // Hold the wrapper past detach, as the system might.
+  NS_VALID_UNTIL_END_OF_SCOPE BrowserAccessibilityCocoa* retained =
+      accessibility_;
+  const NSUInteger hash_before = retained.hash;
+  EXPECT_TRUE([retained isEqual:retained]);
+
+  // Tearing down the manager detaches the wrapper.
+  manager_.reset();
+  ASSERT_FALSE([retained instanceActive]);
+
+  EXPECT_EQ(hash_before, retained.hash);
+  EXPECT_TRUE([retained isEqual:retained]);
+  EXPECT_FALSE([retained isEqual:other_wrapper]);
+}
+
 TEST_F(BrowserAccessibilityMacTest, TestComputeTextEdit) {
   root_ = AXNodeData();
   root_.id = 1;
   root_.role = ax::mojom::Role::kTextField;
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  accessibility_ = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+  accessibility_ = ObjCCastStrict<BrowserAccessibilityCocoa>(
       manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
 
   // Insertion but no deletion.
@@ -314,7 +359,7 @@ TEST_F(BrowserAccessibilityMacTest, TableAPIs) {
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       initial_state, node_id_delegate_, nullptr);
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -322,30 +367,30 @@ TEST_F(BrowserAccessibilityMacTest, TableAPIs) {
       ax_table.accessibilityChildren;
   EXPECT_EQ(5U, children.count);
 
-  EXPECT_NSEQ(@"AXRow", [children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [children[0] role]);
   EXPECT_EQ(2U, [[children[0] accessibilityChildren] count]);
 
-  EXPECT_NSEQ(@"AXRow", [children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [children[1] role]);
   EXPECT_EQ(2U, [[children[1] accessibilityChildren] count]);
 
-  EXPECT_NSEQ(@"AXColumn", [children[2] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [children[2] role]);
   EXPECT_EQ(2U, [[children[2] accessibilityChildren] count]);
   NSArray<BrowserAccessibilityCocoa*>* col_children =
       [children[2] accessibilityChildren];
-  EXPECT_NSEQ(@"AXCell", [col_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [col_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[1] role]);
 
-  EXPECT_NSEQ(@"AXColumn", [children[3] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [children[3] role]);
   EXPECT_EQ(2U, [[children[3] accessibilityChildren] count]);
   col_children = [children[3] accessibilityChildren];
-  EXPECT_NSEQ(@"AXCell", [col_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [col_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[1] role]);
 
-  EXPECT_NSEQ(@"AXGroup", [children[4] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXGroupRole), [children[4] role]);
   EXPECT_EQ(2U, [[children[4] accessibilityChildren] count]);
   col_children = [children[4] accessibilityChildren];
-  EXPECT_NSEQ(@"AXCell", [col_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [col_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [col_children[1] role]);
 }
 
 // Test table row header support.
@@ -357,7 +402,7 @@ TEST_F(BrowserAccessibilityMacTest, TableWithRowHeaders) {
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
   BrowserAccessibilityCocoa* ax_textfield =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -372,11 +417,11 @@ TEST_F(BrowserAccessibilityMacTest, TableWithRowHeaders) {
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       headerless_table_state, node_id_delegate_, nullptr);
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
-  ax_table = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+  ax_table = ObjCCastStrict<BrowserAccessibilityCocoa>(
       manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   row_headers = [ax_table rowHeaders];
   EXPECT_EQ(nil, row_headers);
@@ -387,7 +432,7 @@ TEST_F(BrowserAccessibilityMacTest, TableWithRowHeaders) {
             TableHeaderOption::RowHeaders);
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       table_state, node_id_delegate_, nullptr);
-  ax_table = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+  ax_table = ObjCCastStrict<BrowserAccessibilityCocoa>(
       manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
 
   // Confirm the AX structure is as expected.
@@ -396,36 +441,36 @@ TEST_F(BrowserAccessibilityMacTest, TableWithRowHeaders) {
   EXPECT_EQ(5U, ax_table_children.count);
 
   BrowserAccessibilityCocoa* first_row = ax_table_children[0];
-  EXPECT_NSEQ(@"AXRow", [first_row role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [first_row role]);
   NSArray<BrowserAccessibilityCocoa*>* first_row_children =
       [first_row accessibilityChildren];
   EXPECT_EQ(2U, [first_row_children count]);
-  EXPECT_NSEQ(@"AXCell", [first_row_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [first_row_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_row_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_row_children[1] role]);
 
   BrowserAccessibilityCocoa* second_row = ax_table_children[1];
-  EXPECT_NSEQ(@"AXRow", [second_row role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [second_row role]);
   NSArray<BrowserAccessibilityCocoa*>* second_row_children =
       [second_row accessibilityChildren];
   EXPECT_EQ(2U, [second_row_children count]);
-  EXPECT_NSEQ(@"AXCell", [second_row_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [second_row_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_row_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_row_children[1] role]);
 
   BrowserAccessibilityCocoa* first_column = ax_table_children[2];
-  EXPECT_NSEQ(@"AXColumn", [first_column role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [first_column role]);
   NSArray<BrowserAccessibilityCocoa*>* first_column_children =
       [first_column accessibilityChildren];
   EXPECT_EQ(2U, [first_column_children count]);
-  EXPECT_NSEQ(@"AXCell", [first_column_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [first_column_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_column_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_column_children[1] role]);
 
   BrowserAccessibilityCocoa* second_column = ax_table_children[3];
-  EXPECT_NSEQ(@"AXColumn", [second_column role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [second_column role]);
   NSArray<BrowserAccessibilityCocoa*>* second_column_children =
       [second_column accessibilityChildren];
   EXPECT_EQ(2U, [second_column_children count]);
-  EXPECT_NSEQ(@"AXCell", [second_column_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [second_column_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_column_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_column_children[1] role]);
 
   EXPECT_EQ(first_row_children[0], first_column_children[0]);
   EXPECT_EQ(first_row_children[1], second_column_children[0]);
@@ -433,7 +478,7 @@ TEST_F(BrowserAccessibilityMacTest, TableWithRowHeaders) {
   EXPECT_EQ(second_row_children[1], second_column_children[1]);
 
   BrowserAccessibilityCocoa* table_group = ax_table_children[4];
-  EXPECT_NSEQ(@"AXGroup", [table_group role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXGroupRole), [table_group role]);
   EXPECT_EQ(0U, [table_group accessibilityChildren].count);
 
   // Confirm the table has row headers, and that they match the expected cells
@@ -469,7 +514,7 @@ TEST_F(BrowserAccessibilityMacTest, TableWithTwoRowHeaders) {
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       table_state, node_id_delegate_, nullptr);
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -480,46 +525,46 @@ TEST_F(BrowserAccessibilityMacTest, TableWithTwoRowHeaders) {
   EXPECT_EQ(6U, ax_table_children.count);
 
   BrowserAccessibilityCocoa* first_row = ax_table_children[0];
-  EXPECT_NSEQ(@"AXRow", [first_row role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [first_row role]);
   NSArray<BrowserAccessibilityCocoa*>* first_row_children =
       [first_row accessibilityChildren];
   EXPECT_EQ(3U, [first_row_children count]);
-  EXPECT_NSEQ(@"AXCell", [first_row_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [first_row_children[1] role]);
-  EXPECT_NSEQ(@"AXCell", [first_row_children[2] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_row_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_row_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_row_children[2] role]);
 
   BrowserAccessibilityCocoa* second_row = ax_table_children[1];
-  EXPECT_NSEQ(@"AXRow", [second_row role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXRowRole), [second_row role]);
   NSArray<BrowserAccessibilityCocoa*>* second_row_children =
       [second_row accessibilityChildren];
   EXPECT_EQ(3U, [second_row_children count]);
-  EXPECT_NSEQ(@"AXCell", [second_row_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [second_row_children[1] role]);
-  EXPECT_NSEQ(@"AXCell", [second_row_children[2] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_row_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_row_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_row_children[2] role]);
 
   BrowserAccessibilityCocoa* first_column = ax_table_children[2];
-  EXPECT_NSEQ(@"AXColumn", [first_column role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [first_column role]);
   NSArray<BrowserAccessibilityCocoa*>* first_column_children =
       [first_column accessibilityChildren];
   EXPECT_EQ(2U, [first_column_children count]);
-  EXPECT_NSEQ(@"AXCell", [first_column_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [first_column_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_column_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [first_column_children[1] role]);
 
   BrowserAccessibilityCocoa* second_column = ax_table_children[3];
-  EXPECT_NSEQ(@"AXColumn", [second_column role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [second_column role]);
   NSArray<BrowserAccessibilityCocoa*>* second_column_children =
       [second_column accessibilityChildren];
   EXPECT_EQ(2U, [second_column_children count]);
-  EXPECT_NSEQ(@"AXCell", [second_column_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [second_column_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_column_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [second_column_children[1] role]);
 
   BrowserAccessibilityCocoa* third_column = ax_table_children[4];
-  EXPECT_NSEQ(@"AXColumn", [third_column role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXColumnRole), [third_column role]);
   NSArray<BrowserAccessibilityCocoa*>* third_column_children =
       [third_column accessibilityChildren];
   EXPECT_EQ(2U, [third_column_children count]);
-  EXPECT_NSEQ(@"AXCell", [third_column_children[0] role]);
-  EXPECT_NSEQ(@"AXCell", [third_column_children[1] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [third_column_children[0] role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXCellRole), [third_column_children[1] role]);
 
   EXPECT_EQ(first_row_children[0], first_column_children[0]);
   EXPECT_EQ(first_row_children[1], second_column_children[0]);
@@ -529,7 +574,7 @@ TEST_F(BrowserAccessibilityMacTest, TableWithTwoRowHeaders) {
   EXPECT_EQ(second_row_children[2], third_column_children[1]);
 
   BrowserAccessibilityCocoa* table_group = ax_table_children[5];
-  EXPECT_NSEQ(@"AXGroup", [table_group role]);
+  EXPECT_NSEQ(CFToNSPtrCast(kAXGroupRole), [table_group role]);
   EXPECT_EQ(0U, [table_group accessibilityChildren].count);
 
   // Confirm the table has two row headers per row, and that they match
@@ -588,11 +633,8 @@ TEST_F(BrowserAccessibilityMacTest, AXSortDirectionUnsupportedOnCell) {
                         static_cast<int>(ax::mojom::SortDirection::kAscending));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kCell);
   EXPECT_FALSE([[cell internalAccessibilityAttributeNames]
@@ -609,11 +651,8 @@ TEST_F(BrowserAccessibilityMacTest,
   root_.role = ax::mojom::Role::kRowHeader;
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kRowHeader);
   EXPECT_FALSE([[cell internalAccessibilityAttributeNames]
@@ -630,11 +669,8 @@ TEST_F(BrowserAccessibilityMacTest,
   root_.role = ax::mojom::Role::kColumnHeader;
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kColumnHeader);
   EXPECT_FALSE([[cell internalAccessibilityAttributeNames]
@@ -653,11 +689,8 @@ TEST_F(BrowserAccessibilityMacTest,
                         static_cast<int>(ax::mojom::SortDirection::kUnsorted));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kRowHeader);
   EXPECT_FALSE([[cell internalAccessibilityAttributeNames]
@@ -676,11 +709,8 @@ TEST_F(BrowserAccessibilityMacTest,
                         static_cast<int>(ax::mojom::SortDirection::kUnsorted));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kColumnHeader);
   EXPECT_FALSE([[cell internalAccessibilityAttributeNames]
@@ -699,11 +729,8 @@ TEST_F(BrowserAccessibilityMacTest,
                         static_cast<int>(ax::mojom::SortDirection::kAscending));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kRowHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -722,11 +749,8 @@ TEST_F(BrowserAccessibilityMacTest,
                         static_cast<int>(ax::mojom::SortDirection::kAscending));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kColumnHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -746,11 +770,8 @@ TEST_F(BrowserAccessibilityMacTest,
       static_cast<int>(ax::mojom::SortDirection::kDescending));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kRowHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -771,11 +792,8 @@ TEST_F(BrowserAccessibilityMacTest,
       static_cast<int>(ax::mojom::SortDirection::kDescending));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kColumnHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -794,11 +812,8 @@ TEST_F(BrowserAccessibilityMacTest, AXSortDirectionOtherSupportedOnRowHeader) {
                         static_cast<int>(ax::mojom::SortDirection::kOther));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kRowHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -817,11 +832,8 @@ TEST_F(BrowserAccessibilityMacTest,
                         static_cast<int>(ax::mojom::SortDirection::kOther));
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  BrowserAccessibilityCocoa* cell =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
-          manager_->GetBrowserAccessibilityRoot()
-              ->GetNativeViewAccessible()
-              .Get());
+  BrowserAccessibilityCocoa* cell = ObjCCastStrict<BrowserAccessibilityCocoa>(
+      manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   EXPECT_NSEQ([cell role], NSAccessibilityCellRole);
   EXPECT_EQ([cell internalRole], ax::mojom::Role::kColumnHeader);
   EXPECT_TRUE([[cell internalAccessibilityAttributeNames]
@@ -843,7 +855,7 @@ TEST_F(BrowserAccessibilityMacTest, AXHeaderOnTableWithColumnHeaders) {
   // The native table will have six children: the three rows, the two columns,
   // and the header group.
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -872,7 +884,7 @@ TEST_F(BrowserAccessibilityMacTest, AXHeaderOnTableWithRowHeaders) {
   // The native table will have 13 children: the five rows, the seven columns,
   // and the header group.
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -903,7 +915,7 @@ TEST_F(BrowserAccessibilityMacTest, AXHeaderOnColumnsWithColumnHeaders) {
   // The native table will have six children: the three rows, the two columns,
   // and the header group for the table itself.
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -937,7 +949,7 @@ TEST_F(BrowserAccessibilityMacTest, AXHeaderOnRowsWithRowHeaders) {
   // The native table will have 11 children: the three rows, the seven columns,
   // and the header group for the table itself.
   BrowserAccessibilityCocoa* ax_table =
-      base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+      ObjCCastStrict<BrowserAccessibilityCocoa>(
           manager_->GetBrowserAccessibilityRoot()
               ->GetNativeViewAccessible()
               .Get());
@@ -976,7 +988,7 @@ TEST_F(BrowserAccessibilityMacTest,
   root_.role = ax::mojom::Role::kTextField;
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  accessibility_ = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+  accessibility_ = ObjCCastStrict<BrowserAccessibilityCocoa>(
       manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   SetRootValue("hello world");
   EXPECT_EQ([accessibility_ accessibilityNumberOfCharacters], 11);
@@ -990,7 +1002,7 @@ TEST_F(BrowserAccessibilityMacTest,
   root_.role = ax::mojom::Role::kTextField;
   manager_ = std::make_unique<BrowserAccessibilityManagerMac>(
       MakeAXTreeUpdateForTesting(root_), node_id_delegate_, nullptr);
-  accessibility_ = base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+  accessibility_ = ObjCCastStrict<BrowserAccessibilityCocoa>(
       manager_->GetBrowserAccessibilityRoot()->GetNativeViewAccessible().Get());
   SetRootValue("hello world");
   NSRange visibleRange = [accessibility_ accessibilityVisibleCharacterRange];
@@ -1029,7 +1041,7 @@ class BrowserAccessibilityMacEmptyGroupSubroleTest
   }
 
   BrowserAccessibilityCocoa* CocoaForId(int32_t id) {
-    return base::apple::ObjCCastStrict<BrowserAccessibilityCocoa>(
+    return ObjCCastStrict<BrowserAccessibilityCocoa>(
         manager_->GetFromID(id)->GetNativeViewAccessible().Get());
   }
 
@@ -1053,11 +1065,11 @@ class BrowserAccessibilityMacEmptyGroupSubroleTest
   }
 
   void ExpectEmptyGroupSubrole(int32_t id) {
-    ExpectSubrole(id, ui::NSAccessibilityEmptyGroupSubrole);
+    ExpectSubrole(id, CFToNSPtrCast(kAXEmptyGroupSubrole));
   }
 
   void ExpectNotEmptyGroupSubrole(int32_t id) {
-    ExpectNotSubrole(id, ui::NSAccessibilityEmptyGroupSubrole);
+    ExpectNotSubrole(id, CFToNSPtrCast(kAXEmptyGroupSubrole));
   }
 
   template <typename MutateFn>
@@ -1129,9 +1141,9 @@ TEST_F(BrowserAccessibilityMacEmptyGroupSubroleTest,
     ++++3 kStatus
     ++++4 kLog
   )HTML");
-  ExpectSubrole(2, @"AXApplicationAlert");
-  ExpectSubrole(3, @"AXApplicationStatus");
-  ExpectSubrole(4, @"AXApplicationLog");
+  ExpectSubrole(2, CFToNSPtrCast(kAXApplicationAlertSubrole));
+  ExpectSubrole(3, CFToNSPtrCast(kAXApplicationStatusSubrole));
+  ExpectSubrole(4, CFToNSPtrCast(kAXApplicationLogSubrole));
 }
 
 // Contract #4: empty landmark wrappers report AXEmptyGroup, not the landmark
@@ -1144,7 +1156,7 @@ TEST_F(BrowserAccessibilityMacEmptyGroupSubroleTest,
     ++++++3 kGenericContainer
   )HTML");
   ExpectEmptyGroupSubrole(2);
-  ExpectNotSubrole(2, @"AXLandmarkBanner");
+  ExpectNotSubrole(2, CFToNSPtrCast(kAXLandmarkBannerSubrole));
 }
 
 // The flip side of WebKit's split between isEmptyGroup() (ignores own name) and
@@ -1328,7 +1340,7 @@ TEST_F(BrowserAccessibilityMacEmptyGroupSubroleTest,
     ++1 kRootWebArea
     ++++2 kMathMLMath
   )HTML");
-  ExpectSubrole(2, @"AXDocumentMath");
+  ExpectSubrole(2, CFToNSPtrCast(kAXDocumentMathSubrole));
   ExpectNotEmptyGroupSubrole(2);
 }
 

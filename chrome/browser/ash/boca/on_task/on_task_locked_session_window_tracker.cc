@@ -267,9 +267,8 @@ void LockedSessionWindowTracker::ShowURLBlockedToast() {
   notifications_manager_->CreateToast(std::move(toast_create_params));
 }
 
-// TabStripModel Implementation
+// TabStripModelObserver Implementation
 void LockedSessionWindowTracker::OnTabChangedAt(tabs::TabInterface* tab,
-                                                int index,
                                                 TabChangeType change_type) {
   if (change_type == TabChangeType::kAll) {
     RefreshUrlBlocklist();
@@ -333,24 +332,30 @@ void LockedSessionWindowTracker::OnTabStripModelChanged(
     }
   }
   if (change.type() == TabStripModelChange::kInserted) {
-    content::WebContents* const old_contents = selection.old_contents;
-    SessionID active_tab_id = SessionID::InvalidValue();
-    // When new tabs are added, if the current active tab is closed or is boca
-    // app homepage, then we set `active_tab_id` to be invalid.
-    if (old_contents &&
-        (TabStripModel::kNoTab !=
-         browser_->GetBrowser().GetTabStripModel()->GetIndexOfWebContents(
-             old_contents)) &&
-        (old_contents->GetVisibleURL() !=
-         GURL(ash::boca::kChromeBocaAppUntrustedIndexURL))) {
-      active_tab_id = sessions::SessionTabHelper::IdForTab(old_contents);
-    }
     for (const auto& contents : change.GetInsert()->contents) {
       SessionID tab_id =
           sessions::SessionTabHelper::IdForTab(contents.contents);
       GURL url = contents.contents->GetVisibleURL();
+      SessionID parent_tab_id = SessionID::InvalidValue();
+      content::WebContents* const opener =
+          contents.contents->GetFirstWebContentsInLiveOriginalOpenerChain();
+      if (opener) {
+        parent_tab_id = sessions::SessionTabHelper::IdForTab(opener);
+      } else {
+        content::WebContents* const old_contents = selection.old_contents;
+        // When new tabs are added, if the current active tab is closed or is
+        // boca app homepage, then we set `parent_tab_id` to be invalid.
+        if (old_contents &&
+            (TabStripModel::kNoTab !=
+             browser_->GetBrowser().GetTabStripModel()->GetIndexOfWebContents(
+                 old_contents)) &&
+            (old_contents->GetVisibleURL() !=
+             GURL(ash::boca::kChromeBocaAppUntrustedIndexURL))) {
+          parent_tab_id = sessions::SessionTabHelper::IdForTab(old_contents);
+        }
+      }
       for (auto& observer : observers_) {
-        observer.OnTabAdded(active_tab_id, tab_id, url);
+        observer.OnTabAdded(parent_tab_id, tab_id, url);
       }
     }
   }

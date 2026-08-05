@@ -35,7 +35,6 @@ import org.chromium.chrome.browser.bookmarks.BookmarkPage;
 import org.chromium.chrome.browser.bricks.BricksPage;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsMarginAdapter;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
 import org.chromium.chrome.browser.history.HistoryManagerUtils;
 import org.chromium.chrome.browser.history.HistoryPage;
@@ -53,6 +52,7 @@ import org.chromium.chrome.browser.pdf.PdfInfo;
 import org.chromium.chrome.browser.pdf.PdfPage;
 import org.chromium.chrome.browser.printing.PrintHelper;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.settings.SettingsInTab;
 import org.chromium.chrome.browser.settings.SettingsPage;
 import org.chromium.chrome.browser.settings.SettingsPageFragmentDelegateImpl;
 import org.chromium.chrome.browser.share.ShareDelegate;
@@ -68,6 +68,7 @@ import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.chrome.browser.ui.native_page.NativePage.NativePageType;
 import org.chromium.chrome.browser.ui.native_page.NativePageHost;
+import org.chromium.chrome.browser.ui.side_ui.SideUiStateProvider;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -103,6 +104,7 @@ public class NativePageFactory {
     private final OneshotSupplier<ModuleRegistry> mModuleRegistrySupplier;
     private final MonotonicObservableSupplier<EdgeToEdgeController> mEdgeToEdgeControllerSupplier;
     private final TopInsetProvider mTopInsetProvider;
+    private final OneshotSupplier<SideUiStateProvider> mSideUiStateProviderSupplier;
     private final StartupMetricsTracker mStartupMetricsTracker;
     private @Nullable NewTabPageCreationTracker mNewTabPageCreationTracker;
 
@@ -130,6 +132,7 @@ public class NativePageFactory {
             OneshotSupplier<ModuleRegistry> moduleRegistrySupplier,
             MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier,
             TopInsetProvider topInsetProvider,
+            OneshotSupplier<SideUiStateProvider> sideUiStateProviderSupplier,
             StartupMetricsTracker startupMetricsTracker,
             BackPressManager backPressManager,
             RecentlyClosedEntriesManager recentlyClosedEntriesManager) {
@@ -150,6 +153,7 @@ public class NativePageFactory {
         mModuleRegistrySupplier = moduleRegistrySupplier;
         mEdgeToEdgeControllerSupplier = edgeToEdgeControllerSupplier;
         mTopInsetProvider = topInsetProvider;
+        mSideUiStateProviderSupplier = sideUiStateProviderSupplier;
         mStartupMetricsTracker = startupMetricsTracker;
         mBackPressManager = backPressManager;
         mRecentlyClosedEntriesManager = recentlyClosedEntriesManager;
@@ -177,6 +181,7 @@ public class NativePageFactory {
                             mModuleRegistrySupplier,
                             mEdgeToEdgeControllerSupplier,
                             mTopInsetProvider,
+                            mSideUiStateProviderSupplier,
                             mStartupMetricsTracker,
                             mBackPressManager,
                             mRecentlyClosedEntriesManager);
@@ -213,6 +218,7 @@ public class NativePageFactory {
         private final MonotonicObservableSupplier<EdgeToEdgeController>
                 mEdgeToEdgeControllerSupplier;
         private final TopInsetProvider mTopInsetProvider;
+        private final OneshotSupplier<SideUiStateProvider> mSideUiStateProviderSupplier;
         private final StartupMetricsTracker mStartupMetricsTracker;
         private final BackPressManager mBackPressManager;
         private final RecentlyClosedEntriesManager mRecentlyClosedEntriesManager;
@@ -236,6 +242,7 @@ public class NativePageFactory {
                 OneshotSupplier<ModuleRegistry> moduleRegistrySupplier,
                 MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier,
                 TopInsetProvider topInsetProvider,
+                OneshotSupplier<SideUiStateProvider> sideUiStateProviderSupplier,
                 StartupMetricsTracker startupMetricsTracker,
                 BackPressManager backPressManager,
                 RecentlyClosedEntriesManager recentlyClosedEntriesManager) {
@@ -257,6 +264,7 @@ public class NativePageFactory {
             mModuleRegistrySupplier = moduleRegistrySupplier;
             mEdgeToEdgeControllerSupplier = edgeToEdgeControllerSupplier;
             mTopInsetProvider = topInsetProvider;
+            mSideUiStateProviderSupplier = sideUiStateProviderSupplier;
             mStartupMetricsTracker = startupMetricsTracker;
             mBackPressManager = backPressManager;
             mRecentlyClosedEntriesManager = recentlyClosedEntriesManager;
@@ -298,6 +306,7 @@ public class NativePageFactory {
                     mModuleRegistrySupplier,
                     mEdgeToEdgeControllerSupplier,
                     mTopInsetProvider,
+                    mSideUiStateProviderSupplier,
                     mStartupMetricsTracker,
                     mBackPressManager);
         }
@@ -420,11 +429,23 @@ public class NativePageFactory {
                             tab,
                             mBrowserControlsManager,
                             mTabModelSelector,
-                            mEdgeToEdgeControllerSupplier));
+                            mEdgeToEdgeControllerSupplier),
+                    url);
         }
 
-        protected NativePage buildSettingsPage(Tab tab) {
-            assert ChromeFeatureList.isEnabled(ChromeFeatureList.SETTINGS_IN_TAB);
+        protected NativePage buildSettingsPage(Tab tab, String url) {
+            assert SettingsInTab.isEnabled();
+            // The fragment delegate acts both as a delegate and as a back press handler.
+            var fragmentDelegate =
+                    new SettingsPageFragmentDelegateImpl(
+                            mActivity,
+                            tab.getProfile(),
+                            mWindowAndroid,
+                            mActivityResultTracker,
+                            mSnackbarManagerSupplier.get(),
+                            mBottomSheetController,
+                            mModalDialogManagerSupplier.get(),
+                            tab);
             return new SettingsPage(
                     mActivity,
                     tab.getProfile(),
@@ -433,14 +454,10 @@ public class NativePageFactory {
                             mBrowserControlsManager,
                             mTabModelSelector,
                             mEdgeToEdgeControllerSupplier),
-                    new SettingsPageFragmentDelegateImpl(
-                            mActivity,
-                            tab.getProfile(),
-                            mWindowAndroid,
-                            mActivityResultTracker,
-                            mSnackbarManagerSupplier.get(),
-                            mBottomSheetController,
-                            mModalDialogManagerSupplier.get()));
+                    /* fragmentDelegate= */ fragmentDelegate,
+                    /* backPressHandler= */ fragmentDelegate,
+                    mBackPressManager,
+                    url);
         }
     }
 
@@ -515,7 +532,7 @@ public class NativePageFactory {
                 page = getBuilder().buildBricksPage(tab, url);
                 break;
             case NativePageType.SETTINGS:
-                page = getBuilder().buildSettingsPage(tab);
+                page = getBuilder().buildSettingsPage(tab, url);
                 break;
             default:
                 assert false;
@@ -612,13 +629,11 @@ public class NativePageFactory {
         }
         return new PdfPage(
                 new TabShim(tab, browserControlsManager, tabModelSelector, null),
-                tab.getProfile(),
-                tab.getProfile().isOffTheRecord(),
+                tab,
                 activity,
                 url,
                 pdfInfo,
                 activity.getString(R.string.pdf_transient_tab_title),
-                tab.getId(),
                 pdfFragmentViewTracker);
     }
 

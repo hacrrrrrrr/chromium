@@ -4,6 +4,25 @@
 
 import("//build/config/ozone.gni")
 
+source_set("test_support") {
+  testonly = true
+
+  public = [
+    "mock_oidc_authentication_signin_interceptor.h",
+    "mock_user_policy_oidc_signin_service.h",
+  ]
+
+  sources = [
+    "mock_oidc_authentication_signin_interceptor.cc",
+    "mock_user_policy_oidc_signin_service.cc",
+  ]
+
+  public_deps = [
+    "//chrome/browser/enterprise",
+    "//testing/gmock",
+  ]
+}
+
 source_set("unit_tests") {
   testonly = true
 
@@ -46,11 +65,14 @@ if (is_win || is_mac || is_linux) {
     ]
 
     deps = [
+      ":test_support",
       "//base",
       "//chrome/browser/enterprise:impl",
       "//chrome/browser/policy:test_support",
       "//chrome/browser/profiles:misc",
+      "//chrome/browser/signin:signin_browser_test_base",
       "//chrome/browser/sync",
+      "//chrome/browser/ui:managed_ui",
       "//chrome/browser/ui:ui_features",
       "//chrome/browser/ui/signin",
       "//chrome/test:test_support",

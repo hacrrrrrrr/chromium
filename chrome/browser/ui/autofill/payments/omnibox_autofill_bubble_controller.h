@@ -13,6 +13,10 @@
 #include "components/autofill/core/browser/ui/autofill_suggestion_delegate.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 
+namespace actions {
+class ActionItem;
+}
+
 namespace content {
 class WebContents;
 }
@@ -81,6 +85,10 @@ class OmniboxAutofillBubbleController : public AutofillBubbleControllerBase {
   void DoShowBubble() override;
 
  private:
+  actions::ActionItem* GetActionItem();
+
+  const raw_ref<tabs::TabInterface> tab_interface_;
+
   ui::ScopedUnownedUserData<OmniboxAutofillBubbleController>
       scoped_unowned_user_data_;
 
@@ -98,6 +106,12 @@ class OmniboxAutofillBubbleController : public AutofillBubbleControllerBase {
       const Suggestion&,
       const AutofillSuggestionDelegate::SuggestionMetadata&)>
       did_accept_suggestion_callback_;
+
+  // Whether the Google Pay logo should be shown in the omnibox autofill bubble.
+  // Saved as a state variable and determined upon initial bubble initialization
+  // because GUIDs can potentially change during the flow and cause
+  // discrepancies.
+  bool should_show_google_pay_logo_ = false;
 
   base::WeakPtrFactory<OmniboxAutofillBubbleController> weak_ptr_factory_{this};
 };

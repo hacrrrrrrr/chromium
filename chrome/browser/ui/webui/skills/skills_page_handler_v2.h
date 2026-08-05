@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/memory/raw_ref.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/skills/skills.mojom.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 
@@ -27,7 +28,7 @@ class IdentityManager;
 
 namespace skills {
 
-using ToastType = ::skills::mojom::ToastType;
+class SkillsDialogDelegate;
 
 class SkillsPageHandlerV2 : public ::skills::mojom::SkillsPageHandler {
  public:
@@ -35,21 +36,29 @@ class SkillsPageHandlerV2 : public ::skills::mojom::SkillsPageHandler {
       mojo::PendingReceiver<::skills::mojom::SkillsPageHandler> receiver,
       Profile* profile,
       signin::IdentityManager* identity_manager,
-      content::WebContents* web_contents);
+      content::WebContents* web_contents,
+      base::WeakPtr<SkillsDialogDelegate> delegate = nullptr);
   SkillsPageHandlerV2(const SkillsPageHandlerV2&) = delete;
   SkillsPageHandlerV2& operator=(const SkillsPageHandlerV2&) = delete;
   ~SkillsPageHandlerV2() override;
 
   // ::skills::mojom::SkillsPageHandler:
   void SyncCookies(SyncCookiesCallback callback) override;
-  void ShowToast(ToastType toast_type) override;
-  void InvokeSkill(const std::string& skill_id) override;
+  void ShowSaveToast() override;
+  void ShowDeleteToast(const std::string& skill_id,
+                       ShowDeleteToastCallback callback) override;
+  void InvokeSkill(const std::string& skill_id,
+                   const std::string& skill_name,
+                   const std::string& skill_icon) override;
+  void SendPrompt(const std::string& prompt) override;
+  void CloseDialog() override;
 
  private:
   mojo::Receiver<::skills::mojom::SkillsPageHandler> receiver_;
   const base::raw_ref<Profile> profile_;
   const base::raw_ref<content::WebContents> web_contents_;
   std::unique_ptr<glic::GlicCookieSynchronizer> cookie_synchronizer_;
+  base::WeakPtr<SkillsDialogDelegate> delegate_;
 };
 
 }  // namespace skills

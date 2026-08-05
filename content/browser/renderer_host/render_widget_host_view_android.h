@@ -95,7 +95,7 @@ class TouchSelectionControllerClientManagerAndroid;
 class WebContentsAccessibilityAndroid;
 struct ContextMenuParams;
 
-BASE_FEATURE(kTooltips, "Tooltips", base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kTooltips, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // -----------------------------------------------------------------------------
 // See comments in render_widget_host_view.h about this class and its members.
@@ -814,6 +814,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
 
   // Whether swipe-to-move-cursor gesture is activated.
   bool swipe_to_move_cursor_activated_ = false;
+
+  bool in_destroy_ = false;
 
   raw_ptr<WebContentsAccessibilityAndroid> web_contents_accessibility_ =
       nullptr;

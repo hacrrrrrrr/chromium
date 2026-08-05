@@ -89,6 +89,7 @@
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_system.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom-shared.h"
+#include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/native_ui_types.h"
@@ -127,7 +128,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
 #include "chrome/browser/web_applications/os_integration/web_app_shortcut.h"
-#include "chrome/browser/web_applications/web_app_install_finalizer.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #endif  // BUILDFLAG(IS_WIN)
@@ -529,6 +529,20 @@ void WebAppUiManagerImpl::TriggerInstallDialogForBackgroundInstall(
   web_app::CreateWebAppForBackgroundInstall(
       initiating_web_contents, std::move(tracker), install_url, manifest_id,
       last_committed_url, std::move(callback));
+}
+
+void WebAppUiManagerImpl::TriggerInstallDialogForManifestInstall(
+    content::WebContents* initiating_web_contents,
+    base::WeakPtr<content::Page> initiating_page,
+    std::unique_ptr<webapps::MlInstallOperationTracker> tracker,
+    blink::mojom::ManifestPtr manifest,
+    const GURL& manifest_url,
+    const GURL& requesting_page_url,
+    InstallCallback callback) {
+  web_app::CreateWebAppForManifestInstall(
+      initiating_web_contents, std::move(initiating_page), std::move(tracker),
+      std::move(manifest), manifest_url, requesting_page_url,
+      std::move(callback));
 }
 
 void WebAppUiManagerImpl::TriggerLaunchDialogForBackgroundInstall(

@@ -37,6 +37,7 @@
 #include "chrome/browser/safe_browsing/download_protection/download_protection_service.h"
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/views/file_system_access/file_system_access_test_utils.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -160,6 +161,10 @@ class DownloadDeepScanningBrowserTestBase
                          enterprise_obfuscation::kEnterpriseFileObfuscation)
                    : disabled_features_.push_back(
                          enterprise_obfuscation::kEnterpriseFileObfuscation);
+    // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox is
+    // is enabled and then remove these two Features.
+    disabled_features_.push_back(omnibox::internal::kWebUIOmniboxPopup);
+    disabled_features_.push_back(omnibox::internal::kWebUIOmniboxAimPopup);
   }
 
   void OnDownloadCreated(content::DownloadManager* manager,
@@ -265,7 +270,7 @@ class DownloadDeepScanningBrowserTestBase
 
   void WaitForDownloadToFinish() {
     content::DownloadManager* download_manager =
-        browser()->profile()->GetDownloadManager();
+        browser()->GetProfile()->GetDownloadManager();
     content::DownloadTestObserverTerminal observer(
         download_manager, 1,
         content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_QUIT);
@@ -386,7 +391,7 @@ class DownloadDeepScanningBrowserTestBase
 
   void ObserveDownloadManager() {
     content::DownloadManager* download_manager =
-        browser()->profile()->GetDownloadManager();
+        browser()->GetProfile()->GetDownloadManager();
     download_manager->AddObserver(this);
   }
 
@@ -415,10 +420,10 @@ class DownloadDeepScanningBrowserTestBase
 
   std::string GetProfileIdentifier() const {
 #if BUILDFLAG(IS_CHROMEOS)
-    return browser()->profile()->GetPath().AsUTF8Unsafe();
+    return browser()->GetProfile()->GetPath().AsUTF8Unsafe();
 #else
     if (connectors_machine_scope_) {
-      return browser()->profile()->GetPath().AsUTF8Unsafe();
+      return browser()->GetProfile()->GetPath().AsUTF8Unsafe();
     }
     auto* profile_id_service =
         enterprise::ProfileIdServiceFactory::GetForProfile(
@@ -668,6 +673,63 @@ IN_PROC_BROWSER_TEST_P(DownloadDeepScanningBrowserTest,
   WaitForDownloadToFinish();
 
   // The file should be deep scanned, and safe.
+  ASSERT_EQ(download_items().size(), 1u);
+  download::DownloadItem* item = *download_items().begin();
+  EXPECT_EQ(
+      item->GetDangerType(),
+      download::DownloadDangerType::DOWNLOAD_DANGER_TYPE_DEEP_SCANNED_SAFE);
+  EXPECT_EQ(item->GetState(), download::DownloadItem::COMPLETE);
+}
+
+IN_PROC_BROWSER_TEST_P(DownloadDeepScanningBrowserTest, DataURLDownloadIsTruncated) {
+  base::ScopedAllowBlockingForTesting allow_blocking;
+
+  ClientDownloadResponse metadata_response;
+  metadata_response.set_verdict(ClientDownloadResponse::SAFE);
+  ExpectMetadataResponse(metadata_response);
+
+  enterprise_connectors::ContentAnalysisResponse sync_response;
+  auto* dlp_result = sync_response.add_results();
+  dlp_result->set_tag("dlp");
+  dlp_result->set_status(
+      enterprise_connectors::ContentAnalysisResponse::Result::SUCCESS);
+
+  auto* malware_result = sync_response.add_results();
+  malware_result->set_tag("malware");
+  malware_result->set_status(
+      enterprise_connectors::ContentAnalysisResponse::Result::SUCCESS);
+
+  ExpectContentAnalysisResumableMetadataResponse({"dlp", "malware"});
+  ExpectContentAnalysisResumableContentResponse(sync_response);
+
+  // Needs to be an octet-stream to trigger download
+  std::string data_url_string = "data:application/octet-stream;base64,";
+  data_url_string.append(3000, 'A');
+  GURL url(data_url_string);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  WaitForDeepScanRequest();
+
+  EXPECT_EQ(last_request().reason(),
+            enterprise_connectors::ContentAnalysisRequest::NORMAL_DOWNLOAD);
+
+  // The truncate limit is 1024 characters, but may be less to ensure a valid
+  // base64 encoding.
+  EXPECT_LE(last_request().request_data().url().size(), 1024u);
+  EXPECT_GT(last_request().request_data().referrer_chain_size(), 0);
+  EXPECT_LE(last_request().request_data().referrer_chain(0).url().size(), 1024u);
+
+  ASSERT_TRUE(last_request().request_data().has_csd());
+  ASSERT_GT(last_request().request_data().csd().referrer_chain_size(), 0);
+  ASSERT_GT(last_request().request_data().csd().resources_size(), 0);
+  EXPECT_LE(last_request().request_data().csd().resources(0).url().size(), 1024u);
+  EXPECT_LE(last_request().request_data().csd().url().size(), 1024u);
+
+  WaitForDownloadToFinish();
+
   ASSERT_EQ(download_items().size(), 1u);
   download::DownloadItem* item = *download_items().begin();
   EXPECT_EQ(
@@ -971,7 +1033,7 @@ class DownloadRestrictionsDeepScanningBrowserTest
   void SetUpOnMainThread() override {
     DownloadDeepScanningBrowserTestBase::SetUpOnMainThread();
 
-    browser()->profile()->GetPrefs()->SetInteger(
+    browser()->GetProfile()->GetPrefs()->SetInteger(
         policy::policy_prefs::kDownloadRestrictions,
         static_cast<int>(policy::DownloadRestriction::DANGEROUS_FILES));
     enterprise_connectors::test::SetAnalysisConnector(
@@ -1087,7 +1149,7 @@ class AllowlistedUrlDeepScanningBrowserTest
 
     base::ListValue domain_list;
     domain_list.Append(embedded_test_server()->base_url().host());
-    browser()->profile()->GetPrefs()->SetList(
+    browser()->GetProfile()->GetPrefs()->SetList(
         prefs::kSafeBrowsingAllowlistDomains, std::move(domain_list));
   }
 };

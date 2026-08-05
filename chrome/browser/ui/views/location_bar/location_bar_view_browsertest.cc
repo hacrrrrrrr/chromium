@@ -38,8 +38,6 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_context_menu.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/browser/ui/views/page_action/page_action_container_view.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
-#include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/page_action/test_support/page_action_test_support.h"
 #include "chrome/grit/generated_resources.h"
@@ -77,12 +75,6 @@
 #endif
 
 namespace {
-void FocusNextView(views::FocusManager* focus_manager) {
-  views::View* const focused_view = focus_manager->GetFocusedView();
-  views::View* const next_view =
-      focus_manager->GetNextFocusableView(focused_view, nullptr, false, false);
-  focus_manager->SetFocusedView(next_view);
-}
 
 class TestLocationBarObserver : public LocationBar::Observer {
  public:
@@ -126,8 +118,9 @@ class LocationBarViewBrowserTest : public InProcessBrowserTest {
         BrowserView::GetBrowserViewForBrowser(browser())
             ->toolbar_button_provider();
     return page_actions::GetIconLabelBubbleViewForTesting(
-        toolbar_button_provider->GetPageActionViewInterface(kActionZoomNormal),
-        kActionZoomNormal);
+        toolbar_button_provider->GetPageActionViewInterface(
+            kActionShowZoomBubble),
+        kActionShowZoomBubble);
   }
 
   ContentSettingImageView& GetContentSettingImageView(
@@ -517,95 +510,17 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewGeolocationBackForwardCacheBrowserTest,
   EXPECT_FALSE(geolocation_icon.GetVisible());
 }
 
-class LocationBarViewPageActionsMigrationTest
-    : public LocationBarViewBrowserTest {
- public:
-  LocationBarViewPageActionsMigrationTest() {
-    scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{::features::kPageActionsMigration,
-          {{::features::kPageActionsMigrationBookmarkStar.name, "false"}}},
-         {lens::features::kLensOverlayOmniboxEntryPoint, {}}},
-        {});
-  }
-  ~LocationBarViewPageActionsMigrationTest() override = default;
 
-  LocationBarViewPageActionsMigrationTest(
-      const LocationBarViewPageActionsMigrationTest&) = delete;
-  LocationBarViewPageActionsMigrationTest& operator=(
-      const LocationBarViewPageActionsMigrationTest&) = delete;
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-// This test fails on both X11 and Wayland on Linux. The root cause for X11
-// might be different from Wayland (where programmatically changing window
-// activation is not supported).
-// TODO(crbug.com/376285664): Remove this test altogether once the migration
-// is complete.
-#if BUILDFLAG(IS_LINUX)
-#define MAYBE_LocationBarFocusOrder DISABLED_LocationBarFocusOrder
-#else
-#define MAYBE_LocationBarFocusOrder LocationBarFocusOrder
-#endif
-
-// Tests that shifting focus from the omnibox will focus the migrated page
-// actions first, followed by the legacy page actions.
-IN_PROC_BROWSER_TEST_F(LocationBarViewPageActionsMigrationTest,
-                       MAYBE_LocationBarFocusOrder) {
-#if BUILDFLAG(IS_OZONE)
-  if (::ui::OzonePlatform::RunningOnWaylandForTest()) {
-    GTEST_SKIP() << "Wayland doesn't support changing window activation "
-                    "programmatically";
-  }
-#endif
-  actions::ActionItem* const lens_action =
-      actions::ActionManager::Get().FindAction(
-          kActionSidePanelShowLensOverlayResults);
-  ASSERT_NE(lens_action, nullptr);
-  lens_action->SetVisible(true);
-  lens_action->SetEnabled(true);
-  browser()
-      ->GetActiveTabInterface()
-      ->GetTabFeatures()
-      ->page_action_controller()
-      ->Show(kActionSidePanelShowLensOverlayResults);
-
-  views::View* const lens_overlay_page_action_view =
-      GetLocationBarView()->page_action_container()->GetPageActionView(
-          kActionSidePanelShowLensOverlayResults);
-  views::View* const bookmark_page_action_view =
-      GetLocationBarView()->page_action_icon_controller()->GetIconView(
-          PageActionIconType::kBookmarkStar);
-  ASSERT_TRUE(bookmark_page_action_view->GetVisible());
-
-  views::FocusManager* const focus_manager =
-      GetLocationBarView()->GetFocusManager();
-
-  GetLocationBarView()->FocusLocation(/*is_user_initiated=*/true,
-                                      /*clear_focus_if_failed=*/false);
-  OmniboxViewViews* const omnibox = GetLocationBarView()->omnibox_view();
-  ASSERT_EQ(focus_manager->GetFocusedView(), omnibox);
-
-  FocusNextView(focus_manager);
-  EXPECT_EQ(focus_manager->GetFocusedView(), lens_overlay_page_action_view);
-
-  FocusNextView(focus_manager);
-  EXPECT_EQ(focus_manager->GetFocusedView(), bookmark_page_action_view);
-}
 
 class LocationBarViewPageActionHideWhileEditingTests
     : public InProcessBrowserTest {
  public:
-  LocationBarViewPageActionHideWhileEditingTests() {
-    scoped_feature_list_.InitAndEnableFeature(
-        ::features::kPageActionsMigration);
-  }
+  LocationBarViewPageActionHideWhileEditingTests() = default;
 
   void SetUpOnMainThread() override {
     // 1. Ensure the Zoom action is globally visible/enabled.
     auto* zoom_action =
-        actions::ActionManager::Get().FindAction(kActionZoomNormal);
+        actions::ActionManager::Get().FindAction(kActionShowZoomBubble);
     ASSERT_TRUE(zoom_action);
     zoom_action->SetVisible(true);
     zoom_action->SetEnabled(true);
@@ -616,7 +531,7 @@ class LocationBarViewPageActionHideWhileEditingTests
     page_actions::PageActionController* controller =
         tab_features->page_action_controller();
     ASSERT_TRUE(controller);
-    controller->Show(kActionZoomNormal);
+    controller->Show(kActionShowZoomBubble);
 
     // 3. Make the Zoom icon visible by actually adjusting page zoom from 100%.
     auto* web_contents = browser()->tab_strip_model()->GetActiveWebContents();
@@ -629,7 +544,7 @@ class LocationBarViewPageActionHideWhileEditingTests
  protected:
   page_actions::PageActionView* GetZoomPageActionView() {
     return GetLocationBarView()->page_action_container()->GetPageActionView(
-        kActionZoomNormal);
+        kActionShowZoomBubble);
   }
 
   LocationBarView* GetLocationBarView() {
@@ -774,7 +689,7 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewAddContextButtonBrowserTest,
                        MAYBE_PrefChangesAddContextButtonVisibility) {
   LocationBarView* location_bar_view = GetLocationBarView();
   OmniboxViewViews* omnibox_view = location_bar_view->omnibox_view();
-  PrefService* prefs = browser()->profile()->GetPrefs();
+  PrefService* prefs = browser()->GetProfile()->GetPrefs();
 
   // pref is initially true to show the button.
   prefs->SetBoolean(omnibox::kShowAiModeOmniboxButton, true);
@@ -834,4 +749,55 @@ IN_PROC_BROWSER_TEST_F(LocationBarViewBrowserTest, OmniboxActionsRegistered) {
   ASSERT_TRUE(regular_model_action);
   EXPECT_TRUE(regular_model_action->GetText().empty());
   EXPECT_FALSE(regular_model_action->GetImage().IsEmpty());
+}
+
+// Tests that unsafe schemes are not allowed to be opened from middle clicks.
+IN_PROC_BROWSER_TEST_F(LocationBarViewBrowserTest,
+                       MiddleClickPasteAndGoBlocksUnsafeSchemes) {
+  if (!ui::Clipboard::IsMiddleClickPasteEnabled() ||
+      !ui::Clipboard::IsSupportedClipboardBuffer(
+          ui::ClipboardBuffer::kSelection)) {
+    return;
+  }
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL start_url = embedded_test_server()->GetURL("/title1.html");
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), start_url));
+
+  LocationBarView* location_bar_view = GetLocationBarView();
+  LocationIconView* location_icon_view =
+      location_bar_view->location_icon_view();
+
+  // Try file:// URL. Note: ui::Clipboard::ReadText is asynchronous on Linux, so
+  // we must pump the runloop to allow the callback to run and be rejected.
+  {
+    ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kSelection);
+    writer.WriteText(u"file:///etc/passwd");
+  }
+
+  ui::MouseEvent middle_click_event(ui::EventType::kMousePressed, gfx::Point(),
+                                    gfx::Point(), base::TimeTicks::Now(),
+                                    ui::EF_MIDDLE_MOUSE_BUTTON,
+                                    ui::EF_MIDDLE_MOUSE_BUTTON);
+  location_icon_view->OnMousePressed(middle_click_event);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(start_url, browser()
+                           ->tab_strip_model()
+                           ->GetActiveWebContents()
+                           ->GetLastCommittedURL());
+
+  // Try chrome:// URL.
+  {
+    ui::ScopedClipboardWriter writer(ui::ClipboardBuffer::kSelection);
+    writer.WriteText(u"chrome://version");
+  }
+
+  location_icon_view->OnMousePressed(middle_click_event);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(start_url, browser()
+                           ->tab_strip_model()
+                           ->GetActiveWebContents()
+                           ->GetLastCommittedURL());
 }

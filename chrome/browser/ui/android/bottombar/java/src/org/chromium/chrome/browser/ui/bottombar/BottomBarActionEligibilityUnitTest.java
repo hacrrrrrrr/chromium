@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.ui.bottombar;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -49,6 +51,7 @@ public class BottomBarActionEligibilityUnitTest {
         BottomBarActionEligibility.setCountrySupplier(() -> mCountry);
         // By default, mock the DSE to be Google.
         when(mTemplateUrlService.isDefaultSearchEngineGoogle()).thenReturn(true);
+        when(mGlicEnablingJniMock.shouldShowSettingsPage(any())).thenReturn(true);
     }
 
     @org.junit.After
@@ -150,5 +153,58 @@ public class BottomBarActionEligibilityUnitTest {
 
         // Should return AI_MODE even in France!
         assertEquals(ActionId.AI_MODE, BottomBarActionEligibility.getEligibleExtraAction(mProfile));
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_glic_setting_toggle/true")
+    public void testGetEligibleExtraAction_GlicButtonDisabledByUser() {
+        mCountry = "us";
+        when(mGlicEnablingJniMock.isEnabledForProfile(any())).thenReturn(true);
+
+        BottomBarConfigUtils.setGlicButtonEnabled(false);
+        assertEquals(
+                BottomBarActionEligibility.ACTION_NONE,
+                BottomBarActionEligibility.getEligibleExtraAction(mProfile));
+
+        BottomBarConfigUtils.setGlicButtonEnabled(true);
+        assertEquals(ActionId.GLIC, BottomBarActionEligibility.getEligibleExtraAction(mProfile));
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_glic_setting_toggle/true")
+    public void testGetEligibleExtraAction_GlicButtonDisabledByUser_ToggleShown() {
+        mCountry = "us";
+        when(mGlicEnablingJniMock.isEnabledForProfile(any())).thenReturn(true);
+        BottomBarConfigUtils.setGlicButtonEnabled(false);
+        assertEquals(
+                BottomBarActionEligibility.ACTION_NONE,
+                BottomBarActionEligibility.getEligibleExtraAction(mProfile));
+        BottomBarConfigUtils.setGlicButtonEnabled(true);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_glic_setting_toggle/false")
+    public void testGetEligibleExtraAction_GlicButtonDisabledByUser_ToggleNotShown() {
+        mCountry = "us";
+        when(mGlicEnablingJniMock.isEnabledForProfile(any())).thenReturn(true);
+        BottomBarConfigUtils.setGlicButtonEnabled(false);
+        assertEquals(ActionId.GLIC, BottomBarActionEligibility.getEligibleExtraAction(mProfile));
+        BottomBarConfigUtils.setGlicButtonEnabled(true);
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_glic_setting_toggle/true")
+    public void testShouldShowBottomBarGlicSetting_ToggleParamTrue() {
+        mCountry = "us";
+        when(mGlicEnablingJniMock.shouldShowSettingsPage(any())).thenReturn(true);
+        assertTrue(BottomBarActionEligibility.shouldShowBottomBarGlicSetting(mProfile));
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ANDROID_BOTTOM_BAR + ":show_glic_setting_toggle/false")
+    public void testShouldShowBottomBarGlicSetting_ToggleParamFalse() {
+        mCountry = "us";
+        when(mGlicEnablingJniMock.shouldShowSettingsPage(any())).thenReturn(true);
+        assertFalse(BottomBarActionEligibility.shouldShowBottomBarGlicSetting(mProfile));
     }
 }

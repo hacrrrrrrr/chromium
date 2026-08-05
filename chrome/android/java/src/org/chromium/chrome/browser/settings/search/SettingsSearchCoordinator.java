@@ -69,6 +69,7 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.MainSettings;
 import org.chromium.chrome.browser.settings.MultiColumnSettings;
 import org.chromium.chrome.browser.settings.SettingsActivity;
+import org.chromium.chrome.browser.settings.SettingsMenuHelper;
 import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsDelegate;
 import org.chromium.components.browser_ui.accessibility.AccessibilitySettings;
 import org.chromium.components.browser_ui.settings.search.SearchIndexProvider;
@@ -133,10 +134,6 @@ public class SettingsSearchCoordinator
     private @Nullable Runnable mTurnOffHighlight;
     private @Nullable ContainmentItemController mContainmentController;
 
-    // Whether the back action handler for MultiColumnSettings was set. This is set lazily when
-    // search UI gets focus for the first time.
-    private boolean mMultiColumnSettingsBackActionHandlerSet;
-
     // States for search operation. These states are managed to go back and forth between viewing
     // the search results and browsing result fragments. We perform some UI tasks such as
     // initializing search widget UI, creating/restoring fragments as the state changes.
@@ -159,7 +156,7 @@ public class SettingsSearchCoordinator
     // width and the feature flag condition should be met.
     private boolean mUseMultiColumn;
 
-    private OnBackPressedCallback mBackActionCallback;
+    private @Nullable OnBackPressedCallback mBackActionCallback;
 
     // Set to {@code true} after queries are entered. Used to conditionally clear up the screen.
     private boolean mQueryEntered;
@@ -168,6 +165,9 @@ public class SettingsSearchCoordinator
     // True while local search (language, site settings) UI is enabled, so that settings search
     // should remain hidden across configuration changes.
     private boolean mSuppressUi;
+
+    // Whether destroy() has been called on this object.
+    private boolean mIsDestroyed;
 
     // Used for histogram that logs the user behavior for search.
     // LINT.IfChange(ExitReason)
@@ -377,7 +377,7 @@ public class SettingsSearchCoordinator
     }
 
     private void restoreFragmentState() {
-        var fm = getSettingsFragmentManager();
+        var fm = assumeNonNull(getSettingsFragmentManager());
         var emptyFragment = (EmptyFragment) fm.findFragmentByTag(EMPTY_FRAGMENT);
         if (emptyFragment != null) emptyFragment.setOpenHelpCenter(this::openHelpCenter);
 
@@ -396,21 +396,31 @@ public class SettingsSearchCoordinator
 
     @Override
     public void onTitleUpdated() {
-        boolean reset = (getSettingsFragmentManager().getBackStackEntryCount() == 0);
+        boolean reset = (assumeNonNull(getSettingsFragmentManager()).getBackStackEntryCount() == 0);
         if (reset && (mFragmentState == FS_SEARCH || mFragmentState == FS_RESULTS)) {
             exitSearchState(/* clearFragment= */ false);
         }
     }
 
     @Override
+    public void onHeaderLayoutUpdated() {
+        if (findViewById(R.id.search_box) == null) return;
+
+        // When SlidingPaneLayout finishes its initial layout or switches between single and
+        // two-column mode, re-evaluate whether search should be in single or multi-column layout.
+        onConfigurationChangedInternal();
+    }
+
+    @Override
     public void onAccessibilityStateChanged(
             AccessibilityState.State oldAccessibilityState,
             AccessibilityState.State newAccessibilityState) {
-        if (mActivity.isFinishing() || mActivity.isDestroyed()) return;
+        if (mActivity.isFinishing() || mActivity.isDestroyed() || mIsDestroyed) return;
 
         // If #onSaveInstance has already been called, we cannot commit Fragment transactions. The
         // UI update is safe to skip since the user cannot see the search view in this state.
-        if (getSettingsFragmentManager().isStateSaved()) return;
+        FragmentManager fm = getSettingsFragmentManager();
+        if (fm == null || fm.isStateSaved()) return;
 
         if (!oldAccessibilityState.equals(newAccessibilityState)) {
             if (mIndexData != null) {
@@ -437,7 +447,7 @@ public class SettingsSearchCoordinator
             setFragmentState(FS_SEARCH);
             requireViewById(R.id.search_query_container).setVisibility(View.VISIBLE);
             showBackArrowInSingleColumnMode(false);
-            getSettingsFragmentManager()
+            assumeNonNull(getSettingsFragmentManager())
                     .popBackStackImmediate(
                             RESULT_BACKSTACK, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         }
@@ -519,7 +529,7 @@ public class SettingsSearchCoordinator
                                 disableBackgroundTalkbackNavigation();
                             }
                         });
-        var fm = getSettingsFragmentManager();
+        var fm = assumeNonNull(getSettingsFragmentManager());
 
         // Help menu/icon layout may change from Fragment to Fragment. Monitor the Fragment resume
         // event to update the search bar width in response.
@@ -553,7 +563,7 @@ public class SettingsSearchCoordinator
         // fragments should be disabled.
         // Note that MainSettings in multi-column mode, or single-column mode with the detail pane
         // out of the screen, should be enabled since it is visible.
-        List<Fragment> fragments = getSettingsFragmentManager().getFragments();
+        List<Fragment> fragments = assumeNonNull(getSettingsFragmentManager()).getFragments();
         boolean isHeaderPaneVisible = isShowingMainSettings();
         for (int i = 0; i <= fragments.size() - 2; i++) {
             Fragment f = fragments.get(i);
@@ -599,7 +609,7 @@ public class SettingsSearchCoordinator
     private void observeFragmentForVisibilityChange() {
         View searchBox = requireViewById(R.id.search_box);
         searchBox.setVisibility(View.VISIBLE);
-        getSettingsFragmentManager()
+        assumeNonNull(getSettingsFragmentManager())
                 .registerFragmentLifecycleCallbacks(
                         new FragmentManager.FragmentLifecycleCallbacks() {
                             @Override
@@ -772,15 +782,10 @@ public class SettingsSearchCoordinator
         return providerMap;
     }
 
-    void enterSearchState(boolean isRestored) {
+    @VisibleForTesting
+    public void enterSearchState(boolean isRestored) {
         initIndex();
 
-        if (mMultiColumnSettings != null && !mMultiColumnSettingsBackActionHandlerSet) {
-            mActivity
-                    .getOnBackPressedDispatcher()
-                    .addCallback(mMultiColumnSettings, mBackActionCallback);
-            mMultiColumnSettingsBackActionHandlerSet = true;
-        }
         View searchBox = requireViewById(R.id.search_box);
         View queryContainer = requireViewById(R.id.search_query_container);
         searchBox.setVisibility(View.GONE);
@@ -810,11 +815,12 @@ public class SettingsSearchCoordinator
         }
         KeyboardUtils.showKeyboard(queryEdit);
         setFragmentState(FS_SEARCH);
+        assumeNonNull(mBackActionCallback);
         mBackActionCallback.setEnabled(true);
         // When being restored, MultiColumnTitleUpdater restores the first-visible title index
         // from the saved bundle. Do not override it.
         if (!isRestored) {
-            int stackCount = getSettingsFragmentManager().getBackStackEntryCount();
+            int stackCount = assumeNonNull(getSettingsFragmentManager()).getBackStackEntryCount();
             mUpdateFirstVisibleTitle.onResult(stackCount + 1);
         }
         if (!mUseMultiColumn) {
@@ -858,7 +864,7 @@ public class SettingsSearchCoordinator
         if (clearFragment) {
             clearFragment(/* imageId= */ 0, /* addToBackStack= */ false, emptyRunnable());
         }
-        getSettingsFragmentManager().popBackStack();
+        assumeNonNull(getSettingsFragmentManager()).popBackStack();
         if (mMultiColumnSettings != null
                 && !mUseMultiColumn
                 && mMultiColumnSettings.isLayoutOpen()
@@ -868,6 +874,7 @@ public class SettingsSearchCoordinator
         }
 
         setFragmentState(FS_SETTINGS);
+        assumeNonNull(mBackActionCallback);
         mBackActionCallback.setEnabled(false);
         mUpdateFirstVisibleTitle.onResult(0);
 
@@ -916,7 +923,7 @@ public class SettingsSearchCoordinator
     }
 
     private void stepBackInResultState() {
-        FragmentManager fragmentManager = getSettingsFragmentManager();
+        FragmentManager fragmentManager = assumeNonNull(getSettingsFragmentManager());
         int stackCount = fragmentManager.getBackStackEntryCount();
         if (stackCount > 0) {
             // Switch back to 'search' state if we go all the way back to the fragment
@@ -942,9 +949,19 @@ public class SettingsSearchCoordinator
         fragmentManager.popBackStack();
     }
 
-    private FragmentManager getSettingsFragmentManager() {
+    /**
+     * Returns the FragmentManager to use for displaying settings UI or null if the fragment is not
+     * attached.
+     */
+    private @Nullable FragmentManager getSettingsFragmentManager() {
         if (mMultiColumnSettings != null) {
-            return mMultiColumnSettings.getChildFragmentManager();
+            // Check that the fragment is attached before retrieving its child fragment manager,
+            // otherwise getChildFragmentManager() throws an IllegalStateException.
+            // We check getContext() != null instead of isAdded() because getContext() is not final
+            // and can be mocked in unit tests.
+            return mMultiColumnSettings.getContext() != null
+                    ? mMultiColumnSettings.getChildFragmentManager()
+                    : null;
         } else {
             return mActivity.getSupportFragmentManager();
         }
@@ -959,7 +976,7 @@ public class SettingsSearchCoordinator
         } else {
             fragment = displayRecentSearches(/* addToBackStack= */ true);
         }
-        var fragmentManager = getSettingsFragmentManager();
+        var fragmentManager = assumeNonNull(getSettingsFragmentManager());
         fragmentManager.registerFragmentLifecycleCallbacks(
                 new FragmentManager.FragmentLifecycleCallbacks() {
                     @Override
@@ -976,7 +993,7 @@ public class SettingsSearchCoordinator
     @SuppressWarnings("ReferenceEquality")
     private EmptyFragment clearFragment(
             int imageId, boolean addToBackStack, Runnable openHelpCenter) {
-        var fragmentManager = getSettingsFragmentManager();
+        var fragmentManager = assumeNonNull(getSettingsFragmentManager());
         int viewId = getViewIdForSearchDisplay();
         var transaction = fragmentManager.beginTransaction();
         var emptyFragment = new EmptyFragment();
@@ -1016,7 +1033,7 @@ public class SettingsSearchCoordinator
         fragment.setSelectedCallback(this::onResultSelected);
 
         // Get the FragmentManager and replace the current fragment in the container
-        var transaction = getSettingsFragmentManager().beginTransaction();
+        var transaction = assumeNonNull(getSettingsFragmentManager()).beginTransaction();
         transaction
                 .replace(getViewIdForSearchDisplay(), fragment, RESULT_FRAGMENT)
                 .setReorderingAllowed(true);
@@ -1080,11 +1097,9 @@ public class SettingsSearchCoordinator
         }
         // Case for settings in tab.
         if (mActionBar != null) {
-            if (show) {
-                mActionBar.setNavigationIcon(R.drawable.ic_arrow_back_24dp);
-            } else {
-                mActionBar.setNavigationIcon(null);
-            }
+            boolean isMainSettings = mMultiColumnSettings != null && isShowingMainSettings();
+            SettingsMenuHelper.updateNavigationIcon(
+                    mActionBar, mActivity, show, mUseMultiColumn, isMainSettings);
         }
     }
 
@@ -1358,7 +1373,8 @@ public class SettingsSearchCoordinator
                         if (hasFocus && mFragmentState == FS_RESULTS) {
                             // When tapping on search UI while browsing search results, pop the
                             // backstacks all the way back to showing the search result fragment.
-                            FragmentManager fragmentManager = getSettingsFragmentManager();
+                            FragmentManager fragmentManager =
+                                    assumeNonNull(getSettingsFragmentManager());
                             fragmentManager.popBackStack(
                                     RESULT_BACKSTACK, FragmentManager.POP_BACK_STACK_INCLUSIVE);
                             setFragmentState(FS_SEARCH);
@@ -1439,7 +1455,7 @@ public class SettingsSearchCoordinator
         resultsFragment.setSelectedCallback(this::onResultSelected);
 
         // Get the FragmentManager and replace the current fragment in the container
-        FragmentManager fragmentManager = getSettingsFragmentManager();
+        FragmentManager fragmentManager = assumeNonNull(getSettingsFragmentManager());
         fragmentManager
                 .beginTransaction()
                 .replace(getViewIdForSearchDisplay(), resultsFragment, RESULT_FRAGMENT)
@@ -1480,7 +1496,7 @@ public class SettingsSearchCoordinator
             Constructor<?> constructor = fragment.getConstructor();
             var f = (Fragment) constructor.newInstance();
             f.setArguments(entry.extras);
-            FragmentManager fragmentManager = getSettingsFragmentManager();
+            FragmentManager fragmentManager = assumeNonNull(getSettingsFragmentManager());
             fragmentManager
                     .beginTransaction()
                     .replace(getViewIdForSearchDisplay(), f)
@@ -1713,6 +1729,10 @@ public class SettingsSearchCoordinator
     }
 
     public void destroy() {
+        if (mBackActionCallback != null) {
+            mBackActionCallback.remove();
+            mBackActionCallback = null;
+        }
         // Title supplier should be nulled out as we step out of Settings for cleanup.
         SearchResultsPreferenceFragment.reset();
         if (mIndexData != null) {
@@ -1725,6 +1745,7 @@ public class SettingsSearchCoordinator
         if (mFragmentState != FS_SETTINGS) {
             logExitReason();
         }
+        mIsDestroyed = true;
     }
 
     private void restoreRecentSearches() {

@@ -15,6 +15,18 @@ import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 /** Properties for the Tab Search Overlay component. */
 @NullMarked
 public class TabSearchOverlayProperties {
+    /** Controls the visibility of the empty state view inside the overlay panel. */
+    public static final WritableBooleanPropertyKey EMPTY_STATE_VISIBLE =
+            new WritableBooleanPropertyKey("empty_state_visible");
+
+    /** Click listener for the close button to dismiss the overlay. */
+    public static final WritableObjectPropertyKey<OnClickListener> ON_CLOSE_CLICK =
+            new WritableObjectPropertyKey<>("on_close_click");
+
+    /** Callback executed when the overlay's hide animation completes. */
+    public static final WritableObjectPropertyKey<Runnable> ON_HIDE_FINISHED =
+            new WritableObjectPropertyKey<>("on_hide_finished");
+
     /** Click listener for the background scrim view to dismiss the overlay. */
     public static final WritableObjectPropertyKey<OnClickListener> ON_SCRIM_CLICK =
             new WritableObjectPropertyKey<>("on_scrim_click");
@@ -23,7 +35,9 @@ public class TabSearchOverlayProperties {
     public static final WritableBooleanPropertyKey VISIBLE =
             new WritableBooleanPropertyKey("visible");
 
-    public static final PropertyKey[] ALL_KEYS = {ON_SCRIM_CLICK, VISIBLE};
+    public static final PropertyKey[] ALL_KEYS = {
+        EMPTY_STATE_VISIBLE, ON_CLOSE_CLICK, ON_HIDE_FINISHED, ON_SCRIM_CLICK, VISIBLE
+    };
 
     /** Creates a default PropertyModel with all keys. */
     public static PropertyModel createDefaultModel() {

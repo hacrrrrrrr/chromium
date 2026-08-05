@@ -17,7 +17,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/stack_allocated.h"
 #include "base/rand_util.h"
-#include "base/threading/thread_checker.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "base/time/time_override.h"
 #include "base/types/pass_key.h"
@@ -45,14 +45,19 @@ class BASE_EXPORT LockMetricsRecorder {
     kBaseLock = 0,
     // For samples associated with partition_alloc::internal::Lock
     kPartitionAllocLock = 1,
-    kMax = kPartitionAllocLock,
+  };
+
+  // Samples of lock acquisition times and types stored in a ring buffer.
+  struct LockMetricSample {
+    base::TimeDelta wait_time;
+    LockType type;
   };
 
   // The internal buffer size is a trade-off between memory usage and the number
   // of samples that can be stored. With sampling, this buffer size should be
   // sufficient for most cases. If the buffer overflows, the `RingBuffer` will
   // overwrite the oldest samples.
-  constexpr static size_t kMaxSamples = 256;
+  constexpr static size_t kMaxSamples = 512;
 
   explicit LockMetricsRecorder(PassKey, std::string_view histogram_suffix);
   LockMetricsRecorder(const LockMetricsRecorder&) = delete;
@@ -73,19 +78,19 @@ class BASE_EXPORT LockMetricsRecorder {
 
   bool ShouldRecordLockAcquisitionTime() const;
 
-  // Records a sample into the internal buffer. Must be called on the target
-  // thread.
-  void RecordLockAcquisitionTime(TimeDelta sample, LockType type);
+  // Records a `LockMetricSample` into the internal buffer. Must be called on
+  // the target thread.
+  void RecordLockAcquisitionTime(const LockMetricSample& sample);
 
   // Report lock acquisition times to UMA histograms, if the current thread is
   // the target thread.
   void ReportLockAcquisitionTimes();
 
-  // Iterate over all the samples of the given type and synchronously call the
-  // FunctionRef for each sample. Only exposed for testing. Call
-  // `ReportLockAcquisitionTimes()` to report histograms for all the stored
-  // samples.
-  void ForEachSample(LockType type, FunctionRef<void(const TimeDelta&)> f);
+  // Iterate over each `LockMetricSample` in the unified buffer and
+  // synchronously call the FunctionRef for each sample. Only exposed for
+  // testing. Call `ReportLockAcquisitionTimes()` to report histograms for all
+  // the stored samples.
+  void ForEachSample(FunctionRef<void(const LockMetricSample&)> f);
 
   // Timer that records into a lock metrics object.
   class BASE_EXPORT ScopedLockAcquisitionTimer {
@@ -105,9 +110,9 @@ class BASE_EXPORT LockMetricsRecorder {
         return;
       }
 
-      lock_metrics_->RecordLockAcquisitionTime(
+      lock_metrics_->RecordLockAcquisitionTime(LockMetricSample{
           subtle::TimeTicksNowIgnoringOverride() - *start_time_,
-          LockType::kBaseLock);
+          LockType::kBaseLock});
     }
 
     static ScopedLockAcquisitionTimer CreateForTest(
@@ -134,27 +139,32 @@ class BASE_EXPORT LockMetricsRecorder {
   };
 
  private:
+  bool CalledOnValidThread() const {
+    return bound_thread_ref_ == base::PlatformThread::CurrentRef();
+  }
+
   constexpr static double kSamplingRatio = 0.001;
 
-  static void ReportLockHistogram(const TimeDelta& sample,
+  static void ReportLockHistogram(TimeDelta sample,
                                   base::HistogramBase* histogram_pointer);
 
-  bool iterating_in_progress_ GUARDED_BY_CONTEXT(thread_checker_) = false;
+  bool iterating_in_progress_ = false;
 
-  raw_ptr<base::HistogramBase> base_lock_histogram_
-      GUARDED_BY_CONTEXT(thread_checker_) = nullptr;
-  raw_ptr<base::HistogramBase> partition_alloc_lock_histogram_
-      GUARDED_BY_CONTEXT(thread_checker_) = nullptr;
+  raw_ptr<base::HistogramBase> base_lock_histogram_ = nullptr;
+  raw_ptr<base::HistogramBase> partition_alloc_lock_histogram_ = nullptr;
 
-  std::array<RingBuffer<TimeDelta, kMaxSamples>,
-             static_cast<size_t>(LockType::kMax) + 1>
-      sample_buffer_ GUARDED_BY_CONTEXT(thread_checker_) = {};
+  RingBuffer<LockMetricSample, kMaxSamples> unified_sample_buffer_;
 
   // Include the subsampler in the thread-local data to avoid reallocations
   // when the subsampler is created and destroyed.
-  MetricsSubSampler subsampler_ GUARDED_BY_CONTEXT(thread_checker_);
+  MetricsSubSampler subsampler_;
 
-  THREAD_CHECKER(thread_checker_);
+  // The thread ref of the thread that created this object.
+  //
+  // Note: `DCHECK_CALLED_ON_VALID_THREAD` cannot be used as it may allocate
+  // memory and cause infinite recursion depending on TLS teardown order.
+  const base::PlatformThreadRef bound_thread_ref_ =
+      base::PlatformThread::CurrentRef();
 };
 
 }  // namespace base

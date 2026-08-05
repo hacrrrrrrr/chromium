@@ -23,10 +23,14 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.autofill.settings.FinancialAccountsManagementFragment;
 import org.chromium.chrome.browser.autofill.settings.NonCardPaymentMethodsManagementFragment;
+import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.components.browser_ui.settings.EmbeddableSettingsPage;
 import org.chromium.components.browser_ui.settings.SettingsNavigation;
+import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.ui.base.TestActivity;
 
 /** Tests for SettingsNavigationImpl. */
@@ -45,10 +49,26 @@ public class SettingsNavigationImplTest {
         public SecondFakeSettingsFragment() {}
     }
 
+    /** Fake embeddable settings fragment for testing SettingsInTab intent creation. */
+    public static class FakeEmbeddableSettingsFragment extends Fragment
+            implements EmbeddableSettingsPage {
+        public FakeEmbeddableSettingsFragment() {}
+
+        @Override
+        public org.chromium.base.supplier.MonotonicObservableSupplier<String> getPageTitle() {
+            return null;
+        }
+
+        @Override
+        public int getAnimationType() {
+            return AnimationType.PROPERTY;
+        }
+    }
+
     /** Subclass SettingsHostFragment to mock initial fragment instantiation. */
     public static class TestSettingsHostFragment extends SettingsHostFragment {
         @Override
-        protected Fragment createInitialFragment() {
+        protected Fragment createInitialFragment(@Nullable Intent intent) {
             return new FirstFakeSettingsFragment();
         }
     }
@@ -66,7 +86,7 @@ public class SettingsNavigationImplTest {
                         SettingsNavigation.SettingsFragment.FINANCIAL_ACCOUNTS,
                         /* fragmentArgs= */ null);
         assertEquals(
-                intent.getStringExtra(SettingsActivity.EXTRA_SHOW_FRAGMENT),
+                intent.getStringExtra(SettingsIntentUtil.EXTRA_SHOW_FRAGMENT),
                 FinancialAccountsManagementFragment.class.getName());
     }
 
@@ -78,8 +98,38 @@ public class SettingsNavigationImplTest {
                         SettingsNavigation.SettingsFragment.NON_CARD_PAYMENT_METHODS,
                         /* fragmentArgs= */ null);
         assertEquals(
-                intent.getStringExtra(SettingsActivity.EXTRA_SHOW_FRAGMENT),
+                intent.getStringExtra(SettingsIntentUtil.EXTRA_SHOW_FRAGMENT),
                 NonCardPaymentMethodsManagementFragment.class.getName());
+    }
+
+    @Test
+    @EnableFeatures({ChromeFeatureList.SETTINGS_IN_TAB})
+    @Config(qualifiers = "sw600dp")
+    public void testCreateSettingsIntent_SettingsInTab_LaunchesChromeLauncherActivity() {
+        Intent intent =
+                mSettingsNavigationImpl.createSettingsIntent(
+                        mContext, FakeEmbeddableSettingsFragment.class);
+
+        assertEquals(Intent.ACTION_VIEW, intent.getAction());
+        assertEquals(UrlConstants.SETTINGS_URL, intent.getDataString());
+        assertEquals(ChromeLauncherActivity.class.getName(), intent.getComponent().getClassName());
+        assertEquals(
+                FakeEmbeddableSettingsFragment.class.getName(),
+                intent.getStringExtra(SettingsIntentUtil.EXTRA_SHOW_FRAGMENT));
+    }
+
+    @Test
+    @EnableFeatures({ChromeFeatureList.SETTINGS_IN_TAB})
+    @Config(qualifiers = "sw600dp")
+    public void
+            testCreateSettingsIntent_SettingsInTab_StandaloneFragment_LaunchesSettingsActivity() {
+        Intent intent =
+                mSettingsNavigationImpl.createSettingsIntent(
+                        mContext, FirstFakeSettingsFragment.class);
+
+        assertEquals(SettingsActivity.class.getName(), intent.getComponent().getClassName());
+        assertTrue(
+                intent.getBooleanExtra(SettingsIntentUtil.EXTRA_SHOW_FRAGMENT_STANDALONE, false));
     }
 
     @Test

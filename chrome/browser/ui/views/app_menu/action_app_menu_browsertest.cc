@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/app_menu/action_app_menu.h"
 
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/browser_test.h"
+#include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/view_utils.h"
@@ -46,8 +48,24 @@ IN_PROC_BROWSER_TEST_F(ActionAppMenuBrowserTest, ShowActionAppMenu) {
   menu_button->ShowMenu(views::MenuRunner::NO_FLAGS);
 
   EXPECT_TRUE(menu_button->IsMenuShowing());
-  EXPECT_TRUE(menu_button->action_app_menu());
+  ActionAppMenu* action_menu = menu_button->action_app_menu();
+  ASSERT_TRUE(action_menu);
   EXPECT_FALSE(menu_button->app_menu());
+
+  views::MenuItemView* root = action_menu->root_menu_item_for_testing();
+  ASSERT_TRUE(root);
+
+  // Verify that the Action items have been converted into visual menu items.
+  views::MenuItemView* password_item =
+      root->GetMenuItemByID(kActionShowPasswordManager);
+  ASSERT_TRUE(password_item);
+
+  views::MenuItemView* print_item = root->GetMenuItemByID(kActionPrint);
+  ASSERT_TRUE(print_item);
+
+  // Check if the menu items have background styling
+  EXPECT_TRUE(password_item->GetMenuItemBackground().has_value());
+  EXPECT_TRUE(print_item->GetMenuItemBackground().has_value());
 
   menu_button->CloseMenu();
   EXPECT_FALSE(menu_button->IsMenuShowing());

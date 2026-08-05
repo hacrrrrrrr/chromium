@@ -658,6 +658,7 @@
           "${buildername}",
           "--jobs=4"
         ],
+        "ci_only": true,
         "merge": {
           "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
         },
@@ -1080,6 +1081,7 @@
           "${buildername}",
           "--jobs=4"
         ],
+        "ci_only": true,
         "merge": {
           "script": "//testing/merge_scripts/standard_isolated_script_merge.py"
         },
@@ -1213,7 +1215,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1260,7 +1262,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1298,7 +1300,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1336,7 +1338,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1378,7 +1380,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1425,7 +1427,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1464,7 +1466,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1502,7 +1504,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1540,7 +1542,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1581,7 +1583,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1622,7 +1624,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1661,7 +1663,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,
@@ -1699,7 +1701,7 @@
             "gpu": "apple:m2",
             "hidpi": "1",
             "mac_model": "Mac14,7",
-            "os": "Mac-14.4.1|Mac-26.5.1",
+            "os": "Mac-26.5.1",
             "pool": "chromium.tests.gpu"
           },
           "idempotent": false,

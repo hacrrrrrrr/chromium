@@ -234,9 +234,15 @@ enum class SuggestionType {
   // Fallback suggestion to open a subpopup displaying other shipments.
   kAutofillAiOtherShipments = 95,
 
-  // Next ID: 96
+  // Suggestion displaying source attribution for AtMemory search results.
+  kAtMemorySourceAttribution = 96,
 
-  kMaxValue = kAutofillAiOtherShipments
+  // Suggestion shown in the fetching state of AtMemory.
+  kAtMemoryFetching = 97,
+
+  // Next ID: 98
+
+  kMaxValue = kAtMemoryFetching
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/autofill/enums.xml:SuggestionType)
 

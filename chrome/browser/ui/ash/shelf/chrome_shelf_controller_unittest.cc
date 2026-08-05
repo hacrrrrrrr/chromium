@@ -163,6 +163,7 @@
 #include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/prefs/pref_service.h"
 #include "components/services/app_service/public/cpp/app_registry_cache.h"
+#include "components/services/app_service/public/cpp/app_service_registry.h"
 #include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/app_update.h"
 #include "components/services/app_service/public/cpp/instance.h"
@@ -170,6 +171,7 @@
 #include "components/services/app_service/public/cpp/package_id.h"
 #include "components/services/app_service/public/cpp/stub_icon_loader.h"
 #include "components/services/app_service/public/cpp/types_util.h"
+#include "components/session_manager/core/session.h"
 #include "components/sync/base/data_type.h"
 #include "components/sync/model/sync_change.h"
 #include "components/sync/protocol/app_list_specifics.pb.h"
@@ -1677,7 +1679,7 @@ TEST_F(ChromeShelfControllerTest, DefaultShelfPrefValues) {
 
   // Verify shelf prefs are initialized to default values if they're not set
   // either locally nor in sync data.
-  PrefService* const prefs = browser()->profile()->GetPrefs();
+  PrefService* const prefs = browser()->GetProfile()->GetPrefs();
   EXPECT_EQ(ash::ShelfAlignment::kBottom,
             ash::GetShelfAlignmentPref(prefs, GetPrimaryDisplayId()));
   EXPECT_EQ(ash::ShelfAutoHideBehavior::kNever,
@@ -1716,7 +1718,7 @@ TEST_F(ChromeShelfControllerTest, ShelfPrefsInitializedFromSyncData) {
   // received.
   InitShelfController();
 
-  PrefService* const prefs = browser()->profile()->GetPrefs();
+  PrefService* const prefs = browser()->GetProfile()->GetPrefs();
   EXPECT_EQ(ash::ShelfAlignment::kLeft,
             ash::GetShelfAlignmentPref(prefs, GetPrimaryDisplayId()));
   EXPECT_EQ(ash::ShelfAutoHideBehavior::kAlways,
@@ -1746,7 +1748,7 @@ TEST_F(ChromeShelfControllerTest,
   // before initial synced prefs have been received.
   InitShelfController();
 
-  PrefService* const prefs = browser()->profile()->GetPrefs();
+  PrefService* const prefs = browser()->GetProfile()->GetPrefs();
   EXPECT_EQ(ash::ShelfAlignment::kBottom,
             ash::GetShelfAlignmentPref(prefs, GetPrimaryDisplayId()));
   EXPECT_EQ(ash::ShelfAutoHideBehavior::kNever,
@@ -1786,7 +1788,7 @@ TEST_F(ChromeShelfControllerTest,
 
 TEST_F(ChromeShelfControllerTest, SyncedShelfPrefsDontOverrideLocalPref) {
   // Initialize shelf prefs before shelf controller gets initialized.
-  PrefService* const prefs = browser()->profile()->GetPrefs();
+  PrefService* const prefs = browser()->GetProfile()->GetPrefs();
   ash::SetShelfAlignmentPref(prefs, GetPrimaryDisplayId(),
                              ash::ShelfAlignment::kLeft);
   ash::SetShelfAutoHideBehaviorPref(prefs, GetPrimaryDisplayId(),
@@ -4666,6 +4668,18 @@ class ChromeShelfControllerArcDefaultAppsTest
     ArcDefaultAppList::UseTestAppsDirectory();
     ChromeShelfControllerTestBase::SetUp();
   }
+
+  TestingProfile* CreateProfile(const std::string& profile_name) override {
+    ash::ScopedAccountIdAnnotator annotator(
+        profile_manager()->profile_manager(),
+        session_manager::SessionManager::Get()
+            ->GetPrimarySession()
+            ->account_id());
+    return ChromeShelfControllerTestBase::CreateProfile(profile_name);
+  }
+
+ private:
+  apps::AppServiceRegistry app_service_registry_;
 };
 
 class ChromeShelfControllerPlayStoreAvailabilityTest

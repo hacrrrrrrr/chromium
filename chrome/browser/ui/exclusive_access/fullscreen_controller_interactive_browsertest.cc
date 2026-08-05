@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -218,9 +219,11 @@ void FullscreenControllerInteractiveTest::ToggleTabFullscreen_Internal(
     ui_test_utils::FullscreenWaiter waiter(
         browser(), {.tab_fullscreen = enter_fullscreen});
     if (enter_fullscreen) {
-      browser()->EnterFullscreenModeForTab(tab->GetPrimaryMainFrame(), {});
+      BrowserWebContentsDelegate::From(browser())->EnterFullscreenModeForTab(
+          tab->GetPrimaryMainFrame(), {});
     } else {
-      browser()->ExitFullscreenModeForTab(tab);
+      BrowserWebContentsDelegate::From(browser())->ExitFullscreenModeForTab(
+          tab);
     }
     waiter.Wait();
     // Repeat ToggleFullscreenModeForTab until the correct state is entered.
@@ -836,7 +839,7 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   permission_request_manager->AddRequest(
       web_contents->GetPrimaryMainFrame(),
       std::make_unique<permissions::MockPermissionRequest>(
-          permissions::RequestType::kGeolocation));
+          permissions::RequestType::kCameraStream));
 
   observer.Wait();
   ASSERT_TRUE(observer.request_shown());
@@ -940,6 +943,18 @@ IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
   ui_test_utils::FullscreenWaiter waiter(browser(), {.tab_fullscreen = false});
   BrowserWindowModalDialogDelegate::From(browser())->SetWebContentsBlocked(
       tab, true);
+  waiter.Wait();
+  EXPECT_FALSE(IsWindowFullscreenForTabOrPending());
+}
+
+IN_PROC_BROWSER_TEST_F(FullscreenControllerInteractiveTest,
+                       ShowEmojiPanelExitsFullscreen) {
+  ASSERT_NO_FATAL_FAILURE(ToggleTabFullscreen(true));
+  ASSERT_TRUE(IsWindowFullscreenForTabOrPending());
+
+  ui_test_utils::FullscreenWaiter waiter(browser(), {.tab_fullscreen = false});
+  BrowserWindow::FromBrowser(browser()->GetBrowserForMigrationOnly())
+      ->ShowEmojiPanel();
   waiter.Wait();
   EXPECT_FALSE(IsWindowFullscreenForTabOrPending());
 }
@@ -1723,13 +1738,14 @@ IN_PROC_BROWSER_TEST_F(MAYBE_MultiScreenFullscreenControllerInteractiveTest,
 #endif
 }
 
+// TODO(crbug.com/542615039): Disabled on Mac.
 // TODO(crbug.com/40111905): Disabled on Windows, where views::FullscreenHandler
 // implements fullscreen by directly obtaining MONITORINFO, ignoring the mocked
 // display::Screen configuration used in this test. Disabled on Linux, where the
 // window server's async handling of the fullscreen window state may transition
 // the window into fullscreen on the actual (non-mocked) display bounds before
 // or after the window bounds checks, yielding flaky results.
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC)
+#if BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_BrowserFullscreenContentFullscreenSwapDisplay \
   BrowserFullscreenContentFullscreenSwapDisplay
 #else

@@ -18,6 +18,7 @@ namespace disk_cache {
 SqlSharedCacheManager::SqlSharedCacheManager(
     SqlPersistentStore& store,
     const base::FilePath& path,
+    scoped_refptr<SqlReadCacheMemoryMonitor> read_cache_memory_monitor,
     scoped_refptr<BackendCleanupTracker> cleanup_tracker)
     : store_(store),
       directory_(path),
@@ -25,6 +26,7 @@ SqlSharedCacheManager::SqlSharedCacheManager(
           {base::MayBlock(), base::TaskPriority::USER_BLOCKING,
            base::TaskShutdownBehavior::BLOCK_SHUTDOWN})),
       index_database_(db_task_runner_, store_->GetAsyncTaskManager(), path),
+      read_cache_memory_monitor_(std::move(read_cache_memory_monitor)),
       cleanup_tracker_(cleanup_tracker) {}
 
 SqlSharedCacheManager::~SqlSharedCacheManager() {
@@ -151,7 +153,7 @@ SqlSharedCacheManager::RegisterNewSqlSharedCache(
       nik_str, *store_, directory_,
       base::BindRepeating(&SqlSharedCacheManager::OnSqlSharedCacheUnreferenced,
                           weak_factory_.GetWeakPtr()),
-      db_task_runner);
+      db_task_runner, read_cache_memory_monitor_, cleanup_tracker_);
   SqlSharedCache* cache_ptr = cache.get();
   shared_caches_.insert(std::move(cache));
   CHECK(shared_caches_by_nik_string_.emplace(nik_str, cache_ptr).second);
@@ -211,6 +213,66 @@ void SqlSharedCacheManager::OnGetNikStringForDbId(
   }
   std::move(callback).Run(RegisterNewSqlSharedCache(
       result.value(), shared_cache_db_id, std::move(db_operation_handle)));
+}
+
+void SqlSharedCacheManager::DeleteResources(
+    std::vector<SqlSharedCacheResourceId> resources,
+    base::OnceClosure callback) {
+  absl::flat_hash_map<SqlSharedCacheDbId, std::vector<SqlSharedCacheRowId>>
+      grouped_resources;
+  for (const auto& resource : resources) {
+    grouped_resources[resource.db_id].push_back(resource.row_id);
+  }
+  PostDbOperation(
+      base::BindOnce(&SqlSharedCacheManager::DeleteNextResourceGroup,
+                     weak_factory_.GetWeakPtr(), std::move(grouped_resources),
+                     std::move(callback)));
+}
+
+void SqlSharedCacheManager::DeleteNextResourceGroup(
+    absl::flat_hash_map<SqlSharedCacheDbId, std::vector<SqlSharedCacheRowId>>
+        grouped_resources,
+    base::OnceClosure callback,
+    DbOperationHandle db_operation_handle) {
+  if (grouped_resources.empty()) {
+    if (callback) {
+      std::move(callback).Run();
+    }
+    return;
+  }
+
+  auto it = grouped_resources.begin();
+  const SqlSharedCacheDbId db_id = it->first;
+  std::vector<SqlSharedCacheRowId> row_ids = std::move(it->second);
+  grouped_resources.erase(it);
+
+  auto next_task =
+      base::BindOnce(&SqlSharedCacheManager::DeleteNextResourceGroup,
+                     weak_factory_.GetWeakPtr(), std::move(grouped_resources),
+                     std::move(callback), std::move(db_operation_handle));
+
+  DoGetCacheByDbId(
+      db_id,
+      base::BindOnce(
+          [](std::vector<SqlSharedCacheRowId> row_ids,
+             base::OnceClosure next_task,
+             scoped_refptr<SqlSharedCacheHandle> handle) {
+            if (handle && *handle) {
+              auto* cache = handle->get();
+              cache->DeleteEntries(
+                  row_ids,
+                  base::BindOnce(
+                      [](base::OnceClosure next_task,
+                         base::expected<void,
+                                        SqlSharedCacheIsolatedDatabase::Error>
+                             result) { std::move(next_task).Run(); },
+                      std::move(next_task)));
+            } else {
+              std::move(next_task).Run();
+            }
+          },
+          std::move(row_ids), std::move(next_task)),
+      DbOperationHandle(base::DoNothing()));
 }
 
 void SqlSharedCacheManager::OnSqlSharedCacheUnreferenced(

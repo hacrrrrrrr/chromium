@@ -155,6 +155,7 @@
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_supplement.h"
 #include "third_party/blink/renderer/core/xml/document_xslt.h"
+#include "third_party/blink/renderer/core/xml/xslt_processor.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/fonts/font_performance.h"
@@ -369,6 +370,7 @@ struct SameSizeAsDocumentLoader
   std::optional<blink::mojom::FetchCacheMode> force_fetch_cache_mode;
   FramePolicy frame_policy;
   std::optional<uint64_t> visited_link_salt;
+  const base::UnguessableToken initiator_state_token;
   Member<LocalFrame> frame;
   Member<HistoryItem> history_item;
   Member<DocumentParser> parser;
@@ -559,6 +561,7 @@ DocumentLoader::DocumentLoader(
       force_fetch_cache_mode_(params_->force_fetch_cache_mode),
       frame_policy_(params_->frame_policy.value_or(FramePolicy())),
       visited_link_salt_(params_->visited_link_salt),
+      initiator_state_token_(params_->initiator_state_token),
       frame_(frame),
       // For back/forward navigations, the browser passed a history item to use
       // at commit time in |params_|. Set it as the current history item of this
@@ -766,6 +769,7 @@ DocumentLoader::CreateWebNavigationParamsToCloneDocument() {
   params->service_worker_network_provider =
       std::move(service_worker_network_provider_);
   params->devtools_navigation_token = devtools_navigation_token_;
+  params->initiator_state_token = initiator_state_token_;
   params->base_auction_nonce = base_auction_nonce_;
   params->is_user_activated = had_sticky_activation_;
   params->had_transient_user_activation =
@@ -2924,6 +2928,10 @@ void DocumentLoader::InitializeWindow(Document* owner_document) {
   base::UmaHistogramBoolean("API.StorageAccess.DocumentInheritedStorageAccess",
                             inherited_has_storage_access);
 
+  // Every window should have a valid `initiator_state_token`.
+  CHECK(!initiator_state_token_.is_empty());
+  frame_->DomWindow()->SetInitiatorStateToken(initiator_state_token_);
+
   frame_->DomWindow()->SetPolicyContainer(std::move(policy_container_));
   frame_->DomWindow()->SetContentSecurityPolicy(csp);
 
@@ -3559,6 +3567,13 @@ void DocumentLoader::ResumeParser() {
   }
 }
 
+void DocumentLoader::InheritXsltUseCountersFrom(DocumentLoader* other) {
+  DCHECK(XSLTProcessor::IsXSLTEnabled(frame_ ? frame_->DomWindow() : nullptr));
+  if (other) {
+    use_counter_.InheritXsltUseCountersFrom(other->use_counter_);
+  }
+}
+
 void DocumentLoader::CountUse(mojom::WebFeature feature) {
   return use_counter_.Count(feature, GetFrame());
 }
@@ -4007,8 +4022,9 @@ ContentSecurityPolicy* DocumentLoader::CreateCSP() {
     Vector<network::mojom::blink::ContentSecurityPolicyPtr>
         parsed_embedder_policies = ParseContentSecurityPolicies(
             header.header_value, header.type, header.source, Url());
+    initiator_state_token_ = base::UnguessableToken::Create();
     policy_container_->AddContentSecurityPolicies(
-        mojo::Clone(parsed_embedder_policies));
+        mojo::Clone(parsed_embedder_policies), initiator_state_token_);
     csp->AddPolicies(std::move(parsed_embedder_policies));
   }
 

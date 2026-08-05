@@ -50,6 +50,7 @@
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/supervised_user/core/common/features.h"
 #include "components/supervised_user/test_support/supervised_user_signin_test_utils.h"
+#include "components/vector_icons/vector_icons.h"
 #include "components/webapps/browser/banners/app_banner_manager.h"
 #include "components/webapps/browser/banners/installable_web_app_check_result.h"
 #include "components/webapps/browser/banners/web_app_banner_data.h"
@@ -386,43 +387,6 @@ IN_PROC_BROWSER_TEST_P(AppMenuModelExtensionsInteractiveTest,
                                 MENU_ACTION_MANAGE_EXTENSIONS, 0);
 }
 
-class AppMenuModelCreateNewTabGroupTest : public AppMenuModelInteractiveTest {
- public:
-  AppMenuModelCreateNewTabGroupTest() {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kCreateNewTabGroupAppMenuTopLevel}, {});
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(AppMenuModelCreateNewTabGroupTest,
-                       CheckCreateNewTabGroupAppMenuTopLevel) {
-  RunTestSequence(InstrumentTab(kPrimaryTabPageElementId),
-                  PressButton(kToolbarAppMenuButtonElementId),
-                  EnsurePresent(AppMenuModel::kCreateNewTabGroupTopLevel));
-}
-
-class AppMenuModelCreateNewTabGroupDisabled
-    : public AppMenuModelInteractiveTest {
- public:
-  AppMenuModelCreateNewTabGroupDisabled() {
-    scoped_feature_list_.InitWithFeatures(
-        {}, {features::kCreateNewTabGroupAppMenuTopLevel});
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(AppMenuModelCreateNewTabGroupDisabled,
-                       CheckCreateNewTabGroupAppMenuTopLevelNotPresent) {
-  RunTestSequence(InstrumentTab(kPrimaryTabPageElementId),
-                  PressButton(kToolbarAppMenuButtonElementId),
-                  EnsureNotPresent(AppMenuModel::kCreateNewTabGroupTopLevel));
-}
-
 class PasswordManagerMenuItemInteractiveTest
     : public AppMenuModelInteractiveTest,
       public testing::WithParamInterface<bool> {
@@ -525,7 +489,7 @@ class UniversalInstallAppMenuModelInteractiveTest
   // install icon next to them.
   auto VerifyDiyAppMenuItemViews() {
     const ui::ImageModel icon_image = ui::ImageModel::FromVectorIcon(
-        features::IsRoundedIconsEnabled() ? kInstallDesktopIcon
+        features::IsRoundedIconsEnabled() ? vector_icons::kInstallDesktopIcon
                                           : kInstallDesktopChromeRefreshOldIcon,
         ui::kColorMenuIcon, ui::SimpleMenuModel::kDefaultIconSize);
     return Steps(
@@ -697,20 +661,7 @@ IN_PROC_BROWSER_TEST_F(UniversalInstallAppMenuModelInteractiveTest,
       EnsurePresent(AppMenuModel::kInstallAppItem));
 }
 
-class YourSavedInfoMenuItemInteractiveTest
-    : public AppMenuModelInteractiveTest {
- public:
-  YourSavedInfoMenuItemInteractiveTest() {
-    feature_list_.InitAndEnableFeature(
-        autofill::features::kYourSavedInfoSettingsPage);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(YourSavedInfoMenuItemInteractiveTest,
-                       ContactInfoNavigation) {
+IN_PROC_BROWSER_TEST_F(AppMenuModelInteractiveTest, ContactInfoNavigation) {
   base::HistogramTester histograms;
   RunTestSequence(
       InstrumentTab(kPrimaryTabPageElementId),
@@ -726,8 +677,7 @@ IN_PROC_BROWSER_TEST_F(YourSavedInfoMenuItemInteractiveTest,
                                MENU_ACTION_SHOW_CONTACT_INFO, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(YourSavedInfoMenuItemInteractiveTest,
-                       IdentityDocsNavigation) {
+IN_PROC_BROWSER_TEST_F(AppMenuModelInteractiveTest, IdentityDocsNavigation) {
   base::HistogramTester histograms;
   RunTestSequence(
       InstrumentTab(kPrimaryTabPageElementId),
@@ -743,7 +693,7 @@ IN_PROC_BROWSER_TEST_F(YourSavedInfoMenuItemInteractiveTest,
                                MENU_ACTION_SHOW_IDENTITY_DOCS, 1);
 }
 
-IN_PROC_BROWSER_TEST_F(YourSavedInfoMenuItemInteractiveTest, TravelNavigation) {
+IN_PROC_BROWSER_TEST_F(AppMenuModelInteractiveTest, TravelNavigation) {
   base::HistogramTester histograms;
   RunTestSequence(InstrumentTab(kPrimaryTabPageElementId),
                   PressButton(kToolbarAppMenuButtonElementId),

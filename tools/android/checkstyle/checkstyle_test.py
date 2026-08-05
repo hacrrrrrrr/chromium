@@ -341,6 +341,16 @@ class A {
 
     @java("""
 class A {
+    void test() {
+        var _ = 1; // good
+    }
+}
+""")
+    def test_LocalVariableName_unnamed(self):
+        self._check()
+
+    @java("""
+class A {
     void test(int a) {
         switch (a) {
             case 1:
@@ -394,6 +404,31 @@ class A {
 """)
     def test_AlertDialogCheck(self):
         self._check('Avoid android.app.AlertDialog')
+
+    @java("""
+import org.chromium.base.Log;
+class A {
+    private static final String TAG = "Test";
+    void test(String var) {
+        Log.d(TAG, "message: " + var);
+    }
+}
+""")
+    def test_LogStringConcatenationCheck_catchesConcatenation(self):
+        self._check(
+            'String concatenation (+) inside Log.d or Log.v is discouraged')
+
+    @java("""
+import org.chromium.base.Log;
+class A {
+    private static final String TAG = "Test";
+    void test() {
+        Log.v("a + b = %d", 3);
+    }
+}
+""")
+    def test_LogStringConcatenationCheck_ignoresFormatString(self):
+        self._check()
 
     @java("""
 import android.content.Context;

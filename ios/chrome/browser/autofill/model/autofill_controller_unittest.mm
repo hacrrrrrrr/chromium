@@ -343,6 +343,9 @@ class AutofillControllerTest : public PlatformTest {
 
   void WaitForCondition(ConditionBlock condition);
 
+  // Focuses the field with 'field_id' and dispatches a focus event.
+  void FocusElement(NSString* field_id);
+
   // Simulates a text input event by focusing the field with 'field_id' and
   // dispatching a TextEvent with value 'field_value'.
   void SimulateTextInputEvent(NSString* field_id, NSString* field_value);
@@ -451,12 +454,15 @@ void AutofillControllerTest::SetUp() {
 }
 
 void AutofillControllerTest::TearDown() {
-  [accessory_mediator_ disconnect];
-  [suggestion_controller_ detachFromWebState];
+  @autoreleasepool {
+    [accessory_mediator_ disconnect];
+    [suggestion_controller_ detachFromWebState];
 
-  autofill_manager_injector_.reset();
+    autofill_manager_injector_.reset();
 
-  bottomsheet_tab_helper_ = nullptr;
+    bottomsheet_tab_helper_ = nullptr;
+    autofill_agent_ = nil;
+  }
 
   web::test::WaitForBackgroundTasks();
   web_state_.reset();
@@ -503,19 +509,30 @@ void AutofillControllerTest::WaitForCondition(ConditionBlock condition) {
                                                            true, condition));
 }
 
-void AutofillControllerTest::SimulateTextInputEvent(NSString* field_id,
-                                                    NSString* field_value) {
-  // First focus the field, otherwise the input event does not get delivered to
-  // the browser process.
-  // Then create and dispatch a TextEvent from the field with the given id.
+void AutofillControllerTest::FocusElement(NSString* field_id) {
   web::test::ExecuteJavaScript(
       [NSString
           stringWithFormat:
-              @"document.getElementById('%@').focus();"
+              @"var el = document.getElementById('%@') || "
+              @"document.forms[0]['%@'];"
+              @"if (el) { el.focus(); el.dispatchEvent(new Event('focus', "
+              @"{bubbles: true})); }",
+              field_id, field_id],
+      web_state());
+}
+
+void AutofillControllerTest::SimulateTextInputEvent(NSString* field_id,
+                                                    NSString* field_value) {
+  FocusElement(field_id);
+  web::test::ExecuteJavaScript(
+      [NSString
+          stringWithFormat:
+              @"var el = document.getElementById('%@') || "
+              @"document.forms[0]['%@'];"
               @"var event = document.createEvent('TextEvent');"
               @"event.initTextEvent('textInput', true, true, window, '%@');"
-              @"document.getElementById('%@').dispatchEvent(event);",
-              field_id, field_value, field_id],
+              @"if (el) { el.dispatchEvent(event); }",
+              field_id, field_id, field_value],
       web_state());
 }
 
@@ -1103,8 +1120,7 @@ TEST_F(AutofillControllerTest, KeyValueSuggestions) {
   // Focus element.
   web::test::ExecuteJavaScript(@"document.forms[0].greeting.value='B'",
                                web_state());
-  web::test::ExecuteJavaScript(@"document.forms[0].greeting.focus()",
-                               web_state());
+  FocusElement(@"greeting");
   WaitForSuggestionRetrieval(/*wait_for_trigger=*/YES);
   EXPECT_EQ(1U, [suggestion_controller() suggestions].count);
   FormSuggestion* suggestion = [suggestion_controller() suggestions][0];
@@ -1117,8 +1133,7 @@ TEST_F(AutofillControllerTest, KeyValueSuggestions) {
 TEST_F(AutofillControllerTest, KeyValueTypedSuggestions) {
   SetUpKeyValueData();
   ResetWaitForSuggestionRetrieval();
-  web::test::ExecuteJavaScript(@"document.forms[0].greeting.focus()",
-                               web_state());
+  FocusElement(@"greeting");
   WaitForSuggestionRetrieval(/*wait_for_trigger=*/YES);
   ResetWaitForSuggestionRetrieval();
   SimulateTextInputEvent(/*field_id=*/@"greeting", /*field_value=*/@"B");
@@ -1136,7 +1151,7 @@ TEST_F(AutofillControllerTest, KeyValueFocusChange) {
 
   // Focus the dummy field and confirm no suggestions are presented.
   ResetWaitForSuggestionRetrieval();
-  web::test::ExecuteJavaScript(@"document.forms[0].dummy.focus()", web_state());
+  FocusElement(@"dummy");
   WaitForSuggestionRetrieval(/*wait_for_trigger=*/YES);
   ASSERT_EQ(0U, [suggestion_controller() suggestions].count);
   ResetWaitForSuggestionRetrieval();
@@ -1150,8 +1165,7 @@ TEST_F(AutofillControllerTest, KeyValueFocusChange) {
 
   // Enter 'B' in the greeting field and confirm that one suggestion ("Bonjour")
   // is presented.
-  web::test::ExecuteJavaScript(@"document.forms[0].greeting.focus()",
-                               web_state());
+  FocusElement(@"greeting");
   WaitForSuggestionRetrieval(/*wait_for_trigger=*/YES);
   ResetWaitForSuggestionRetrieval();
   web::test::ExecuteJavaScript(

@@ -367,6 +367,10 @@ class ManualFillingComponentBridge {
                                 }));
     }
 
+    public static boolean isAtMemoryEnabled(WebContents webContents) {
+        return ManualFillingComponentBridgeJni.get().isAtMemoryEnabled(webContents);
+    }
+
     @VisibleForTesting
     public static void cachePasswordSheetData(
             WebContents webContents,
@@ -451,6 +455,10 @@ class ManualFillingComponentBridge {
                 .onOptionSelectedForWebContents(webContents, accessoryAction);
     }
 
+    static void hideAtMemoryBottomSheet(WebContents webContents) {
+        ManualFillingComponentBridgeJni.get().hideAtMemoryBottomSheet(webContents);
+    }
+
     @NativeMethods
     interface Natives {
         void onFillingTriggered(
@@ -484,5 +492,9 @@ class ManualFillingComponentBridge {
         void signalAutoGenerationStatusForTesting(WebContents webContents, boolean available);
 
         void disableServerPredictionsForTesting();
+
+        boolean isAtMemoryEnabled(WebContents webContents);
+
+        void hideAtMemoryBottomSheet(WebContents webContents);
     }
 }

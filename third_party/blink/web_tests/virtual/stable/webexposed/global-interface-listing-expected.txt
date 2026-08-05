@@ -1704,6 +1704,7 @@ interface DelegatedInkTrailPresenter
     method constructor
     method updateInkTrailStartPoint
 interface DeviceMotionEvent : Event
+    static method requestPermission
     attribute @@toStringTag
     getter acceleration
     getter accelerationIncludingGravity
@@ -1723,6 +1724,7 @@ interface DeviceMotionEventRotationRate
     getter gamma
     method constructor
 interface DeviceOrientationEvent : Event
+    static method requestPermission
     attribute @@toStringTag
     getter absolute
     getter alpha
@@ -3895,7 +3897,6 @@ interface HTMLEmbedElement : HTMLElement
     setter type
     setter width
 interface HTMLFencedFrameElement : HTMLElement
-    static method canLoadOpaqueURL
     attribute @@toStringTag
     getter allow
     getter config
@@ -4918,6 +4919,7 @@ interface HTMLTemplateElement : HTMLElement
     getter shadowRootCustomElementRegistry
     getter shadowRootDelegatesFocus
     getter shadowRootMode
+    getter shadowRootReferenceTarget
     getter shadowRootSerializable
     getter shadowRootSlotAssignment
     method constructor
@@ -4926,6 +4928,7 @@ interface HTMLTemplateElement : HTMLElement
     setter shadowRootCustomElementRegistry
     setter shadowRootDelegatesFocus
     setter shadowRootMode
+    setter shadowRootReferenceTarget
     setter shadowRootSerializable
     setter shadowRootSlotAssignment
 interface HTMLTextAreaElement : HTMLElement
@@ -6362,6 +6365,7 @@ interface Navigator
     getter clipboard
     getter connection
     getter cookieEnabled
+    getter cpuPerformance
     getter credentials
     getter deprecatedRunAdAuctionEnforcesKAnonymity
     getter deviceMemory
@@ -7644,7 +7648,7 @@ interface RadioNodeList : NodeList
     method @@iterator
     method constructor
     setter value
-interface Range : AbstractRange
+interface Range : NodeRange
     attribute @@toStringTag
     attribute END_TO_END
     attribute END_TO_START
@@ -9232,6 +9236,7 @@ interface ShadowRoot : DocumentFragment
     getter onslotchange
     getter pictureInPictureElement
     getter pointerLockElement
+    getter referenceTarget
     getter serializable
     getter slotAssignment
     getter styleSheets
@@ -9247,6 +9252,7 @@ interface ShadowRoot : DocumentFragment
     setter fullscreenElement
     setter innerHTML
     setter onslotchange
+    setter referenceTarget
 interface SharedStorage
     attribute @@toStringTag
     getter worklet
@@ -9465,7 +9471,7 @@ interface SpeechSynthesisVoice
     getter name
     getter voiceURI
     method constructor
-interface StaticRange : AbstractRange
+interface StaticRange : NodeRange
     attribute @@toStringTag
     method constructor
 interface StereoPannerNode : AudioNode

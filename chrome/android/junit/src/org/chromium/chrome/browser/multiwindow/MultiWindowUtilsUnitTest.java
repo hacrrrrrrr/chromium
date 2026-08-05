@@ -43,6 +43,7 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowToast;
 import org.robolectric.util.ReflectionHelpers;
 
 import org.chromium.base.ActivityState;
@@ -83,6 +84,8 @@ import org.chromium.components.messages.MessageBannerProperties;
 import org.chromium.components.messages.MessageDispatcher;
 import org.chromium.components.messages.MessageIdentifier;
 import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.ui.widget.Toast;
+import org.chromium.ui.widget.ToastManager;
 import org.chromium.url.GURL;
 
 import java.util.Arrays;
@@ -1109,6 +1112,7 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    @DisableFeatures(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)
     public void testShouldShowInstanceSwitcherIph_NonDesktop() {
         DeviceInfo.setIsDesktopForTesting(false);
         MultiWindowTestUtils.enableMultiInstance();
@@ -1128,27 +1132,59 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
-    public void testShouldShowInstanceSwitcherIph_Desktop() {
-        DeviceInfo.setIsDesktopForTesting(true);
+    @EnableFeatures(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)
+    public void testShouldShowInstanceSwitcherIph_DeprecationEnabled() {
         MultiWindowTestUtils.enableMultiInstance();
 
-        // 1 instance -> should return false
+        // 2 instances, flag enabled -> should return false.
         writeInstanceInfo(
                 INSTANCE_ID_0, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 2, TASK_ID_5);
+        writeInstanceInfo(
+                INSTANCE_ID_1, URL_2, /* tabCount= */ 1, /* incognitoTabCount= */ 0, TASK_ID_6);
         assertFalse(MultiWindowUtils.shouldShowInstanceSwitcherIph());
+    }
 
-        // Create up to 10 instances -> should return false
-        for (int i = 1; i < 10; i++) {
-            writeInstanceInfo(i, "url" + i, /* tabCount= */ 1, /* incognitoTabCount= */ 0, 100 + i);
-        }
-        assertFalse(MultiWindowUtils.shouldShowInstanceSwitcherIph());
+    @Test
+    @DisableFeatures(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)
+    public void testShouldShowRecentTabsIph_DeprecationDisabled() {
+        MultiWindowTestUtils.enableMultiInstance();
 
-        // 11 instances -> should return true
-        writeInstanceInfo(10, "url10", /* tabCount= */ 1, /* incognitoTabCount= */ 0, 110);
-        assertTrue(MultiWindowUtils.shouldShowInstanceSwitcherIph());
+        // Inactive instances present, but flag disabled -> should return false.
+        writeInstanceInfo(
+                INSTANCE_ID_0,
+                URL_1,
+                /* tabCount= */ 3,
+                /* incognitoTabCount= */ 2,
+                INVALID_TASK_ID);
+        assertFalse(MultiWindowUtils.shouldShowRecentTabsIph());
+    }
 
-        // Reset DeviceInfo setting
-        DeviceInfo.setIsDesktopForTesting(false);
+    @Test
+    @EnableFeatures(ChromeFeatureList.IN_APP_WINDOW_MANAGER_DEPRECATION)
+    public void testShouldShowRecentTabsIph_DeprecationEnabled() {
+        MultiWindowUtils.setAppTaskIdsForTesting(new HashSet<>());
+        MultiWindowTestUtils.enableMultiInstance();
+
+        // 0 inactive instances -> should return false
+        assertFalse(MultiWindowUtils.shouldShowRecentTabsIph());
+
+        // 1 active instance (TASK_ID_5 is in appTaskIds, so active) -> should return false
+        Set<Integer> appTaskIds = new HashSet<>();
+        appTaskIds.add(TASK_ID_5);
+        MultiWindowUtils.setAppTaskIdsForTesting(appTaskIds);
+        writeInstanceInfo(
+                INSTANCE_ID_0, URL_1, /* tabCount= */ 3, /* incognitoTabCount= */ 2, TASK_ID_5);
+        assertFalse(MultiWindowUtils.shouldShowRecentTabsIph());
+
+        // 1 active instance + 1 inactive instance (INVALID_TASK_ID is NOT in appTaskIds, so
+        // inactive) -> should return true
+        writeInstanceInfo(
+                INSTANCE_ID_1,
+                URL_2,
+                /* tabCount= */ 1,
+                /* incognitoTabCount= */ 0,
+                INVALID_TASK_ID);
+        assertTrue(MultiWindowUtils.shouldShowRecentTabsIph());
     }
 
     @Test
@@ -1475,6 +1511,23 @@ public class MultiWindowUtilsUnitTest {
     }
 
     @Test
+    @Config(shadows = {ShadowToast.class})
+    public void testShowInstanceCreationLimitToast() {
+        MultiWindowUtils.setMaxInstancesForTesting(3);
+        Context context = ApplicationProvider.getApplicationContext();
+        MultiWindowUtils.showInstanceCreationLimitToast(context);
+
+        ToastManager toastManager =
+                ReflectionHelpers.callStaticMethod(ToastManager.class, "getInstance");
+        Toast toast = ReflectionHelpers.callInstanceMethod(toastManager, "getCurrentToast");
+        Assert.assertNotNull("Toast should have been shown.", toast);
+
+        String expectedText =
+                context.getString(R.string.multi_instance_creation_limit_message_toast, 3);
+        Assert.assertEquals("Toast text should match.", expectedText, toast.getText().toString());
+    }
+
+    @Test
     public void testInstanceCreationLimitMessage() {
         MultiWindowUtils.setMaxInstancesForTesting(3);
         MessageDispatcher messageDispatcher = mock(MessageDispatcher.class);
@@ -1668,6 +1721,27 @@ public class MultiWindowUtilsUnitTest {
                 "Expected activity with more recent lastAccessedTime.",
                 activity2,
                 MultiWindowUtils.getForegroundWindowActivity(activity0));
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ON_STARTUP_WINDOW_POLICY)
+    public void testIsNewStartupWindowPolicyEnabled_Desktop() {
+        DeviceInfo.setIsDesktopForTesting(/* isDesktop= */ true);
+        assertTrue(MultiWindowUtils.isNewStartupWindowPolicyEnabled());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ON_STARTUP_WINDOW_POLICY)
+    public void testIsNewStartupWindowPolicyEnabled_NonDesktop() {
+        DeviceInfo.setIsDesktopForTesting(/* isDesktop= */ false);
+        assertFalse(MultiWindowUtils.isNewStartupWindowPolicyEnabled());
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.ON_STARTUP_WINDOW_POLICY)
+    public void testIsNewStartupWindowPolicyEnabled_FlagDisabled() {
+        DeviceInfo.setIsDesktopForTesting(/* isDesktop= */ true);
+        assertFalse(MultiWindowUtils.isNewStartupWindowPolicyEnabled());
     }
 
     private void testRecordTabCountForRelaunchWhenActivityPausedImpl(int windowId) {

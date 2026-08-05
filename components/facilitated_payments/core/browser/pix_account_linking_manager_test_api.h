@@ -28,11 +28,17 @@ class PixAccountLinkingManagerTestApi {
   void DismissPrompt() { manager_->DismissPrompt(); }
   void OnAccepted() { manager_->OnAccepted(); }
   void OnDeclined() { manager_->OnDeclined(); }
+  void OnUserReturnedToChrome() { manager_->OnUserReturnedToChrome(); }
   void OnUiScreenEvent(UiEvent ui_event_type) {
     manager_->OnUiScreenEvent(ui_event_type);
   }
 
   // Network and backend response handlers.
+
+  std::optional<AccountLinkingParams> CreateAccountLinkingParams() {
+    return manager_->CreateAccountLinkingParams();
+  }
+
   void DoOnClientTokenReceived(const std::vector<uint8_t>& client_token) {
     manager_->DoOnClientTokenReceived(client_token);
   }
@@ -53,6 +59,9 @@ class PixAccountLinkingManagerTestApi {
   }
   const std::vector<uint8_t>& client_token() const {
     return manager_->client_token_;
+  }
+  FacilitatedPaymentsApiClient* GetApiClient() {
+    return manager_->GetApiClient();
   }
 
  private:

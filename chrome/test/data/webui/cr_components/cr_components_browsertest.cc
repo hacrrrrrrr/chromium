@@ -34,12 +34,6 @@ IN_PROC_BROWSER_TEST_F(CrComponentsTest, HelpBubbleMixin) {
   RunTest("cr_components/help_bubble/help_bubble_mixin_test.js", "mocha.run()");
 }
 
-IN_PROC_BROWSER_TEST_F(CrComponentsTest, HelpBubbleMixinLit) {
-  set_test_loader_host(chrome::kChromeUINewTabPageHost);
-  RunTest("cr_components/help_bubble/help_bubble_mixin_lit_test.js",
-          "mocha.run()");
-}
-
 IN_PROC_BROWSER_TEST_F(CrComponentsTest, HelpBubble) {
   set_test_loader_host(chrome::kChromeUINewTabPageHost);
   RunTest("cr_components/help_bubble/help_bubble_test.js", "mocha.run()");
@@ -124,6 +118,11 @@ IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxDropdownTest) {
   RunTest("cr_components/searchbox/searchbox_dropdown_test.js", "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxSelectionMixin) {
+  RunTest("cr_components/searchbox/searchbox_selection_mixin_test.js",
+          "mocha.run()");
+}
+
 IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxIconTest) {
   set_test_loader_host(chrome::kChromeUINewTabPageHost);
   RunTest("cr_components/searchbox/searchbox_icon_test.js", "mocha.run()");
@@ -132,6 +131,11 @@ IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxIconTest) {
 IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxMixinTest) {
   set_test_loader_host(chrome::kChromeUINewTabPageHost);
   RunTest("cr_components/searchbox/searchbox_mixin_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxUtilsTest) {
+  set_test_loader_host(chrome::kChromeUINewTabPageHost);
+  RunTest("cr_components/searchbox/searchbox_utils_test.js", "mocha.run()");
 }
 
 class CrComponentsHistoryClustersTest : public WebUIMochaBrowserTest {
@@ -330,8 +334,8 @@ IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, LensSearch) {
           "mocha.run()");
 }
 
-IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, RecentTabChip) {
-  RunTest("cr_components/composebox/recent_tab_chip_test.js", "mocha.run()");
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, CurrentTabChip) {
+  RunTest("cr_components/composebox/current_tab_chip_test.js", "mocha.run()");
 }
 #endif
 
@@ -407,10 +411,6 @@ IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxInputPlaceholder) {
 
 IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxMatch) {
   RunTest("cr_components/composebox/composebox_match_test.js", "mocha.run()");
-}
-
-IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, Composebox) {
-  RunTest("cr_components/composebox/composebox_test.js", "mocha.run()");
 }
 
 IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxMixin) {

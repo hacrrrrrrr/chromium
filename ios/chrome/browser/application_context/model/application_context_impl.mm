@@ -35,6 +35,7 @@
 #import "components/gcm_driver/gcm_driver.h"
 #import "components/history/core/browser/history_service.h"
 #import "components/keyed_service/core/service_access_type.h"
+#import "components/metrics/metrics_features.h"
 #import "components/metrics/metrics_service.h"
 #import "components/metrics_services_manager/metrics_services_manager.h"
 #import "components/net_log/net_export_file_writer.h"
@@ -464,7 +465,9 @@ ApplicationContextImpl::GetActivityReporter() {
             GetSharedURLLoaderFactory(),
             // Never send cookies for activity reports.
             base::BindRepeating([](const GURL& url) { return false; })),
-        base::BindRepeating(&GetChannel), base::DoNothing(), true);
+        base::BindRepeating(&::GetChannel),
+        base::BindRepeating(&ios::provider::GetBrandCode), base::DoNothing(),
+        true);
   }
   return activity_reporter_.get();
 }
@@ -640,7 +643,9 @@ optimization_guide::OptimizationGuideGlobalState*
 ApplicationContextImpl::GetOptimizationGuideGlobalState() {
   if (!optimization_guide_global_state_) {
     optimization_guide_global_state_ =
-        std::make_unique<optimization_guide::OptimizationGuideGlobalState>();
+        std::make_unique<optimization_guide::OptimizationGuideGlobalState>(
+            GetLocalState(), GetProfileManager(), GetApplicationLocaleStorage(),
+            GetSharedURLLoaderFactory());
   }
   return optimization_guide_global_state_.get();
 }
@@ -658,13 +663,15 @@ void ApplicationContextImpl::OnAppEnterState(AppState app_state) {
   if (metrics_services_manager_) {
     if (metrics::MetricsService* metrics_service =
             metrics_services_manager_->GetMetricsService()) {
+      bool enable_background_metrics_work = base::FeatureList::IsEnabled(
+          metrics::features::kIOSBackgroundMetrics);
       switch (app_state) {
         case AppState::kForeground:
           metrics_service->OnAppEnterForeground();
           break;
 
         case AppState::kBackgroundFromActive:
-          metrics_service->OnAppEnterBackground();
+          metrics_service->OnAppEnterBackground(enable_background_metrics_work);
           break;
         case AppState::kBackgroundProcessing:
           // Background processing should be tracked in metrcis, including
@@ -675,7 +682,7 @@ void ApplicationContextImpl::OnAppEnterState(AppState app_state) {
           // When background processing is complete, this state should be
           // treated like normal backgrounding, including specifically the
           // clean exit beacon.
-          metrics_service->OnAppEnterBackground();
+          metrics_service->OnAppEnterBackground(enable_background_metrics_work);
           break;
       }
     }

@@ -22,7 +22,6 @@
 #include "gpu/command_buffer/service/shared_image/d3d_image_backing.h"
 #include "gpu/command_buffer/service/shared_image/d3d_image_utils.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_format_service_utils.h"
-#include "gpu/config/gpu_finch_features.h"
 #include "gpu/ipc/common/dxgi_helpers.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/buffer_usage_util.h"
@@ -231,12 +230,6 @@ DXGI_FORMAT GetDXGITypelessFormat(viz::SharedImageFormat format) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
-bool UseUpdateSubresource1(const GpuDriverBugWorkarounds& workarounds) {
-  return base::FeatureList::IsEnabled(
-             features::kD3DBackingUploadWithUpdateSubresource) &&
-         !workarounds.disable_d3d11_update_subresource1;
-}
-
 // CPU_READ is needed for RenderableGMBVideoFramePool case where the DXGI handle
 // is mapped on GPU process.
 constexpr SharedImageUsageSet kSupportedUsage =
@@ -270,7 +263,7 @@ D3DImageBackingFactory::D3DImageBackingFactory(
       dxgi_shared_handle_manager_(std::move(dxgi_shared_handle_manager)),
       angle_d3d11_device_(gl::QueryD3D11DeviceObjectFromANGLE()),
       gl_format_caps_(gl_format_caps),
-      use_update_subresource1_(UseUpdateSubresource1(workarounds)),
+      use_update_subresource1_(!workarounds.disable_d3d11_update_subresource1),
       enable_webnn_only_d3d_factory_(enable_webnn_only_d3d_factory) {
   CHECK(angle_d3d11_device_ || enable_webnn_only_d3d_factory)
       << "D3DImageBackingFactory requires a D3D11 device.";
@@ -482,7 +475,7 @@ bool D3DImageBackingFactory::IsSwapChainSupported(
 }
 
 // static
-bool D3DImageBackingFactory::ClearBackBufferToColor(IDXGISwapChain1* swap_chain,
+bool D3DImageBackingFactory::ClearBackBufferToColor(IDXGISwapChain3* swap_chain,
                                                     const SkColor4f& color) {
   Microsoft::WRL::ComPtr<ID3D11Texture2D> d3d11_texture;
   HRESULT hr = swap_chain->GetBuffer(0, IID_PPV_ARGS(&d3d11_texture));
@@ -496,7 +489,7 @@ bool D3DImageBackingFactory::ClearBackBufferToColor(IDXGISwapChain1* swap_chain,
 }
 
 bool D3DImageBackingFactory::CreateSwapChainInternal(
-    Microsoft::WRL::ComPtr<IDXGISwapChain1>& swap_chain,
+    Microsoft::WRL::ComPtr<IDXGISwapChain3>& swap_chain,
     Microsoft::WRL::ComPtr<ID3D11Texture2D>& back_buffer_texture,
     Microsoft::WRL::ComPtr<ID3D11Texture2D>& front_buffer_texture,
     viz::SharedImageFormat format,
@@ -545,24 +538,25 @@ bool D3DImageBackingFactory::CreateSwapChainInternal(
   desc.AlphaMode = format.HasAlpha() ? DXGI_ALPHA_MODE_PREMULTIPLIED
                                      : DXGI_ALPHA_MODE_IGNORE;
 
+  Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain1;
   hr = dxgi_factory->CreateSwapChainForComposition(d3d11_device_.Get(), &desc,
-                                                   nullptr, &swap_chain);
+                                                   nullptr, &swap_chain1);
   if (FAILED(hr)) {
     LOG(ERROR) << "CreateSwapChainForComposition failed with error " << std::hex
                << hr;
     return false;
   }
 
+  // IDXGISwapChain3 is supported on all Windows versions >= 10. Windows 10
+  // which is the minimum Windows version Chromium supports.
+  CHECK_EQ(swap_chain1.As(&swap_chain), S_OK);
   gl::LabelSwapChainAndBuffers(swap_chain.Get(), kD3DImageBackingLabel);
 
   if (gl::DXGIWaitableSwapChainEnabled()) {
-    Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain3;
-    if (SUCCEEDED(swap_chain.As(&swap_chain3))) {
-      hr = swap_chain3->SetMaximumFrameLatency(
-          gl::GetDXGIWaitableSwapChainMaxQueuedFrames());
-      DCHECK(SUCCEEDED(hr)) << "SetMaximumFrameLatency failed with error "
-                            << logging::SystemErrorCodeToString(hr);
-    }
+    hr = swap_chain->SetMaximumFrameLatency(
+        gl::GetDXGIWaitableSwapChainMaxQueuedFrames());
+    DCHECK(SUCCEEDED(hr)) << "SetMaximumFrameLatency failed with error "
+                          << logging::SystemErrorCodeToString(hr);
   }
 
   // Explicitly clear front and back buffers to ensure that there are no
@@ -607,7 +601,7 @@ std::unique_ptr<SharedImageBacking> D3DImageBackingFactory::CreateSharedImage(
   const auto size = si_info.size;
   const auto usage = si_info.usage;
   if (usage.Has(SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE)) {
-    Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain;
+    Microsoft::WRL::ComPtr<IDXGISwapChain3> swap_chain;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer_texture;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> front_buffer_texture;
     if (!CreateSwapChainInternal(swap_chain, back_buffer_texture,

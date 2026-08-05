@@ -29,6 +29,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/profile_waiter.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -181,7 +182,13 @@ class OptimizationGuideKeyedServiceDisabledBrowserTest
     : public InProcessBrowserTest {
  public:
   OptimizationGuideKeyedServiceDisabledBrowserTest() {
-    feature_list_.InitWithFeatures({}, {features::kOptimizationHints});
+    feature_list_.InitWithFeatures(
+        /*enabled_features=*/{},
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove the two omnibox features below.
+        /*disabled_features=*/
+        {features::kOptimizationHints, omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
   }
 
  private:
@@ -211,9 +218,13 @@ class OptimizationGuideKeyedServiceBrowserTest
           {
               {"on_device_startup_metric_delay", "0"},
           }}},
+        // TODO(crbug.com/452061489): Fix tests that fail when the WebUI Omnibox
+        // is enabled and then remove the two omnibox features below.
         /*disabled_features=*/
         {features::internal::kWallpaperSearchGraduated,
-         features::internal::kComposeGraduated});
+         features::internal::kComposeGraduated,
+         omnibox::internal::kWebUIOmniboxPopup,
+         omnibox::internal::kWebUIOmniboxAimPopup});
   }
 
   OptimizationGuideKeyedServiceBrowserTest(
@@ -346,7 +357,7 @@ class OptimizationGuideKeyedServiceBrowserTest
   }
 
   OptimizationGuideKeyedService* service() {
-    auto* profile = browser()->profile();
+    auto* profile = browser()->GetProfile();
     return OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   }
 
@@ -402,7 +413,7 @@ class OptimizationGuideKeyedServiceBrowserTest
     // feature.
     EnableSignIn();
 
-    auto* prefs = browser()->profile()->GetPrefs();
+    auto* prefs = browser()->GetProfile()->GetPrefs();
     prefs->SetInteger(prefs::GetSettingEnabledPrefName(feature),
                       static_cast<int>(prefs::FeatureOptInState::kEnabled));
     base::RunLoop().RunUntilIdle();
@@ -929,7 +940,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   // Visibility of compose is enabled via finch.
   EXPECT_TRUE(IsSettingVisible(UserVisibleFeatureKey::kCompose));
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -972,7 +983,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   EXPECT_FALSE(ogks->ShouldFeatureBeCurrentlyEnabledForUser(
       UserVisibleFeatureKey::kCompose));
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -1024,7 +1035,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   EXPECT_FALSE(ogks->ShouldFeatureBeCurrentlyEnabledForUser(
       UserVisibleFeatureKey::kCompose));
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -1069,7 +1080,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
           browser()->GetProfile()->GetPrimaryOTRProfile(
               /*create_if_needed=*/true));
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   prefs->SetInteger(
       prefs::GetSettingEnabledPrefName(UserVisibleFeatureKey::kWallpaperSearch),
       static_cast<int>(prefs::FeatureOptInState::kEnabled));
@@ -1094,7 +1105,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   EXPECT_TRUE(ogks);
   EXPECT_NE(guest_ogks, ogks);
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
   auto* guest_prefs = guest_browser->GetProfile()->GetPrefs();
 
   EnableSignIn();
@@ -1285,7 +1296,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
                        CheckUploadWithoutMetricsConsent) {
-  auto* profile = browser()->profile();
+  auto* profile = browser()->GetProfile();
   OptimizationGuideKeyedService* ogks =
       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
 
@@ -1341,7 +1352,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   SetMetricsConsent(true);
   EnableSignIn();
 
-  auto* profile = browser()->profile();
+  auto* profile = browser()->GetProfile();
   OptimizationGuideKeyedService* ogks =
       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   auto compose_feature = UserVisibleFeatureKey::kCompose;
@@ -1427,7 +1438,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   SetMetricsConsent(true);
   EnableSignIn();
 
-  auto* profile = browser()->profile();
+  auto* profile = browser()->GetProfile();
   OptimizationGuideKeyedService* ogks =
       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   auto compose_feature = UserVisibleFeatureKey::kCompose;
@@ -1616,7 +1627,7 @@ IN_PROC_BROWSER_TEST_F(OptimizationGuideKeyedServiceBrowserTest,
   SetMetricsConsent(true);
   EnableSignIn();
 
-  auto* profile = browser()->profile();
+  auto* profile = browser()->GetProfile();
   OptimizationGuideKeyedService* ogks =
       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   auto compose_feature = UserVisibleFeatureKey::kCompose;

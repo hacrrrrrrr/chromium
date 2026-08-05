@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_bubble_view.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_device_picker_bubble_view.h"
+#include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_no_target_device_bubble_view.h"
 #include "chrome/browser/ui/views/send_tab_to_self/send_tab_to_self_promo_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar/pinned_toolbar_actions.h"
 #include "chrome/browser/user_education/user_education_service.h"
@@ -184,7 +185,8 @@ void SendTabToSelfBubbleController::ShowBubbleWithAnchor(
 
   if (browser) {
     send_tab_to_self_action_item_ = actions::ActionManager::Get().FindAction(
-        kActionSendTabToSelf, browser->GetActions()->root_action_item());
+        kActionSendTabToSelf,
+        BrowserActions::From(browser.get())->root_action_item());
     // The toolbar might not have this action button.
     // See SendTabToSelfToolbarIconController::CanShowOnBrowser().
     if (send_tab_to_self_action_item_) {
@@ -240,8 +242,6 @@ void SendTabToSelfBubbleController::OnDeviceSelected(
   UserEducationService::MaybeNotifyNewBadgeFeatureUsed(
       GetProfile(), send_tab_to_self::kSendTabToSelfEnhancedDesktopUI);
 
-  // TODO(crbug.com/40817150): This duplicates the ShouldOfferFeature() check,
-  // instead the 2 codepaths should share code.
   SendTabToSelfPageHandler* handler =
       SendTabToSelfPageHandler::GetOrCreateForWebContents(&GetWebContents());
 

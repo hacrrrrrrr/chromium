@@ -20,6 +20,8 @@
 #include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "content/browser/loader/navigation_loader_interceptor.h"
 #include "content/browser/loader/response_head_update_params.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
+#include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/fake_embedded_worker_instance_client.h"
 #include "content/browser/service_worker/fake_service_worker.h"
@@ -38,7 +40,10 @@
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/mock_render_process_host.h"
+#include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_content_browser_client.h"
+#include "content/public/test/test_renderer_host.h"
+#include "content/public/test/web_contents_tester.h"
 #include "content/test/fake_network_url_loader_factory.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/test/cert_test_util.h"
@@ -71,7 +76,10 @@ class MockSearchPrefetchContentBrowserClient : public TestContentBrowserClient {
   URLLoaderRequestHandler
   CreateURLLoaderHandlerForServiceWorkerInitiatedNavigationRequest(
       FrameTreeNodeId frame_tree_node_id,
-      const network::ResourceRequest& resource_request) override {
+      const network::ResourceRequest& resource_request,
+      int64_t navigation_id,
+      scoped_refptr<base::SequencedTaskRunner> navigation_response_task_runner)
+      override {
     if (handler_) {
       return std::move(handler_);
     }
@@ -263,7 +271,7 @@ class FetchEventServiceWorker : public FakeServiceWorker {
     response_callback_->OnResponse(
         OkResponse(nullptr /* blob_body */, response_source_, response_time_,
                    cache_storage_cache_name_),
-        blink::mojom::ServiceWorkerFetchEventTiming::New());
+        blink::mojom::ServiceWorkerFetchEventTiming::New(), /*errors=*/nullptr);
     response_callback_.FlushForTesting();
     std::move(finish_callback_)
         .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
@@ -271,8 +279,8 @@ class FetchEventServiceWorker : public FakeServiceWorker {
   void FinishRespondWithCustomResponse(
       blink::mojom::FetchAPIResponsePtr response) {
     response_callback_->OnResponse(
-        std::move(response),
-        blink::mojom::ServiceWorkerFetchEventTiming::New());
+        std::move(response), blink::mojom::ServiceWorkerFetchEventTiming::New(),
+        /*errors=*/nullptr);
     response_callback_.FlushForTesting();
     std::move(finish_callback_)
         .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
@@ -349,7 +357,7 @@ class FetchEventServiceWorker : public FakeServiceWorker {
         response_callback->OnResponse(
             OkResponse(std::move(blob_body_), response_source_, response_time_,
                        cache_storage_cache_name_),
-            std::move(timing));
+            std::move(timing), /*errors=*/nullptr);
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
         break;
@@ -357,19 +365,20 @@ class FetchEventServiceWorker : public FakeServiceWorker {
         response_callback->OnResponseStream(
             OkResponse(nullptr /* blob_body */, response_source_,
                        response_time_, cache_storage_cache_name_),
-            std::move(stream_handle_), std::move(timing));
+            std::move(stream_handle_), std::move(timing), /*errors=*/nullptr);
 
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
         break;
       case ResponseMode::kFallbackResponse:
         response_callback->OnFallback(/*request_body=*/std::nullopt,
-                                      std::move(timing));
+                                      std::move(timing), /*errors=*/nullptr);
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
         break;
       case ResponseMode::kErrorResponse:
-        response_callback->OnResponse(ErrorResponse(), std::move(timing));
+        response_callback->OnResponse(ErrorResponse(), std::move(timing),
+                                      /*errors=*/nullptr);
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::REJECTED);
         break;
@@ -399,18 +408,18 @@ class FetchEventServiceWorker : public FakeServiceWorker {
         response_callback->OnResponse(
             OkResponse(nullptr /* blob_body */, response_source_,
                        response_time_, cache_storage_cache_name_),
-            std::move(timing));
+            std::move(timing), /*errors=*/nullptr);
         // Now the caller must call FinishWaitUntil() to finish the event.
         break;
       case ResponseMode::kRedirect:
         response_callback->OnResponse(RedirectResponse(redirected_url_.spec()),
-                                      std::move(timing));
+                                      std::move(timing), /*errors=*/nullptr);
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
         break;
       case ResponseMode::kHeaders:
         response_callback->OnResponse(HeadersResponse(headers_),
-                                      std::move(timing));
+                                      std::move(timing), /*errors=*/nullptr);
         std::move(finish_callback)
             .Run(blink::mojom::ServiceWorkerEventStatus::COMPLETED);
         break;
@@ -597,6 +606,17 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
     return helper_->context()->GetStorageControl();
   }
 
+  void SetUpTestWebContentsAndNavigation(const GURL& url) {
+    web_contents_ = WebContentsTester::CreateTestWebContents(
+        helper_->browser_context(), nullptr);
+    frame_tree_node_id_ =
+        web_contents_->GetPrimaryMainFrame()->GetFrameTreeNodeId();
+
+    navigation_simulator_ =
+        NavigationSimulator::CreateBrowserInitiated(url, web_contents_.get());
+    navigation_simulator_->Start();
+  }
+
   // Starts a request. After calling this, the request is ongoing and the
   // caller can use functions like client_.RunUntilComplete() to wait for
   // completion.
@@ -604,8 +624,10 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
     // Create a ServiceWorkerClient and simulate what
     // ServiceWorkerControlleeRequestHandler does to assign it a controller.
     if (!service_worker_client_) {
-      service_worker_client_ = std::make_unique<ScopedServiceWorkerClient>(
-          CreateServiceWorkerClient(helper_->context(), request->url));
+      service_worker_client_ =
+          std::make_unique<ScopedServiceWorkerClient>(CreateServiceWorkerClient(
+              helper_->context(), request->url,
+              /*are_ancestors_secure=*/true, frame_tree_node_id_));
       service_worker_client()->AddMatchingRegistration(registration_.get());
       service_worker_client()->SetControllerRegistration(
           registration_, /*notify_controllerchange=*/false);
@@ -938,6 +960,11 @@ class ServiceWorkerMainResourceLoaderTest : public testing::Test {
   bool did_call_fallback_callback_ = false;
   base::OnceClosure quit_closure_for_fallback_callback_;
   ResponseHeadUpdateParams response_head_update_params_;
+
+  RenderViewHostTestEnabler rvh_test_enabler_;
+  std::unique_ptr<WebContents> web_contents_;
+  std::unique_ptr<NavigationSimulator> navigation_simulator_;
+  FrameTreeNodeId frame_tree_node_id_;
 };
 
 TEST_F(ServiceWorkerMainResourceLoaderTest, Basic) {
@@ -1550,6 +1577,7 @@ TEST_F(ServiceWorkerMainResourceLoaderTest, FencedFrameNavigationPreload) {
   registration_->EnableNavigationPreload(true);
 
   std::unique_ptr<network::ResourceRequest> request = CreateRequest();
+  SetUpTestWebContentsAndNavigation(request->url);
   request->destination = network::mojom::RequestDestination::kFencedframe;
 
   // Perform the request.
@@ -2191,6 +2219,7 @@ TEST_F(ServiceWorkerMainResourceLoaderTest, SearchPrefetchHitInSyntheticResponse
       }));
 
   std::unique_ptr<network::ResourceRequest> request = CreateRequest();
+  SetUpTestWebContentsAndNavigation(request->url);
   request->is_outermost_main_frame = true;
 
   StartRequest(std::move(request));

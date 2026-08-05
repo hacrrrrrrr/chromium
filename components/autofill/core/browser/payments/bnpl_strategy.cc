@@ -21,6 +21,11 @@ BnplStrategy::GetNextActionOnUserDecisionToUseBnpl() {
   NOTREACHED();
 }
 
+BnplStrategy::UserDecisionToUseBnplAgainNextAction
+BnplStrategy::GetNextActionOnUserDecisionToUseBnplAgain() {
+  NOTREACHED();
+}
+
 BnplStrategy::BnplAmountExtractionReturnedNextAction
 BnplStrategy::GetNextActionOnAmountExtractionReturned() {
   NOTREACHED();
@@ -33,6 +38,15 @@ BnplStrategy::GetBeforeViewSwitchAction() {
 
 BnplStrategy::BnplAiBasedAmountExtractionReturnedNextAction
 BnplStrategy::GetNextActionOnAiBasedAmountExtractionReturned() {
+  NOTREACHED();
+}
+
+BnplStrategy::UserDecisionToUseSavedCardsNextAction
+BnplStrategy::GetNextActionOnUserDecisionToUseSavedCards() {
+  NOTREACHED();
+}
+
+BnplStrategy::UiDismissalAction BnplStrategy::GetUiDismissalAction() {
   NOTREACHED();
 }
 

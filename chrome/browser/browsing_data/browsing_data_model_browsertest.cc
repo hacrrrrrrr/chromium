@@ -51,11 +51,9 @@
 #include "components/privacy_sandbox/privacy_sandbox_settings.h"
 #include "components/services/storage/public/mojom/local_storage_control.mojom.h"
 #include "components/services/storage/public/mojom/storage_usage_info.mojom.h"
-#include "components/services/storage/shared_storage/shared_storage_manager.h"
 #include "components/unexportable_keys/features.h"
 #include "content/public/browser/dom_storage_context.h"
 #include "content/public/browser/network_service_instance.h"
-#include "content/public/browser/private_aggregation_data_model.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/storage_usage_info.h"
 #include "content/public/common/content_features.h"
@@ -155,20 +153,6 @@ void ProvideRequestHandlerKeyCommitmentsToNetworkService(
       network::WrapKeyCommitmentsForIssuers(std::move(origins_and_commitments)),
       run_loop.QuitClosure());
   run_loop.Run();
-}
-
-void AccessTopics(const content::ToRenderFrameHost& adapter) {
-  std::string command =
-      R"(
-    (async () => {
-      try {
-        document.browsingTopics();
-      } catch (e) {
-        return e.toString();
-      }
-      return "Success";
-    })())";
-  EXPECT_EQ("Success", EvalJs(adapter, command));
 }
 
 class IdpTestServer {
@@ -389,7 +373,6 @@ void EnsurePageAccessedStorage(content::WebContents* web_contents) {
 
 using browsing_data_model_test_util::ValidateBrowsingDataEntries;
 using browsing_data_model_test_util::ValidateBrowsingDataEntriesNonZeroUsage;
-using OperationResult = storage::SharedStorageDatabase::OperationResult;
 using browsing_data_test_util::HasDataForType;
 using browsing_data_test_util::SetDataForType;
 
@@ -403,10 +386,6 @@ class BrowsingDataModelBrowserTest
         {features::kIsolatedWebApps, {}},
         {features::kIsolatedWebAppDevMode, {}},
         {network::features::kSharedStorageAPI, {}},
-        {network::features::kInterestGroupStorage, {}},
-        {blink::features::kPrivateAggregationApi, {}},
-        {blink::features::kAdInterestGroupAPI, {}},
-        {blink::features::kFledge, {}},
         {blink::features::kFencedFrames, {}},
         {network::features::kBrowsingTopics, {}},
         {net::features::kThirdPartyStoragePartitioning, {}},
@@ -505,7 +484,7 @@ class BrowsingDataModelBrowserTest
   }
 
   content::StoragePartition* default_storage_partition() {
-    return browser()->profile()->GetDefaultStoragePartition();
+    return browser()->GetProfile()->GetDefaultStoragePartition();
   }
 
   content::WebContents* web_contents() {
@@ -548,49 +527,6 @@ class BrowsingDataModelBrowserTest
   testing::NiceMock<policy::MockConfigurationPolicyProvider> provider_;
 };
 
-IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
-                       SharedStorageHandledCorrectly) {
-  // Add origin shared storage.
-  auto* shared_storage_manager =
-      default_storage_partition()->GetSharedStorageManager();
-  ASSERT_NE(nullptr, shared_storage_manager);
-
-  base::test::TestFuture<OperationResult> future;
-  url::Origin testOrigin = url::Origin::Create(GURL("https://a.test"));
-  shared_storage_manager->Set(
-      testOrigin, u"key", u"value", future.GetCallback(),
-      storage::SharedStorageDatabase::SetBehavior::kDefault);
-  EXPECT_EQ(OperationResult::kSet, future.Get());
-
-  std::unique_ptr<BrowsingDataModel> browsing_data_model =
-      BuildBrowsingDataModel();
-  // Validate shared storage entry saved correctly.
-  base::test::TestFuture<uint64_t> test_entry_storage_size;
-  shared_storage_manager->FetchOrigins(base::BindLambdaForTesting(
-      [&](std::vector<::storage::mojom::StorageUsageInfoPtr>
-              storage_usage_info) {
-        ASSERT_EQ(1U, storage_usage_info.size());
-        test_entry_storage_size.SetValue(
-            storage_usage_info[0]->total_size_bytes);
-      }));
-
-  ValidateBrowsingDataEntries(
-      browsing_data_model.get(),
-      {{kTestHost,
-        blink::StorageKey::CreateFirstParty(testOrigin),
-        {{BrowsingDataModel::StorageType::kSharedStorage},
-         test_entry_storage_size.Get(),
-         /*cookie_count=*/0}}});
-
-  // Remove origin.
-  RemoveBrowsingDataForDataOwner(browsing_data_model.get(), kTestHost);
-
-  // Rebuild Browsing Data Model and verify entries are empty.
-  browsing_data_model = BuildBrowsingDataModel();
-  ValidateBrowsingDataEntries(browsing_data_model.get(), {});
-}
-
-
 IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest, TrustTokenIssuance) {
   // Setup the test server to be able to issue trust tokens, and have it issue
   // some to the profile.
@@ -619,7 +555,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest, TrustTokenIssuance) {
   EXPECT_EQ(true, EvalJs(web_contents(), command));
 
   browser()
-      ->profile()
+      ->GetProfile()
       ->GetDefaultStoragePartition()
       ->FlushNetworkInterfaceForTesting();
 
@@ -644,46 +580,6 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest, TrustTokenIssuance) {
 }
 
 IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
-                       TopicsAccessReportedCorrectly) {
-  // Navigate to test page.
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), test_url()));
-
-  auto* content_settings =
-      content_settings::PageSpecificContentSettings::GetForFrame(
-          web_contents()->GetPrimaryMainFrame());
-
-  // Validate that the allowed browsing data model is empty.
-  auto* allowed_browsing_data_model =
-      content_settings->allowed_browsing_data_model();
-  ValidateBrowsingDataEntries(allowed_browsing_data_model, {});
-  ASSERT_EQ(allowed_browsing_data_model->size(), 0u);
-
-  // Get Topics
-  AccessTopics(web_contents());
-
-  WaitForModelUpdate(allowed_browsing_data_model, 1);
-
-  // Validate Topics are reported correctly
-  url::Origin testOrigin = https_test_server()->GetOrigin(kTestHost);
-  ValidateBrowsingDataEntries(
-      allowed_browsing_data_model,
-      {{kTestHost,
-        testOrigin,
-        {{static_cast<BrowsingDataModel::StorageType>(
-             ChromeBrowsingDataModelDelegate::StorageType::kTopics)},
-         /*storage_size=*/0,
-         /*cookie_count=*/0}}});
-  ASSERT_EQ(allowed_browsing_data_model->size(), 1u);
-
-  // Clear Topic via BDM
-  RemoveBrowsingDataForDataOwner(allowed_browsing_data_model, kTestHost);
-
-  // Validate that the allowed browsing data model is cleared.
-  ValidateBrowsingDataEntries(allowed_browsing_data_model, {});
-  ASSERT_EQ(allowed_browsing_data_model->size(), 0u);
-}
-
-IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
                        IsolatedWebAppUsageInDefaultStoragePartitionModel) {
   // Check that no IWAs are installed at the beginning of the test.
   std::unique_ptr<BrowsingDataModel> browsing_data_model =
@@ -691,7 +587,7 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
   ValidateBrowsingDataEntries(browsing_data_model.get(), {});
   ASSERT_EQ(browsing_data_model->size(), 0u);
 
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   std::unique_ptr<web_app::ScopedBundledIsolatedWebApp> app1 =
       web_app::IsolatedWebAppBuilder(web_app::ManifestBuilder()).BuildBundle();
@@ -785,7 +681,8 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
   SetDataForType("LocalStorage", web_contents());
 
   //  Flush storage size to disk.
-  auto* storage_partition = browser()->profile()->GetDefaultStoragePartition();
+  auto* storage_partition =
+      browser()->GetProfile()->GetDefaultStoragePartition();
   storage_partition->Flush();
 
   // To ensure that flushing is completed.
@@ -1045,7 +942,8 @@ IN_PROC_BROWSER_TEST_F(BrowsingDataModelBrowserTest,
   SetDataForType("LocalStorage", content::ChildFrameAt(web_contents(), 0));
 
   //  Flush storage size to disk.
-  auto* storage_partition = browser()->profile()->GetDefaultStoragePartition();
+  auto* storage_partition =
+      browser()->GetProfile()->GetDefaultStoragePartition();
   storage_partition->Flush();
 
   // To ensure that flushing is completed.

@@ -64,11 +64,9 @@ class ComposeboxQueryControllerBridge
   AddTabContextFromCache(JNIEnv* env, long tab_id, bool is_suggested_tab);
   void GetAimUrl(JNIEnv* env,
                  GURL url,
-                 const std::string& query_text,
                  const base::android::JavaRef<jobject>& j_callback);
   void GetImageGenerationUrl(JNIEnv* env,
                              GURL url,
-                             const std::string& query_text,
                              const base::android::JavaRef<jobject>& j_callback);
 
   // Builds the URL to use for a navigation, supplementing the passed in URL
@@ -80,7 +78,6 @@ class ComposeboxQueryControllerBridge
   void GetAimUrlFromInputState(
       JNIEnv* env,
       GURL url,
-      const std::string& query_text,
       const base::android::JavaRef<jobject>& j_callback);
   void RemoveAttachment(JNIEnv* env, const std::string& token);
   bool IsFuseboxEligible(JNIEnv* env);
@@ -142,13 +139,17 @@ class ComposeboxQueryControllerBridge
   void StartTabContextUploadFlow(
       JNIEnv* env,
       const base::UnguessableToken& context_token,
+      std::optional<SessionID> tab_session_id,
       bool was_cached,
       base::TimeTicks start_time,
       std::unique_ptr<lens::ContextualInputData> page_content_data);
   void OnInputStateChanged(const contextual_search::InputState& state);
 
   std::unique_ptr<ComposeboxQueryController::CreateSearchUrlRequestInfo>
-  CreateSearchUrlRequestInfoFromUrl(GURL url, const std::string& query_text);
+  CreateSearchUrlRequestInfoFromUrl(GURL url);
+  void OnSearchUrlCreated(
+      base::android::ScopedJavaGlobalRef<jobject> j_callback,
+      GURL url);
   void ContextualizeAndCreateSearchUrl(
       std::unique_ptr<ComposeboxQueryController::CreateSearchUrlRequestInfo>
           search_url_request_info,
@@ -159,6 +160,8 @@ class ComposeboxQueryControllerBridge
   }
 
   raw_ptr<Profile> profile_;
+  // The WebContents of the active tab where the search query was initiated.
+  base::WeakPtr<content::WebContents> web_contents_;
   raw_ptr<contextual_tasks::ContextualTasksUIInterface>
       contextual_tasks_web_ui_interface_ = nullptr;
   bool is_task_scoped_ = false;

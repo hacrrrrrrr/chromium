@@ -48,7 +48,7 @@ class MockReadAnythingLifecycleObserver : public ReadAnythingLifecycleObserver {
   MOCK_METHOD(void,
               Activate,
               (bool active,
-               std::optional<ReadAnythingOpenTrigger>,
+               ReadAnythingOpenTrigger,
                std::optional<base::TimeDelta>),
               (override));
   MOCK_METHOD(void, OnDestroyed, (), (override));
@@ -95,12 +95,11 @@ class ReadAnythingSidePanelControllerTest
 
   void OnEntryShown(SidePanelEntry* entry) {
     if (IsImmersiveEnabled()) {
-      std::optional<ReadAnythingOpenTrigger> read_anything_trigger;
-      if (entry->last_open_trigger().has_value()) {
-        read_anything_trigger =
-            read_anything::SidePanelToReadAnythingOpenTrigger(
-                entry->last_open_trigger().value());
-      }
+      ReadAnythingOpenTrigger read_anything_trigger =
+          entry->last_open_trigger().has_value()
+              ? read_anything::SidePanelToReadAnythingOpenTrigger(
+                    entry->last_open_trigger().value())
+              : ReadAnythingOpenTrigger::kUnknown;
       ReadAnythingController::From(browser()->GetActiveTabInterface())
           ->OnEntryShown(read_anything_trigger);
     } else {
@@ -146,10 +145,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingSidePanelControllerTest,
   entry->set_last_open_trigger(SidePanelOpenTrigger::kReadAnythingOmniboxChip);
 
   EXPECT_CALL(read_anything_observer_,
-              Activate(true,
-                       std::optional<ReadAnythingOpenTrigger>(
-                           ReadAnythingOpenTrigger::kOmniboxChip),
-                       testing::_))
+              Activate(true, ReadAnythingOpenTrigger::kOmniboxChip, testing::_))
       .Times(1);
   OnEntryShown(entry);
 }
@@ -163,7 +159,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingSidePanelControllerTest,
               SidePanelEntry::Key(SidePanelEntry::Id::kReadAnything));
 
   EXPECT_CALL(read_anything_observer_,
-              Activate(false, empty_trigger(), testing::_))
+              Activate(false, ReadAnythingOpenTrigger::kUnknown, testing::_))
       .Times(1);
   OnEntryHidden(entry);
 }
@@ -330,6 +326,11 @@ IN_PROC_BROWSER_TEST_P(
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingSidePanelControllerInteractiveTest,
                        OpenAndCloseWithKeyboardShortcut) {
+  if (GetParam()) {
+    // Immersive mode is tested in ToggleImmersiveFromKeyboardShortcut.
+    return;
+  }
+
   ui::Accelerator reading_mode_accelerator;
   ASSERT_TRUE(BrowserView::GetBrowserViewForBrowser(browser())->GetAccelerator(
       IDC_SHOW_READING_MODE_KEYBOARD, &reading_mode_accelerator));
@@ -368,7 +369,6 @@ class ReadAnythingKeyboardShortcutCUJTest
 
     std::vector<base::test::FeatureRef> enabled_features = {
         features::kImmersiveReadAnything, features::kReadAnythingOmniboxChip,
-        features::kPageActionsMigration,
         feature_engagement::kIPHReadingModeKeyboardShortcutFeature};
     feature_list_.InitAndEnableFeatures(enabled_features);
     ReadAnythingController::SetFreezeDistillationOnCreationForTesting(true);
@@ -444,7 +444,6 @@ class ReadAnythingPresentationModeCUJTest
 
     std::vector<base::test::FeatureRef> enabled_features = {
         features::kImmersiveReadAnything, features::kReadAnythingOmniboxChip,
-        features::kPageActionsMigration,
         feature_engagement::kIPHReadingModePresentationModeFeature};
     feature_list_.InitAndEnableFeatures(enabled_features);
     ReadAnythingController::SetFreezeDistillationOnCreationForTesting(true);

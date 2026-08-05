@@ -48,12 +48,10 @@
         <structure type="lottie" name="IDR_AUTOFILL_SAVE_CARD_LOCAL_LOTTIE" file="resources/autofill/autofill_save_card_local.json" compress="brotli"/>
         <structure type="lottie" name="IDR_AUTOFILL_SAVE_CARD_TO_WALLET_LOTTIE" file="resources/autofill/autofill_save_card_to_wallet.json" compress="brotli"/>
         <structure type="lottie" name="IDR_AUTOFILL_SAVE_SECURITY_CODE_LOTTIE" file="resources/autofill/autofill_save_security_code.json" compress="brotli"/>
+        <structure type="lottie" name="IDR_AUTOFILL_TURN_ON_PAYMENTS_AUTOFILL_CONVENIENTLY_LOTTIE" file="resources/autofill/autofill_turn_on_payments_autofill_conveniently.json" compress="brotli"/>
 
         <!-- Shopping resources -->
         <structure type="lottie" name="IDR_SHOPPING_DISCOUNTS_AVAILABLE_LOTTIE" file="resources/shopping/discounts_available.json" compress="brotli"/>
-
-        <!-- Projects Panel resources -->
-        <structure type="lottie" name="IDR_PROJECTS_NO_TAB_GROUPS" file="resources/projects/resumption_empty_state.json" compress="brotli"/>
 
         <!-- Automated Password Change resources -->
         <structure type="lottie" name="IDR_PASSWORD_CHANGE_SUCCESS_LOTTIE" file="resources/automated_password_change/password_change_success.json" compress="brotli"/>

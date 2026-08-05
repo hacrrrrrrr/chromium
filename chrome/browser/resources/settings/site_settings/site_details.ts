@@ -568,6 +568,84 @@ export class SiteDetailsElement extends SiteDetailsElementBase {
         'privacy:imagesmode' :
         'privacy:imagesmode-old';
   }
+
+  protected getMicIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:mic' :
+        'privacy:mic-old';
+  }
+
+  protected getNotificationsIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:notifications' :
+        'privacy:notifications-old';
+  }
+
+  protected getPianoIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:piano' :
+        'privacy:piano-old';
+  }
+
+  protected getSelectWindowIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:select-window' :
+        'privacy:select-window-old';
+  }
+
+  protected getSensorsIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:sensors' :
+        'privacy:sensors-old';
+  }
+
+  protected getSmartCardReaderIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:smart-card-reader' :
+        'privacy:smart-card-reader-old';
+  }
+
+  protected getSyncSavedLocallyIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:sync-saved-locally' :
+        'privacy:sync-saved-locally-old';
+  }
+
+  protected getUsbIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:usb' :
+        'privacy:usb-old';
+  }
+
+  protected getV8Icon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:v8' :
+        'privacy:v8-old';
+  }
+
+  protected getVideogameAssetIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:videogame-asset' :
+        'privacy:videogame-asset-old';
+  }
+
+  protected getVolumeUpIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:volume-up' :
+        'privacy:volume-up-old';
+  }
+
+  protected getWarningIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:warning' :
+        'privacy:warning-old';
+  }
+
+  protected getWebAssetIcon_(): string {
+    return loadTimeData.getBoolean('webuiRoundedIconsEnabled') ?
+        'privacy:web-asset' :
+        'privacy:web-asset-old';
+  }
 }
 
 declare global {

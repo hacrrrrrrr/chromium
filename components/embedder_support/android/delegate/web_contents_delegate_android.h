@@ -13,6 +13,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
+#include "content/public/browser/immersive_playback_options.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
@@ -96,11 +97,18 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
                               int32_t line_no,
                               const std::u16string& source_id) override;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
+  content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
+      content::WebContents* source,
+      const input::NativeWebKeyboardEvent& event) override;
   bool HandleKeyboardEvent(content::WebContents* source,
                            const input::NativeWebKeyboardEvent& event) override;
   bool TakeFocus(content::WebContents* source, bool reverse) override;
   void ShowRepostFormWarningDialog(content::WebContents* source) override;
   bool ShouldBlockMediaRequest(const GURL& url) override;
+  void RequestImmersivePlaybackConfirmation(
+      const content::ImmersiveOptions& default_options,
+      base::OnceCallback<void(content::ImmersivePlaybackConfirmationResult)>
+          callback) override;
   bool CanEnterFullscreenModeForTab(
       content::RenderFrameHost* requesting_frame) override;
   void EnterFullscreenModeForTab(

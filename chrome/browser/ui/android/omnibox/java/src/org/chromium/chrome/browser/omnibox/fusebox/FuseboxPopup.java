@@ -72,6 +72,7 @@ class FuseboxPopup {
     private final @Nullable InsetObserver mInsetObserver;
     private final int mInitialScrollPaddingBottom;
     private @PopupState int mCurrentState = PopupState.HIDDEN;
+    private boolean mIsFirstShow = true;
     private @Nullable Integer mPreviousAccessibilityImportance;
     private @Nullable View mCachedContentView;
 
@@ -184,7 +185,7 @@ class FuseboxPopup {
         mRecentTabsContainer = contentView.findViewById(R.id.fusebox_recent_tabs_container);
 
         mAttachmentButtons =
-                List.of(mAddCurrentTab, mTabButton, mCameraButton, mGalleryButton, mFileButton);
+                List.of(mAddCurrentTab, mTabButton, mGalleryButton, mCameraButton, mFileButton);
 
         mDividers =
                 mRecentTabsDivider != null
@@ -241,7 +242,15 @@ class FuseboxPopup {
         }
 
         updateLayout();
-        show();
+        if (mIsFirstShow) {
+            mIsFirstShow = false;
+            // Defer showing the popup window by one main-looper tick when transitioning from
+            // HIDDEN on the very first show so that pending PropertyModel view-binder callbacks
+            // (e.g., model selection buttons) finish populating content views into mViewGroup.
+            PostTask.postTask(TaskTraits.UI_DEFAULT, this::show);
+        } else {
+            show();
+        }
     }
 
     private void hideBackgroundAccessibility() {

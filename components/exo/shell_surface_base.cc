@@ -918,6 +918,10 @@ void ShellSurfaceBase::SetRestoreInfo(int32_t restore_session_id,
   // TODO(crbug.com/1327490): Rename restore info variables.
   // Restore information must be set before widget is created.
   DCHECK(!widget_);
+  SecurityDelegate* security = GetSecurityDelegate();
+  if (!security || !security->CanSetRestoreInfo()) {
+    return;
+  }
   restore_session_id_.emplace(restore_session_id);
   restore_window_id_.emplace(restore_window_id);
   ash::LoginUnlockThroughputRecorder* throughput_recorder =
@@ -928,6 +932,10 @@ void ShellSurfaceBase::SetRestoreInfo(int32_t restore_session_id,
 void ShellSurfaceBase::SetRestoreInfoWithWindowIdSource(
     int32_t restore_session_id,
     const std::string& restore_window_id_source) {
+  SecurityDelegate* security = GetSecurityDelegate();
+  if (!security || !security->CanSetRestoreInfo()) {
+    return;
+  }
   restore_session_id_.emplace(restore_session_id);
   if (!restore_window_id_source.empty())
     restore_window_id_source_.emplace(restore_window_id_source);
@@ -1462,6 +1470,8 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
   if (lost_capture == gained_capture_parent)
     return;
 
+  base::WeakPtr<aura::Window> weak_gained =
+      gained_capture ? gained_capture->GetWeakPtrAsWindow() : nullptr;
   if (!gained_capture) {
     // If `gained_capture` is nullptr, find the closest ancestor of
     // `lost_capture` that is a popup with grab.
@@ -1472,11 +1482,17 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
         break;
       }
     }
-    // Give capture to the new `gained_capture`.
     if (gained_capture) {
+      base::WeakPtr<aura::Window> weak_lost =
+          lost_capture ? lost_capture->GetWeakPtrAsWindow() : nullptr;
+      weak_gained = gained_capture->GetWeakPtrAsWindow();
       ShellSurfaceBase* parent_shell_surface =
           GetShellSurfaceBaseForWindow(gained_capture);
       parent_shell_surface->StartCapture();
+      // If the lost capture is destroyed, there is nothing to close.
+      if (!weak_lost) {
+        return;
+      }
     }
   }
 
@@ -1503,7 +1519,7 @@ void ShellSurfaceBase::OnCaptureChanged(aura::Window* lost_capture,
 
   // Please note that `gained_capture_ancestors` also includes `gained_capture`.
   base::flat_set<aura::Window*> gained_capture_ancestors;
-  for (aura::Window* next = gained_capture; next != nullptr;
+  for (aura::Window* next = weak_gained.get(); next != nullptr;
        next = wm::GetTransientParent(next)) {
     gained_capture_ancestors.insert(next);
   }
@@ -1683,15 +1699,17 @@ void ShellSurfaceBase::OnWindowActivated(ActivationReason reason,
 void ShellSurfaceBase::OnTooltipShown(aura::Window* target,
                                       std::u16string_view text,
                                       const gfx::Rect& bounds) {
-  if (root_surface()) {
-    root_surface()->OnTooltipShown(text, bounds);
+  if (!IsShellSurfaceWindow(target) || !root_surface()) {
+    return;
   }
+  root_surface()->OnTooltipShown(text, bounds);
 }
 
 void ShellSurfaceBase::OnTooltipHidden(aura::Window* target) {
-  if (root_surface()) {
-    root_surface()->OnTooltipHidden();
+  if (!IsShellSurfaceWindow(target) || !root_surface()) {
+    return;
   }
+  root_surface()->OnTooltipHidden();
 }
 
 // Returns true if surface is currently being resized.

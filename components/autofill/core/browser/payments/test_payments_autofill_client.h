@@ -238,8 +238,9 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
   BnplUiDelegate* GetBnplUiDelegate() override;
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   OmniboxAutofillDelegate* GetOmniboxAutofillDelegate() override;
-  void ShowOmniboxAutofillChip(
+  void ShowExpandedOmniboxAutofillChip(
       std::vector<Suggestion> suggestions,
+      base::OnceClosure on_chip_shown,
       base::RepeatingCallback<void(base::span<const Suggestion>)>
           on_suggestions_shown,
       base::RepeatingCallback<void(SuggestionHidingReason)>
@@ -319,6 +320,20 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
            !legal_message_lines_.empty();
   }
 
+  std::vector<PaymentsAutofillClient::SaveIbanPromptCallback>&
+  confirm_upload_iban_to_cloud_callbacks() {
+    return confirm_upload_iban_to_cloud_callbacks_;
+  }
+
+  std::vector<base::OnceCallback<void(const std::string&)>>&
+  load_risk_data_callbacks() {
+    return load_risk_data_callbacks_;
+  }
+
+  void set_defer_load_risk_data_responses(bool defer) {
+    defer_load_risk_data_responses_ = defer;
+  }
+
   AutofillProgressUiType autofill_progress_dialog_type() const {
     return autofill_progress_dialog_type_;
   }
@@ -386,6 +401,8 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
 
   bool confirm_save_iban_locally_called_ = false;
   bool confirm_upload_iban_to_cloud_called_ = false;
+  std::vector<PaymentsAutofillClient::SaveIbanPromptCallback>
+      confirm_upload_iban_to_cloud_callbacks_;
 
   // Populated if IBAN save was offered. True if bubble was shown, false
   // otherwise.
@@ -393,6 +410,9 @@ class TestPaymentsAutofillClient : public PaymentsAutofillClient {
 
   // True if LoadRiskData() was called, false otherwise.
   bool risk_data_loaded_ = false;
+  bool defer_load_risk_data_responses_ = false;
+  std::vector<base::OnceCallback<void(const std::string&)>>
+      load_risk_data_callbacks_;
 
   bool is_tab_model_popup_ = false;
 

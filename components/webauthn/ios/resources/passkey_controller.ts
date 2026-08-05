@@ -50,6 +50,9 @@ function isGpmAaguid(aaguid: Uint8Array): boolean {
  */
 const cachedNavigatorCredentials: CredentialsContainer = navigator.credentials;
 
+// Tracks whether a WebAuthn request is currently pending.
+let hasPendingRequest = false;
+
 // A function will be defined here by the placeholder replacement.
 // It will be called to determine whether to attempt to handle modal
 // passkeys requests directly in the browser.
@@ -89,16 +92,22 @@ function getAbortError(): DOMException {
   return new DOMException('The request has been aborted.', 'AbortError');
 }
 
-// Helper to handle the AbortSignal event listener.
-function setupAbortSignalHandler(signal: AbortSignal, promiseId: string): void {
-  signal.addEventListener('abort', () => {
-    DeferredPublicKeyCredentialPromise.reject(promiseId, getAbortError());
-
+// Cancels an assertion request if it is still ongoing.
+function cancelAssertionRequest(requestId: string): void {
+  if (DeferredPublicKeyCredentialPromise.has(requestId)) {
+    DeferredPublicKeyCredentialPromise.reject(requestId, getAbortError());
     sendWebKitMessage(HANDLER_NAME, {
       'event': 'cancelRequest',
       'frameId': gCrWeb.getFrameId(),
-      'requestId': promiseId,
+      'requestId': requestId,
     });
+  }
+}
+
+// Helper to handle the AbortSignal event listener.
+function setupAbortSignalHandler(signal: AbortSignal, promiseId: string): void {
+  signal.addEventListener('abort', () => {
+    cancelAssertionRequest(promiseId);
   }, {once: true});
 }
 
@@ -110,6 +119,27 @@ interface PublicKeyCredentialClientCapabilities {
 
   // Whether the platform supports user-verifying platform authenticators.
   userVerifyingPlatformAuthenticator?: boolean;
+}
+
+// Options passed to PublicKeyCredential.signalUnknownCredential.
+interface UnknownCredentialOptions {
+  rpId: string;
+  credentialId: string;
+}
+
+// Options passed to PublicKeyCredential.signalCurrentUserDetails.
+interface CurrentUserDetailsOptions {
+  rpId: string;
+  userId: string;
+  name: string;
+  displayName: string;
+}
+
+// Options passed to PublicKeyCredential.signalAllAcceptedCredentials.
+interface AllAcceptedCredentialsOptions {
+  rpId: string;
+  userId: string;
+  allAcceptedCredentialIds: string[];
 }
 
 // Class to backup and override PublicKeyCredential methods.
@@ -127,6 +157,18 @@ class PublicKeyCredentialOverrider {
 
   // PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable.
   private originalIsUVPAA: (() => Promise<boolean>)|undefined;
+
+  // PublicKeyCredential.signalUnknownCredential.
+  private originalSignalUnknownCredential:
+      ((options: UnknownCredentialOptions) => Promise<void>)|undefined;
+
+  // PublicKeyCredential.signalCurrentUserDetails.
+  private originalSignalCurrentUserDetails:
+      ((options: CurrentUserDetailsOptions) => Promise<void>)|undefined;
+
+  // PublicKeyCredential.signalAllAcceptedCredentials.
+  private originalSignalAllAcceptedCredentials:
+      ((options: AllAcceptedCredentialsOptions) => Promise<void>)|undefined;
 
   constructor() {
     // PublicKeyCredential can be undefined.
@@ -150,6 +192,23 @@ class PublicKeyCredentialOverrider {
       this.originalIsUVPAA =
           PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
               .bind(PublicKeyCredential);
+    }
+
+    if (PublicKeyCredential.signalUnknownCredential) {
+      this.originalSignalUnknownCredential =
+          PublicKeyCredential.signalUnknownCredential.bind(PublicKeyCredential);
+    }
+
+    if (PublicKeyCredential.signalCurrentUserDetails) {
+      this.originalSignalCurrentUserDetails =
+          PublicKeyCredential.signalCurrentUserDetails.bind(
+              PublicKeyCredential);
+    }
+
+    if (PublicKeyCredential.signalAllAcceptedCredentials) {
+      this.originalSignalAllAcceptedCredentials =
+          PublicKeyCredential.signalAllAcceptedCredentials.bind(
+              PublicKeyCredential);
     }
   }
 
@@ -192,6 +251,28 @@ class PublicKeyCredentialOverrider {
           return capabilities;
         },
       });
+
+      Object.defineProperty(PublicKeyCredential, 'signalUnknownCredential', {
+        value: (options: UnknownCredentialOptions) =>
+            signalUnknownCredential(options),
+        writable: true,
+        configurable: true,
+      });
+
+      Object.defineProperty(PublicKeyCredential, 'signalCurrentUserDetails', {
+        value: (options: CurrentUserDetailsOptions) =>
+            signalCurrentUserDetails(options),
+        writable: true,
+        configurable: true,
+      });
+
+      Object.defineProperty(
+          PublicKeyCredential, 'signalAllAcceptedCredentials', {
+            value: (options: AllAcceptedCredentialsOptions) =>
+                signalAllAcceptedCredentials(options),
+            writable: true,
+            configurable: true,
+          });
     } else if (shouldShimIsUVPAA()) {
       Object.defineProperty(
           PublicKeyCredential, PublicKeyCredentialOverrider.IS_UVPAA, {
@@ -267,6 +348,36 @@ class PublicKeyCredentialOverrider {
   async checkOriginalConditionalCreateCapability(): Promise<boolean> {
     return this.checkOriginalCapability('conditionalCreate');
   }
+
+  // Invokes the original WebKit implementation of
+  // PublicKeyCredential.signalUnknownCredential().
+  passthroughSignalUnknownCredential(options: UnknownCredentialOptions):
+      Promise<void> {
+    if (this.originalSignalUnknownCredential) {
+      return this.originalSignalUnknownCredential(options);
+    }
+    return Promise.resolve();
+  }
+
+  // Invokes the original WebKit implementation of
+  // PublicKeyCredential.signalCurrentUserDetails().
+  passthroughSignalCurrentUserDetails(options: CurrentUserDetailsOptions):
+      Promise<void> {
+    if (this.originalSignalCurrentUserDetails) {
+      return this.originalSignalCurrentUserDetails(options);
+    }
+    return Promise.resolve();
+  }
+
+  // Invokes the original WebKit implementation of
+  // PublicKeyCredential.signalAllAcceptedCredentials().
+  passthroughSignalAllAcceptedCredentials(
+      options: AllAcceptedCredentialsOptions): Promise<void> {
+    if (this.originalSignalAllAcceptedCredentials) {
+      return this.originalSignalAllAcceptedCredentials(options);
+    }
+    return Promise.resolve();
+  }
 }
 
 const publicKeyCredentialOverrider = new PublicKeyCredentialOverrider();
@@ -283,14 +394,15 @@ function isPublicKeyCredential(credential: Credential):
 
   // Verify that the PublicKeyCredential interface matches the webauthn spec as
   // described here: https://w3c.github.io/webauthn/#iface-pkcredential
-  // Note that, while `authenticatorAttachment` is nullable, this attribute
-  // reports the authenticator attachment modality in effect at the time the
-  // navigator.credentials.create() or navigator.credentials.get() methods
-  // successfully complete, so it should not be null.
+  // Note that, while `authenticatorAttachment` is nullable, it reports the
+  // authenticator attachment modality in effect at the time the methods
+  // successfully complete. Under some circumstances (e.g. authenticators or
+  // WebKit returning null), it can be null.
   const publicKeyCredential: PublicKeyCredential =
       (credential as PublicKeyCredential);
   return publicKeyCredential.rawId instanceof ArrayBuffer &&
-      typeof publicKeyCredential.authenticatorAttachment === 'string' &&
+      (typeof publicKeyCredential.authenticatorAttachment === 'string' ||
+       publicKeyCredential.authenticatorAttachment === null) &&
       publicKeyCredential.response.clientDataJSON instanceof ArrayBuffer &&
       typeof (publicKeyCredential.getClientExtensionResults) === 'function' &&
       typeof (publicKeyCredential.toJSON) === 'function';
@@ -360,6 +472,12 @@ function bufferSourceToBase64URL(buffer: BufferSource): string {
 type Options =
     PublicKeyCredentialCreationOptions|PublicKeyCredentialRequestOptions;
 
+// Interface containing the promise and the request ID of a passkey request.
+interface PasskeyRequestResult {
+  promise: Promise<Credential|null>;
+  requestId: string;
+}
+
 // Checks if the object is a PublicKeyCredentialCreationOptions.
 function isCreationOptions(options: Options):
     options is PublicKeyCredentialCreationOptions {
@@ -393,12 +511,12 @@ interface RelyingPartyEntity {
 function extractRelyingPartyEntity(options: Options): RelyingPartyEntity {
   if (isCreationOptions(options)) {
     return {
-      'id': options.rp.id ?? document.location.host,
+      'id': options.rp.id ?? document.location.hostname,
       'name': options.rp.name,
     };
   } else {  // PublicKeyCredentialRequestOptions
     return {
-      'id': options.rpId ?? document.location.host,
+      'id': options.rpId ?? document.location.hostname,
     };
   }
 }
@@ -644,7 +762,7 @@ function createPublicKeyCredential(
     response: AuthenticatorResponse,
     extensionOutputs: AuthenticationExtensionsClientOutputs):
     PublicKeyCredential {
-  return {
+  const credential = {
     id: arrayBufferToBase64URL(rawId),
     type: PUBLIC_KEY,
     authenticatorAttachment: authenticatorAttachment,
@@ -672,6 +790,9 @@ function createPublicKeyCredential(
       }
     },
   };
+
+  Object.setPrototypeOf(credential, PublicKeyCredential.prototype);
+  return credential as PublicKeyCredential;
 }
 
 // Creates an empty credential, which will be used to resolve a Credential
@@ -684,10 +805,8 @@ function createEmptyCredential(): PublicKeyCredential {
 
 // Returns whether a credential is non empty.
 function isValidCredential(credential: Credential|null): boolean {
-  return !!credential && !!credential.type && !!credential.id &&
-      isPublicKeyCredential(credential) &&
-      !!credential.authenticatorAttachment && !!credential.rawId &&
-      !!credential.response && !!credential.response.clientDataJSON;
+  return !!credential && isPublicKeyCredential(credential) &&
+      credential.id !== '';
 }
 
 // Creates a valid AuthenticatorAttestationResponse from the provided list of
@@ -695,9 +814,9 @@ function isValidCredential(credential: Credential|null): boolean {
 // https://www.w3.org/TR/webauthn-2/#authenticatorattestationresponse
 function createAuthenticatorAttestationResponse(
     attestationObj: ArrayBuffer, authenticatorData: ArrayBuffer,
-    publicKeySpkiDer: ArrayBuffer,
+    publicKeySpkiDer: ArrayBuffer|null,
     clientDataJson: string): AuthenticatorAttestationResponse {
-  return {
+  const response = {
     attestationObject: attestationObj,
     clientDataJSON: stringToArrayBuffer(clientDataJson),
     getAuthenticatorData(): ArrayBuffer {
@@ -715,22 +834,27 @@ function createAuthenticatorAttestationResponse(
       return ['hybrid', 'internal'];
     },
   };
+
+  Object.setPrototypeOf(response, AuthenticatorAttestationResponse.prototype);
+  return response as AuthenticatorAttestationResponse;
 }
 
 // Resolve and reject functions types used by the deferred promise.
 type ResolveFunction<T> = (value: T|PromiseLike<T>) => void;
 type RejectFunction = (reason?: any) => void;
 
-// Default timeout for deferred public key credential promises.
-const DEFAULT_TIMEOUT_MS = 300000;
+// Timeouts for deferred public key credential promises.
+const DEFAULT_TIMEOUT_MS = 300000;  // 5 mins
+const MIN_TIMEOUT_MS = 180000;      // 3 mins
+const MAX_TIMEOUT_MS = 72000000;    // 20 hours
 
 // Class containing a promise and access to its resolve and reject method for
 // later use.
 class DeferredPublicKeyCredentialPromise {
   // eslint-disable-next-line @typescript-eslint/explicit-member-accessibility
-  public promise: Promise<PublicKeyCredential>;
+  public promise: Promise<PublicKeyCredential|null>;
   // Resolve function of the deferred promise.
-  private resolve: ResolveFunction<PublicKeyCredential> = () => {};
+  private resolve: ResolveFunction<PublicKeyCredential|null> = () => {};
   // Reject function of the deferred promise.
   private reject: RejectFunction = () => {};
   // Unique ID for this deferred promise.
@@ -744,28 +868,37 @@ class DeferredPublicKeyCredentialPromise {
     // Assign a unique ID for this object.
     this.id = generateRandomId();
 
+    // Adjust the timeout, so that it is within [MIN_TIMEOUT_MS, MAX_TIMEOUT_MS].
+    const adjustedTimeoutMs =
+        Math.max(MIN_TIMEOUT_MS, Math.min(timeoutMs, MAX_TIMEOUT_MS));
+
     let timerId: ReturnType<typeof setTimeout>;
-    this.promise = Promise.race([
-      new Promise<PublicKeyCredential>((resolve, reject) => {
-        this.resolve = resolve;
-        this.reject = reject;
-      }),
-      new Promise<PublicKeyCredential>((_, reject) => {
-        timerId = setTimeout(() => {
-          reject(new DOMException(
-              `Promise timed out after ${timeoutMs}ms`, 'NotAllowedError'));
-        }, timeoutMs);
-      }),
-    ]).finally(() => {
-      clearTimeout(timerId);
-      DeferredPublicKeyCredentialPromise.ongoingPromises.delete(this.id);
-    });
+    this.promise =
+        Promise
+            .race([
+              new Promise<PublicKeyCredential|null>((resolve, reject) => {
+                this.resolve = resolve;
+                this.reject = reject;
+              }),
+              new Promise<PublicKeyCredential|null>((_, reject) => {
+                timerId = setTimeout(() => {
+                  reject(new DOMException(
+                      `Promise timed out after ${adjustedTimeoutMs}ms`,
+                      'NotAllowedError'));
+                }, adjustedTimeoutMs);
+              }),
+            ])
+            .finally(() => {
+              clearTimeout(timerId);
+              DeferredPublicKeyCredentialPromise.ongoingPromises.delete(
+                  this.id);
+            });
 
     DeferredPublicKeyCredentialPromise.ongoingPromises.set(this.id, this);
   }
 
   // Resolves a deferred promise using the provided credential.
-  static resolve(id: string, cred: PublicKeyCredential): void {
+  static resolve(id: string, cred: PublicKeyCredential|null): void {
     DeferredPublicKeyCredentialPromise.ongoingPromises.get(id)?.resolve(cred);
   }
 
@@ -773,6 +906,74 @@ class DeferredPublicKeyCredentialPromise {
   static reject(id: string, reason?: DOMException|string): void {
     DeferredPublicKeyCredentialPromise.ongoingPromises.get(id)?.reject(reason);
   }
+
+  // Checks if a deferred promise is still ongoing.
+  static has(id: string): boolean {
+    return DeferredPublicKeyCredentialPromise.ongoingPromises.has(id);
+  }
+}
+
+// Handles PublicKeyCredential.signalUnknownCredential calls from the webpage
+// by invoking WebKit's native implementation first, and notifying the browser
+// C++ layer only upon successful resolution.
+function signalUnknownCredential(options: UnknownCredentialOptions):
+    Promise<void> {
+  return publicKeyCredentialOverrider
+      .passthroughSignalUnknownCredential(options)
+      .then(() => {
+        if (options && typeof options.rpId === 'string' &&
+            typeof options.credentialId === 'string') {
+          sendWebKitMessage(HANDLER_NAME, {
+            'event': 'signalUnknownCredential',
+            'rpId': options.rpId,
+            'credentialId': options.credentialId,
+          });
+        }
+      });
+}
+
+// Handles PublicKeyCredential.signalCurrentUserDetails calls from the webpage
+// by invoking WebKit's native implementation first, and notifying the browser
+// C++ layer only upon successful resolution.
+function signalCurrentUserDetails(options: CurrentUserDetailsOptions):
+    Promise<void> {
+  return publicKeyCredentialOverrider
+      .passthroughSignalCurrentUserDetails(options)
+      .then(() => {
+        if (options && typeof options.rpId === 'string' &&
+            typeof options.userId === 'string' &&
+            typeof options.name === 'string' &&
+            typeof options.displayName === 'string') {
+          sendWebKitMessage(HANDLER_NAME, {
+            'event': 'signalCurrentUserDetails',
+            'rpId': options.rpId,
+            'userId': options.userId,
+            'name': options.name,
+            'displayName': options.displayName,
+          });
+        }
+      });
+}
+
+// Handles PublicKeyCredential.signalAllAcceptedCredentials calls from the
+// webpage by invoking WebKit's native implementation first, and notifying the
+// browser C++ layer only upon successful resolution.
+function signalAllAcceptedCredentials(options: AllAcceptedCredentialsOptions):
+    Promise<void> {
+  return publicKeyCredentialOverrider
+      .passthroughSignalAllAcceptedCredentials(options)
+      .then(() => {
+        if (options && typeof options.rpId === 'string' &&
+            typeof options.userId === 'string' &&
+            Array.isArray(options.allAcceptedCredentialIds)) {
+          sendWebKitMessage(HANDLER_NAME, {
+            'event': 'signalAllAcceptedCredentials',
+            'rpId': options.rpId,
+            'userId': options.userId,
+            'allAcceptedCredentialIds': options.allAcceptedCredentialIds,
+          });
+        }
+      });
 }
 
 // Creates a passthrough registration request from the provided parameters.
@@ -791,7 +992,7 @@ function createPassthroughRegistrationRequest(
       // https://w3c.github.io/webauthn/#sctn-authenticator-data.
       const aaguid = new Uint8Array(
           response.getAuthenticatorData().slice(37).slice(0, 16));
-      const rpId = options!.publicKey!.rp.id ?? document.location.host;
+      const rpId = options!.publicKey!.rp.id ?? document.location.hostname;
       sendWebKitMessage(HANDLER_NAME, {
         'event': 'logCreateResolved',
         'isGpm': isGpmAaguid(aaguid),
@@ -805,17 +1006,21 @@ function createPassthroughRegistrationRequest(
 // Creates a passthrough assertion request from the provided parameters.
 // The passthrough request invokes the WebKit implementation of
 // `navigator.credentials.get()` and, upon completion, informs the browser for
-// metrics purposes.
+// metrics purposes. `logStartEvent` indicates whether the start of the get
+// request should be logged for metrics.
 function createPassthroughAssertionRequest(
-    options?: CredentialRequestOptions|undefined): Promise<Credential|null> {
-  sendWebKitMessage(HANDLER_NAME, {'event': 'logGetRequest'});
+    options: CredentialRequestOptions|undefined,
+    logStartEvent: boolean): Promise<Credential|null> {
+  if (logStartEvent) {
+    sendWebKitMessage(HANDLER_NAME, {'event': 'logGetRequest'});
+  }
 
   return cachedNavigatorCredentials.get(options).then((credential) => {
     if (credential && isPublicKeyCredential(credential)) {
       // rpId is an optional member of publicKey. Default value (caller's
       // origin domain) should be used if it is not specified
       // (https://w3c.github.io/webauthn/#dom-publickeycredentialrequestoptions-rpid).
-      const rpId = options!.publicKey!.rpId ?? document.location.host;
+      const rpId = options!.publicKey!.rpId ?? document.location.hostname;
       sendWebKitMessage(HANDLER_NAME, {
         'event': 'logGetResolved',
         'credentialId': credential.id,
@@ -829,9 +1034,12 @@ function createPassthroughAssertionRequest(
 // Creates a registration request from the provided parameters.
 function createRegistrationRequest(
     publicKeyOptions: PublicKeyCredentialCreationOptions,
-    isConditional: boolean, signal?: AbortSignal): Promise<Credential|null> {
+    isConditional: boolean, signal?: AbortSignal): PasskeyRequestResult {
   if (signal?.aborted) {
-    return Promise.reject(getAbortError());
+    return {
+      promise: Promise.reject(getAbortError()),
+      requestId: '',
+    };
   }
 
   const deferredPromise =
@@ -853,15 +1061,21 @@ function createRegistrationRequest(
     'extensions': serializeExtensions(publicKeyOptions.extensions),
   });  // Attestation request
 
-  return deferredPromise.promise;
+  return {
+    promise: deferredPromise.promise,
+    requestId: deferredPromise.id,
+  };
 }
 
 // Creates an assertion request from the provided parameters.
 function createAssertionRequest(
     publicKeyOptions: PublicKeyCredentialRequestOptions, isConditional: boolean,
-    signal?: AbortSignal): Promise<Credential|null> {
+    signal?: AbortSignal): PasskeyRequestResult {
   if (signal?.aborted) {
-    return Promise.reject(getAbortError());
+    return {
+      promise: Promise.reject(getAbortError()),
+      requestId: '',
+    };
   }
 
   const deferredPromise =
@@ -883,7 +1097,111 @@ function createAssertionRequest(
     'extensions': serializeExtensions(publicKeyOptions.extensions),
   });  // Assertion request
 
-  return deferredPromise.promise;
+  return {
+    promise: deferredPromise.promise,
+    requestId: deferredPromise.id,
+  };
+}
+
+// Interface tracking the status of concurrent conditional passkey requests.
+interface ConditionalPromiseStatus {
+  // Whether the request was deferred to the renderer / WebKit passthrough.
+  deferredToRenderer: boolean;
+  // Whether WebKit's passthrough request has settled (resolved or rejected).
+  passthroughSettled: boolean;
+  // The error from WebKit's passthrough request, if it rejected.
+  passthroughError: any;
+  // The result credential from WebKit's passthrough request, if it resolved.
+  passthroughResult: Credential|null;
+}
+
+// Handles a conditional get passkey request by running the browser-layer and
+// the WebKit requests concurrently.
+function handleConditionalGetRequest(options: CredentialRequestOptions):
+    Promise<Credential|null> {
+  const browserAssertionRequest =
+      createAssertionRequest(options.publicKey!, true, options.signal);
+
+  const status: ConditionalPromiseStatus = {
+    deferredToRenderer: false,
+    passthroughSettled: false,
+    passthroughError: null,
+    passthroughResult: null,
+  };
+
+  const passthroughController = new AbortController();
+  const signal = options.signal;
+  if (signal) {
+    if (signal.aborted) {
+      passthroughController.abort(signal.reason);
+    } else {
+      signal.addEventListener('abort', () => {
+        passthroughController.abort(signal.reason);
+      }, {once: true});
+    }
+  }
+  const passthroughOptions: CredentialRequestOptions = {
+    ...options,
+    signal: passthroughController.signal,
+  };
+
+  // Manually controlled promise representing the WebKit passthrough request.
+  // This allows coordinating its resolution/rejection with the browser request:
+  // - Resolves as soon as WebKit produces a valid credential.
+  // - Rejects ONLY if WebKit fails AND the browser request has deferred to the
+  //   renderer, preventing WebKit errors from prematurely failing the flow
+  //   while the browser UI is still active.
+  let resolvePassthrough: (value: Credential|null) => void = () => {};
+  let rejectPassthrough: (reason: any) => void = () => {};
+  const coordinatedPassthrough =
+      new Promise<Credential|null>((resolve, reject) => {
+        resolvePassthrough = resolve;
+        rejectPassthrough = reject;
+      });
+
+  createPassthroughAssertionRequest(passthroughOptions, false)
+      .then(
+          result => {
+            status.passthroughSettled = true;
+            status.passthroughResult = result;
+            resolvePassthrough(result);
+            if (isValidCredential(result)) {
+              cancelAssertionRequest(browserAssertionRequest.requestId);
+            }
+          },
+          err => {
+            status.passthroughSettled = true;
+            status.passthroughError = err;
+            if (status.deferredToRenderer) {
+              rejectPassthrough(err);
+            }
+          });
+
+  const browserAssertionPromise =
+      browserAssertionRequest.promise.then(result => {
+        if (result === null) {
+          return null;
+        }
+
+        if (isValidCredential(result)) {
+          passthroughController.abort();
+          return result;
+        }
+
+        status.deferredToRenderer = true;
+        if (status.passthroughSettled) {
+          if (status.passthroughError) {
+            throw status.passthroughError;
+          }
+          return status.passthroughResult;
+        }
+        return coordinatedPassthrough;
+      });
+
+  return Promise.race([
+    browserAssertionPromise,
+    coordinatedPassthrough,
+  ]);
 }
 
 /**
@@ -897,22 +1215,37 @@ const credentialsContainer: CredentialsContainer = {
     }
 
     const isConditional: boolean = isConditionalMediation(options);
+    hasPendingRequest = true;
+
+    let promise: Promise<Credential|null>;
     if (shouldHandlePasskeyRequests(isConditional) &&
         options.publicKey.challenge) {
-      return createAssertionRequest(
-                 options.publicKey, isConditional, options.signal)
-          .then(result => {
-            if (isValidCredential(result)) {
-              // TODO(crbug.com/460485333): Notification message of success
-              // here?
-              return result;
-            }
+      if (isConditional) {
+        promise = handleConditionalGetRequest(options);
+      } else {
+        const browserAssertionRequest = createAssertionRequest(
+            options.publicKey, isConditional, options.signal);
+        promise = browserAssertionRequest.promise.then(result => {
+          if (result === null) {
+            return null;
+          }
 
-            return createPassthroughAssertionRequest(options);
-          });
+          if (isValidCredential(result)) {
+            // TODO(crbug.com/460485333): Notification message of
+            // success here?
+            return result;
+          }
+
+          return createPassthroughAssertionRequest(options, true);
+        });
+      }
     } else {
-      return createPassthroughAssertionRequest(options);
+      promise = createPassthroughAssertionRequest(options, true);
     }
+
+    return promise.finally(() => {
+      hasPendingRequest = false;
+    });
   },
   create: function(
       options?: CredentialCreationOptions|undefined): Promise<Credential|null> {
@@ -922,23 +1255,34 @@ const credentialsContainer: CredentialsContainer = {
     }
 
     const isConditional: boolean = isConditionalMediation(options);
+    hasPendingRequest = true;
+
+    let promise: Promise<Credential|null>;
     if (shouldHandlePasskeyRequests(isConditional) &&
         options.publicKey.challenge && options.publicKey.user &&
         options.publicKey.user.id) {
-      return createRegistrationRequest(
-                 options.publicKey, isConditional, options.signal)
-          .then(result => {
-            if (isValidCredential(result)) {
-              // TODO(crbug.com/460485333): Notification message of success
-              // here?
-              return result;
-            }
+      const browserRegistrationRequest = createRegistrationRequest(
+          options.publicKey, isConditional, options.signal);
+      promise = browserRegistrationRequest.promise.then(result => {
+        if (result === null) {
+          return null;
+        }
 
-            return createPassthroughRegistrationRequest(options);
-          });
+        if (isValidCredential(result)) {
+          // TODO(crbug.com/460485333): Notification message of
+          // success here?
+          return result;
+        }
+
+        return createPassthroughRegistrationRequest(options);
+      });
     } else {
-      return createPassthroughRegistrationRequest(options);
+      promise = createPassthroughRegistrationRequest(options);
     }
+
+    return promise.finally(() => {
+      hasPendingRequest = false;
+    });
   },
   preventSilentAccess: function(): Promise<any> {
     return cachedNavigatorCredentials.preventSilentAccess();
@@ -981,7 +1325,7 @@ function deferToRenderer(requestId: string, requestType: number): void {
             DeferredPublicKeyCredentialPromise.resolve(
                 requestId, emptyCredential);
           } else {
-            DeferredPublicKeyCredentialPromise.reject(requestId);
+            DeferredPublicKeyCredentialPromise.resolve(requestId, null);
           }
         });
   } else if (requestType === RequestType.CONDITIONAL_CREATE) {
@@ -991,7 +1335,7 @@ function deferToRenderer(requestId: string, requestType: number): void {
             DeferredPublicKeyCredentialPromise.resolve(
                 requestId, emptyCredential);
           } else {
-            DeferredPublicKeyCredentialPromise.reject(requestId);
+            DeferredPublicKeyCredentialPromise.resolve(requestId, null);
           }
         });
   } else {  // MODAL or UNKNOWN
@@ -1000,12 +1344,11 @@ function deferToRenderer(requestId: string, requestType: number): void {
 }
 
 // Function called from C++ to reject a passkey request.
-function rejectPasskeyRequest(requestId: string): void {
-  const reason =
-      new DOMException('The operation is not allowed.', 'NotAllowedError');
+function rejectPasskeyRequest(
+    requestId: string, errorName: string, errorMessage: string): void {
+  const reason = new DOMException(errorMessage, errorName);
   DeferredPublicKeyCredentialPromise.reject(requestId, reason);
 }
-
 
 // Resolves the credential promise with the provided response.
 function resolveCredentialPromise(
@@ -1028,9 +1371,11 @@ function resolveAssertionRequest(
     authenticatorData: decodeBase64URLToArrayBuffer(authenticatorData64),
     clientDataJSON: stringToArrayBuffer(clientDataJson),
     signature: decodeBase64URLToArrayBuffer(signature64),
-    userHandle: decodeBase64URLToArrayBuffer(userHandle64),
+    userHandle: userHandle64 ? decodeBase64URLToArrayBuffer(userHandle64) :
+                               null,
   };
 
+  Object.setPrototypeOf(response, AuthenticatorAssertionResponse.prototype);
   resolveCredentialPromise(requestId, id64, response, extensions);
 }
 
@@ -1045,7 +1390,10 @@ function resolveAttestationRequest(
       createAuthenticatorAttestationResponse(
           decodeBase64URLToArrayBuffer(attestationObject64),
           decodeBase64URLToArrayBuffer(authenticatorData64),
-          decodeBase64URLToArrayBuffer(publicKeySpkiDer64), clientDataJson);
+          publicKeySpkiDer64 ?
+              decodeBase64URLToArrayBuffer(publicKeySpkiDer64) :
+              null,
+          clientDataJson);
 
   resolveCredentialPromise(requestId, id64, response, extensions);
 }
@@ -1062,4 +1410,19 @@ if (window.isSecureContext) {
 
   // Override PublicKeyCredential's behaviour to expose browser capabilities.
   publicKeyCredentialOverrider.override();
+
+  if (shouldHandleConditionalPasskeyRequests() ||
+      shouldHandleModalPasskeyRequests()) {
+    // When navigating back to a page where a WebAuthn request has been made,
+    // the page must be reloaded so that the WebAuthn request happens again,
+    // otherwise the user won't be able to perform the assertion or registration
+    // again.
+    window.addEventListener('pageshow', (event) => {
+      // event.persisted is true if the page was restored from the bfcache.
+      if (event.persisted && hasPendingRequest) {
+        // Force a full page reload to clear stale WebAuthn state.
+        window.location.reload();
+      }
+    });
+  }
 }

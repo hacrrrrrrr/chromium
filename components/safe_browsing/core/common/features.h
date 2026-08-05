@@ -31,11 +31,6 @@ BASE_DECLARE_FEATURE(kAdSamplerTriggerFeature);
 // Enables adding warning shown timestamp to client safe browsing report.
 BASE_DECLARE_FEATURE(kAddWarningShownTSToClientSafeBrowsingReport);
 
-// Controls whether V4Store attempts to migrate V5 stores on disk to V4. This
-// feature is temporary while the `kLocalListsUseSBv5` feature is still only
-// partially implemented.
-BASE_DECLARE_FEATURE(kAllowSafeBrowsingV4StoreDiskMigrationChanges);
-
 // Enables antivirus product info to be included in download pings.
 BASE_DECLARE_FEATURE(kAntivirusTelemetryForDownloads);
 
@@ -122,6 +117,9 @@ extern const base::FeatureParam<bool>
     kCsdCreditCardFormEnableInteractionTrigger;
 // Specifies whether to enable triggering on detection of a credit card form.
 extern const base::FeatureParam<bool> kCsdCreditCardFormEnableDetectionTrigger;
+
+// Enables the creation of the ClientSideDetectionService on iOS.
+BASE_DECLARE_FEATURE(kClientSideDetectionEnabledIos);
 
 // Killswitch for Llama forced trigger info redirect chain check.
 BASE_DECLARE_FEATURE(kClientSideDetectionForcedLlamaRedirectChainKillswitch);
@@ -223,6 +221,14 @@ extern const base::FeatureParam<int> kDownloadWarningSurveyIgnoreDelaySeconds;
 // the value of DownloadWarningHatsType enum (see
 // //c/b/download/download_warning_desktop_hats_util.h).
 extern const base::FeatureParam<int> kDownloadWarningSurveyType;
+
+// When enabled, behaves the same as
+// kMigrateToBlockV8OptimizerOnUnfamiliarSites, but only targeting profiles
+// that have Safe Browsing Enhanced Protection enabled.
+BASE_DECLARE_FEATURE(kEnableBlockV8OptimizerOnUnfamiliarSitesForEsbClients);
+BASE_DECLARE_FEATURE_PARAM(bool, kEsbDryRun);
+BASE_DECLARE_FEATURE_PARAM(int, kEsbMinSiteEngagementScore);
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kEsbMinAgeOfInitialVisit);
 
 // Enabled additional device and network information to RealTimeUrlCheck
 // requests, WP scan requests, and reporting events. These will be visible from
@@ -373,8 +379,8 @@ BASE_DECLARE_FEATURE_PARAM(
     kMigrateToBlockV8OptimizerOnUnfamiliarSitesMinAgeOfInitialVisit);
 // If true, the migration will run in dry-run mode (evaluating eligibility and
 // logging metrics, but not actually changing the content setting).
-extern const base::FeatureParam<bool>
-    kMigrateToBlockV8OptimizerOnUnfamiliarSitesDryRun;
+BASE_DECLARE_FEATURE_PARAM(bool,
+                           kMigrateToBlockV8OptimizerOnUnfamiliarSitesDryRun);
 
 // When enabled, the Password Leak detection toggle is moved out from under the
 // 'Standard protection' Safe Browsing option to the top-level 'Privacy and
@@ -387,10 +393,6 @@ BASE_DECLARE_FEATURE(kNoticeQueueForEsb);
 // Enable the collection of Notification Telemetry to track potentially abusive
 // notifications.
 BASE_DECLARE_FEATURE(kNotificationTelemetry);
-
-// Enable the collection of ServiceWorkerBehaviors via the
-// NotificationTelemetryService.
-BASE_DECLARE_FEATURE(kNotificationTelemetrySwb);
 
 // Enables proactive password protection, which triggers a CSD scan when
 // focusing on a password field.
@@ -470,6 +472,15 @@ BASE_DECLARE_FEATURE(kSkipImageClassificationScoringForNonPageLoadTriggers);
 
 // Controls the daily quota for the suspicious site trigger.
 BASE_DECLARE_FEATURE(kSuspiciousSiteTriggerQuotaFeature);
+
+// Enables HaTS surveys for users encountering suspicious site warnings.
+BASE_DECLARE_FEATURE(kSuspiciousSiteWarningSurvey);
+extern const base::FeatureParam<std::string>
+    kSuspiciousSiteWarningSurveyTriggerId;
+extern const base::FeatureParam<std::string>
+    kSuspiciousSiteWarningSurveyProceedTriggerId;
+extern const base::FeatureParam<std::string>
+    kSuspiciousSiteWarningSurveyHeedTriggerId;
 
 // Enables warnings on sites that Safe Browsing deems suspicious.
 BASE_DECLARE_FEATURE(kSuspiciousSiteWarnings);

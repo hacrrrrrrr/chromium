@@ -28,6 +28,7 @@
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_init_state.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
@@ -238,8 +239,10 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowPropertyManagerTest,
       Browser::CreateParams::CreateForPictureInPicture(
           app_name, true, browser()->GetProfile(), true);
   Browser* pip_browser = Browser::Create(params);
-  ASSERT_TRUE(pip_browser->is_type_picture_in_picture());
-  ASSERT_EQ(app_name, pip_browser->app_name());
+  ASSERT_EQ(pip_browser->GetType(),
+            BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE);
+  ASSERT_EQ(app_name,
+            BrowserInitState::From(pip_browser)->create_params().app_name);
 
   content::RunAllTasksUntilIdle();
 
@@ -256,7 +259,7 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowPropertyManagerTest,
 
   std::wstring expected_app_id =
       shell_integration::win::GetAppUserModelIdForApp(
-          base::UTF8ToWide(app_name), browser()->profile()->GetPath());
+          base::UTF8ToWide(app_name), browser()->GetProfile()->GetPath());
 
   EXPECT_EQ(expected_app_id, prop_var.get().pwszVal);
 }
@@ -267,8 +270,10 @@ IN_PROC_BROWSER_TEST_F(BrowserWindowPropertyManagerTest,
       Browser::CreateParams::CreateForPictureInPicture(
           "", true, browser()->GetProfile(), true);
   Browser* pip_browser = Browser::Create(params);
-  ASSERT_TRUE(pip_browser->is_type_picture_in_picture());
-  ASSERT_TRUE(pip_browser->app_name().empty());
+  ASSERT_EQ(pip_browser->GetType(),
+            BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE);
+  ASSERT_TRUE(
+      BrowserInitState::From(pip_browser)->create_params().app_name.empty());
 
   content::RunAllTasksUntilIdle();
 

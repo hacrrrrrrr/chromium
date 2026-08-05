@@ -1081,20 +1081,16 @@ void RuleSet::AddChildRules(StyleRule* parent_rule,
 
       // Try first the parameter from @apply, then the fallback block given in
       // @contents, and if neither exists, nothing happens.
-      StyleRule* rules_to_add = nullptr;
-      if (apply->FakeParentRuleForDeclarations()) {
+      const StyleRuleGroup* rules_to_add = nullptr;
+      if (apply->HasContentsBlock()) {
         rules_to_add = To<StyleRuleApplyMixin>(
-                           apply->Clone(parent_rule, mixin_parameter_bindings))
-                           ->FakeParentRuleForDeclarations();
-      } else if (contents_rule->FakeParentRuleForFallback() &&
-                 contents_rule->FakeParentRuleForFallback()->ChildRules()) {
-        rules_to_add =
-            To<StyleRuleContentsStatement>(
-                contents_rule->Clone(parent_rule, mixin_parameter_bindings))
-                ->FakeParentRuleForFallback();
+            apply->Clone(parent_rule, mixin_parameter_bindings));
+      } else if (!contents_rule->ChildRules().empty()) {
+        rules_to_add = To<StyleRuleContentsStatement>(
+            contents_rule->Clone(parent_rule, mixin_parameter_bindings));
       }
-      if (rules_to_add && rules_to_add->ChildRules()) {
-        AddChildRules(parent_rule, *rules_to_add->ChildRules(), medium, mixins,
+      if (rules_to_add) {
+        AddChildRules(parent_rule, rules_to_add->ChildRules(), medium, mixins,
                       add_rule_flags, container_queries, cascade_layer,
                       style_scope, apply_mixins_stack);
       }
@@ -1334,18 +1330,16 @@ void RuleSet::AddRulesFromSheet(const StyleSheetContents* sheet,
                 kRuleHasNoSpecialState, nullptr /* container_queries */,
                 cascade_layer, style_scope, apply_mixins_stack);
 
-  if (const auto* route_map = RouteMap::Get(medium.GetDocument())) {
-    // Need to do this for every style sheet, since each may add their own
-    // anonymous routes.
-    //
-    // TODO(crbug.com/436805487): See if we can find a better place for this.
-    // Maybe RuleSet isn't the right place. DidRoutesChange() was modeled after
-    // DidMediaQueryResultsChange(), but maybe there's a better way.
-    if (const NavigationState* new_state = route_map->GetNavigationState()) {
-      navigation_state_ = MakeGarbageCollected<NavigationState>(*new_state);
-    } else {
-      navigation_state_ = nullptr;
-    }
+  // Need to do this for every style sheet, since each may add their own
+  // anonymous routes.
+  //
+  // TODO(crbug.com/436805487): See if we can find a better place for this.
+  // Maybe RuleSet isn't the right place. DidRoutesChange() was modeled after
+  // DidMediaQueryResultsChange(), but maybe there's a better way.
+  if (const auto* new_state = NavigationState::Get(medium.GetDocument())) {
+    navigation_state_ = MakeGarbageCollected<NavigationState>(*new_state);
+  } else {
+    navigation_state_ = nullptr;
   }
 }
 

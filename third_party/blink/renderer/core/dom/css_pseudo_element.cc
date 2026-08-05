@@ -268,7 +268,7 @@ PseudoElement* GetPseudoElementForCSSPseudoElement(
 LayoutObject* CSSPseudoElement::GetLayoutObject() const {
   CHECK(element_);
   // Ensure layout is up to date.
-  element_->GetDocument().EnsurePaintLocationDataValidForNode(
+  element_->GetDocument().UpdateStyleAndLayoutForNode(
       element_, DocumentUpdateReason::kJavaScript);
 
   PseudoElement* pseudo_element = GetPseudoElementForCSSPseudoElement(
@@ -341,10 +341,8 @@ void CSSPseudoElementsCacheData::CacheCSSPseudoElement(
     const AtomicString& pseudo_argument,
     CSSPseudoElement& pseudo_element) {
   PseudoElementCacheKey key(pseudo_id, pseudo_argument);
-  auto it = pseudo_elements_map_.find(key);
-  if (it != pseudo_elements_map_.end()) {
-    return;
-  }
+  // insert() keeps any existing entry, so the first cached pseudo-element for
+  // a key stays cached.
   pseudo_elements_map_.insert(key, &pseudo_element);
 }
 

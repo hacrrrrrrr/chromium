@@ -67,6 +67,7 @@ public class AtMemoryBottomSheetBridge implements AtMemoryBottomSheetCoordinator
     @CalledByNative
     public static AutofillSuggestion createAutofillSuggestion(
             @JniType("std::u16string") String label,
+            @JniType("std::u16string") String secondaryLabel,
             @JniType("std::u16string") String subLabel,
             int iconId,
             int suggestionType,
@@ -75,6 +76,7 @@ public class AtMemoryBottomSheetBridge implements AtMemoryBottomSheetCoordinator
             boolean hasDeactivatedStyle) {
         return new AutofillSuggestion.Builder()
                 .setLabel(label)
+                .setSecondaryLabel(secondaryLabel)
                 .setSubLabel(subLabel)
                 .setIconId(iconId)
                 .setSuggestionType(suggestionType)
@@ -119,10 +121,8 @@ public class AtMemoryBottomSheetBridge implements AtMemoryBottomSheetCoordinator
     }
 
     @Override
-    public void onSearchFocus(boolean hasFocus) {
-        if (hasFocus) {
-            mCoordinator.expandSheet();
-        }
+    public void requestExpandSheet(boolean expandInFullHeight) {
+        mCoordinator.expand(expandInFullHeight);
     }
 
     @Override
@@ -130,6 +130,14 @@ public class AtMemoryBottomSheetBridge implements AtMemoryBottomSheetCoordinator
         if (mNativeAtMemoryBottomSheetBridge != 0) {
             AtMemoryBottomSheetBridgeJni.get()
                     .onSuggestionSelected(mNativeAtMemoryBottomSheetBridge, position);
+        }
+    }
+
+    @Override
+    public void onSuggestionDismissed(int position) {
+        if (mNativeAtMemoryBottomSheetBridge != 0) {
+            AtMemoryBottomSheetBridgeJni.get()
+                    .onSuggestionDismissed(mNativeAtMemoryBottomSheetBridge, position);
         }
     }
 
@@ -167,6 +175,8 @@ public class AtMemoryBottomSheetBridge implements AtMemoryBottomSheetCoordinator
                 long nativeAtMemoryBottomSheetBridge, @JniType("std::u16string") String query);
 
         void onSuggestionSelected(long nativeAtMemoryBottomSheetBridge, int position);
+
+        void onSuggestionDismissed(long nativeAtMemoryBottomSheetBridge, int position);
 
         void onChildSuggestionsShown(long nativeAtMemoryBottomSheetBridge, int parentPosition);
 

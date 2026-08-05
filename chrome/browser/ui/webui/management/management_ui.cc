@@ -6,17 +6,18 @@
 
 #include <memory>
 
+#include "base/feature_list.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/android_buildflags.h"
+#include "build/build_config.h"
 #include "chrome/browser/enterprise/browser_management/management_identity.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/managed_ui.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/webui/current_channel_logo.h"
 #include "chrome/browser/ui/webui/management/management_ui_constants.h"
 #include "chrome/browser/ui/webui/management/management_ui_handler.h"
-#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -32,6 +33,10 @@
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/webui/webui_util.h"
 
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/webui/theme_source.h"
+#endif
+
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/strings/grit/ash_strings.h"
 #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
@@ -44,6 +49,7 @@
 #else  // BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
+#include "chrome/browser/ui/managed_ui.h"  // nogncheck crbug.com/40147906
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace {
@@ -102,7 +108,7 @@ content::WebUIDataSource* CreateAndAddManagementUIHtmlSource(Profile* profile) {
 }  // namespace
 
 // static
-base::RefCountedMemory* ManagementUI::GetFaviconResourceBytes(
+scoped_refptr<base::RefCountedMemory> ManagementUI::GetFaviconResourceBytes(
     ui::ResourceScaleFactor scale_factor) {
   return ui::ResourceBundle::GetSharedInstance().LoadDataResourceBytesForScale(
       IDR_MANAGEMENT_FAVICON, scale_factor);
@@ -329,3 +335,14 @@ void ManagementUI::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       policy::policy_prefs::kHasDismissedManagementPagePromotionBanner, false);
 }
+
+// Mobile Android is the only platform without extensions support.
+// On Mobile, chrome://management WebUI is guarded behind the
+// `features::kMigrateManagementPageToWebUIOnMobile` experiment flag.
+#if !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+bool ManagementUIConfig::IsWebUIEnabled(
+    content::BrowserContext* browser_context) {
+  return base::FeatureList::IsEnabled(
+      features::kMigrateManagementPageToWebUIOnMobile);
+}
+#endif

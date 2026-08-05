@@ -59,22 +59,27 @@ source_set("unit_tests") {
 
   if (enterprise_data_controls) {
     sources += [ "data_protection_clipboard_utils_unittest.cc" ]
-    deps += [ "//components/enterprise/data_controls/core/browser:features" ]
+    deps += [
+      "//components/enterprise/data_controls/content/browser",
+      "//components/enterprise/data_controls/core/browser:features",
+    ]
     if (!is_android) {
       sources += [ "clipboard_toast_tracker_unittest.cc" ]
     }
   }
 
-  if (toolkit_views) {
+  if (enterprise_screenshot_protection || enterprise_watermark) {
     sources += [
       "data_protection_navigation_observer_unittest.cc",
-      "data_protection_overlay_view_unittest.cc",
       "data_protection_page_user_data_unittest.cc",
     ]
     deps += [
-      ":data_protection_view_lib",
       "//components/safe_browsing/core/browser:referring_app_info",
       "//components/safe_browsing/core/browser/realtime:test_support",
     ]
+    if (toolkit_views) {
+      sources += [ "data_protection_overlay_view_unittest.cc" ]
+      deps += [ ":data_protection_view_lib" ]
+    }
   }
 }

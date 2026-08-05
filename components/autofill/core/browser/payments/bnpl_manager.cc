@@ -128,9 +128,36 @@ void BnplManager::OnUserDecisionToUseBnpl(
   if (ongoing_flow_state_ != nullptr &&
       base::FeatureList::IsEnabled(
           features::kAutofillEnablePayNowPayLaterTabs)) {
-    // User has already navigated to Pay Later tab before in this popup. This
-    // means that either there is an ongoing flow already, or the user is in an
-    // error state, both of which mean a new flow should not be started.
+    // User has already navigated to Pay Later tab before. This means that
+    // either there is an ongoing flow already, or the user is in an error
+    // state, both of which mean a new flow should not be started.
+    CHECK(payments_autofill_client().GetBnplStrategy());
+    using enum BnplStrategy::UserDecisionToUseBnplAgainNextAction;
+    switch (payments_autofill_client()
+                .GetBnplStrategy()
+                ->GetNextActionOnUserDecisionToUseBnplAgain()) {
+      case kDoNothing:
+        break;
+      case kReshowSelectBnplIssuerUiOnAndroid:
+        // For Android only: If the user previously extracted an amount,
+        // selected an issuer, switched to Pay Now (which reset the issuer
+        // choice while preserving the final checkout amount), and now returns
+        // to the Pay Later tab: re-show the issuer selection UI.
+        if (!ongoing_flow_state_->issuer.has_value()) {
+          CHECK_DEREF(payments_autofill_client().GetBnplUiDelegate())
+              .ShowSelectBnplIssuerUi(
+                  GetSortedBnplIssuerContext(
+                      browser_autofill_manager_->client(),
+                      ongoing_flow_state_->final_checkout_amount),
+                  ongoing_flow_state_->app_locale,
+                  base::BindRepeating(&BnplManager::OnIssuerAccepted,
+                                      weak_factory_.GetWeakPtr()),
+                  base::BindOnce(&BnplManager::Reset,
+                                 weak_factory_.GetWeakPtr()),
+                  HasSeenAmountExtractionAiTerms());
+        }
+        break;
+    }
     return;
   }
 
@@ -213,11 +240,15 @@ void BnplManager::OnUserDecisionToUseBnpl(
         // empty. Instead, continue to show disabled issuers.
         if (is_card_number_field_empty_) {
           browser_autofill_manager_->GetAmountExtractionManager()
-              .TriggerCheckoutAmountExtractionWithAi();
+              .TriggerCheckoutAmountExtractionWithAi(
+                  base::BindOnce(&BnplManager::OnAmountExtractionReturnedFromAi,
+                                 weak_factory_.GetWeakPtr()));
         }
       } else {
         browser_autofill_manager_->GetAmountExtractionManager()
-            .TriggerCheckoutAmountExtractionWithAi();
+            .TriggerCheckoutAmountExtractionWithAi(
+                base::BindOnce(&BnplManager::OnAmountExtractionReturnedFromAi,
+                               weak_factory_.GetWeakPtr()));
       }
     } else {
       // On user decision to use BNPL, if the user has not seen the AI
@@ -235,7 +266,17 @@ void BnplManager::OnIssuerAccepted(BnplIssuer issuer) {
 
   if (base::FeatureList::IsEnabled(
           features::kAutofillEnablePayNowPayLaterTabs)) {
-    ReplaceIssuerSuggestionsWithLoadingThrobber();
+    CHECK(payments_autofill_client().GetBnplStrategy());
+    using enum BnplStrategy::BeforeSwitchingViewAction;
+    switch (payments_autofill_client()
+                .GetBnplStrategy()
+                ->GetBeforeViewSwitchAction()) {
+      case kDoNothing:
+        break;
+      case kCloseCurrentUi:
+        ReplaceIssuerSuggestionsWithLoadingThrobber();
+        break;
+    }
     if (!has_logged_bnpl_suggestion_accepted_) {
       autofill_metrics::LogPayLaterTabSuggestionAccepted(
           ongoing_flow_state_->issuer->issuer_id(),
@@ -250,7 +291,9 @@ void BnplManager::OnIssuerAccepted(BnplIssuer issuer) {
           features::kAutofillEnableAiBasedAmountExtraction) &&
       !ongoing_flow_state_->final_checkout_amount) {
     browser_autofill_manager_->GetAmountExtractionManager()
-        .TriggerCheckoutAmountExtractionWithAi();
+        .TriggerCheckoutAmountExtractionWithAi(
+            base::BindOnce(&BnplManager::OnAmountExtractionReturnedFromAi,
+                           weak_factory_.GetWeakPtr()));
     return;
   }
 
@@ -335,39 +378,58 @@ void BnplManager::OnCreditCardSuggestionsShown(
 
 void BnplManager::OnUserDecisionToUseSavedCards() {
   CancelOngoingRequests();
-  CHECK(ongoing_flow_state_);
 
   browser_autofill_manager_->GetCreditCardFormEventLogger()
       .OnUserDecisionToUsePayNowTab();
 
-  // Always go to issuer suggestions if there is a checkout amount present.
-  // Early return in this case to keep the checkout amount cached.
-  if (ongoing_flow_state_->final_checkout_amount) {
-    ongoing_flow_state_->issuer.reset();
-    ReplaceLoadingThrobberWithIssuerSuggestions(
-        GetSortedBnplIssuerContext(browser_autofill_manager_->client(),
-                                   ongoing_flow_state_->final_checkout_amount));
+  if (!ongoing_flow_state_) {
     return;
   }
 
-  if (HasSeenAmountExtractionAiTerms() && is_card_number_field_empty_) {
-    // Make sure the loading throbber is showing when all below conditions are
-    // met:
-    // 1. The user has seen the AI terms before.
-    // 2. There is no checkout amount retrieved.
-    // 3. The card number field is empty.
-    ReplaceIssuerSuggestionsWithLoadingThrobber();
-  } else {
-    // For first time users, if there is no checkout amount, make sure the
-    // Pay Later tab is updated to show issuer suggestions.
-    ReplaceLoadingThrobberWithIssuerSuggestions(
-        GetSortedBnplIssuerContext(browser_autofill_manager_->client(),
-                                   ongoing_flow_state_->final_checkout_amount));
-  }
+  CHECK(payments_autofill_client().GetBnplStrategy());
+  using enum BnplStrategy::UserDecisionToUseSavedCardsNextAction;
+  switch (payments_autofill_client()
+              .GetBnplStrategy()
+              ->GetNextActionOnUserDecisionToUseSavedCards()) {
+    case kUpdateDesktopPopupSuggestions: {
+      // Always go to issuer suggestions if there is a checkout amount present.
+      // Early return in this case to keep the checkout amount cached.
+      if (ongoing_flow_state_->final_checkout_amount) {
+        ongoing_flow_state_->issuer.reset();
+        ReplaceLoadingThrobberWithIssuerSuggestions(GetSortedBnplIssuerContext(
+            browser_autofill_manager_->client(),
+            ongoing_flow_state_->final_checkout_amount));
+        return;
+      }
 
-  // Reset flow cache to restart the flow if the user select the Pay Later tab
-  // again.
-  ongoing_flow_state_.reset();
+      if (HasSeenAmountExtractionAiTerms() && is_card_number_field_empty_) {
+        // Make sure the loading throbber is showing when all below conditions
+        // are met:
+        // 1. The user has seen the AI terms before.
+        // 2. There is no checkout amount retrieved.
+        // 3. The card number field is empty.
+        ReplaceIssuerSuggestionsWithLoadingThrobber();
+      } else {
+        // For first time users, if there is no checkout amount, make sure the
+        // Pay Later tab is updated to show issuer suggestions.
+        ReplaceLoadingThrobberWithIssuerSuggestions(GetSortedBnplIssuerContext(
+            browser_autofill_manager_->client(),
+            ongoing_flow_state_->final_checkout_amount));
+      }
+      ongoing_flow_state_.reset();
+      break;
+    }
+    case kResetSelectedIssuerOrFlowStateOnAndroid: {
+      // Android strategy: keep cached checkout amount if present, while
+      // resetting selected issuer choice. Otherwise reset flow state.
+      if (ongoing_flow_state_->final_checkout_amount) {
+        ongoing_flow_state_->issuer.reset();
+      } else {
+        ongoing_flow_state_.reset();
+      }
+      break;
+    }
+  }
 }
 
 void BnplManager::OnAmountExtractionReturned(
@@ -452,20 +514,29 @@ void BnplManager::OnAmountExtractionReturnedFromAi(
     CHECK(payments_autofill_client().GetBnplStrategy());
     if (base::FeatureList::IsEnabled(
             features::kAutofillEnablePayNowPayLaterTabs)) {
+      std::vector<BnplIssuerContext> issuer_contexts =
+          GetSortedBnplIssuerContext(browser_autofill_manager_->client(),
+                                     /*checkout_amount=*/std::nullopt,
+                                     result.error());
       using enum BnplStrategy::BnplAiBasedAmountExtractionReturnedNextAction;
       switch (payments_autofill_client()
                   .GetBnplStrategy()
                   ->GetNextActionOnAiBasedAmountExtractionReturned()) {
         case kReplaceLoadingThrobberWithIssuerSuggestionsOnDesktop: {
-          std::vector<BnplIssuerContext> issuer_contexts =
-              GetSortedBnplIssuerContext(browser_autofill_manager_->client(),
-                                         /*checkout_amount=*/std::nullopt,
-                                         result.error());
           ReplaceLoadingThrobberWithIssuerSuggestions(issuer_contexts);
           break;
         }
         case kSwitchToIssuerSelectionScreenOnAndroid:
-          // TODO(viplavkadam): Implement Android flow.
+          ongoing_flow_state_->issuer.reset();
+          payments_autofill_client().OnPurchaseAmountExtracted(
+              issuer_contexts,
+              /*checkout_amount=*/std::nullopt,
+              /*is_amount_supported_by_any_issuer=*/false,
+              ongoing_flow_state_->app_locale,
+              base::BindOnce(&BnplManager::OnIssuerAccepted,
+                             weak_factory_.GetWeakPtr()),
+              base::BindOnce(&BnplManager::Reset, weak_factory_.GetWeakPtr()));
+
           break;
       }
     } else {
@@ -516,6 +587,12 @@ void BnplManager::OnAmountExtractionReturnedFromAi(
     std::vector<BnplIssuerContext> issuer_contexts =
         GetSortedBnplIssuerContext(browser_autofill_manager_->client(),
                                    ongoing_flow_state_->final_checkout_amount);
+    bool is_amount_supported_by_any_issuer =
+        IsExtractedAmountSupportedByAnyBnplIssuer(
+            payments_autofill_client()
+                .GetPaymentsDataManager()
+                .GetBnplIssuers(),
+            ongoing_flow_state_->final_checkout_amount);
     if (base::FeatureList::IsEnabled(
             features::kAutofillEnablePayNowPayLaterTabs)) {
       using enum BnplStrategy::BnplAiBasedAmountExtractionReturnedNextAction;
@@ -527,16 +604,16 @@ void BnplManager::OnAmountExtractionReturnedFromAi(
           break;
         }
         case kSwitchToIssuerSelectionScreenOnAndroid:
-          // TODO(viplavkadam): Implement Android flow.
+          payments_autofill_client().OnPurchaseAmountExtracted(
+              issuer_contexts, ongoing_flow_state_->final_checkout_amount,
+              is_amount_supported_by_any_issuer,
+              ongoing_flow_state_->app_locale,
+              base::BindOnce(&BnplManager::OnIssuerAccepted,
+                             weak_factory_.GetWeakPtr()),
+              base::BindOnce(&BnplManager::Reset, weak_factory_.GetWeakPtr()));
           break;
       }
     } else {
-      bool is_amount_supported_by_any_issuer =
-          IsExtractedAmountSupportedByAnyBnplIssuer(
-              payments_autofill_client()
-                  .GetPaymentsDataManager()
-                  .GetBnplIssuers(),
-              ongoing_flow_state_->final_checkout_amount);
       // If the accepted issuer is not eligible, update UI.
       CHECK_DEREF(payments_autofill_client().GetBnplUiDelegate())
           .UpdateBnplIssuerUi(
@@ -679,9 +756,12 @@ void BnplManager::FetchVcnDetails(GURL url) {
 }
 
 void BnplManager::CancelOngoingRequests() {
+  // Invalidate weak pointers before cancelling requests so that any network or
+  // amount extraction callbacks triggered synchronously during cancellation are
+  // ignored.
+  weak_factory_.InvalidateWeakPtrs();
   payments_autofill_client().GetPaymentsNetworkInterface()->CancelRequest();
   browser_autofill_manager_->GetAmountExtractionManager().Reset();
-  weak_factory_.InvalidateWeakPtrs();
 }
 
 void BnplManager::Reset() {
@@ -1280,14 +1360,20 @@ void BnplManager::ReplaceIssuerSuggestionsWithLoadingThrobber() {
 }
 
 void BnplManager::HideSuggestionsOrRemoveSelectBnplIssuerOrProgressUi() {
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillEnablePayNowPayLaterTabs)) {
-    browser_autofill_manager_->client().HideSuggestions(
-        SuggestionHidingReason::kHiddenByCaller, /*product=*/std::nullopt);
-  } else {
-    payments_autofill_client()
-        .GetBnplUiDelegate()
-        ->RemoveSelectBnplIssuerOrProgressUi();
+  CHECK(payments_autofill_client().GetBnplStrategy());
+  using enum BnplStrategy::UiDismissalAction;
+  switch (
+      payments_autofill_client().GetBnplStrategy()->GetUiDismissalAction()) {
+    case kHideSuggestions:
+      browser_autofill_manager_->client().HideSuggestions(
+          SuggestionHidingReason::kHiddenByCaller, /*product=*/std::nullopt);
+      break;
+    case kRemoveBnplUi:
+      CHECK(payments_autofill_client().GetBnplUiDelegate());
+      payments_autofill_client()
+          .GetBnplUiDelegate()
+          ->RemoveSelectBnplIssuerOrProgressUi();
+      break;
   }
 }
 

@@ -23,7 +23,7 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser_actions.h"
-#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #endif
 #include "chrome/common/webui_url_constants.h"
@@ -236,7 +236,7 @@ void FinalizeAndSendAimQuery(
   lens::ClientToAimMessage client_to_page_message =
       session_handle->CreateClientToAimRequest(std::move(request_info));
 
-  web_ui_interface->PostMessageToWebview(client_to_page_message);
+  web_ui_interface->PostAimMessage(client_to_page_message);
 }
 
 void SendInjectedInputRemovedUpdate(
@@ -252,7 +252,7 @@ void SendInjectedInputRemovedUpdate(
       lens::InjectedInputUpdatePayload::UpdateType::
           InjectedInputUpdatePayload_UpdateType_REMOVED);
 
-  web_ui_interface->PostMessageToWebview(client_to_aim_message);
+  web_ui_interface->PostAimMessage(client_to_aim_message);
 }
 
 bool ShouldShowSidePanel() {
@@ -316,12 +316,12 @@ bool GetEffectivePinState(Profile* profile) {
 #if !BUILDFLAG(IS_ANDROID)
 void UpdatePinButtonVisibilityState(BrowserWindowInterface* browser_window,
                                     bool eligible) {
-  if (!browser_window || !browser_window->GetActions()) {
+  if (!browser_window || !BrowserActions::From(browser_window)) {
     return;
   }
 
   actions::ActionItem* const scope_action =
-      browser_window->GetActions()->root_action_item();
+      BrowserActions::From(browser_window)->root_action_item();
   if (!scope_action) {
     return;
   }

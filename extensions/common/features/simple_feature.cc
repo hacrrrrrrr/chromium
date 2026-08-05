@@ -32,6 +32,7 @@
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/mojom/context_type.mojom.h"
 #include "extensions/common/switches.h"
+#include "extensions/common/url_pattern.h"
 
 using crx_file::id_util::HashedIdInHex;
 using extensions::mojom::ManifestLocation;
@@ -505,7 +506,7 @@ bool SimpleFeature::IsIdInAllowlist(const HashedExtensionId& hashed_id) const {
 
 // static
 bool SimpleFeature::IsIdInList(const HashedExtensionId& hashed_id,
-                               const std::vector<std::string>& list) {
+                               base::span<const std::string_view> list) {
   if (!IsValidHashedExtensionId(hashed_id))
     return false;
 
@@ -592,9 +593,8 @@ bool SimpleFeature::IsValidHashedExtensionId(
   return hashed_id.value().length() == 40;
 }
 
-void SimpleFeature::set_blocklist(
-    std::initializer_list<const char* const> blocklist) {
-  blocklist_.assign(blocklist.begin(), blocklist.end());
+void SimpleFeature::set_blocklist(StaticSpan<std::string_view> blocklist) {
+  blocklist_ = blocklist.span();
 }
 
 void SimpleFeature::set_command_line_switch(
@@ -602,19 +602,17 @@ void SimpleFeature::set_command_line_switch(
   command_line_switch_ = std::string(command_line_switch);
 }
 
-void SimpleFeature::set_contexts(
-    std::initializer_list<mojom::ContextType> contexts) {
-  contexts_ = contexts;
+void SimpleFeature::set_contexts(StaticSpan<mojom::ContextType> contexts) {
+  contexts_.emplace(contexts.span());
 }
 
 void SimpleFeature::set_dependencies(
-    std::initializer_list<const char* const> dependencies) {
-  dependencies_.assign(dependencies.begin(), dependencies.end());
+    StaticSpan<std::string_view> dependencies) {
+  dependencies_ = dependencies.span();
 }
 
-void SimpleFeature::set_extension_types(
-    std::initializer_list<Manifest::Type> types) {
-  extension_types_ = types;
+void SimpleFeature::set_extension_types(StaticSpan<Manifest::Type> types) {
+  extension_types_ = types.span();
 }
 
 void SimpleFeature::set_feature_flag(std::string_view feature_flag) {
@@ -622,24 +620,28 @@ void SimpleFeature::set_feature_flag(std::string_view feature_flag) {
 }
 
 void SimpleFeature::set_session_types(
-    std::initializer_list<mojom::FeatureSessionType> types) {
-  session_types_ = types;
+    StaticSpan<mojom::FeatureSessionType> types) {
+  session_types_ = types.span();
 }
 
-void SimpleFeature::set_matches(
-    std::initializer_list<const char* const> matches) {
-  matches_.ClearPatterns();
-  for (const auto* pattern : matches)
-    matches_.AddPattern(URLPattern(URLPattern::SCHEME_ALL, pattern));
+void SimpleFeature::set_matches(StaticSpan<std::string_view> matches) {
+  match_patterns_ = matches.span();
 }
 
-void SimpleFeature::set_platforms(std::initializer_list<Platform> platforms) {
-  platforms_ = platforms;
+bool SimpleFeature::MatchesURL(const GURL& url) const {
+  // Create the URLPattern per call to avoid the memory overhead of storing it
+  // for the feature's process lifetime.
+  return std::ranges::any_of(match_patterns_, [&url](std::string_view pattern) {
+    return URLPattern(URLPattern::SCHEME_ALL, pattern).MatchesURL(url);
+  });
 }
 
-void SimpleFeature::set_allowlist(
-    std::initializer_list<const char* const> allowlist) {
-  allowlist_.assign(allowlist.begin(), allowlist.end());
+void SimpleFeature::set_platforms(StaticSpan<Platform> platforms) {
+  platforms_ = platforms.span();
+}
+
+void SimpleFeature::set_allowlist(StaticSpan<std::string_view> allowlist) {
+  allowlist_ = allowlist.span();
 }
 
 Feature::Availability SimpleFeature::GetEnvironmentAvailability(
@@ -758,7 +760,8 @@ Feature::Availability SimpleFeature::GetContextAvailability(
   if (contexts_ && !std::ranges::contains(*contexts_, context))
     return CreateAvailability(AvailabilityResult::kInvalidContext, context);
 
-  // TODO(kalman): Consider checking |matches_| regardless of context type.
+  // TODO(kalman): Consider checking `match_patterns_` regardless of context
+  // type.
   // Fewer surprises, and if the feature configuration wants to isolate
   // "matches" from say "privileged_extension" then they can use complex
   // features.
@@ -766,7 +769,7 @@ Feature::Availability SimpleFeature::GetContextAvailability(
       context == mojom::ContextType::kWebPage ||
       context == mojom::ContextType::kWebUi ||
       context == mojom::ContextType::kUntrustedWebUi;
-  if (supports_url_matching && !matches_.MatchesURL(url)) {
+  if (supports_url_matching && !MatchesURL(url)) {
     return CreateAvailability(AvailabilityResult::kInvalidUrl, url);
   }
 

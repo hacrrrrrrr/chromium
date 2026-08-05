@@ -188,7 +188,7 @@ class PasswordSettingsMediatorTest : public PlatformTest {
                    PasswordForm::Store store) {
     password_manager::StoredCredential cred;
     cred.username_value = u"user@gmail.com";
-    cred.password_value = password;
+    cred.password_value = password_manager::PasswordString(std::move(password));
     cred.url = GURL(url);
     cred.signon_realm = "https://www.example.com/";
     cred.in_store = store;
@@ -269,12 +269,11 @@ TEST_F(PasswordSettingsMediatorTest,
   CreateMediator();
   ASSERT_TRUE(
       [mediator_ conformsToProtocol:@protocol(SyncObserverModelBridge)]);
-  PasswordSettingsMediator<IdentityManagerObserverBridgeDelegate>*
-      syncObserver = static_cast<
-          PasswordSettingsMediator<IdentityManagerObserverBridgeDelegate>*>(
+  PasswordSettingsMediator<IdentityManagerObserving>* syncObserver =
+      static_cast<PasswordSettingsMediator<IdentityManagerObserving>*>(
           mediator_);
   const signin::PrimaryAccountChangeEvent event;
-  [syncObserver onPrimaryAccountChanged:event];
+  [syncObserver primaryAccountDidChange:event];
   [[consumer_ verify] setOnDeviceEncryptionState:
                           PasswordSettingsOnDeviceEncryptionStateNotShown];
 }

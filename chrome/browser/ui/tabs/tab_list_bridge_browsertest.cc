@@ -532,7 +532,7 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, MoveTabToWindow) {
   // Move the second tab from the first browser to the second.
   tabs::TabInterface* tab_to_move = source_list_interface->GetTab(1);
   source_list_interface->MoveTabToWindow(tab_to_move->GetHandle(),
-                                         second_browser->session_id(), 1);
+                                         second_browser->GetSessionID(), 1);
 
   // Verify the tabs are in the correct places.
   EXPECT_EQ(1, source_list_interface->GetTabCount());
@@ -658,9 +658,10 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, HighlightTabs) {
 IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest,
                        ContainsTabGroupWhenTabGroupsNotSupported) {
   // App windows don't allow tab groups.
-  Browser::CreateParams params = Browser::CreateParams::CreateForApp(
-      "some app", /*trusted_source=*/false, gfx::Rect(), browser()->profile(),
-      /*user_gesture=*/true);
+  Browser::CreateParams params =
+      Browser::CreateParams::CreateForApp("some app", /*trusted_source=*/false,
+                                          gfx::Rect(), browser()->GetProfile(),
+                                          /*user_gesture=*/true);
   // params.window = window2.release();
   Browser* browser2 = Browser::Create(params);
   ui_test_utils::DeprecatedFakeActivateBrowser(browser2);
@@ -1121,7 +1122,7 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, MoveTabGroupToWindow) {
             GetTabStripStateString(source_model, /*annotate_groups=*/true));
 
   EXPECT_TRUE(source_list_interface->MoveTabGroupToWindow(
-      *group_id, second_browser->session_id(), 1));
+      *group_id, second_browser->GetSessionID(), 1));
 
   // Verify that the group has been moved to the destination window.
   EXPECT_EQ("2",
@@ -1170,7 +1171,7 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest,
   // end since the closest valid index that isn't in the middle of another tab
   // group is 3.
   EXPECT_TRUE(source_list_interface->MoveTabGroupToWindow(
-      *group_id, second_browser->session_id(), 2));
+      *group_id, second_browser->GetSessionID(), 2));
 
   EXPECT_EQ("2",
             GetTabStripStateString(source_model, /*annotate_groups=*/true));
@@ -1247,7 +1248,7 @@ IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, Observer_OnTabMoved) {
 
 IN_PROC_BROWSER_TEST_F(TabListBridgeBrowserTest, IsTabListEditable) {
   // Use two tab lists, which means two browsers.
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   Browser* browser1 = browser();
   Browser* browser2 = CreateBrowser(profile);
 

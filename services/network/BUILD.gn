@@ -96,6 +96,8 @@ component("network_service") {
     "local_network_access_checker.h",
     "local_network_access_url_loader_interceptor.cc",
     "local_network_access_url_loader_interceptor.h",
+    "logical_invalidation_store.cc",
+    "logical_invalidation_store.h",
     "mojo_host_resolver_impl.cc",
     "mojo_host_resolver_impl.h",
     "multiple_durable_message_writer_impl.cc",
@@ -388,7 +390,6 @@ component("network_service") {
     "//services/network/public/cpp/cert_verifier:mojo_cert_verifier",
     "//services/network/public/mojom",
     "//services/network/public/proto",
-    "//services/network/shared_storage",
     "//services/network/trust_tokens",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/mojom",
@@ -499,6 +500,7 @@ source_set("tests") {
     "keepalive_statistics_recorder_unittest.cc",
     "known_legacy_scope_domains_delegate_unittest.cc",
     "local_network_access_checker_unittest.cc",
+    "logical_invalidation_store_unittest.cc",
     "mojo_host_resolver_impl_unittest.cc",
     "multiple_durable_message_writer_impl_unittest.cc",
     "net_log_proxy_sink_unittest.cc",
@@ -570,11 +572,6 @@ source_set("tests") {
 
   if (enable_websockets) {
     sources += [
-      "proxy_resolver_factory_mojo_unittest.cc",
-      "proxy_service_mojo_unittest.cc",
-      "test_mojo_proxy_resolver_factory.cc",
-      "test_mojo_proxy_resolver_factory.h",
-      "url_request_context_builder_mojo_unittest.cc",
       "websocket_factory_unittest.cc",
       "websocket_interceptor_unittest.cc",
       "websocket_throttler_unittest.cc",
@@ -619,6 +616,7 @@ source_set("tests") {
     ":network_service",
     ":test_support",
     "//base",
+    "//base/test:test_support",
     "//components/enterprise/buildflags",
     "//components/network_session_configurator/browser",
     "//components/os_crypt/async/browser:test_support",
@@ -645,9 +643,6 @@ source_set("tests") {
     "//services/network/public/cpp:buildflags",
     "//services/network/public/mojom",
     "//services/network/public/proto",
-    "//services/network/shared_storage",
-    "//services/network/shared_storage:test_support",
-    "//services/network/shared_storage:tests",
     "//services/network/trust_tokens",
     "//services/network/trust_tokens:tests",
     "//services/service_manager/public/cpp",
@@ -667,6 +662,13 @@ source_set("tests") {
   }
 
   if (use_blink) {
+    sources += [
+      "proxy_resolver_factory_mojo_unittest.cc",
+      "proxy_service_mojo_unittest.cc",
+      "test_mojo_proxy_resolver_factory.cc",
+      "test_mojo_proxy_resolver_factory.h",
+      "url_request_context_builder_mojo_unittest.cc",
+    ]
     deps += [
       "//services/proxy_resolver:lib",
       "//third_party/blink/public/common:preloading_headers",

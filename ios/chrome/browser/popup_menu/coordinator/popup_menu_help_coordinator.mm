@@ -37,6 +37,8 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/popup_menu_commands.h"
+#import "ios/chrome/browser/shared/public/commands/quick_delete_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
@@ -52,6 +54,15 @@ namespace {
 
 base::TimeDelta kPromoDisplayDelayForTests = base::Seconds(1);
 
+// Total number of pages in the Level Up Password Checkup walkthrough sequence.
+const NSInteger kLevelUpPasswordCheckupWalkthroughTotalPages = 4;
+
+// Total number of pages in the Level Up Quick Delete walkthrough sequence.
+const NSInteger kLevelUpQuickDeleteWalkthroughTotalPages = 2;
+
+// Total number of pages in the Level Up Payment Methods walkthrough sequence.
+const NSInteger kLevelUpPaymentMethodsWalkthroughTotalPages = 4;
+
 // The active IPH session type inside the popup menu.
 enum class PopupMenuIPHSessionType {
   // No active IPH session.
@@ -60,8 +71,12 @@ enum class PopupMenuIPHSessionType {
   kHistoryMenuItem,
   // Active session when Tab Reminders IPH is triggered.
   kTabReminders,
-  // Active session when Level Up walkthrough IPH is triggered.
-  kLevelUpWalkthrough,
+  // Active session when Level Up Password Checkup walkthrough IPH is triggered.
+  kLevelUpPasswordCheckupWalkthrough,
+  // Active session when Level Up Quick Delete walkthrough IPH is triggered.
+  kLevelUpQuickDeleteWalkthrough,
+  // Active session when Level Up Payment Methods walkthrough IPH is triggered.
+  kLevelUpPaymentMethodsWalkthrough,
 };
 }  // namespace
 
@@ -117,8 +132,7 @@ enum class PopupMenuIPHSessionType {
 #pragma mark - Getters
 
 - (feature_engagement::Tracker*)featureEngagementTracker {
-  CHECK(!_stopped, base::NotFatalUntil::M147)
-      << "PopupMenuHelpCoordinator used after -stop";
+  CHECK(!_stopped) << "PopupMenuHelpCoordinator used after -stop";
   feature_engagement::Tracker* tracker =
       feature_engagement::TrackerFactory::GetForProfile(self.profile);
   DCHECK(tracker);
@@ -163,9 +177,15 @@ enum class PopupMenuIPHSessionType {
     return [NSNumber numberWithInt:static_cast<NSInteger>(
                                        overflow_menu::Destination::History)];
   }
-  if (_activeIPHSessionType == PopupMenuIPHSessionType::kLevelUpWalkthrough) {
+  if (_activeIPHSessionType ==
+      PopupMenuIPHSessionType::kLevelUpPasswordCheckupWalkthrough) {
     return [NSNumber numberWithInt:static_cast<NSInteger>(
                                        overflow_menu::Destination::Passwords)];
+  }
+  if (_activeIPHSessionType ==
+      PopupMenuIPHSessionType::kLevelUpPaymentMethodsWalkthrough) {
+    return [NSNumber numberWithInt:static_cast<NSInteger>(
+                                       overflow_menu::Destination::Settings)];
   }
   return nil;
 }
@@ -183,6 +203,13 @@ enum class PopupMenuIPHSessionType {
     return;
   }
 
+  if (_activeIPHSessionType ==
+      PopupMenuIPHSessionType::kLevelUpQuickDeleteWalkthrough) {
+    OverflowMenuAction* clearBrowsingDataAction = [self.actionProvider
+        actionForActionType:overflow_menu::ActionType::ClearBrowsingData];
+    self.uiConfiguration.scrollToAction = clearBrowsingDataAction;
+  }
+
   if ([self
           showIPHInViewController:menu
                    forSessionType:PopupMenuIPHSessionType::kHistoryMenuItem]) {
@@ -191,7 +218,19 @@ enum class PopupMenuIPHSessionType {
 
   if ([self showIPHInViewController:menu
                      forSessionType:PopupMenuIPHSessionType::
-                                        kLevelUpWalkthrough]) {
+                                        kLevelUpPasswordCheckupWalkthrough]) {
+    return;
+  }
+
+  if ([self showIPHInViewController:menu
+                     forSessionType:PopupMenuIPHSessionType::
+                                        kLevelUpPaymentMethodsWalkthrough]) {
+    return;
+  }
+
+  if ([self showIPHInViewController:menu
+                     forSessionType:PopupMenuIPHSessionType::
+                                        kLevelUpQuickDeleteWalkthrough]) {
     return;
   }
 
@@ -212,17 +251,26 @@ enum class PopupMenuIPHSessionType {
     return NO;
   }
 
-  CGFloat anchorXInParent =
-      CGRectGetMidX(self.uiConfiguration.highlightedDestinationFrame);
-  CGFloat anchorX =
-      [menu.view.window convertPoint:CGPointMake(anchorXInParent, 0)
-                            fromView:menu.view]
-          .x;
-  CGPoint anchorPoint = CGPointMake(
-      anchorX, CGRectGetMaxY(self.uiConfiguration.destinationListScreenFrame));
+  CGRect destFrame = self.uiConfiguration.highlightedDestinationFrame;
+  CGRect listFrame = self.uiConfiguration.destinationListScreenFrame;
+  CGFloat parentViewWidth = CGRectGetWidth(menu.view.bounds);
 
-  CGFloat parentViewWidth =
-      self.uiConfiguration.destinationListScreenFrame.size.width;
+  CGFloat anchorXInParent = CGRectGetWidth(destFrame) > 0
+                                ? CGRectGetMidX(destFrame)
+                                : 0.5 * parentViewWidth;
+
+  CGPoint anchorInMenu =
+      CGPointMake(anchorXInParent, CGRectGetMidY(menu.view.bounds));
+  if (sessionType != PopupMenuIPHSessionType::kLevelUpQuickDeleteWalkthrough &&
+      CGRectGetHeight(listFrame) > 0) {
+    CGPoint listBottomInMenu =
+        [menu.view convertPoint:CGPointMake(0, CGRectGetMaxY(listFrame))
+                       fromView:nil];
+    anchorInMenu.y = listBottomInMenu.y;
+  }
+
+  CGPoint anchorPoint = [menu.view.window convertPoint:anchorInMenu
+                                              fromView:menu.view];
 
   self.overflowMenuBubblePresenter =
       [self createBubblePresenterForIPH:sessionType
@@ -256,11 +304,24 @@ enum class PopupMenuIPHSessionType {
       return [self
           newHistoryIPHBubblePresenterWithAnchorXInParent:anchorXInParent
                                           parentViewWidth:parentViewWidth];
-    case PopupMenuIPHSessionType::kLevelUpWalkthrough:
-      return [self newLevelUpWalkthroughBubblePresenterWithAnchorXInParent:
-                       anchorXInParent
-                                                           parentViewWidth:
-                                                               parentViewWidth];
+    case PopupMenuIPHSessionType::kLevelUpPasswordCheckupWalkthrough:
+      return [self
+          newLevelUpPasswordCheckupWalkthroughBubblePresenterWithAnchorXInParent:
+              anchorXInParent
+                                                                 parentViewWidth:
+                                                                     parentViewWidth];
+    case PopupMenuIPHSessionType::kLevelUpPaymentMethodsWalkthrough:
+      return [self
+          newLevelUpPaymentMethodsWalkthroughBubblePresenterWithAnchorXInParent:
+              anchorXInParent
+                                                                parentViewWidth:
+                                                                    parentViewWidth];
+    case PopupMenuIPHSessionType::kLevelUpQuickDeleteWalkthrough:
+      return [self
+          newLevelUpQuickDeleteWalkthroughBubblePresenterWithAnchorXInParent:
+              anchorXInParent
+                                                             parentViewWidth:
+                                                                 parentViewWidth];
     default:
       NOTREACHED();
   }
@@ -306,8 +367,7 @@ enum class PopupMenuIPHSessionType {
 
 // Returns whether blue dot should be shown.
 - (BOOL)shouldShowBlueDot {
-  CHECK(!_stopped, base::NotFatalUntil::M147)
-      << "PopupMenuHelpCoordinator used after -stop";
+  CHECK(!_stopped) << "PopupMenuHelpCoordinator used after -stop";
 
   // As sync error takes precendence on blue dot for settings destination in the
   // overflow menu. In that case don't show blue dot as the full path from
@@ -512,9 +572,12 @@ enum class PopupMenuIPHSessionType {
   self.popupMenuBubblePresenter = nil;
 }
 
-// Triggers Step 1 of the Level Up walkthrough IPH sequence (a bubble on the New
-// Tab Page pointing to the Tools menu button).
-- (void)showLevelUpWalkthroughIPH {
+// Triggers Step 1 of a Level Up walkthrough IPH sequence (a bubble on the
+// toolbar pointing to the Tools menu button).
+- (void)showLevelUpWalkthroughStep1WithSessionType:
+            (PopupMenuIPHSessionType)sessionType
+                                              text:(NSString*)text
+                                        totalPages:(NSInteger)totalPages {
   if (!IsLevelUpEnabled()) {
     return;
   }
@@ -526,10 +589,13 @@ enum class PopupMenuIPHSessionType {
     return;
   }
 
+  _activeIPHSessionType = sessionType;
+
   __weak __typeof(self) weakSelf = self;
   CallbackWithIPHDismissalReasonType dismissalCallback =
       ^(IPHDismissalReasonType reason) {
-        [weakSelf levelUpWalkthroughIPHDismissedWithReason:reason];
+        [weakSelf levelUpWalkthroughStep1DismissedWithReason:reason
+                                                 sessionType:sessionType];
         weakSelf.popupMenuBubblePresenter = nil;
       };
 
@@ -548,14 +614,15 @@ enum class PopupMenuIPHSessionType {
 
   BubbleViewControllerPresenter* bubblePresenter =
       [[BubbleViewControllerPresenter alloc]
-               initWithText:l10n_util::GetNSString(
-                                IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_SETTINGS)
-                      title:nil
-             arrowDirection:arrowDirection
-                  alignment:alignment
-                 bubbleType:BubbleViewTypeRichWithNext
-            pageControlPage:BubblePageControlPageFirst
-          dismissalCallback:dismissalCallback];
+                   initWithText:text
+                          title:nil
+                 arrowDirection:arrowDirection
+                      alignment:alignment
+                     bubbleType:BubbleViewTypeRichWithNext
+                pageControlPage:BubblePageControlPageFirst
+          totalPageControlPages:totalPages
+          customNextButtonTitle:nil
+              dismissalCallback:dismissalCallback];
   bubblePresenter.dismissalTimerDisabled = YES;
 
   CGFloat anchorPointY =
@@ -573,6 +640,7 @@ enum class PopupMenuIPHSessionType {
   }
 
   if (![bubblePresenter canPresentInView:baseView anchorPoint:anchorPoint]) {
+    _activeIPHSessionType = PopupMenuIPHSessionType::kNone;
     return;
   }
 
@@ -585,12 +653,14 @@ enum class PopupMenuIPHSessionType {
 
 // Action triggered when the Level Up walkthrough Step 1 IPH (pointing to the
 // Tools menu button) is dismissed. Prepares the session state for Step 2.
-- (void)levelUpWalkthroughIPHDismissedWithReason:
-    (IPHDismissalReasonType)reason {
+- (void)
+    levelUpWalkthroughStep1DismissedWithReason:(IPHDismissalReasonType)reason
+                                   sessionType:
+                                       (PopupMenuIPHSessionType)sessionType {
   if (reason == IPHDismissalReasonType::kTappedAnchorView ||
       reason == IPHDismissalReasonType::kTappedIPH ||
       reason == IPHDismissalReasonType::kTappedNext) {
-    _activeIPHSessionType = PopupMenuIPHSessionType::kLevelUpWalkthrough;
+    _activeIPHSessionType = sessionType;
     if (reason == IPHDismissalReasonType::kTappedNext) {
       id<PopupMenuCommands> popupMenuHandler = HandlerForProtocol(
           self.browser->GetCommandDispatcher(), PopupMenuCommands);
@@ -601,10 +671,22 @@ enum class PopupMenuIPHSessionType {
   }
 }
 
-// Action triggered when the Level Up Password Manager Step 2 IPH (pointing to
+// Triggers Step 1 of the Level Up Password Checkup walkthrough IPH sequence.
+- (void)showLevelUpPasswordCheckupWalkthroughIPH {
+  [self
+      showLevelUpWalkthroughStep1WithSessionType:
+          PopupMenuIPHSessionType::kLevelUpPasswordCheckupWalkthrough
+                                            text:
+                                                l10n_util::GetNSString(
+                                                    IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_CHROME_MENU)
+                                      totalPages:
+                                          kLevelUpPasswordCheckupWalkthroughTotalPages];
+}
+
+// Action triggered when the Level Up Password Checkup Step 2 IPH (pointing to
 // the Password Manager row in the overflow menu) is dismissed. Navigates the
 // user to the Password Manager settings page to show Step 3.
-- (void)levelUpPasswordManagerIPHDismissedWithReason:
+- (void)levelUpPasswordCheckupIPHDismissedWithReason:
     (IPHDismissalReasonType)reason {
   _activeIPHSessionType = PopupMenuIPHSessionType::kNone;
   if (reason == IPHDismissalReasonType::kTappedNext ||
@@ -615,6 +697,68 @@ enum class PopupMenuIPHSessionType {
     [settingsHandler
         showSavedPasswordsSettingsFromViewController:self.baseViewController
                      shouldShowLevelUpWalkthroughIPH:YES];
+  }
+}
+
+// Triggers Step 1 of the Level Up Payment Methods walkthrough IPH sequence.
+- (void)showLevelUpPaymentMethodsWalkthroughIPH {
+  [self
+      showLevelUpWalkthroughStep1WithSessionType:
+          PopupMenuIPHSessionType::kLevelUpPaymentMethodsWalkthrough
+                                            text:
+                                                l10n_util::GetNSString(
+                                                    IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_CHROME_MENU)
+                                      totalPages:
+                                          kLevelUpPaymentMethodsWalkthroughTotalPages];
+}
+
+// Action triggered when the Level Up Payment Methods Step 2 IPH (pointing to
+// the Settings / Payment Methods item in the overflow menu) is dismissed.
+- (void)levelUpPaymentMethodsIPHDismissedWithReason:
+    (IPHDismissalReasonType)reason {
+  _activeIPHSessionType = PopupMenuIPHSessionType::kNone;
+  switch (reason) {
+    case IPHDismissalReasonType::kTappedNext:
+    case IPHDismissalReasonType::kTappedAnchorView:
+    case IPHDismissalReasonType::kTappedIPH: {
+      id<PopupMenuCommands> popupMenuHandler = HandlerForProtocol(
+          self.browser->GetCommandDispatcher(), PopupMenuCommands);
+      [popupMenuHandler dismissPopupMenuAnimated:YES];
+
+      id<SceneCommands> sceneHandler = HandlerForProtocol(
+          self.browser->GetCommandDispatcher(), SceneCommands);
+      [sceneHandler showSettingsFromViewController:self.baseViewController
+                   shouldShowLevelUpWalkthroughIPH:YES];
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// Triggers Step 1 of the Level Up Quick Delete walkthrough IPH sequence.
+- (void)showLevelUpQuickDeleteWalkthroughIPH {
+  [self
+      showLevelUpWalkthroughStep1WithSessionType:
+          PopupMenuIPHSessionType::kLevelUpQuickDeleteWalkthrough
+                                            text:
+                                                l10n_util::GetNSString(
+                                                    IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_CHROME_MENU)
+                                      totalPages:
+                                          kLevelUpQuickDeleteWalkthroughTotalPages];
+}
+
+// Action triggered when the Level Up Quick Delete Step 2 IPH (pointing to
+// the Clear Browsing Data row in the overflow menu) is dismissed.
+- (void)levelUpQuickDeleteIPHDismissedWithReason:
+    (IPHDismissalReasonType)reason {
+  _activeIPHSessionType = PopupMenuIPHSessionType::kNone;
+  if (reason == IPHDismissalReasonType::kTappedNext ||
+      reason == IPHDismissalReasonType::kTappedAnchorView ||
+      reason == IPHDismissalReasonType::kTappedIPH) {
+    id<QuickDeleteCommands> quickDeleteHandler = HandlerForProtocol(
+        self.browser->GetCommandDispatcher(), QuickDeleteCommands);
+    [quickDeleteHandler showQuickDeleteAndCanPerformRadialWipeAnimation:YES];
   }
 }
 
@@ -678,20 +822,21 @@ enum class PopupMenuIPHSessionType {
 }
 
 // Creates and returns a `BubbleViewControllerPresenter` for Step 2 of the Level
-// Up walkthrough sequence (a bubble pointing to the Password Manager item
-// inside the overflow menu).
+// Up Password Checkup walkthrough sequence (a bubble pointing to the Password
+// Manager item inside the overflow menu).
 - (BubbleViewControllerPresenter*)
-    newLevelUpWalkthroughBubblePresenterWithAnchorXInParent:
+    newLevelUpPasswordCheckupWalkthroughBubblePresenterWithAnchorXInParent:
         (CGFloat)anchorXInParent
-                                            parentViewWidth:
-                                                (CGFloat)parentViewWidth {
+                                                           parentViewWidth:
+                                                               (CGFloat)
+                                                                   parentViewWidth {
   NSString* text = l10n_util::GetNSString(
       IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_PASSWORD_MANAGER);
 
   __weak __typeof(self) weakSelf = self;
   CallbackWithIPHDismissalReasonType dismissalCallback =
       ^(IPHDismissalReasonType reason) {
-        [weakSelf levelUpPasswordManagerIPHDismissedWithReason:reason];
+        [weakSelf levelUpPasswordCheckupIPHDismissedWithReason:reason];
         weakSelf.overflowMenuBubblePresenter = nil;
       };
 
@@ -708,9 +853,95 @@ enum class PopupMenuIPHSessionType {
   return bubbleViewControllerPresenter;
 }
 
+// Creates and returns a `BubbleViewControllerPresenter` for Step 2 of the Level
+// Up Payment Methods walkthrough sequence (a bubble pointing to the Payment
+// Methods item inside the overflow menu).
+- (BubbleViewControllerPresenter*)
+    newLevelUpPaymentMethodsWalkthroughBubblePresenterWithAnchorXInParent:
+        (CGFloat)anchorXInParent
+                                                          parentViewWidth:
+                                                              (CGFloat)
+                                                                  parentViewWidth {
+  NSString* text =
+      l10n_util::GetNSString(IDS_IOS_LEVEL_UP_WALKTHROUGH_OPEN_SETTINGS);
+
+  __weak __typeof(self) weakSelf = self;
+  CallbackWithIPHDismissalReasonType dismissalCallback =
+      ^(IPHDismissalReasonType reason) {
+        [weakSelf levelUpPaymentMethodsIPHDismissedWithReason:reason];
+        weakSelf.overflowMenuBubblePresenter = nil;
+      };
+
+  BubbleAlignment alignment = anchorXInParent < 0.5 * parentViewWidth
+                                  ? BubbleAlignmentTopOrLeading
+                                  : BubbleAlignmentBottomOrTrailing;
+
+  NSString* customNextButtonTitle =
+      l10n_util::GetNSString(IDS_IOS_IPH_BUBBLE_NEXT);
+
+  BubbleViewControllerPresenter* bubbleViewControllerPresenter =
+      [[BubbleViewControllerPresenter alloc]
+                   initWithText:text
+                          title:nil
+                 arrowDirection:BubbleArrowDirectionUp
+                      alignment:alignment
+                     bubbleType:BubbleViewTypeRichWithNext
+                pageControlPage:BubblePageControlPageSecond
+          totalPageControlPages:kLevelUpPaymentMethodsWalkthroughTotalPages
+          customNextButtonTitle:customNextButtonTitle
+              dismissalCallback:dismissalCallback];
+  bubbleViewControllerPresenter.dismissalTimerDisabled = YES;
+  return bubbleViewControllerPresenter;
+}
+
+// Creates and returns a `BubbleViewControllerPresenter` for Step 2 of the Level
+// Up Quick Delete walkthrough sequence (a bubble pointing to the Clear Browsing
+// Data item inside the overflow menu).
+- (BubbleViewControllerPresenter*)
+    newLevelUpQuickDeleteWalkthroughBubblePresenterWithAnchorXInParent:
+        (CGFloat)anchorXInParent
+                                                       parentViewWidth:
+                                                           (CGFloat)
+                                                               parentViewWidth {
+  NSString* text =
+      l10n_util::GetNSString(IDS_IOS_LEVEL_UP_WALKTHROUGH_DELETE_BROWSING_DATA);
+
+  __weak __typeof(self) weakSelf = self;
+  CallbackWithIPHDismissalReasonType dismissalCallback =
+      ^(IPHDismissalReasonType reason) {
+        [weakSelf levelUpQuickDeleteIPHDismissedWithReason:reason];
+        weakSelf.overflowMenuBubblePresenter = nil;
+      };
+
+  BubbleAlignment alignment = anchorXInParent < 0.5 * parentViewWidth
+                                  ? BubbleAlignmentTopOrLeading
+                                  : BubbleAlignmentBottomOrTrailing;
+
+  NSString* customNextButtonTitle =
+      l10n_util::GetNSString(IDS_IOS_IPH_BUBBLE_NEXT);
+
+  BubbleViewControllerPresenter* bubbleViewControllerPresenter =
+      [[BubbleViewControllerPresenter alloc]
+                   initWithText:text
+                          title:nil
+                 arrowDirection:BubbleArrowDirectionDown
+                      alignment:alignment
+                     bubbleType:BubbleViewTypeRichWithNext
+                pageControlPage:BubblePageControlPageSecond
+          totalPageControlPages:kLevelUpQuickDeleteWalkthroughTotalPages
+          customNextButtonTitle:customNextButtonTitle
+              dismissalCallback:dismissalCallback];
+  bubbleViewControllerPresenter.dismissalTimerDisabled = YES;
+  return bubbleViewControllerPresenter;
+}
+
 - (void)overflowMenuIPHDidDismiss {
   self.overflowMenuBubblePresenter = nil;
   self.uiConfiguration.highlightDestination = -1;
+  OverflowMenuAction* clearBrowsingDataAction = [self.actionProvider
+      actionForActionType:overflow_menu::ActionType::ClearBrowsingData];
+  clearBrowsingDataAction.highlighted = NO;
+  clearBrowsingDataAction.automaticallyUnhighlight = YES;
 }
 
 #pragma mark - Overflow Menu Customization Methods

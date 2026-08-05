@@ -35,6 +35,8 @@
   E(kActionCloseTab, IDC_CLOSE_TAB) \
   E(kActionSelectNextTab, IDC_SELECT_NEXT_TAB) \
   E(kActionSelectPreviousTab, IDC_SELECT_PREVIOUS_TAB) \
+  E(kActionCycleToNextTab, IDC_CYCLE_TO_NEXT_TAB) \
+  E(kActionCycleToPrevTab, IDC_CYCLE_TO_PREV_TAB) \
   E(kActionSelectTab0, IDC_SELECT_TAB_0) \
   E(kActionSelectTab1, IDC_SELECT_TAB_1) \
   E(kActionSelectTab2, IDC_SELECT_TAB_2) \
@@ -85,6 +87,7 @@
   E(kActionShowMemorySaverChip) \
   E(kActionShowJsOptimizationsIcon) \
   E(kActionShowCookieControls) \
+  E(kActionShowZoomBubble) \
   E(kActionUnfocusTabGroup, IDC_UNFOCUS_TAB_GROUP) \
   E(kActionAddNewTabToGroup, IDC_ADD_NEW_TAB_TO_GROUP) \
   E(kActionCreateNewTabGroup, IDC_CREATE_NEW_TAB_GROUP) \
@@ -92,7 +95,6 @@
   E(kActionFocusPrevTabGroup, IDC_FOCUS_PREV_TAB_GROUP) \
   E(kActionCloseTabGroup, IDC_CLOSE_TAB_GROUP) \
   E(kActionGroupUngroupedTabs, IDC_GROUP_UNGROUPED_TABS) \
-  E(kActionCreateNewTabGroupTopLevel, IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL) \
   E(kActionAddNewTabRecentGroup, IDC_ADD_NEW_TAB_RECENT_GROUP) \
   E(kActionFakePageActionForDebug, IDC_FAKE_PAGE_ACTION_FOR_DEBUG) \
   /* Page-manipulation commands that target a specified tab, which may not */ \
@@ -352,10 +354,6 @@
   E(kActionBookmarkBarRemoveFromBookmarksBar, \
     IDC_BOOKMARK_BAR_REMOVE_FROM_BOOKMARKS_BAR) \
   /* Context menu items for Sharing */ \
-  E(kActionContentContextSharingSharedClipboardSingleDevice, \
-    IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_SINGLE_DEVICE) \
-  E(kActionContentContextSharingSharedClipboardMultipleDevices, \
-    IDC_CONTENT_CONTEXT_SHARING_SHARED_CLIPBOARD_MULTIPLE_DEVICES) \
   E(kActionContentContextGenerateQrCode, IDC_CONTENT_CONTEXT_GENERATE_QR_CODE) \
   E(kActionContentContextSharingSubmenu, IDC_CONTENT_CONTEXT_SHARING_SUBMENU) \
   /* Context menu item to show the clipboard history menu */ \
@@ -423,8 +421,8 @@
   E(kActionToggleVerticalTabsExpandOnHover, \
     IDC_TOGGLE_VERTICAL_TABS_EXPAND_ON_HOVER) \
   E(kActionVerticalTabsSendFeedback, IDC_VERTICAL_TABS_SEND_FEEDBACK) \
-  /*Projects Panel*/ \
-  E(kActionToggleProjectsPanel) \
+  /*Organizer Panel*/ \
+  E(kActionToggleOrganizerPanel) \
   /*Omnibox Context Menu*/       \
   E(kActionOmniboxContextAddImage, IDC_OMNIBOX_CONTEXT_ADD_IMAGE)\
   E(kActionOmniboxContextAddFile, IDC_OMNIBOX_CONTEXT_ADD_FILE)  \
@@ -485,7 +483,8 @@
   E(kActionSidePanelShowHistory, IDC_SHOW_HISTORY_SIDE_PANEL) \
   E(kActionSidePanelShowLens) \
   E(kActionSidePanelShowLensOverlayResults) \
-  E(kActionSidePanelShowReadAnything, IDC_SHOW_READING_MODE_SIDE_PANEL) \
+  E(kActionSidePanelShowReadAnything) \
+  E(kActionShowReadingModeSidePanel, IDC_SHOW_READING_MODE_SIDE_PANEL) \
   E(kActionShowReadingModeKeyboard, IDC_SHOW_READING_MODE_KEYBOARD) \
   E(kActionSidePanelShowReadingList, IDC_READING_LIST_MENU_SHOW_UI) \
   E(kActionSidePanelShowSearchCompanion) \
@@ -499,6 +498,7 @@
   E(kActionHome, IDC_HOME) \
   E(kActionForward, IDC_FORWARD) \
   E(kActionNewIncognitoWindow, IDC_NEW_INCOGNITO_WINDOW) \
+  E(kActionNewIsolatedWindow, IDC_NEW_ISOLATED_WINDOW) \
   E(kActionSendSharedTabGroupFeedback, IDC_SEND_SHARED_TAB_GROUP_FEEDBACK) \
   E(kActionShowPasswordManager, IDC_SHOW_PASSWORD_MANAGER) \
   E(kActionShowPaymentMethods, IDC_SHOW_PAYMENT_METHODS) \
@@ -535,6 +535,19 @@
   E(kActionWebAuthnAmbientSignin) \
   E(kActionAutofillPayment) \
 
+#define SUBMENU_ACTION_IDS                                                     \
+  E(kActionMenuBookmarksSubmenu, kBookmarksMenuId)                             \
+  E(kActionMenuPasswordsAndAutofillSubmenu, kPasswordsAndAutofillMenuId)       \
+  E(kActionMenuReadingListSubmenu, kReadingListMenuId)                         \
+  E(kActionMenuZoomSubmenu, kZoomMenuId)                                       \
+  E(kActionMenuProfileSubmenu, kProfileMenuId)                                 \
+  E(kActionMenuFindAndEditSubmenu, kFindAndEditMenuId)                         \
+  E(kActionMenuSaveAndShareSubmenu, kSaveAndShareMenuId)                       \
+  E(kActionMenuHelpSubmenu, kHelpMenuId)                                       \
+  E(kActionMenuSavedTabGroupsSubmenu, kSavedTabGroupsMenuId)                   \
+  E(kActionMenuRecentTabsSubmenu, kRecentTabsMenuId)                           \
+  E(kActionMenuDeveloperSubmenu, kDeveloperMenuId)
+
 #define CHROME_ACTION_IDS \
     CHROME_COMMON_ACTION_IDS \
     CHROME_PLATFORM_SPECIFIC_ACTION_IDS \
@@ -548,6 +561,7 @@ enum ChromeActionIds : actions::ActionId {
   CHROME_ACTION_IDS
   SIDE_PANEL_ACTION_IDS
   TOOLBAR_PINNABLE_ACTION_IDS
+  SUBMENU_ACTION_IDS
 
   kChromeActionsEnd,
 };

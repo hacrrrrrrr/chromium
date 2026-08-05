@@ -896,20 +896,15 @@ std::optional<base::ScopedTempDir> CreateSecureTempDir() {
   // instead of just `base::ScopedTempDir::CreateUniqueTempDir`, because the
   // former allows setting a more recognizable prefix of
   // `COMPANY_SHORTNAME_STRING` on the temp directory.
-  base::FilePath parent_dir;
-  if (::IsUserAnAdmin()) {
-    if (!base::PathService::Get(base::DIR_SYSTEM_TEMP, &parent_dir)) {
-      return std::nullopt;
-    }
-  } else {
-    if (!base::GetTempDir(&parent_dir)) {
-      return std::nullopt;
-    }
+  std::optional<base::FilePath> parent_dir = GetUpdaterTempDir();
+  if (!parent_dir) {
+    return std::nullopt;
   }
 
   base::FilePath temp_dir;
   if (!base::CreateTemporaryDirInDir(
-          parent_dir, FILE_PATH_LITERAL(COMPANY_SHORTNAME_STRING), &temp_dir)) {
+          *parent_dir, FILE_PATH_LITERAL(COMPANY_SHORTNAME_STRING),
+          &temp_dir)) {
     return std::nullopt;
   }
 
@@ -1069,7 +1064,7 @@ void ForEachRegistryRunValueWithPrefix(
                                            KEY_WOW64_32KEY);
        it.Valid(); ++it) {
     const std::wstring run_name = it.Name();
-    if (base::StartsWith(run_name, prefix)) {
+    if (run_name.starts_with(prefix)) {
       callback(run_name);
     }
   }
@@ -1097,7 +1092,7 @@ void ForEachServiceWithPrefix(
                                          KEY_WOW64_32KEY);
        it.Valid(); ++it) {
     const std::wstring service_name = it.Name();
-    if (base::StartsWith(service_name, service_name_prefix)) {
+    if (service_name.starts_with(service_name_prefix)) {
       if (display_name_prefix.empty()) {
         callback(service_name);
         continue;
@@ -1118,7 +1113,7 @@ void ForEachServiceWithPrefix(
       }
 
       const bool display_name_starts_with_prefix =
-          base::StartsWith(display_name, display_name_prefix);
+          display_name.starts_with(display_name_prefix);
       VLOG(1) << __func__ << ": " << service_name
               << " matches: " << service_name_prefix << ": " << display_name
               << ": " << display_name_starts_with_prefix << ": "
@@ -1605,7 +1600,7 @@ HResultOr<std::wstring> GetCommandLineForPid(DWORD process_id) {
     return base::unexpected(HRESULTFromLastError());
   }
   cmd_line.resize(bytes_read / sizeof(wchar_t));
-  if (cmd_line.back() == L'\0') {
+  if (!cmd_line.empty() && cmd_line.back() == L'\0') {
     cmd_line.pop_back();
   }
   return cmd_line;

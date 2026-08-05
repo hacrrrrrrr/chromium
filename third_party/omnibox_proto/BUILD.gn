@@ -21,7 +21,6 @@ _proto_files = [
   "chrome_aim_entry_point.proto",
   "chrome_searchbox_stats.proto",
   "entity_info.proto",
-  "feature_gate_constraints.proto",
   "groups.proto",
   "icon.proto",
   "icon_resource_ids.proto",
@@ -54,7 +53,7 @@ _proto_files = [
   "url_param.proto",
 ]
 
-fuzzable_proto_library("omnibox_proto") {
+proto_library("omnibox_proto") {
   sources = _proto_files
   proto_in_dir = "."
 }

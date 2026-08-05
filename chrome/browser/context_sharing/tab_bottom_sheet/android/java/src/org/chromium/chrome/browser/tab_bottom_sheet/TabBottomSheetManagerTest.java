@@ -135,7 +135,7 @@ public class TabBottomSheetManagerTest {
                                     null,
                                     Color.WHITE,
                                     new TestCoBrowseComponentProvider(),
-                                    mPeekViewManager);
+                                    () -> mPeekViewManager);
                     mManager =
                             (TabBottomSheetManagerImpl)
                                     tabbedRootUiCoordinator.getTabBottomSheetManagerForTesting();
@@ -263,7 +263,7 @@ public class TabBottomSheetManagerTest {
                             .hideContent(any(), anyBoolean(), anyInt());
 
                     // Simulate Omnibox losing focus (hasFocus = false).
-                    // This triggers maybeShowBottomSheet().
+                    // This triggers unsuppressBottomSheet().
                     // If the bug is present, it will try to show, fail (since it is showing),
                     // and call notifyOnClose() which calls hideContent().
                     omniboxFocusSupplier.set(false);
@@ -296,6 +296,7 @@ public class TabBottomSheetManagerTest {
                                         webContents,
                                         TabBottomSheetClientType.UNKNOWN,
                                         CoBrowseContainerType.BOTTOM_SHEET,
+                                        /* requestFocus= */ false,
                                         new TestCoBrowseComponentProvider()));
 
         ThreadUtils.runOnUiThreadBlocking(
@@ -349,6 +350,7 @@ public class TabBottomSheetManagerTest {
                                         webContents,
                                         TabBottomSheetClientType.UNKNOWN,
                                         CoBrowseContainerType.BOTTOM_SHEET,
+                                        /* requestFocus= */ false,
                                         new TestCoBrowseComponentProvider()));
 
         ThreadUtils.runOnUiThreadBlocking(
@@ -644,7 +646,7 @@ public class TabBottomSheetManagerTest {
                                         null,
                                         Color.WHITE,
                                         new TestCoBrowseComponentProvider(),
-                                        mPeekViewManager));
+                                        () -> mPeekViewManager));
 
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {

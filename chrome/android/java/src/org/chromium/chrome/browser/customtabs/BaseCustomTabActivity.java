@@ -89,6 +89,7 @@ import org.chromium.chrome.browser.customtabs.content.DefaultCustomTabIntentHand
 import org.chromium.chrome.browser.customtabs.content.TabCreationMode;
 import org.chromium.chrome.browser.customtabs.content.TabObserverRegistrar;
 import org.chromium.chrome.browser.customtabs.features.ImmersiveModeController;
+import org.chromium.chrome.browser.customtabs.features.WebappInsetsConsumer;
 import org.chromium.chrome.browser.customtabs.features.desktop_popup_header.DesktopPopupHeaderUtils;
 import org.chromium.chrome.browser.customtabs.features.minimizedcustomtab.CustomTabMinimizationManagerHolder;
 import org.chromium.chrome.browser.customtabs.features.minimizedcustomtab.CustomTabMinimizeDelegate;
@@ -164,6 +165,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     private CustomTabStatusBarColorProvider mStatusBarColorProvider;
     private CustomTabActivityTabFactory mTabFactory;
     private CustomTabIntentHandler mCustomTabIntentHandler;
+    private @Nullable CustomTabResumeManager mResumeManager;
     private CustomTabNightModeStateController mNightModeStateController;
     private @Nullable WebappActivityCoordinator mWebappActivityCoordinator;
     private @Nullable TrustedWebActivityCoordinator mTwaCoordinator;
@@ -190,6 +192,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     private WebappDeferredStartupWithStorageHandler mWebappDeferredStartupWithStorageHandler;
     private TrustedWebActivityModel mTrustedWebActivityModel;
     private SharedActivityCoordinator mSharedActivityCoordinator;
+    private @Nullable ImmersiveModeController mImmersiveModeController;
+    private @Nullable WebappInsetsConsumer mWebappInsetsConsumer;
     private TrustedWebActivityBrowserControlsVisibilityManager mBrowserControlsVisibilityManager;
     private @Nullable AppHeaderCoordinator mAppHeaderCoordinator;
     private @Nullable BrowserServicesThemeColorProvider mBrowserServicesThemeColorProvider;
@@ -317,21 +321,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
 
     @Override
     protected boolean wrapContentWithEdgeToEdgeLayout() {
-        if (!super.wrapContentWithEdgeToEdgeLayout()) {
-            return false;
-        }
-
-        // Webapp/WebAPK display-cutout handling uses its own window-level edge-to-edge flow.
-        // Wrapping the content view in EdgeToEdgeLayoutCoordinator adds system-bar padding that
-        // prevents standalone/fullscreen webapp content from filling the viewport on newer
-        // Android versions.
-        if (ChromeFeatureList.sWebAppShortEdgesCutoutMode.isEnabled()
-                && mIntentDataProvider.isWebappOrWebApkActivity()) {
-            return false;
-        }
-
         // TODO(crbug.com/392774038): Enable for e2e everywhere for PCCT.
-        return !mIntentDataProvider.isPartialCustomTab();
+        return super.wrapContentWithEdgeToEdgeLayout() && !mIntentDataProvider.isPartialCustomTab();
     }
 
     @Override
@@ -608,14 +599,31 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
 
         InstalledWebappDataRegister.prefetchPreferences();
 
+        if (ChromeFeatureList.sWebAppShortEdgesCutoutMode.isEnabled()
+                && mIntentDataProvider.isWebappOrWebApkActivity()) {
+            // The window's edge-to-edge state is owned by token holders (display cutout
+            // controller, immersive mode). While any token is held, withhold system bar and
+            // display cutout insets from the edge-to-edge root layout so the web app content
+            // draws under zero-height bars; releasing the last token restores the fitted
+            // layout, e.g. with the CCT toolbar below the status bar after an off-origin
+            // navigation.
+            mWebappInsetsConsumer = new WebappInsetsConsumer(getInsetObserver());
+            assumeNonNull(getEdgeToEdgeManager())
+                    .getEdgeToEdgeStateProvider()
+                    .getSupplier()
+                    .addSyncObserverAndCallIfNonNull(mWebappInsetsConsumer::drawEdgeToEdge);
+        }
+
         mClientPackageNameProvider =
                 new ClientPackageNameProvider(
                         getLifecycleDispatcher(), mIntentDataProvider, getSavedInstanceState());
 
         // Hidden tabs shouldn't be used in incognito/ephemeral CCT, since they are always
-        // created with regular profile.
+        // created with regular profile. Also restrict usage if restoring a tab state.
+        mResumeManager = maybeCreateResumeManager();
+        boolean shouldRestore = mResumeManager != null && mResumeManager.isTabResumptionRequested();
         HiddenTab hiddenTab =
-                mIntentDataProvider.isOffTheRecord()
+                (mIntentDataProvider.isOffTheRecord() || shouldRestore)
                         ? null
                         : CustomTabActivityTabController.takeHiddenTab(mIntentDataProvider);
 
@@ -721,7 +729,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getWindowAndroid(),
                         this,
                         getCipherFactory(),
-                        getLifecycleDispatcher());
+                        getLifecycleDispatcher(),
+                        mResumeManager);
 
         getCustomTabActivityTabFactory().setActivityType(getActivityType());
         // Finish reparenting as soon as possible as it may be blocking navigation.
@@ -888,9 +897,19 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
 
     @Override
     protected void onDestroyInternal() {
+        if (mResumeManager != null) {
+            mResumeManager.destroy();
+            mResumeManager = null;
+        }
+
         if (mCustomTabSessionHandler != null) {
             mCustomTabSessionHandler.onDestroy();
             mCustomTabSessionHandler = null;
+        }
+
+        if (mWebappInsetsConsumer != null) {
+            mWebappInsetsConsumer.destroy();
+            mWebappInsetsConsumer = null;
         }
 
         if (mFullscreenManager != null) {
@@ -1493,12 +1512,16 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         return mCustomTabOrientationController;
     }
 
-    private ImmersiveModeController createImmersiveModeController() {
-        return new ImmersiveModeController(
-                this,
-                getWindowAndroid(),
-                assumeNonNull(getEdgeToEdgeManager()).getEdgeToEdgeStateProvider(),
-                getLifecycleDispatcher());
+    private ImmersiveModeController getImmersiveModeController() {
+        if (mImmersiveModeController == null) {
+            mImmersiveModeController =
+                    new ImmersiveModeController(
+                            this,
+                            getWindowAndroid(),
+                            assumeNonNull(getEdgeToEdgeManager()).getEdgeToEdgeStateProvider(),
+                            getLifecycleDispatcher());
+        }
+        return mImmersiveModeController;
     }
 
     private CustomTabToolbarColorController getCustomTabToolbarColorController() {
@@ -1678,7 +1701,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                             getCurrentPageVerifier(),
                             controlsVisibilityManager,
                             getCustomTabStatusBarColorProvider(),
-                            this::createImmersiveModeController,
+                            this::getImmersiveModeController,
                             getIntentDataProvider(),
                             getCustomTabOrientationController(),
                             getCustomTabActivityNavigationController(),
@@ -1795,5 +1818,15 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         }
 
         return null;
+    }
+
+    private @Nullable CustomTabResumeManager maybeCreateResumeManager() {
+        if (!ChromeFeatureList.sCctTabResumption.isEnabled()) return null;
+
+        if (!CustomTabResumeManager.shouldCreateTabResumeManager(mIntentDataProvider)) {
+            return null;
+        }
+
+        return new CustomTabResumeManager(mIntentDataProvider, getCipherFactory());
     }
 }

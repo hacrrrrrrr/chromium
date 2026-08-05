@@ -549,6 +549,12 @@ void StreamWrite(DevToolsUIBindings* bindings,
                              base::Value(encoded));
 }
 
+enum class DevToolsFrontendLocation {
+  kLocal = 0,
+  kRemote = 1,
+  kMaxValue = kRemote,
+};
+
 bool IsLocalDevToolsFrontendURL(const GURL& url) {
   if (!url.is_valid() || url.IsAboutBlank() ||
       !url.SchemeIs(content::kChromeDevToolsScheme) ||
@@ -1981,11 +1987,6 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
                       std::move(ai_assistance_file_agent_dict));
   }
 
-  response_dict.Set("devToolsAiAssistanceV2",
-                    base::DictValue().Set(
-                        "enabled", base::FeatureList::IsEnabled(
-                                       ::features::kDevToolsAiAssistanceV2)));
-
   response_dict.Set("devToolsAiV2Architecture",
                     base::DictValue().Set(
                         "enabled", base::FeatureList::IsEnabled(
@@ -2050,8 +2051,7 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
                                      enabled_by_flags, disabled_by_flags)));
 
   base::DictValue devtools_well_known_dict;
-  devtools_well_known_dict.Set(
-      "enabled", base::FeatureList::IsEnabled(::features::kDevToolsWellKnown));
+  devtools_well_known_dict.Set("enabled", true);
   response_dict.Set("devToolsWellKnown", std::move(devtools_well_known_dict));
 
   base::DictValue ve_logging_dict;
@@ -2070,11 +2070,6 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
       base::FeatureList::IsEnabled(net::features::kEnableSchemeBoundCookies));
   response_dict.Set("devToolsEnableOriginBoundCookies",
                     std::move(origin_bound_cookies_dict));
-
-  if (base::FeatureList::IsEnabled(features::kDevToolsGreenDevUi)) {
-    response_dict.Set("devToolsGreenDevUi",
-                      base::DictValue().Set("enabled", true));
-  }
 
   if (base::FeatureList::IsEnabled(
           ::features::kDevToolsAnimationStylesInStylesTab)) {
@@ -2111,12 +2106,12 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
   response_dict.Set("devToolsAiGeneratedTimelineLabels",
                     std::move(ai_generated_timeline_labels_dict));
 
-  base::DictValue devtools_force_popover_dict;
-  devtools_force_popover_dict.Set(
+  base::DictValue devtools_force_interest_dict;
+  devtools_force_interest_dict.Set(
       "enabled", base::FeatureList::IsEnabled(
-                     blink::features::kDevToolsAllowPopoverForcing));
-  response_dict.Set("devToolsAllowPopoverForcing",
-                    std::move(devtools_force_popover_dict));
+                     blink::features::kDevToolsAllowInterestForcing));
+  response_dict.Set("devToolsAllowInterestForcing",
+                    std::move(devtools_force_interest_dict));
 
   base::DictValue flexible_layout_dict;
   flexible_layout_dict.Set(
@@ -2227,6 +2222,21 @@ base::DictValue DevToolsUIBindings::GetHostConfigDictionary(Profile* profile) {
                         "enabled", GetFeatureStateForDevTools(
                                        ::features::kDevToolsPlusButton,
                                        enabled_by_flags, disabled_by_flags)));
+
+  response_dict.Set(
+      "devToolsInstrumentationBreakpoints",
+      base::DictValue().Set(
+          "enabled", GetFeatureStateForDevTools(
+                         ::features::kDevToolsInstrumentationBreakpoints,
+                         enabled_by_flags, disabled_by_flags)));
+
+  response_dict.Set(
+      "devToolsSourceMapScopesInSourcesPanel",
+      base::DictValue().Set(
+          "enabled",
+          GetFeatureStateForDevTools(
+              ::features::kDevToolsSourceMapScopesInSourcesPanel,
+              enabled_by_flags, disabled_by_flags)));
 
 #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
   // We check AreExtensionsOnExtensionURLsAllowed() here because this is used to
@@ -2462,6 +2472,14 @@ void DevToolsUIBindings::MaybeStartLogging() {
     if (!remote_debugging_enabled) {
       session_tags |= SessionTags::kDevToolsRemoteDebuggingDisabled;
     }
+
+    // Log the frontend location explicitly
+    GURL frontend_url = web_contents_->GetVisibleURL();
+    DevToolsFrontendLocation location = IsLocalDevToolsFrontendURL(frontend_url)
+                                            ? DevToolsFrontendLocation::kLocal
+                                            : DevToolsFrontendLocation::kRemote;
+    base::UmaHistogramEnumeration("DevTools.FrontendLocation", location);
+
     metrics::structured::StructuredMetricsClient::Record(
         metrics::structured::events::v2::dev_tools::SessionStart()
             .SetTags(session_tags)

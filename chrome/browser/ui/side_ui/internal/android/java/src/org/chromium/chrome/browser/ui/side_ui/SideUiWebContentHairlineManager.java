@@ -14,7 +14,11 @@ import com.google.errorprone.annotations.DoNotMock;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider;
+import org.chromium.chrome.browser.tabmodel.IncognitoStateProvider.IncognitoStateObserver;
 import org.chromium.chrome.browser.ui.side_ui.SideUiCoordinator.AnchorSide;
+import org.chromium.chrome.browser.ui.side_ui.SideUiCoordinator.SideUiId;
 import org.chromium.chrome.browser.ui.side_ui.SideUiCoordinator.SideUiSpecs;
 
 import java.util.Set;
@@ -26,9 +30,11 @@ import java.util.Set;
 
     private final BrowserControlsStateProvider mBrowserControlsStateProvider;
     private final SideUiStateProvider mSideUiStateProvider;
+    private final IncognitoStateProvider mIncognitoStateProvider;
 
     private final WebContentHairlineControlsObserver mWebContentHairlineControlsObserver;
     private final WebContentHairlineAdjuster mWebContentHairlineAdjuster;
+    private final WebContentHairlineIncognitoObserver mWebContentHairlineIncognitoObserver;
 
     /**
      * Creates a {@link SideUiWebContentHairlineManager}.
@@ -37,28 +43,46 @@ import java.util.Set;
      *     controls changes.
      * @param sideUiStateProvider The {@link SideUiStateProvider} to observe SideUI changes.
      * @param sideUiWebContentHairlineContainer The group that contains the WebContent hairlines.
+     * @param incognitoStateProvider The {@link IncognitoStateProvider} to observe incognito state.
      */
     /* package */ SideUiWebContentHairlineManager(
             BrowserControlsStateProvider browserControlsStateProvider,
             SideUiStateProvider sideUiStateProvider,
-            SideUiWebContentHairlineContainer sideUiWebContentHairlineContainer) {
+            SideUiWebContentHairlineContainer sideUiWebContentHairlineContainer,
+            IncognitoStateProvider incognitoStateProvider) {
         mBrowserControlsStateProvider = browserControlsStateProvider;
         mSideUiStateProvider = sideUiStateProvider;
+        mIncognitoStateProvider = incognitoStateProvider;
 
         mWebContentHairlineControlsObserver =
                 new WebContentHairlineControlsObserver(
-                        browserControlsStateProvider, sideUiWebContentHairlineContainer);
+                        browserControlsStateProvider,
+                        sideUiStateProvider,
+                        sideUiWebContentHairlineContainer);
         browserControlsStateProvider.addObserver(mWebContentHairlineControlsObserver);
+        mWebContentHairlineControlsObserver.updateWebContentHairlineContainer();
 
         mWebContentHairlineAdjuster =
-                new WebContentHairlineAdjuster(sideUiWebContentHairlineContainer);
+                new WebContentHairlineAdjuster(
+                        sideUiStateProvider, sideUiWebContentHairlineContainer);
         sideUiStateProvider.addObserver(mWebContentHairlineAdjuster);
+
+        mWebContentHairlineIncognitoObserver =
+                new WebContentHairlineIncognitoObserver(sideUiWebContentHairlineContainer);
+        mIncognitoStateProvider.addIncognitoStateObserverAndTrigger(
+                mWebContentHairlineIncognitoObserver);
     }
 
     /** Destroys all owned objects. */
     /* package */ void destroy() {
         mBrowserControlsStateProvider.removeObserver(mWebContentHairlineControlsObserver);
         mSideUiStateProvider.removeObserver(mWebContentHairlineAdjuster);
+        mIncognitoStateProvider.removeObserver(mWebContentHairlineIncognitoObserver);
+    }
+
+    /** Updates the WebContent hairline container. */
+    /* package */ void update() {
+        mWebContentHairlineControlsObserver.updateWebContentHairlineContainer();
     }
 
     /**
@@ -69,12 +93,15 @@ import java.util.Set;
             implements BrowserControlsStateProvider.Observer {
 
         private final BrowserControlsStateProvider mBrowserControlsStateProvider;
+        private final SideUiStateProvider mSideUiStateProvider;
         private final SideUiWebContentHairlineContainer mSideUiWebContentHairlineContainer;
 
         WebContentHairlineControlsObserver(
                 BrowserControlsStateProvider browserControlsStateProvider,
+                SideUiStateProvider sideUiStateProvider,
                 SideUiWebContentHairlineContainer sideUiWebContentHairlineContainer) {
             mBrowserControlsStateProvider = browserControlsStateProvider;
+            mSideUiStateProvider = sideUiStateProvider;
             mSideUiWebContentHairlineContainer = sideUiWebContentHairlineContainer;
         }
 
@@ -96,11 +123,14 @@ import java.util.Set;
             updateWebContentHairlineContainer();
         }
 
-        private void updateWebContentHairlineContainer() {
+        /* package */ void updateWebContentHairlineContainer() {
             // Hides the top hairline, if needed.
             int topVisibleContentOffset =
                     (int) mBrowserControlsStateProvider.getTopVisibleContentOffset();
-            boolean hideTopHairline = topVisibleContentOffset == 0;
+            boolean hideTopHairline =
+                    !ChromeFeatureList.sSidePanelTopHairlineRefactorAndroid.isEnabled()
+                            || topVisibleContentOffset == 0
+                            || !mSideUiStateProvider.isAnySideUiShowing();
             mSideUiWebContentHairlineContainer
                     .getTopHairline()
                     .setVisibility(hideTopHairline ? View.INVISIBLE : View.VISIBLE);
@@ -119,12 +149,15 @@ import java.util.Set;
      */
     private static final class WebContentHairlineAdjuster extends ViewMarginAdjusterForSideUi {
 
+        private final SideUiStateProvider mSideUiStateProvider;
         private final SideUiWebContentHairlineContainer mSideUiWebContentHairlineContainer;
 
         public WebContentHairlineAdjuster(
+                SideUiStateProvider sideUiStateProvider,
                 SideUiWebContentHairlineContainer sideUiWebContentHairlineContainer) {
             super(sideUiWebContentHairlineContainer);
 
+            mSideUiStateProvider = sideUiStateProvider;
             mSideUiWebContentHairlineContainer = sideUiWebContentHairlineContainer;
         }
 
@@ -135,17 +168,25 @@ import java.util.Set;
 
         @Override
         public void onSideUiSpecsChanged(SideUiSpecs sideUiSpecs) {
-            // TODO(crbug.com/525353575): Investigate if we need to update rounded corner logic for
-            //  different height side containers.
-            // TODO(crbug.com/530332806): Investigate if we need to disable rounded corners for VT.
+            // TODO(crbug.com/525353575): Determine the innermost side UI to figure out which
+            //  corner to show when supporting VT and SP on the same side.
+            boolean isLeftShowing = sideUiSpecs.getWidth(AnchorSide.LEFT) != 0;
+            boolean isVtShowing = mSideUiStateProvider.isSideUiShowing(SideUiId.VERTICAL_TABS);
+
             int leftHairlineVisibility =
-                    sideUiSpecs.getWidth(AnchorSide.LEFT) == 0 ? View.INVISIBLE : View.VISIBLE;
+                    (isLeftShowing && !isVtShowing) ? View.VISIBLE : View.INVISIBLE;
             mSideUiWebContentHairlineContainer
                     .getLeftHairline()
                     .setVisibility(leftHairlineVisibility);
             mSideUiWebContentHairlineContainer
-                    .getLeftRoundedCorner()
+                    .getTopLeftRoundedCorner()
                     .setVisibility(leftHairlineVisibility);
+
+            int leftBottomCornerVisibility =
+                    (isLeftShowing && isVtShowing) ? View.VISIBLE : View.INVISIBLE;
+            mSideUiWebContentHairlineContainer
+                    .getBottomLeftRoundedCorner()
+                    .setVisibility(leftBottomCornerVisibility);
 
             int rightHairlineVisibility =
                     sideUiSpecs.getWidth(AnchorSide.RIGHT) == 0 ? View.INVISIBLE : View.VISIBLE;
@@ -153,10 +194,29 @@ import java.util.Set;
                     .getRightHairline()
                     .setVisibility(rightHairlineVisibility);
             mSideUiWebContentHairlineContainer
-                    .getRightRoundedCorner()
+                    .getTopRightRoundedCorner()
                     .setVisibility(rightHairlineVisibility);
 
             super.onSideUiSpecsChanged(sideUiSpecs);
+        }
+    }
+
+    /**
+     * Implementation of {@link IncognitoStateObserver} that updates the colors of the hairlines and
+     * rounded corners when incognito mode changes.
+     */
+    private static final class WebContentHairlineIncognitoObserver
+            implements IncognitoStateObserver {
+        private final SideUiWebContentHairlineContainer mSideUiWebContentHairlineContainer;
+
+        WebContentHairlineIncognitoObserver(
+                SideUiWebContentHairlineContainer sideUiWebContentHairlineContainer) {
+            mSideUiWebContentHairlineContainer = sideUiWebContentHairlineContainer;
+        }
+
+        @Override
+        public void onIncognitoStateChanged(boolean isIncognito) {
+            mSideUiWebContentHairlineContainer.setIncognitoState(isIncognito);
         }
     }
 }

@@ -71,7 +71,7 @@ class ManifestSilentUpdateCommandTest : public WebAppTest {
     WebAppTest::SetUp();
     FakeWebAppProvider* provider = FakeWebAppProvider::Get(profile());
     provider->SetOriginAssociationManager(
-        std::make_unique<FakeWebAppOriginAssociationManager>());
+        std::make_unique<FakeWebAppOriginAssociationManager>(*profile()));
     provider->StartWithSubsystems();
     test::WaitUntilWebAppProviderAndSubsystemsReady(provider);
 
@@ -555,13 +555,6 @@ TEST_F(ManifestSilentUpdateCommandTest, FileHandlersUpdatedSilently) {
     handler->action = GURL("http://example.com/open-files");
     handler->accept[u"image/png"].push_back(u".png");
     handler->name = u"Images";
-    {
-      blink::Manifest::ImageResource icon;
-      icon.src = GURL("fav1.png");
-      icon.purpose = {blink::mojom::ManifestImageResource_Purpose::ANY,
-                      blink::mojom::ManifestImageResource_Purpose::MASKABLE};
-      handler->icons.push_back(icon);
-    }
     new_manifest->file_handlers.push_back(std::move(handler));
   }
 

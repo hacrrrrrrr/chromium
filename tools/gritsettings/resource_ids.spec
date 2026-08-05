@@ -253,10 +253,6 @@
     "META": {"sizes": {"includes": [10],}},
     "includes": [2920],
   },
-  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/browsing_topics/resources.grd": {
-    "META": {"sizes": {"includes": [10]}},
-    "includes": [2940],
-  },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/certificate_manager/resources.grd": {
     "META": {"sizes": {"includes": [50],}},
     "includes": [2950],
@@ -457,9 +453,13 @@
     "META": {"sizes": {"includes": [10]}},
     "includes": [3769],
   },
+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/contextual_tasks/extension/resources.grd": {
+    "META": {"sizes": {"includes": [10]}},
+    "includes": [3770],
+  },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/contextual_tasks/resources.grd": {
     "META": {"sizes": {"includes": [100]}},
-    "includes": [3770],
+    "includes": [3771],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/data_sharing/resources.grd": {
    "META": {"sizes": {"includes": [20]}},
@@ -570,7 +570,7 @@
     "includes": [4110],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/iwa_dev/resources.grd": {
-    "META": {"sizes": {"includes": [10]}},
+    "META": {"sizes": {"includes": [20]}},
     "includes": [4150],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/key_value_pair_viewer_shared/resources.grd": {
@@ -669,6 +669,10 @@
     "META": {"sizes": {"includes": [5]}},
     "includes": [4510],
   },
+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/organizer_panel/resources.grd": {
+    "META": {"sizes": {"includes": [10]}},
+    "includes": [4515],
+  },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/password_manager/resources.grd": {
     "META": {"sizes": {"includes": [200]}},
     "includes": [4520],
@@ -676,14 +680,6 @@
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/pdf/resources.grd": {
     "META": {"sizes": {"includes": [200]}},
     "includes": [4540],
-  },
-  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/personal_context_notice/resources.grd": {
-    "META": {"sizes": {"includes": [10]}},
-    "includes": [4550],
-  },
-  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/personal_context_internals/resources.grd": {
-    "META": {"sizes": {"includes": [10]}},
-    "includes": [4555],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/predictors/resources.grd": {
     "META": {"sizes": {"includes": [5],}},
@@ -706,7 +702,7 @@
     "includes": [4665],
   },
    "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/webui_toolbar/resources.grd": {
-    "META": {"sizes": {"includes": [170]}},
+    "META": {"sizes": {"includes": [100]}},
     "includes": [4670],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/sandbox_internals/resources.grd": {
@@ -1272,15 +1268,6 @@
     "META": {"join": 2},
     "messages": [7140],
   },
-  # plus_addresses_internal_strings.grd and plus_addresses_strings.grd must
-  # share the same id because they define the same strings, but only one of them
-  # is built depending on whether src_internal is available.
-  "components/plus_addresses/core/browser/resources/internal/strings/plus_addresses_internal_strings.grd": {
-    "messages": [7160],
-  },
-  "components/plus_addresses/core/browser/resources/strings/plus_addresses_strings.grd": {
-    "messages": [7160],
-  },
   # components/policy/resources/policy_templates.grd and
   # components/policy/resources/policy_templates.build.grd must share the same
   # id because they are based on the same structure, however they are used in
@@ -1351,9 +1338,13 @@
     "META": {"sizes": {"includes": [5]}},
     "includes": [7385],
   },
+  "<(SHARED_INTERMEDIATE_DIR)/components/notebooks/internals/webui/resources/resources.grd": {
+    "META": {"sizes": {"includes": [10]}},
+    "includes": [7390],
+  },
   "<(SHARED_INTERMEDIATE_DIR)/components/ntp_tiles/webui/resources/resources.grd": {
     "META": {"sizes": {"includes": [5]}},
-    "includes": [7390],
+    "includes": [7395],
   },
   "<(SHARED_INTERMEDIATE_DIR)/components/optimization_guide/optimization_guide_internals/resources/resources.grd": {
     "META": {"sizes": {"includes": [10]}},
@@ -1518,10 +1509,6 @@
   },
 
   # These files are generated during the build.
-  "<(SHARED_INTERMEDIATE_DIR)/content/browser/resources/private_aggregation/resources.grd": {
-    "META": {"sizes": {"includes": [20]}},
-    "includes": [8060],
-  },
   "<(SHARED_INTERMEDIATE_DIR)/content/browser/resources/gpu/resources.grd": {
     "META": {"sizes": {"includes": [20]}},
     "includes": [8080],
@@ -1798,7 +1785,7 @@
   },
 
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/webui_toolbar_shared/resources.grd": {
-    "META": {"sizes": {"includes": [20]}},
+    "META": {"sizes": {"includes": [100]}},
     "includes": [10140],
   },
 

@@ -120,7 +120,9 @@ void RenderWidgetHostViewChildFrame::
       manager->RemoveObserver(this);
 #if BUILDFLAG(IS_ANDROID)
       auto* observer = root_view->GetTouchSelectionControllerInputObserver();
-      host()->RemoveInputEventObserver(observer);
+      if (observer) {
+        host()->RemoveInputEventObserver(observer);
+      }
 #endif
     }
   } else {
@@ -188,7 +190,9 @@ void RenderWidgetHostViewChildFrame::SetFrameConnector(
 
 #if BUILDFLAG(IS_ANDROID)
       auto* observer = root_view->GetTouchSelectionControllerInputObserver();
-      host()->AddInputEventObserver(observer);
+      if (observer) {
+        host()->AddInputEventObserver(observer);
+      }
 #endif
     }
   }
@@ -310,19 +314,27 @@ void RenderWidgetHostViewChildFrame::WasOccluded() {
   Hide();
 }
 
-gfx::Rect RenderWidgetHostViewChildFrame::GetViewBounds() {
+gfx::Rect RenderWidgetHostViewChildFrame::GetViewBoundsHelper(
+    bool without_transform) {
   gfx::Rect screen_space_rect;
   if (frame_connector_) {
     screen_space_rect = frame_connector_->GetRectInParentViewInDip();
 
-    RenderWidgetHostView* parent_view =
+    RenderWidgetHostViewBase* parent_view =
         frame_connector_->GetParentRenderWidgetHostView();
 
     // The parent_view can be null in tests when using a TestWebContents.
     if (parent_view) {
       // Translate screen_space_rect by the parent's RenderWidgetHostView
       // offset.
-      screen_space_rect.Offset(parent_view->GetViewBounds().OffsetFromOrigin());
+      gfx::Vector2d offset;
+      if (without_transform) {
+        offset =
+            parent_view->GetViewBoundsWithoutTransform().OffsetFromOrigin();
+      } else {
+        offset = parent_view->GetViewBounds().OffsetFromOrigin();
+      }
+      screen_space_rect.Offset(offset);
     }
     // TODO(wjmaclean): GetViewBounds is a bit of a mess. It's used to determine
     // the size of the renderer content and where to place context menus and so
@@ -332,6 +344,14 @@ gfx::Rect RenderWidgetHostViewChildFrame::GetViewBounds() {
     screen_space_rect.set_size(frame_connector_->GetLocalFrameSizeInDip());
   }
   return screen_space_rect;
+}
+
+gfx::Rect RenderWidgetHostViewChildFrame::GetViewBounds() {
+  return GetViewBoundsHelper(/*without_transform=*/false);
+}
+
+gfx::Rect RenderWidgetHostViewChildFrame::GetViewBoundsWithoutTransform() {
+  return GetViewBoundsHelper(/*without_transform=*/true);
 }
 
 gfx::Size RenderWidgetHostViewChildFrame::GetVisibleViewportSize() {
@@ -397,9 +417,10 @@ void RenderWidgetHostViewChildFrame::UpdateBackgroundColor() {
   CHECK(GetBackgroundColor(), base::NotFatalUntil::M152);
 
   SkColor color = *GetBackgroundColor();
-  CHECK(SkColorGetA(color) == SK_AlphaOPAQUE ||
-            SkColorGetA(color) == SK_AlphaTRANSPARENT,
-        base::NotFatalUntil::M152);
+  // TODO(crbug.com/535539883): CHECK-exclusion: Convert to a CHECK once we
+  // are confident it won't be triggered.
+  DCHECK(SkColorGetA(color) == SK_AlphaOPAQUE ||
+         SkColorGetA(color) == SK_AlphaTRANSPARENT);
   if (host()->owner_delegate()) {
     host()->owner_delegate()->SetBackgroundOpaque(SkColorGetA(color) ==
                                                   SK_AlphaOPAQUE);
@@ -694,8 +715,9 @@ void RenderWidgetHostViewChildFrame::UpdateInheritedEffectiveTouchAction() {
 }
 
 void RenderWidgetHostViewChildFrame::UpdateRenderThrottlingStatus() {
-  // Do not send throttling status to main frames.
-  if (host() && frame_connector_ && !host()->owner_delegate()) {
+  // Send throttling status to subframes and embedded main frames except fenced
+  // frames.
+  if (host() && frame_connector_ && !host()->frame_tree()->is_fenced_frame()) {
     host_->GetAssociatedFrameWidget()->UpdateRenderThrottlingStatusForSubFrame(
         frame_connector_->IsThrottled(), frame_connector_->IsSubtreeThrottled(),
         frame_connector_->IsDisplayLocked());
@@ -782,6 +804,20 @@ gfx::Rect RenderWidgetHostViewChildFrame::GetBoundsInScreen() {
     // The root_view can be null in tests when using a TestWebContents.
     if (root_view)
       rect = root_view->GetBoundsInScreen();
+  }
+  return rect;
+}
+
+gfx::Rect RenderWidgetHostViewChildFrame::GetBoundsInScreenWithoutTransform() {
+  gfx::Rect rect;
+  if (frame_connector_) {
+    RenderWidgetHostViewBase* root_view =
+        frame_connector_->GetRootRenderWidgetHostView();
+
+    // The root_view can be null in tests when using a TestWebContents.
+    if (root_view) {
+      rect = root_view->GetBoundsInScreenWithoutTransform();
+    }
   }
   return rect;
 }

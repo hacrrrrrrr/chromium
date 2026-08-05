@@ -82,8 +82,8 @@ class SendTabToSelfInteractiveUiTest : public InteractiveBrowserTest {
   auto StopToastTimer() {
     return Do([this]() {
       browser()
-          ->browser_window_features()
-          ->toast_controller()
+          ->GetFeatures()
+          .toast_controller()
           ->GetToastCloseTimerForTesting()
           ->Stop();
     });
@@ -95,8 +95,7 @@ class SendTabToSelfInteractiveUiTest : public InteractiveBrowserTest {
           toast_controller->MaybeShowToast(std::move(toast_params));
           toast_controller->GetToastCloseTimerForTesting()->Stop();
         },
-        browser()->browser_window_features()->toast_controller(),
-        std::move(params)));
+        browser()->GetFeatures().toast_controller(), std::move(params)));
   }
 
   SendTabToSelfDevicePickerBubbleView* GetBubbleView() {
@@ -209,6 +208,10 @@ IN_PROC_BROWSER_TEST_F(SendTabToSelfDeviceSelectionInteractiveUiTest,
                         &views::View::GetEnabled, true),
       CheckViewProperty("device_button_1",
                         &SendTabToSelfBubbleDeviceButton::IsSelected, true),
+      // Verify that initial focus lands on the selected device button so screen
+      // reader users hear the currently selected device in the list of options
+      // first.
+      CheckViewProperty("device_button_1", &views::View::HasFocus, true),
       PressButton(views::DialogClientView::kOkButtonElementId),
       WaitForShow(toasts::ToastView::kToastViewId), StopToastTimer(),
       Do([this]() {
@@ -261,6 +264,10 @@ IN_PROC_BROWSER_TEST_F(SendTabToSelfDeviceSelectionInteractiveUiTest,
                         &views::View::GetEnabled, true),
       CheckViewProperty("device_button_1",
                         &SendTabToSelfBubbleDeviceButton::IsSelected, true),
+      // Verify that initial focus lands on the selected device button so screen
+      // reader users hear the currently selected device in the list of options
+      // first.
+      CheckViewProperty("device_button_1", &views::View::HasFocus, true),
       CheckViewProperty("device_button_2",
                         &SendTabToSelfBubbleDeviceButton::IsSelected, false),
       // Clicking the already selected device should keep it selected.

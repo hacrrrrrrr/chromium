@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -51,7 +50,6 @@
 #include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/common/omnibox_features.h"
-#include "components/omnibox/common/omnibox_metrics_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
@@ -79,7 +77,8 @@ DEFINE_LOCAL_STATE_IDENTIFIER_VALUE(HeightObserver, kAimPopupHeightState);
 DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewTab);
 
 using DeepQuery = WebContentsInteractionTestUtil::DeepQuery;
-const DeepQuery kClassicContextMenu = {"omnibox-popup-app", "#context"};
+const DeepQuery kClassicContextMenu = {
+    "omnibox-popup-app", "omnibox-popup-contextual-entrypoint", "#context"};
 const DeepQuery kDropdownContent = {"omnibox-popup-app",
                                     "cr-searchbox-dropdown", "#content"};
 const DeepQuery kOmniboxPopup = {"omnibox-popup-app"};
@@ -308,7 +307,7 @@ class OmniboxAimWebUiInteractiveTestBase
  protected:
   auto SetAimEligibleResponse() {
     return Do([this]() {
-      auto* profile = browser()->profile();
+      auto* profile = browser()->GetProfile();
       auto* service = AimEligibilityServiceFactory::GetForProfile(profile);
       omnibox::AimEligibilityResponse response;
       response.set_is_eligible(true);
@@ -546,7 +545,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
   // Force a larger window size to give the popup room to grow.
   browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
 
-  browser()->profile()->GetPrefs()->SetInteger(
+  browser()->GetProfile()->GetPrefs()->SetInteger(
       contextual_search::kSearchContentSharingSettings,
       static_cast<int>(
           contextual_search::SearchContentSharingSettingsValue::kEnabled));
@@ -700,27 +699,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
       WaitForGoogleSearch(kNewTab, {{"q", "suggestion-1"}}));
 }
 
-IN_PROC_BROWSER_TEST_F(OmniboxAimWebUiInteractiveTest,
-                       RecordsEarlyExitMetrics) {
-  base::HistogramTester histogram_tester;
-  RunTestSequence(
-      OpenAimPopupInNewTab(), Do([&]() {
-        EXPECT_TRUE(base::test::RunUntil([&]() {
-          return histogram_tester.GetBucketCount(
-                     "Omnibox.Popup.Aim.ResultToContentReadyEarlyExitReason",
-                     static_cast<int>(
-                         omnibox::ResultToContentReadyEarlyExitReason::
-                             kNoResultReadyTime)) > 0;
-        }));
-
-        // Assert the bucket count recorded.
-        histogram_tester.ExpectBucketCount(
-            "Omnibox.Popup.Aim.ResultToContentReadyEarlyExitReason",
-            omnibox::ResultToContentReadyEarlyExitReason::kNoResultReadyTime,
-            1);
-      }));
-}
-
 struct AimSearchParam {
   bool is_voice = false;
   bool submit_via_keyboard = false;
@@ -872,7 +850,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxAimUploadInteractiveTest,
 
   RunTestSequence(
       Do([this]() {
-        browser()->profile()->GetPrefs()->SetInteger(
+        browser()->GetProfile()->GetPrefs()->SetInteger(
             contextual_search::kSearchContentSharingSettings,
             static_cast<int>(contextual_search::
                                  SearchContentSharingSettingsValue::kEnabled));
@@ -945,8 +923,9 @@ class WebUIOmniboxSimplificationInteractiveTest
 #endif
 IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
                        MAYBE_HasBackgroundApplied) {
-  const DeepQuery kContextButton = {"omnibox-popup-app", "#context",
-                                    "#entrypoint"};
+  const DeepQuery kContextButton = {
+      "omnibox-popup-app", "omnibox-popup-contextual-entrypoint", "#context",
+      "cr-composebox-contextual-entrypoint-button", "#entrypoint"};
   RunTestSequence(
       SetAimEligibleResponse(),
       AddInstrumentedTab(kNewTab, chrome::ChromeUINewTabURLAsGURL()),
@@ -962,15 +941,17 @@ IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
 }
 
 // TODO(crbug.com/512348269): Flaky on Mac and Windows.
-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+// TODO(crbug.com/542622759): Flaky on Linux.
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 #define MAYBE_OblongShapeApplied DISABLED_OblongShapeApplied
 #else
 #define MAYBE_OblongShapeApplied OblongShapeApplied
 #endif
 IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
                        MAYBE_OblongShapeApplied) {
-  const DeepQuery kContextButton = {"omnibox-popup-app", "#context",
-                                    "#entrypoint"};
+  const DeepQuery kContextButton = {
+      "omnibox-popup-app", "omnibox-popup-contextual-entrypoint", "#context",
+      "cr-composebox-contextual-entrypoint-button", "#entrypoint"};
   DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kOblongStyleApplied);
   StateChange style_applied;
   style_applied.event = kOblongStyleApplied;
@@ -997,8 +978,9 @@ IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
 #endif
 IN_PROC_BROWSER_TEST_F(WebUIOmniboxSimplificationInteractiveTest,
                        MAYBE_HasSuggestionLabel) {
-  const DeepQuery kSuggestionLabel = {"omnibox-popup-app", "#context",
-                                      "#description"};
+  const DeepQuery kSuggestionLabel = {
+      "omnibox-popup-app", "omnibox-popup-contextual-entrypoint", "#context",
+      "cr-composebox-contextual-entrypoint-button", "#description"};
   browser()->GetWindow()->SetBounds(gfx::Rect(0, 0, 1280, 1024));
   std::u16string expected_text =
       l10n_util::GetStringUTF16(IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MULTIMODAL);

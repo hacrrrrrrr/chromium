@@ -17,10 +17,8 @@ COMPONENT_EXPORT(ONE_TIME_TOKENS)
 BASE_DECLARE_FEATURE(kGmailOtpRetrievalService);
 
 COMPONENT_EXPORT(ONE_TIME_TOKENS)
-extern const base::FeatureParam<std::string> kFetchEmailOneTimeTokenEndpointUrl;
-
-COMPONENT_EXPORT(ONE_TIME_TOKENS)
-extern const base::FeatureParam<std::string> kMockGmailOtpValue;
+extern const base::FeatureParam<base::TimeDelta>
+    kGmailOtpSubscriptionPeriodParam;
 
 }  // namespace one_time_tokens::features
 

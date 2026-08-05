@@ -6,7 +6,9 @@
 #define CHROME_BROWSER_GLIC_SERVICE_METRICS_METRICS_TYPES_H_
 
 #include <string>
+#include <string_view>
 
+#include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 
 namespace glic {
@@ -180,7 +182,11 @@ enum class ResponseSegmentation {
   kReshowInactiveAttachedAudio = 162,
   kReshowInactiveDetachedText = 163,
   kReshowInactiveDetachedAudio = 164,
-  kMaxValue = kReshowInactiveDetachedAudio,
+  kTabContextMenuAttachedText = 165,
+  kTabContextMenuAttachedAudio = 166,
+  kTabContextMenuDetachedText = 167,
+  kTabContextMenuDetachedAudio = 168,
+  kMaxValue = kTabContextMenuDetachedAudio,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicResponseSegmentation)
 
@@ -345,6 +351,7 @@ ResponseSegmentation GetResponseSegmentation(bool attached,
                                              mojom::InvocationSource source);
 
 std::string GetInvocationSourceString(mojom::InvocationSource source);
+std::string_view GetEmbedderTypeString(EmbedderType type);
 }  // namespace glic
 
 #endif  // CHROME_BROWSER_GLIC_SERVICE_METRICS_METRICS_TYPES_H_

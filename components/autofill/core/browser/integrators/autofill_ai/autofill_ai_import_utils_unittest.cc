@@ -171,7 +171,7 @@ class AutofillAiImportUtilsTest : public testing::Test {
  private:
   base::test::ScopedFeatureList feature_list_;
   test::AutofillUnitTestEnvironment autofill_environment_;
-  base::test::SingleThreadTaskEnvironment task_environment_;
+  base::test::TaskEnvironment task_environment_;
   AutofillWebDataServiceTestHelper webdata_helper_{
       std::make_unique<EntityTable>()};
   syncer::TestSyncService sync_service_;
@@ -473,7 +473,7 @@ TEST_F(AutofillAiImportUtilsTest, MaybeGetLocalizedDate) {
     base::i18n::SetICUDefaultLocale("en_GB");
     EXPECT_THAT(MaybeGetLocalizedDate(a), optional(u"30 Dec 2025"));
     base::i18n::SetICUDefaultLocale("de_DE");
-    EXPECT_THAT(MaybeGetLocalizedDate(a), optional(u"30. Dez. 2025"));
+    EXPECT_THAT(MaybeGetLocalizedDate(a), optional(u"30.12.2025"));
     base::i18n::SetICUDefaultLocale("fr_FR");
     EXPECT_THAT(MaybeGetLocalizedDate(a), optional(u"30 déc. 2025"));
   }

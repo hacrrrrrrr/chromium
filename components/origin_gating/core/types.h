@@ -39,6 +39,8 @@ enum class GateableEvent {
   kPageAction,
 };
 
+std::string GateableEventToString(GateableEvent event);
+
 using GateableEventSet = base::EnumSet<GateableEvent,
                                        GateableEvent::kNavigationRequest,
                                        GateableEvent::kPageAction>;
@@ -48,6 +50,11 @@ enum class DecisionSource {
   // Predicate that allows if the origins in question are same-origin with each
   // other.
   kAllowSameOrigin,
+  // Predicate that allows if the destination is a localhost URL with an http or
+  // https scheme.
+  kAllowHttpLocalhost,
+  // Predicate that allows if the destination is about:blank.
+  kAllowAboutBlank,
   // Predicate that allows if the user has already confirmed the origin in
   // question.
   kCacheWithUserConfirmation,
@@ -58,10 +65,22 @@ enum class DecisionSource {
   // delegate provides the embedder-specific logic via
   // `Delegate::EvaluateEnterprisePolicy`.
   kEnterprisePolicy,
+  // Predicate that blocks if the destination's host is an IP address.
+  kForbidIpAddress,
+  // Predicate that blocks if the destination's scheme is not https.
+  kRequireHttps,
+  // Predicate that blocks if the destination's scheme is neither https nor
+  // http.
+  kRequireHttpsOrHttp,
+  // Predicate that evaluates the destination against the actor container
+  // configuration.
+  kActorContainerConfig,
   // No decision was reached before the OriginGating framework ran out of
   // predicates to run.
   kNoVerdict,
 };
+
+std::string DecisionSourceToString(DecisionSource source);
 
 // Encapsulates the source of any positive/negative gating verdict.
 class DecisionAttribution {
@@ -94,6 +113,8 @@ class DecisionAttribution {
   bool operator==(DecisionSource source) const;
   bool operator==(std::string_view name) const;
   bool operator==(const DecisionAttribution& other) const;
+
+  std::string ToString() const;
 
  private:
   bool is_source() const { return type() == Type::kDecisionSource; }

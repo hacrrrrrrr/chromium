@@ -34,10 +34,6 @@ TestStoragePartition::GetCertVerifierServiceUpdater() {
   return nullptr;
 }
 
-storage::SharedStorageManager* TestStoragePartition::GetSharedStorageManager() {
-  return nullptr;
-}
-
 scoped_refptr<network::SharedURLLoaderFactory>
 TestStoragePartition::GetURLLoaderFactoryForBrowserProcess() {
   return test_url_loader_factory_->GetSafeWeakWrapper();
@@ -140,14 +136,6 @@ TestStoragePartition::GetPlatformNotificationContext() {
   return platform_notification_context_;
 }
 
-InterestGroupManager* TestStoragePartition::GetInterestGroupManager() {
-  return nullptr;
-}
-
-PrivateAggregationDataModel*
-TestStoragePartition::GetPrivateAggregationDataModel() {
-  return nullptr;
-}
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 CdmStorageDataModel* TestStoragePartition::GetCdmStorageDataModel() {
@@ -158,11 +146,6 @@ CdmStorageDataModel* TestStoragePartition::GetCdmStorageDataModel() {
 network::mojom::DeviceBoundSessionManager*
 TestStoragePartition::GetDeviceBoundSessionManager() {
   return device_bound_session_manager_;
-}
-
-BrowsingTopicsSiteDataManager*
-TestStoragePartition::GetBrowsingTopicsSiteDataManager() {
-  return browsing_topics_site_data_manager_;
 }
 
 DevToolsBackgroundServicesContext*

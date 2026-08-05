@@ -234,8 +234,8 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
         mBottomSheetContainer.setVisibility(View.VISIBLE);
 
         var rootView = root.get();
-        LayoutInflater.from(rootView.getContext())
-                .inflate(R.layout.bottom_sheet, mBottomSheetContainer);
+        int layoutId = isLargeFormFactor() ? R.layout.bottom_sheet_desktop : R.layout.bottom_sheet;
+        LayoutInflater.from(rootView.getContext()).inflate(layoutId, mBottomSheetContainer);
         mBottomSheet = rootView.findViewById(R.id.bottom_sheet);
 
         mBottomSheet.init(
@@ -800,6 +800,11 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
         mBottomSheet.onSheetBackgroundColorOverrideChanged();
     }
 
+    @Override
+    public boolean isLargeFormFactorUiEnabled(BottomSheetContent content) {
+        return isLargeFormFactor() && content != null && content.supportsLargeFormFactor();
+    }
+
     private void onScrimVisibilityChanged(boolean visible) {
         if (mScrimVisible == visible) return;
         mScrimVisible = visible;
@@ -809,9 +814,14 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
     private void adjustBottomSheetZAxis(boolean scrimVisible) {
         if (mBottomSheet == null) return;
         assumeNonNull(mBottomSheetContainer);
-        if (scrimVisible && mBottomSheet.isSheetOpen()) {
-            // Scrimmed bottom sheet. Draw the bottom sheet container on top of all sibling views,
-            // originating from the bottom of the screen.
+        BottomSheetContent content = mBottomSheet.getCurrentSheetContent();
+        boolean shouldCover =
+                (scrimVisible || (content != null && content.coversBottomControls()))
+                        && mBottomSheet.isSheetOpen();
+        if (shouldCover) {
+            // Scrimmed bottom sheet or sheet requesting to cover bottom controls. Draw the bottom
+            // sheet container on top of all sibling views, originating from the bottom of the
+            // screen.
             mIsAnchoredToBottomControls = false;
             mBottomSheetContainer.setZ(1.0f);
             mBottomSheet.setBottomMargin(0);

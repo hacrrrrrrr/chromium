@@ -189,6 +189,14 @@ public interface BottomSheetContent {
     }
 
     /**
+     * @return Whether this content covers the bottom controls (e.g. bottom navigation bar)
+     *         from the bottom of the screen with zero bottom margin, even when unscrimmed.
+     */
+    default boolean coversBottomControls() {
+        return false;
+    }
+
+    /**
      * Returns whether this sheet content has a solid background color. Return false when the sheet
      * is showing complex content like tab content / a page preview.
      */
@@ -299,11 +307,15 @@ public interface BottomSheetContent {
     default void onBackPressed() {}
 
     /**
-     * Returns the content description for the bottom sheet. This is generally the name of the
-     * feature/content that is showing. It can be a dynamic string. 'Swipe down to close.' will be
-     * automatically appended after the content description.
+     * @deprecated Container-level content descriptions on the bottom sheet cause screen readers
+     *     (like TalkBack) to mask and skip non-interactive descendant views. Use {@link
+     *     #getSheetFullHeightAccessibilityStringId()} or {@link
+     *     #getSheetHalfHeightAccessibilityStringId()} for accessibility pane titles instead.
      */
-    @Nullable String getSheetContentDescription(Context context);
+    @Deprecated
+    default @Nullable String getSheetContentDescription(Context context) {
+        return null;
+    }
 
     /**
      * @return The resource id of the string announced when the sheet is opened at half height. This

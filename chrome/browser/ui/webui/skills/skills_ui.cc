@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/i18n/number_formatting.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/global_features.h"
@@ -21,10 +22,12 @@
 #include "chrome/browser/ui/webui/skills/skills_dialog_handler.h"
 #include "chrome/browser/ui/webui/skills/skills_page_handler.h"
 #include "chrome/browser/ui/webui/skills/skills_page_handler_v2.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/skills_resources.h"
 #include "chrome/grit/skills_resources_map.h"
 #include "components/application_locale_storage/application_locale_storage.h"
+#include "components/google/core/common/google_util.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/skills/features.h"
 #include "components/skills/public/skill.h"
@@ -36,12 +39,22 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/webui_util.h"
+#include "url/gurl.h"
 
 namespace skills {
 namespace {
 
 constexpr int kMaxNameCharCount = 100;
 constexpr int kMaxPromptCharCount = 20000;
+
+std::string GetSkillsV2Origin() {
+  auto* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kSkillsV2Origin)) {
+    return command_line->GetSwitchValueASCII(switches::kSkillsV2Origin);
+  }
+  // Default to prod if not specified.
+  return "https://clients5.google.com";
+}
 
 bool ShouldDisableBrowseSkillsPage() {
   if (!base::FeatureList::IsEnabled(
@@ -135,7 +148,10 @@ void AddSkillsV1Resources(content::WebUIDataSource* source, Profile* profile) {
 
 }  // namespace
 
-SkillsUI::SkillsUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
+SkillsUI::SkillsUI(content::WebUI* web_ui)
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/false,
+                              /*enable_chrome_histograms=*/true) {
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
       profile, chrome::kChromeUISkillsHost);
@@ -144,6 +160,7 @@ SkillsUI::SkillsUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
     webui::SetupWebUIDataSource(source, kSkillsResources,
                                 IDR_SKILLS_V2_SKILLS_HTML);
     source->AddResourcePath("dialog", IDR_SKILLS_V2_SKILLS_DIALOG_HTML);
+    source->AddString("skillsPrimaryOrigin", GetSkillsV2Origin());
   } else {
     webui::SetupWebUIDataSource(source, kSkillsResources,
                                 IDR_SKILLS_SKILLS_HTML);
@@ -155,6 +172,10 @@ SkillsUI::SkillsUI(content::WebUI* web_ui) : ui::MojoWebUIController(web_ui) {
   source->AddBoolean(
       "isSkillsWebViewV2Enabled",
       base::FeatureList::IsEnabled(features::kSkillsWebViewV2Enabled));
+
+  std::string application_locale = g_browser_process->GetApplicationLocale();
+  std::string google_locale = google_util::GetGoogleLocale(application_locale);
+  source->AddString("languageCode", google_locale);
 
   auto* command_line = base::CommandLine::ForCurrentProcess();
   source->AddBoolean("devMode", command_line->HasSwitch("skills-dev"));
@@ -193,6 +214,17 @@ void SkillsUI::InitializeDialog(base::WeakPtr<SkillsDialogDelegate> delegate,
   initial_skill_ = std::move(skill);
   entrypoint_ = entrypoint;
   dialog_type_ = dialog_type;
+
+  if (base::FeatureList::IsEnabled(features::kSkillsWebViewV2Enabled)) {
+    base::DictValue update =
+        base::DictValue()
+            .Set("dialogType", static_cast<int>(dialog_type))
+            .Set("skillId", initial_skill_.id)
+            .Set("skillPrompt", initial_skill_.prompt);
+    content::WebUIDataSource::Update(Profile::FromWebUI(web_ui()),
+                                     chrome::kChromeUISkillsHost,
+                                     std::move(update));
+  }
 }
 
 void SkillsUI::BindInterface(
@@ -209,7 +241,7 @@ void SkillsUI::BindInterface(
   page_handler_v2_ = std::make_unique<skills::SkillsPageHandlerV2>(
       std::move(receiver), profile,
       IdentityManagerFactory::GetForProfile(profile),
-      web_ui()->GetWebContents());
+      web_ui()->GetWebContents(), delegate_);
 }
 
 void SkillsUI::CreatePageHandler(

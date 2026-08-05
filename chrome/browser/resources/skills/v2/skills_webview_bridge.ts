@@ -5,9 +5,7 @@ import {assert} from '//resources/js/assert.js';
 import {EventTracker} from '//resources/js/event_tracker.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 
-import {ToastType} from '../skills.mojom-webui.js';
-
-import {HANDSHAKE_PING_INTERVAL_MS, HANDSHAKE_TIMEOUT_MS, PRIMARY_SKILLS_ORIGIN, SKILLS_API_ALLOWED_ORIGINS, SKILLS_HANDSHAKE_ACK, SKILLS_HANDSHAKE_TYPE, SKILLS_INVOKE_SKILL, SKILLS_SHOW_TOAST} from './skills_webview_bridge_constants.js';
+import {getLoadingStageHistogramName, getPrimarySkillsOrigin, getSkillsApiAllowedOrigins, HANDSHAKE_PING_INTERVAL_MS, HANDSHAKE_TIMEOUT_MS, HISTOGRAM_HANDSHAKE_RESULT, HISTOGRAM_WRITE_LATENCY, LoadingStage, SKILLS_CLOSE_DIALOG, SKILLS_GEMINI_PROMPT_TYPE, SKILLS_HANDSHAKE_ACK, SKILLS_HANDSHAKE_TYPE, SKILLS_INVOKE_SKILL, SKILLS_LOG_METRIC, SKILLS_OPEN_URL, SKILLS_SEND_PROMPT, SKILLS_SHOW_TOAST, SKILLS_TOAST_CLOSED_TYPE, SKILLS_UNDO_TYPE} from './skills_webview_bridge_constants.js';
 
 /**
  * Returns a URLPattern given an origin pattern string that has the syntax:
@@ -30,7 +28,9 @@ export function matcherForOrigin(originPattern: string): URLPattern|null {
 
 function isInternalOnlyOrigin(origin: string): boolean {
   return origin === 'https://login.corp.google.com' ||
-      origin === 'https://accounts.googlers.com';
+      origin === 'https://accounts.googlers.com' ||
+      origin === 'https://gaiastaging.corp.google.com' ||
+      origin.endsWith('.proxy.googlers.com');
 }
 
 export function urlMatchesApiAllowedOrigin(url: URL): boolean {
@@ -45,7 +45,7 @@ export function urlMatchesApiAllowedOrigin(url: URL): boolean {
 
   // A URL is allowed to have API access if it matches any of the explicit API
   // allowed origins.
-  return SKILLS_API_ALLOWED_ORIGINS.some((origin: string) => {
+  return getSkillsApiAllowedOrigins().some((origin: string) => {
     // Only allow internal origins for internal users.
     if (isInternalOnlyOrigin(origin) &&
         !loadTimeData.getBoolean('isInternalUser')) {
@@ -58,8 +58,13 @@ export function urlMatchesApiAllowedOrigin(url: URL): boolean {
 // TODO(b/529400161): Consider moving to another file.
 export interface SkillsWebviewBridgeDelegate {
   onError(): void;
-  onShowToast(toastType: ToastType): void;
-  onInvokeSkill(skillId: string): void;
+  onShowSaveToast(): void;
+  onShowDeleteToast(skillId: string): Promise<{actionClicked: boolean}>;
+  onInvokeSkill(skillId: string, skillName: string, skillIcon: string): void;
+  onUrlChanged(url: URL): void;
+  onCloseDialog(): void;
+  onHandshakeComplete(): void;
+  onSendPrompt(prompt: string): void;
 }
 
 /**
@@ -74,6 +79,11 @@ export class SkillsWebviewBridge {
   private isConnected_: boolean = false;
   private eventTracker_: EventTracker = new EventTracker();
   private delegate_: SkillsWebviewBridgeDelegate;
+  private handshakeStartTime_: number|null = null;
+  private isInitialHandshake_: boolean = true;
+  private isInitialGuestFramework_: boolean = true;
+  private isInitialGuestWebClient_: boolean = true;
+  private isInitialGuestDataFetch_: boolean = true;
 
   constructor(
       webview: chrome.webviewTag.WebView,
@@ -104,6 +114,8 @@ export class SkillsWebviewBridge {
       return;
     }
 
+    this.delegate_.onUrlChanged(urlObj);
+
     // Start handshake if valid target url.
     if (this.urlRequiresHandshake(urlObj)) {
       this.targetOrigin_ = urlObj.origin;
@@ -122,7 +134,7 @@ export class SkillsWebviewBridge {
       return true;
     }
 
-    return matcherForOrigin(PRIMARY_SKILLS_ORIGIN)?.test(url) ?? false;
+    return matcherForOrigin(getPrimarySkillsOrigin())?.test(url) ?? false;
   }
 
   private onLoadStop() {
@@ -135,6 +147,7 @@ export class SkillsWebviewBridge {
     // Reset in case of successive handshakes.
     this.isConnected_ = false;
     this.stopHandshake();
+    this.handshakeStartTime_ = performance.now();
 
     // Send a handshake ping periodically.
     this.handshakeIntervalId_ = window.setInterval(() => {
@@ -143,6 +156,7 @@ export class SkillsWebviewBridge {
 
     // Set a timeout to abort handshake.
     this.timeoutId_ = window.setTimeout(() => {
+      this.recordHandshakeFailureMetric();
       this.stopHandshake();
       this.delegate_.onError();
     }, HANDSHAKE_TIMEOUT_MS);
@@ -184,6 +198,11 @@ export class SkillsWebviewBridge {
       this.isConnected_ = true;
       this.webview_.removeAttribute('hidden');
       this.stopHandshake();
+      if (this.isInitialHandshake_) {
+        this.recordInitialHandshakeMetrics();
+        this.isInitialHandshake_ = false;
+        this.delegate_.onHandshakeComplete();
+      }
     }
 
     // Before we process non-handshake message, make sure we are connected.
@@ -195,22 +214,125 @@ export class SkillsWebviewBridge {
       this.handleShowToastMessage(e.data);
     } else if (e.data.type === SKILLS_INVOKE_SKILL) {
       this.handleInvokeSkillMessage(e.data);
+    } else if (e.data.type === SKILLS_CLOSE_DIALOG) {
+      this.delegate_.onCloseDialog();
+    } else if (e.data.type === SKILLS_LOG_METRIC) {
+      this.handleLogMetricMessage(e.data);
+    } else if (e.data.type === SKILLS_OPEN_URL) {
+      this.handleOpenUrlMessage(e.data);
+    } else if (e.data.type === SKILLS_SEND_PROMPT) {
+      this.handleSendPromptMessage(e.data);
     }
   }
 
-  private handleShowToastMessage(data: {toastType: string}) {
+  private recordHandshakeFailureMetric() {
+    if (this.isInitialHandshake_) {
+      chrome.histograms.recordBoolean(HISTOGRAM_HANDSHAKE_RESULT, false);
+      this.isInitialHandshake_ = false;
+    }
+  }
+
+  private recordInitialHandshakeMetrics() {
+    if (this.handshakeStartTime_ !== null) {
+      const handshakeDuration = performance.now() - this.handshakeStartTime_;
+      chrome.histograms.recordMediumTime(
+          getLoadingStageHistogramName(LoadingStage.HANDSHAKE),
+          Math.floor(handshakeDuration));
+    }
+    chrome.histograms.recordBoolean(HISTOGRAM_HANDSHAKE_RESULT, true);
+  }
+
+  private async handleShowToastMessage(
+      data: {toastType: string, skillId?: string}) {
     // TODO(b/529405584): Refactor toastType to be an enum & consider how we
     // want to surface errors to the user if skillId does not exist.
     if (data.toastType === 'save') {
-      this.delegate_.onShowToast(ToastType.kSave);
+      this.delegate_.onShowSaveToast();
     } else if (data.toastType === 'delete') {
-      this.delegate_.onShowToast(ToastType.kDelete);
+      const skillId = data.skillId ?? '';
+      const response = await this.delegate_.onShowDeleteToast(skillId);
+      if (response.actionClicked) {
+        this.sendUndo(skillId);
+      } else {
+        this.sendToastClosed(skillId);
+      }
     }
   }
 
-  private handleInvokeSkillMessage(data: {skillId: string}) {
+  private sendUndo(skillId: string) {
+    if (this.webview_.contentWindow && this.targetOrigin_) {
+      this.webview_.contentWindow.postMessage(
+          {
+            'type': SKILLS_UNDO_TYPE,
+            'skillId': skillId,
+          },
+          this.targetOrigin_);
+    }
+  }
+
+  private sendToastClosed(skillId: string) {
+    if (this.webview_.contentWindow && this.targetOrigin_) {
+      this.webview_.contentWindow.postMessage(
+          {
+            'type': SKILLS_TOAST_CLOSED_TYPE,
+            'skillId': skillId,
+          },
+          this.targetOrigin_);
+    }
+  }
+
+  private handleInvokeSkillMessage(data: {
+    skillId: string,
+    skillName: string,
+    skillIcon: string,
+  }) {
     if (data.skillId) {
-      this.delegate_.onInvokeSkill(data.skillId);
+      this.delegate_.onInvokeSkill(
+          data.skillId, data.skillName, data.skillIcon);
+    }
+  }
+  private handleLogMetricMessage(data: {metricName: string, valueMs: number}) {
+    const valueMs = Math.floor(data.valueMs);
+    if (data.metricName === 'framework-load-time' &&
+        this.isInitialGuestFramework_) {
+      chrome.histograms.recordMediumTime(
+          getLoadingStageHistogramName(LoadingStage.GUEST_FRAMEWORK), valueMs);
+      this.isInitialGuestFramework_ = false;
+    } else if (
+        data.metricName === 'web-client-load-time' &&
+        this.isInitialGuestWebClient_) {
+      chrome.histograms.recordMediumTime(
+          getLoadingStageHistogramName(LoadingStage.GUEST_WEB_CLIENT), valueMs);
+      this.isInitialGuestWebClient_ = false;
+    } else if (
+        data.metricName === 'guest-data-fetch-time' &&
+        this.isInitialGuestDataFetch_) {
+      chrome.histograms.recordMediumTime(
+          getLoadingStageHistogramName(LoadingStage.GUEST_DATA_FETCH), valueMs);
+      this.isInitialGuestDataFetch_ = false;
+    } else if (data.metricName === 'guest-data-save-time') {
+      chrome.histograms.recordMediumTime(HISTOGRAM_WRITE_LATENCY, valueMs);
+    }
+  }
+
+  private handleOpenUrlMessage(data: {url: string}) {
+    window.open(data.url, '_blank');
+  }
+
+  private handleSendPromptMessage(data: {prompt: string}) {
+    if (data.prompt) {
+      this.delegate_.onSendPrompt(data.prompt);
+    }
+  }
+
+  sendGeminiPrompt(prompt: string) {
+    if (this.webview_.contentWindow && this.targetOrigin_) {
+      this.webview_.contentWindow.postMessage(
+          {
+            type: SKILLS_GEMINI_PROMPT_TYPE,
+            prompt: prompt,
+          },
+          this.targetOrigin_);
     }
   }
 

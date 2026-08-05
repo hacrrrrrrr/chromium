@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/extensions/extension_install_ui.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/controls/hover_button.h"
 #include "chrome/browser/ui/views/controls/hover_button_controller.h"
 #include "chrome/browser/ui/views/extensions/extensions_menu_button.h"
@@ -58,8 +59,9 @@ class ExtensionsMenuViewInteractiveUITest : public ExtensionsToolbarUITest {
     // still being tested.
     // TODO(crbug.com/40857680): Remove all these tests once
     // kExtensionsMenuAccessControl is fully enabled.
-    scoped_feature_list_.InitAndDisableFeature(
-        extensions_features::kExtensionsMenuAccessControl);
+    scoped_feature_list_.InitWithFeatures(
+        {}, {extensions_features::kExtensionsMenuAccessControl,
+             features::kExtensionsPinnedByDefault});
   }
 
   static base::flat_set<raw_ptr<ExtensionMenuItemView, CtnExperimental>>
@@ -136,7 +138,9 @@ class ExtensionsMenuViewInteractiveUITest : public ExtensionsToolbarUITest {
   }
 
   void ClickExtensionsMenuButton(Browser* browser) {
-    ClickButton(browser->GetBrowserView().toolbar()->GetExtensionsButton());
+    ClickButton(BrowserView::GetBrowserViewForBrowser(browser)
+                    ->toolbar()
+                    ->GetExtensionsButton());
   }
 
   void ClickExtensionsMenuButton() { ClickExtensionsMenuButton(browser()); }
@@ -209,8 +213,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewInteractiveUITest,
                        ExtensionsMenuButtonHighlight) {
   LoadTestExtension("extensions/uitest/window_open");
   ClickExtensionsMenuButton();
-  EXPECT_EQ(views::InkDrop::Get(
-                browser()->GetBrowserView().toolbar()->GetExtensionsButton())
+  EXPECT_EQ(views::InkDrop::Get(BrowserView::GetBrowserViewForBrowser(browser())
+                                    ->toolbar()
+                                    ->GetExtensionsButton())
                 ->GetInkDrop()
                 ->GetTargetInkDropState(),
             views::InkDropState::ACTIVATED);
@@ -295,7 +300,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewInteractiveUITest,
   TriggerSingleExtensionButton();
 
   ExtensionsContainerViews* const extensions_container =
-      browser()->GetBrowserView().toolbar()->extensions_container();
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
+          ->extensions_container();
   std::optional<extensions::ExtensionId> action_id =
       extensions_container->GetPoppedOutActionId();
   ASSERT_NE(std::nullopt, action_id);
@@ -319,7 +326,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewInteractiveUITest,
   TriggerExtensionButton(id1);
 
   ExtensionsContainerViews* const extensions_container =
-      browser()->GetBrowserView().toolbar()->extensions_container();
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
+          ->extensions_container();
   ASSERT_NE(std::nullopt, extensions_container->GetPoppedOutActionId());
 
   auto* extension_registrar =
@@ -347,7 +356,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionsMenuViewInteractiveUITest,
   destroyed_waiter.Wait();
 
   ExtensionsContainerViews* const extensions_container =
-      browser()->GetBrowserView().toolbar()->extensions_container();
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
+          ->extensions_container();
 
   // This test should not use a popped-out action, as we want to make sure that
   // the menu closes on its own and not because a popup dialog replaces it.
@@ -702,9 +713,8 @@ IN_PROC_BROWSER_TEST_P(ActivateWithReloadExtensionsMenuInteractiveUITest,
   TriggerSingleExtensionButton();
 
   auto* const action_bubble =
-      browser()
-          ->GetBrowserView()
-          .toolbar()
+      BrowserView::GetBrowserViewForBrowser(browser())
+          ->toolbar()
           ->extensions_container()
           ->GetAnchoredWidgetForExtensionForTesting(extensions()[0]->id())
           ->widget_delegate()

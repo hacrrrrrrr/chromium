@@ -23,6 +23,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab_ui.TabListFaviconProvider;
 import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.ShoppingPersistedTabDataFetcher;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabHoverCardController.TabHoverCardListener;
 import org.chromium.components.browser_ui.util.TextResolver;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectionDelegate;
 import org.chromium.components.tab_groups.TabGroupColorId;
@@ -131,8 +132,7 @@ public class TabProperties {
 
     public static final WritableBooleanPropertyKey IS_COLLAPSED = new WritableBooleanPropertyKey();
 
-    public static final WritableBooleanPropertyKey IS_RAIL_COLLAPSED =
-            new WritableBooleanPropertyKey();
+    public static final WritableIntPropertyKey RAIL_COLLAPSE_STATE = new WritableIntPropertyKey();
 
     public static final WritableObjectPropertyKey<Float> DRAGGING_Y =
             new WritableObjectPropertyKey<>();
@@ -233,8 +233,15 @@ public class TabProperties {
     /** The {@link org.chromium.chrome.browser.tab.TabImpl.MediaState} indicator of the tab. */
     public static final WritableIntPropertyKey MEDIA_INDICATOR = new WritableIntPropertyKey();
 
+    /** Whether Glic context sharing is active for the tab. */
+    public static final WritableBooleanPropertyKey IS_GLIC_ACTIVE =
+            new WritableBooleanPropertyKey();
+
     /** The {@link ActorUiTabController.UiTabState} indicator of the tab. */
     public static final WritableObjectPropertyKey<UiTabState> ACTOR_UI_STATE =
+            new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<TabHoverCardListener> TAB_HOVER_CARD_LISTENER =
             new WritableObjectPropertyKey<>();
 
     private static final PropertyKey[] COMMON_KEYS_TAB_AND_GROUP_GRID =
@@ -266,7 +273,7 @@ public class TabProperties {
                 VISIBILITY,
                 USE_SHRINK_CLOSE_ANIMATION,
                 ACTOR_UI_STATE,
-                IS_RAIL_COLLAPSED
+                RAIL_COLLAPSE_STATE
             };
 
     // TAB_ACTION_STATE must always be the first property as keys are iterated in order. TAB_ID must
@@ -283,10 +290,12 @@ public class TabProperties {
                         HIGHLIGHT_STATE,
                         IS_PINNED,
                         IS_COLLAPSED,
+                        IS_GLIC_ACTIVE,
                         TAB_GROUP_ID,
                         TAB_GROUP_HEADER_ID,
                         MEDIA_INDICATOR,
-                        IS_LOADING
+                        IS_LOADING,
+                        TAB_HOVER_CARD_LISTENER
                     },
                     COMMON_KEYS_TAB_AND_GROUP_GRID);
 
@@ -332,18 +341,20 @@ public class TabProperties {
                 DRAGGING_Y,
                 FAVICON_FETCHER,
                 IS_COLLAPSED,
+                IS_GLIC_ACTIVE,
                 IS_INCOGNITO,
                 IS_LOADING,
                 IS_PINNED,
-                IS_RAIL_COLLAPSED,
                 IS_SELECTED,
                 MEDIA_INDICATOR,
+                RAIL_COLLAPSE_STATE,
                 TAB_ACTION_BUTTON_DATA,
                 TAB_CLICK_LISTENER,
                 TAB_CONTEXT_CLICK_LISTENER,
                 TAB_GROUP_CARD_COLOR,
                 TAB_GROUP_HEADER_ID,
                 TAB_GROUP_ID,
+                TAB_HOVER_CARD_LISTENER,
                 TAB_ID,
                 TAB_LONG_CLICK_LISTENER,
                 TITLE

@@ -7,12 +7,14 @@
 #ifndef EXTENSIONS_COMMON_EXTENSION_L10N_UTIL_H_
 #define EXTENSIONS_COMMON_EXTENSION_L10N_UTIL_H_
 
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "base/auto_reset.h"
+#include "base/i18n/language_tag.h"
 #include "base/values.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
@@ -101,21 +103,6 @@ std::string CurrentLocaleOrDefault();
 // proper fallback.
 void GetAllLocales(std::set<std::string>* all_locales);
 
-// Provides a vector of all fallback locales for message localization.
-// The vector is ordered by priority of locale - application locale,
-// first_parent, ..., `default_locale`.
-void GetAllFallbackLocales(const std::string& default_locale,
-                           std::vector<std::string>* all_fallback_locales);
-
-// Fill `valid_locales` with all valid locales under `locale_path`.
-// `valid_locales` is the intersection of the set of locales supported by
-// Chrome and the set of locales specified by `locale_path`.
-// Returns true if valid_locales contains at least one locale, false otherwise.
-// `error` contains an error message when a locale is corrupt or missing.
-bool GetValidLocales(const base::FilePath& locale_path,
-                     std::set<std::string>* valid_locales,
-                     std::string* error);
-
 // Loads messages file for the default locale and application locales
 // (application locales do not have to exist). Application locales include the
 // current locale and its parents. If `gzip_permission` is
@@ -162,12 +149,14 @@ class ScopedLocaleForTest {
   ~ScopedLocaleForTest();
 
  private:
-  std::string_view process_locale_;    // The process locale at ctor time.
-  std::string_view preferred_locale_;  // The preferred locale at ctor time.
+  std::optional<base::i18n::LanguageTag>
+      process_locale_;  // The process locale at ctor time.
+  std::optional<base::i18n::LanguageTag>
+      preferred_locale_;  // The preferred locale at ctor time.
 };
 
 // Returns a locale like "en-CA".
-const std::string& GetPreferredLocaleForTest();
+std::string GetPreferredLocaleForTest();
 
 }  // namespace extension_l10n_util
 

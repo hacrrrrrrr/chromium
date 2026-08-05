@@ -89,12 +89,18 @@ constexpr base::TimeDelta kPerAttemptMinVerificationTimeLimit =
 // The minimum RSA key size for SimplePathBuilderDelegate.
 constexpr size_t kMinRsaModulusLengthBits = 1024;
 
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+// CQRP policy allows a maximum of 5 logs.
+constexpr uint16_t kCqrpMaxMtcLogNumber = 5;
+#endif
+
 DEFINE_CERT_ERROR_ID(kCtRequirementsNotMet,
                      "Path does not meet CT requirements");
 DEFINE_CERT_ERROR_ID(kPathLacksEVPolicy, "Path does not have an EV policy");
 DEFINE_CERT_ERROR_ID(kPathLacksQwacPolicy, "Path does not have QWAC policies");
 DEFINE_CERT_ERROR_ID(kChromeRootConstraintsFailed,
                      "Path does not satisfy CRS constraints");
+DEFINE_CERT_ERROR_ID(kCertValidityTooLong, "Cert validity too long");
 
 base::DictValue NetLogCertParams(const CRYPTO_BUFFER* cert_handle,
                                  const bssl::CertErrors& errors) {
@@ -372,6 +378,20 @@ class CertVerifyProcTrustStore {
     return system_trust_store_->GetMTCAnchorData(log_id);
   }
 
+  std::optional<bssl::VerifyCertificateChainDelegate::MTCCosigner>
+  GetMtcMirrorKey(base::span<const uint8_t> cosigner_id) const {
+    return system_trust_store_->GetMtcMirrorKey(cosigner_id);
+  }
+
+  bool IsMtcCosignerPolicySatisfied(
+      const bssl::ParsedCertificate& target_cert,
+      base::Time current_time,
+      const bssl::MTCAnchor* mtc_anchor,
+      base::span<const std::vector<uint8_t>> valid_additional_cosigners) const {
+    return system_trust_store_->IsMtcCosignerPolicySatisfied(
+        target_cert, current_time, mtc_anchor, valid_additional_cosigners);
+  }
+
   bool IsNonChromeRootStoreTrustAnchor(
       const bssl::ParsedCertificate* trust_anchor) const {
     return additional_trust_store_->GetTrust(trust_anchor).IsTrustAnchor() ||
@@ -439,6 +459,7 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
   // requires RSA keys to be at least 1024-bits large, and optionally accepts
   // SHA1 certificates.
   PathBuilderDelegateImpl(
+      const bssl::ParsedCertificate& target,
       std::string_view hostname,
       const CRLSet* crl_set,
       CTVerifier* ct_verifier,
@@ -460,6 +481,7 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
       : bssl::SimplePathBuilderDelegate(
             kMinRsaModulusLengthBits,
             bssl::SimplePathBuilderDelegate::DigestPolicy::kStrong),
+        target_(target),
         hostname_(hostname),
         crl_set_(crl_set),
         ct_verifier_(ct_verifier),
@@ -489,6 +511,35 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
 
     net_log_->EndEvent(NetLogEventType::CERT_VERIFY_PROC_PATH_BUILT,
                        [&] { return NetLogPathBuilderResultPath(*path); });
+  }
+
+  bool IsCosignatureVerificationResultAcceptable(
+      const bssl::MTCAnchor* mtc_anchor,
+      std::vector<std::vector<uint8_t>> valid_additional_cosigners) override {
+    CHECK(mtc_anchor);
+    // TODO(crbug.com/452983502): Add netlogs for cosignature verification and
+    // policy evaluation results?
+    if (!trust_store_->IsKnownMtcAnchor(mtc_anchor)) {
+      // Cosigner policy only applies to publicly trusted MTCs, only a valid CA
+      // signature is required for private PKIs.
+      return true;
+    }
+
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+    return trust_store_->IsMtcCosignerPolicySatisfied(
+        *target_, current_time_, mtc_anchor, valid_additional_cosigners);
+#else
+    return false;
+#endif
+  }
+
+  std::optional<bssl::VerifyCertificateChainDelegate::MTCCosigner>
+  GetMTCCosigner(bssl::Span<const uint8_t> cosigner_id) override {
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+    return trust_store_->GetMtcMirrorKey(cosigner_id);
+#else
+    return std::nullopt;
+#endif
   }
 
  private:
@@ -561,9 +612,14 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
     }
 
     if (path->trust_anchor.MTCAnchor()) {
+      // Check MTC revocation and policies from SignerSet configuration.
+      // (Note that cosigner policy is checked separately by
+      // IsCosignatureVerificationResultAcceptable when necessary.)
+      CheckMTCRevocationAndPolicy(path);
+
       // MTCs don't use traditional revocation checks or certificate
-      // transparency.
-      CheckMTCRevocation(path);
+      // transparency. Return now, any checks past this point are for
+      // traditional certs only.
       return;
     }
 
@@ -583,7 +639,7 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
     CheckCertificateTransparency(path, cert_for_ct_verify.get(), delegate_data);
   }
 
-  void CheckMTCRevocation(bssl::CertPathBuilderResultPath* path) {
+  void CheckMTCRevocationAndPolicy(bssl::CertPathBuilderResultPath* path) {
     // Revocation information for MTCs is distributed in the PKI Metadata
     // Fastpush component, which is part of the Chrome Root Store. This method
     // should never be reached in the non-CRS case since we also would not have
@@ -591,22 +647,65 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
     // may need to pull the revocation information definitions out of CRS code
     // into a place that can be shared by both.
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+    const bssl::MTCAnchor* mtc_anchor = path->trust_anchor.MTCAnchor().get();
     const TrustStoreChrome::MtcAnchorExtraData* mtc_anchor_data =
-        trust_store_->GetMTCAnchorData(
-            path->trust_anchor.MTCAnchor()->log_id());
+        trust_store_->GetMTCAnchorData(mtc_anchor->spec_version() ==
+                                               bssl::MTCAnchor::kDavidben08
+                                           ? mtc_anchor->log_id()
+                                           : mtc_anchor->ca_id());
     if (!mtc_anchor_data) {
       return;
     }
 
     const auto& leaf = path->certs.front();
-    uint64_t index;
+
+    if (mtc_anchor_data->signer_config.max_cert_lifetime) {
+      base::Time not_before;
+      base::Time not_after;
+      if (!GeneralizedTimeToTime(leaf->tbs().validity_not_before,
+                                 &not_before) ||
+          !GeneralizedTimeToTime(leaf->tbs().validity_not_after, &not_after)) {
+        // It should be impossible to get here with validity times that can't
+        // be converted to base::Time without already having caused an error
+        // somewhere earlier, so kInternalError should be fine.
+        path->errors.GetErrorsForCert(0)->AddError(
+            bssl::cert_errors::kInternalError);
+        return;
+      }
+      if (not_after - not_before >
+          mtc_anchor_data->signer_config.max_cert_lifetime) {
+        path->errors.GetErrorsForCert(0)->AddError(kCertValidityTooLong);
+        return;
+      }
+    }
+
+    uint64_t serial;
     // This method is only called on MTCs that boringssl verified successfully,
     // so the serial number is already known to be valid and we don't need to
     // gracefully handle a failure here.
-    CHECK(bssl::der::ParseUint64(leaf->tbs().serial_number, &index));
+    CHECK(bssl::der::ParseUint64(leaf->tbs().serial_number, &serial));
 
-    auto it = mtc_anchor_data->revoked_indices.upper_bound(index);
-    if (it != mtc_anchor_data->revoked_indices.end() && index >= it->second) {
+    if (mtc_anchor->spec_version() == bssl::MTCAnchor::kPlants04) {
+      uint16_t log_number = serial >> 48;
+      if (log_number < mtc_anchor_data->signer_config.min_log_number) {
+        path->errors.GetErrorsForCert(0)->AddError(
+            bssl::cert_errors::kCertificateRevoked);
+        return;
+      }
+      // CQRP policy specifies a maximum allowable log number. The
+      // IsKnownMtcAnchor check is probably redundant here since only a known
+      // anchor would have a result in GetMTCAnchorData, but it is more
+      // future-proof to check.
+      if (trust_store_->IsKnownMtcAnchor(mtc_anchor) &&
+          log_number > kCqrpMaxMtcLogNumber) {
+        path->errors.GetErrorsForCert(0)->AddError(
+            bssl::cert_errors::kCertificateRevoked);
+        return;
+      }
+    }
+
+    auto it = mtc_anchor_data->revoked_serials.upper_bound(serial);
+    if (it != mtc_anchor_data->revoked_serials.end() && serial >= it->second) {
       path->errors.GetErrorsForCert(0)->AddError(
           bssl::cert_errors::kCertificateRevoked);
       return;
@@ -980,6 +1079,7 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
         NetLogEventType::CERT_VERIFY_PROC_PATH_BUILDER_DEBUG, "debug", msg);
   }
 
+  raw_ref<const bssl::ParsedCertificate> target_;
   std::string_view hostname_;
   raw_ptr<const CRLSet> crl_set_;
   raw_ptr<CTVerifier> ct_verifier_;
@@ -1333,6 +1433,10 @@ void MapPathBuilderErrorsToCertStatus(const bssl::CertPathErrors& errors,
     *cert_status |= CERT_STATUS_DATE_INVALID;
   }
 
+  if (errors.ContainsError(kCertValidityTooLong)) {
+    *cert_status |= CERT_STATUS_VALIDITY_TOO_LONG;
+  }
+
   if (errors.ContainsError(bssl::cert_errors::kDistrustedByTrustStore) ||
       errors.ContainsError(bssl::cert_errors::kVerifySignedDataFailed) ||
       errors.ContainsError(bssl::cert_errors::kNoIssuersFound) ||
@@ -1424,8 +1528,8 @@ bssl::CertPathBuilder::Result TryBuildPath(
   }
 
   PathBuilderDelegateImpl path_builder_delegate(
-      hostname, crl_set, ct_verifier, ct_policy_enforcer, require_ct_delegate,
-      net_fetcher, verification_type, flags, trust_store,
+      *target, hostname, crl_set, ct_verifier, ct_policy_enforcer,
+      require_ct_delegate, net_fetcher, verification_type, flags, trust_store,
       additional_constraints, ocsp_response, sct_list, ev_metadata, deadline,
       current_time, checked_revocation, net_log);
 

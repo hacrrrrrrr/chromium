@@ -55,7 +55,6 @@ class DeviceBoundSessionManager;
 namespace storage {
 class QuotaManager;
 struct QuotaSettings;
-class SharedStorageManager;
 class SpecialStoragePolicy;
 }  // namespace storage
 
@@ -68,7 +67,6 @@ namespace content {
 class BackgroundSyncContext;
 class BrowserContext;
 class BrowsingDataFilterBuilder;
-class BrowsingTopicsSiteDataManager;
 class CdmStorageDataModel;
 class ContentIndexContext;
 class DedicatedWorkerService;
@@ -79,9 +77,7 @@ class GeneratedCodeCacheContext;
 struct GlobalRenderFrameHostId;
 class HostZoomLevelContext;
 class HostZoomMap;
-class InterestGroupManager;
 class PlatformNotificationContext;
-class PrivateAggregationDataModel;
 class ServiceWorkerContext;
 class SharedWorkerService;
 class StoragePartitionConfig;
@@ -108,10 +104,6 @@ class CONTENT_EXPORT StoragePartition {
 
   virtual cert_verifier::mojom::CertVerifierServiceUpdater*
   GetCertVerifierServiceUpdater() = 0;
-
-  // Returns the SharedStorageManager for the StoragePartition, or nullptr if it
-  // doesn't exist because the feature is disabled.
-  virtual storage::SharedStorageManager* GetSharedStorageManager() = 0;
 
   // Returns a pointer/info to a URLLoaderFactory/CookieManager owned by
   // the storage partition. Prefer to use this instead of creating a new
@@ -166,9 +158,6 @@ class CONTENT_EXPORT StoragePartition {
   virtual HostZoomLevelContext* GetHostZoomLevelContext() = 0;
   virtual ZoomLevelDelegate* GetZoomLevelDelegate() = 0;
   virtual PlatformNotificationContext* GetPlatformNotificationContext() = 0;
-  virtual InterestGroupManager* GetInterestGroupManager() = 0;
-  virtual BrowsingTopicsSiteDataManager* GetBrowsingTopicsSiteDataManager() = 0;
-  virtual PrivateAggregationDataModel* GetPrivateAggregationDataModel() = 0;
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
   virtual CdmStorageDataModel* GetCdmStorageDataModel() = 0;
 #endif  // BUILDFLAG(ENABLE_LIBRARY_CDMS)

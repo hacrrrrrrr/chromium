@@ -19,9 +19,10 @@ using testing::IsEmpty;
 
 namespace password_manager {
 
-class PromoCardRelaunchChromeTest : public ChromeRenderViewHostTestHarness {
+class NotificationCardRelaunchChromeTest
+    : public ChromeRenderViewHostTestHarness {
  public:
-  PromoCardRelaunchChromeTest()
+  NotificationCardRelaunchChromeTest()
       : ChromeRenderViewHostTestHarness(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
     scoped_feature_list_.InitAndEnableFeature(
@@ -34,26 +35,26 @@ class PromoCardRelaunchChromeTest : public ChromeRenderViewHostTestHarness {
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-TEST_F(PromoCardRelaunchChromeTest, ShouldShow) {
-  auto promo = std::make_unique<RelaunchChromePromo>(pref_service());
+TEST_F(NotificationCardRelaunchChromeTest, ShouldShow) {
+  auto promo = std::make_unique<RelaunchChromeBanner>();
+
+  EXPECT_EQ(promo->GetNotificationSeverity(), NotificationSeverity::kCritical);
+  EXPECT_FALSE(promo->IsDismissible());
 
   promo->set_is_encryption_available(false);
-  EXPECT_TRUE(promo->ShouldShowPromo());
+  EXPECT_TRUE(promo->ShouldShowCard(NotificationCardPrefState{}));
 
   promo->set_is_encryption_available(true);
-  EXPECT_FALSE(promo->ShouldShowPromo());
+  EXPECT_FALSE(promo->ShouldShowCard(NotificationCardPrefState{}));
 }
 
-TEST_F(PromoCardRelaunchChromeTest, ShouldShowAfterDismiss) {
-  ASSERT_THAT(pref_service()->GetList(prefs::kPasswordManagerPromoCardsList),
-              IsEmpty());
-
-  auto promo = std::make_unique<RelaunchChromePromo>(pref_service());
+TEST_F(NotificationCardRelaunchChromeTest, ShouldShowAfterDismiss) {
+  auto promo = std::make_unique<RelaunchChromeBanner>();
   promo->set_is_encryption_available(false);
-  EXPECT_TRUE(promo->ShouldShowPromo());
+  EXPECT_TRUE(promo->ShouldShowCard(NotificationCardPrefState{}));
 
-  promo->OnPromoCardDismissed();
-  EXPECT_TRUE(promo->ShouldShowPromo());
+  NotificationCardPrefState dismissed_state{.was_dismissed = true};
+  EXPECT_TRUE(promo->ShouldShowCard(dismissed_state));
 }
 
 }  // namespace password_manager

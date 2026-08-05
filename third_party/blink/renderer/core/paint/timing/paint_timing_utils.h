@@ -14,17 +14,12 @@ class HeadsUpDisplayLayer;
 }
 
 namespace blink {
+class Document;
+class LocalDOMWindow;
 class LocalFrameView;
 }  // namespace blink
 
 namespace blink::paint_timing {
-
-// Returns the `Node` causing the image to be generated. For pseudo elements,
-// this is the parent node; for all other nodes, this is the `node` itself.
-inline CORE_EXPORT Node* ImageGeneratingNode(Node* node) {
-  return node && node->IsPseudoElement() ? node->ParentOrShadowHostNode()
-                                         : node;
-}
 
 // Returns true if `object` will cause an image to be rendered, and false
 // otherwise.
@@ -43,6 +38,12 @@ CORE_EXPORT cc::HeadsUpDisplayLayer* GetHUDLayerIfContentfulPaintRectsEnabled(
 
 CORE_EXPORT cc::HeadsUpDisplayLayer* GetHUDLayerIfLayoutShiftRectsEnabled(
     LocalFrameView* frame_view);
+
+// Notifies the document loader that performance timing has changed in some way
+// if the window, document, and loader are non-null. Causes the current
+// performance timing values to be sent to UKM.
+CORE_EXPORT void NotifyLoaderPerformanceTimingChanged(LocalDOMWindow*);
+CORE_EXPORT void NotifyLoaderPerformanceTimingChanged(Document*);
 
 }  // namespace blink::paint_timing
 

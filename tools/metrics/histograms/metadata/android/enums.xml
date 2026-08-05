@@ -210,6 +210,13 @@ chromium-metrics-reviews@google.com.
   <int value="16" label="NEW_DOWNLOAD_TAB_OPEN_BUTTON"/>
 </enum>
 
+<enum name="AndroidDownloadOpenTarget">
+  <int value="0" label="CHROME_DEFAULT"/>
+  <int value="1" label="CHROME_FALLBACK"/>
+  <int value="2" label="OTHER_APP_DEFAULT"/>
+  <int value="3" label="OS_CHOOSER"/>
+</enum>
+
 <!-- LINT.IfChange(AndroidDragTargetType) -->
 
 <enum name="AndroidDragTargetType">
@@ -272,11 +279,32 @@ chromium-metrics-reviews@google.com.
   <int value="393228" label="6.12"/>
 </enum>
 
+<!-- LINT.IfChange(AndroidPdfHyperlinkClickResult) -->
+
+<enum name="AndroidPdfHyperlinkClickResult">
+  <int value="0" label="Success: Load initiated"/>
+  <int value="1" label="Blocked: Invalid scheme"/>
+  <int value="2" label="Ignored: V2 disabled"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/ui/android/pdf/java/src/org/chromium/chrome/browser/pdf/PdfUtils.java:PdfHyperlinkClickResult) -->
+
 <enum name="AndroidPdfLoadResult">
   <int value="0" label="Success"/>
   <int value="1" label="Error"/>
   <int value="2" label="Abort"/>
 </enum>
+
+<!-- LINT.IfChange(AndroidPdfSelectionMenuItem) -->
+
+<enum name="AndroidPdfSelectionMenuItem">
+  <int value="0" label="Other"/>
+  <int value="1" label="Share"/>
+  <int value="2" label="Web Search"/>
+  <int value="3" label="Translate"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/ui/android/pdf/java/src/org/chromium/chrome/browser/pdf/PdfUtils.java:PdfSelectionMenuItem) -->
 
 <!-- LINT.IfChange(AndroidPdfToolbarAction) -->
 
@@ -287,6 +315,10 @@ chromium-metrics-reviews@google.com.
   <int value="3" label="Fit To Page Vertical"/>
   <int value="4" label="Fit To Page Horizontal"/>
   <int value="5" label="Page Navigation"/>
+  <int value="6" label="Print"/>
+  <int value="7" label="Two-page view"/>
+  <int value="8" label="Single page view"/>
+  <int value="9" label="Document properties"/>
 </enum>
 
 <!-- LINT.ThenChange(//chrome/browser/ui/android/pdf/java/src/org/chromium/chrome/browser/pdf/PdfUtils.java:PdfToolbarAction) -->
@@ -341,15 +373,6 @@ chromium-metrics-reviews@google.com.
   <int value="4" label="Sandbox Engaged"/>
 </enum>
 
-<enum name="AndroidStorageSystemType">
-  <int value="0" label="UFS"/>
-  <int value="1" label="EMMC"/>
-  <int value="2" label="Unknown"/>
-  <int value="3" label="Undetermined">
-    Failed to determine storage type by falling through all checks.
-  </int>
-</enum>
-
 <enum name="AndroidThemeSettingsEntry">
   <summary>See Android.DarkTheme.ThemeSettingsEntry.</summary>
   <int value="0" label="Settings"/>
@@ -370,6 +393,31 @@ chromium-metrics-reviews@google.com.
 </enum>
 
 <!-- LINT.ThenChange(//android_webview/glue/java/src/com/android/webview/chromium/WebViewChromiumFactoryProvider.java:UidType)-->
+
+<!-- LINT.IfChange(AndroidVerticalTabsDragDropResult) -->
+
+<enum name="AndroidVerticalTabsDragDropResult">
+  <int value="0" label="Reordered"/>
+  <int value="1" label="Grouped"/>
+  <int value="2" label="Ungrouped"/>
+  <int value="3" label="Aborted (No Change)"/>
+  <int value="4" label="Dragged Out"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/android/features/tab_ui/java/src/org/chromium/chrome/browser/tasks/tab_management/vertical_tabs/VerticalTabListItemTouchHelperCallback.java:AndroidVerticalTabsDragDropResult) -->
+
+<!-- LINT.IfChange(AndroidVerticalTabsLayoutToggleSourceAndDirection) -->
+
+<enum name="AndroidVerticalTabsLayoutToggleSourceAndDirection">
+  <int value="0" label="Enable: App Menu"/>
+  <int value="1" label="Enable: Tab Context Menu"/>
+  <int value="2" label="Enable: Tab Strip Context Menu"/>
+  <int value="3" label="Disable: App Menu"/>
+  <int value="4" label="Disable: Tab Context Menu"/>
+  <int value="5" label="Disable: Tab Strip Context Menu"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/ui/vertical_tabs/android/java/src/org/chromium/chrome/browser/ui/vertical_tabs/VerticalTabUtils.java:AndroidVerticalTabsLayoutToggleSourceAndDirection)-->
 
 <enum name="AndroidWebViewCrashCollectionState">
   <int value="0" label="ENABLED_BY_COMMANDLINE">
@@ -814,6 +862,10 @@ chromium-metrics-reviews@google.com.
   <int value="201" label="HttpCache.getQuotaBytes"/>
   <int value="202" label="HttpCache.setQuotaBytes"/>
   <int value="203" label="Profile.enqueuePreconnect"/>
+  <int value="204" label="Profile.setCrossOriginIsolatedAllowList"/>
+  <int value="205" label="Profile.getCrossOriginIsolatedAllowList"/>
+  <int value="206" label="Navigation.getResponseHeaders"/>
+  <int value="207" label="WebViewProviderFactory.buildWebContent"/>
 <!-- LINT.ThenChange(/android_webview/support_library/java/src/org/chromium/support_lib_glue/SupportLibWebViewChromiumFactory.java:ApiCall) -->
 
 </enum>
@@ -1041,22 +1093,6 @@ chromium-metrics-reviews@google.com.
       label="Icons, Addresses, Names, Emails, and Telephone numbers"/>
 </enum>
 
-<enum name="CookieManagerThreadingCondition">
-  <int value="0" label="Not called before UI thread is set"/>
-  <int value="1" label="Called on a non-looper thread"/>
-  <int value="2"
-      label="Called from background looper and UI thread is main looper"/>
-  <int value="3"
-      label="Called from background looper and UI thread is the same
-             background looper"/>
-  <int value="4"
-      label="Called from background looper and UI thread is a different
-             background looper"/>
-  <int value="5" label="Called from main looper and UI thread is main looper"/>
-  <int value="6"
-      label="Called from main looper and UI thread is a background looper"/>
-</enum>
-
 <enum name="CpuAbiBitnessSupport">
   <int value="0" label="Neither"/>
   <int value="1" label="32-bit only"/>
@@ -1216,18 +1252,6 @@ chromium-metrics-reviews@google.com.
   <int value="5" label="ERROR_NO_PADDING_WITH_NEW_INSETS"/>
 </enum>
 
-<enum name="ExifOrientation">
-  <int value="0" label="Normal"/>
-  <int value="1" label="Rotate 90"/>
-  <int value="2" label="Rotate 190"/>
-  <int value="3" label="Rotate 270"/>
-  <int value="4" label="Transpose"/>
-  <int value="5" label="Transverse"/>
-  <int value="6" label="Flip Horizontally"/>
-  <int value="7" label="Flip Vertically"/>
-  <int value="8" label="Undefined"/>
-</enum>
-
 <enum name="GlicPromoBottomSheetDismissReason">
   <int value="0" label="Accept"/>
   <int value="1" label="Reject"/>
@@ -1365,6 +1389,7 @@ chromium-metrics-reviews@google.com.
 <enum name="LauncherShortcutUpdateFailure">
   <int value="0" label="Rate Limited"/>
   <int value="1" label="Limit Exceeded"/>
+  <int value="2" label="Illegal State"/>
 </enum>
 
 <!-- LINT.ThenChange(//chrome/android/java/src/org/chromium/chrome/browser/LauncherShortcutActivity.java:UpdateFailure) -->
@@ -1500,6 +1525,8 @@ chromium-metrics-reviews@google.com.
   <int value="73" label="ExtensionDevTools"/>
   <int value="74" label="PersonalContextFetchingFailure"/>
   <int value="75" label="PrivateInferenceNotice"/>
+  <int value="76" label="ContextualTasksWindowResized"/>
+  <int value="77" label="ImmersivePlaybackConfirmation"/>
 </enum>
 
 <!-- LINT.ThenChange(//components/messages/android/message_enums.h:MessageIdentifier) -->
@@ -1596,6 +1623,7 @@ chromium-metrics-reviews@google.com.
       label="Browser window creation from native feature (eg. extensions)"/>
   <int value="11" label="Upgrade to Android S multi-instance support"/>
   <int value="12" label="Crash recovery"/>
+  <int value="13" label="Relaunch"/>
 </enum>
 
 <enum name="NTPImpressionType">
@@ -2988,6 +3016,8 @@ chromium-metrics-reviews@google.com.
   <int value="140" label="profileClearAllOriginMatchedHeaders"/>
   <int value="141" label="profileAddQuicHints"/>
   <int value="142" label="profileGetHttpCacheManager"/>
+  <int value="143" label="profileSetCrossOriginIsolatedAllowList"/>
+  <int value="144" label="profileGetCrossOriginIsolatedAllowList"/>
 </enum>
 
 <!-- LINT.ThenChange(//base/tracing/protos/chrome_track_event.proto:WebViewStartup) -->

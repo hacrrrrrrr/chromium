@@ -48,6 +48,15 @@ chromium-metrics-reviews@google.com.
 
 <!-- LINT.ThenChange(//chrome/browser/win/taskbar_manager.h:PinAppToTaskbarChannel) -->
 
+<!-- LINT.IfChange(PlatformExperienceDelegatedTaskName) -->
+
+<variants name="PlatformExperienceDelegatedTaskName">
+  <variant name="RegisterSearchPromotion"
+      summary="Register search promotion task"/>
+</variants>
+
+<!-- LINT.ThenChange(//chrome/browser/platform_experience/delegated_tasks/delegated_task.h:DelegatedTaskType) -->
+
 <histogram name="Windows.AcLayersLoaded" enum="BooleanLoaded"
     expires_after="2026-05-04">
   <owner>ajgo@chromium.org</owner>
@@ -71,7 +80,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.CetAvailable" enum="BooleanAvailable"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>ajgo@chromium.org</owner>
   <owner>wfh@chromium.org</owner>
   <summary>
@@ -82,7 +91,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.CetEnabled" enum="BooleanEnabled"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>ajgo@chromium.org</owner>
   <owner>wfh@chromium.org</owner>
   <summary>
@@ -247,7 +256,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.DestinationMatches" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -257,7 +266,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.DownloadSucceed" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -268,7 +277,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.FailureReason"
-    enum="InstallerDownloaderFailureReason" expires_after="2026-11-22">
+    enum="InstallerDownloaderFailureReason" expires_after="2027-01-24">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -279,7 +288,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.InfobarShown" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -302,7 +311,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.InstallerDownloader.RequestAccepted" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>koretadaniel@chromium.org</owner>
   <owner>top-chrome-desktop-ui@google.com</owner>
   <summary>
@@ -425,7 +434,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.PdhQueryErrorCode" enum="PDH_STATUS"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>spvm@chromium.org</owner>
   <owner>catan-team@chromium.org</owner>
   <summary>
@@ -433,15 +442,28 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Windows.PdhQueryResultCStatus" enum="PDH_STATUS"
-    expires_after="2026-09-09">
-  <owner>spvm@chromium.org</owner>
-  <owner>etienneb@chromium.org</owner>
-  <owner>catan-team@chromium.org</owner>
+<histogram
+    name="Windows.PlatformExperienceHelper.DelegatedTasks.{TaskName}.Duration"
+    units="ms" expires_after="2027-07-27">
+  <owner>alsan@chromium.org</owner>
+  <owner>chrome-desktop-ui-waterloo@google.com</owner>
   <summary>
-    Records the CStatus inside PDH_FMT_COUNTERVALUE values which
-    ::PdhGetFormattedCounterValue() returned due to internal error.
+    Records the execution duration of the {TaskName} delegated task run by the
+    platform experience helper.
   </summary>
+  <token key="TaskName" variants="PlatformExperienceDelegatedTaskName"/>
+</histogram>
+
+<histogram
+    name="Windows.PlatformExperienceHelper.DelegatedTasks.{TaskName}.Status"
+    enum="DelegatedTaskStatus" expires_after="2027-07-27">
+  <owner>alsan@chromium.org</owner>
+  <owner>chrome-desktop-ui-waterloo@google.com</owner>
+  <summary>
+    Records the outcome status of running the {TaskName} delegated task via the
+    platform experience helper.
+  </summary>
+  <token key="TaskName" variants="PlatformExperienceDelegatedTaskName"/>
 </histogram>
 
 <histogram name="Windows.PlatformExperienceHelper.InstallerLaunchStatus.System"
@@ -509,6 +531,18 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Windows.ScreenWin.ReentrantDisplayInfoChanged" enum="Boolean"
+    expires_after="2027-07-01">
+  <owner>davidbienvenu@chromium.org</owner>
+  <owner>ui-dev@chromium.org</owner>
+  <summary>
+    Recorded when a re-entrant call to update display information occurs on
+    Windows (e.g. during display change notifications). Records true if the
+    re-entrant display information vector differs from the initial pass, and
+    false if the display information is unchanged.
+  </summary>
+</histogram>
+
 <histogram name="Windows.SetWindowsHookEx.Result" enum="WinGetLastError"
     expires_after="2027-06-01">
   <owner>jackmil@google.com</owner>
@@ -544,7 +578,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Windows.TaskbarPinFromSettingsSucceeded" enum="Boolean"
-    expires_after="2026-11-15">
+    expires_after="2027-01-17">
   <owner>davidbienvenu@chromium.org</owner>
   <owner>jessemckenna@google.com</owner>
   <summary>

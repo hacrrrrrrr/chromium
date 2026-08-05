@@ -5,15 +5,15 @@
 #include "ui/accessibility/platform/inspect/ax_element_wrapper_mac.h"
 
 #import <Accessibility/Accessibility.h>
+#include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Foundation/Foundation.h>
 
-#include <ostream>
+#include <optional>
 
 #include "base/apple/bridging.h"
 #include "base/apple/foundation_util.h"
 #include "base/apple/scoped_cftyperef.h"
-#include "base/compiler_specific.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/functional/callback.h"
 #include "base/logging.h"
@@ -21,6 +21,10 @@
 #include "base/strings/sys_string_conversions.h"
 #include "ui/accessibility/platform/ax_platform_node_cocoa.h"
 #include "ui/accessibility/platform/ax_private_attributes_mac.h"
+#include "ui/accessibility/platform/ax_utils_mac.h"
+
+using base::apple::ObjCCast;
+using base::apple::ScopedCFTypeRef;
 
 // TODO(https://crbug.com/406190900): Remove this deprecation pragma.
 #pragma clang diagnostic push
@@ -46,7 +50,7 @@ NSArray<AXCustomContent*>* CustomContentFromArchive(NSData* archive_data) {
           [NSSet setWithArray:@[ NSArray.class, AXCustomContent.class ]]
                      forKey:NSKeyedArchiveRootObjectKey];
 
-  return base::apple::ObjCCast<NSArray>(contents);
+  return ObjCCast<NSArray>(contents);
 }
 
 }  // namespace
@@ -121,8 +125,9 @@ id AXElementWrapper::AsId() const {
 }
 
 std::string AXElementWrapper::DOMId() const {
-  id domid_value = *GetAttributeValue(@"AXDOMIdentifier");
-  return base::SysNSStringToUTF8(static_cast<NSString*>(domid_value));
+  id domid_value =
+      *GetAttributeValue(base::apple::CFToNSPtrCast(kAXDOMIdentifierAttribute));
+  return base::SysNSStringToUTF8(ObjCCast<NSString>(domid_value));
 }
 
 NSArray* AXElementWrapper::Children() const {
@@ -130,7 +135,7 @@ NSArray* AXElementWrapper::Children() const {
     return [node_ accessibilityChildren];
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFTypeRef> children_ref;
+    ScopedCFTypeRef<CFTypeRef> children_ref;
     if ((AXUIElementCopyAttributeValue(
             (__bridge AXUIElementRef)node_, kAXChildrenAttribute,
             children_ref.InitializeInto())) == kAXErrorSuccess) {
@@ -203,7 +208,7 @@ NSArray* AXElementWrapper::AttributeNames() const {
   }
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFArrayRef> attributes_ref;
+    ScopedCFTypeRef<CFArrayRef> attributes_ref;
     AXError result = AXUIElementCopyAttributeNames(
         (__bridge AXUIElementRef)node_, attributes_ref.InitializeInto());
     if (AXSuccess(result, "AXAttributeNamesOf")) {
@@ -229,7 +234,7 @@ NSArray* AXElementWrapper::ParameterizedAttributeNames() const {
   }
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFArrayRef> attributes_ref;
+    ScopedCFTypeRef<CFArrayRef> attributes_ref;
     AXError result = AXUIElementCopyParameterizedAttributeNames(
         (__bridge AXUIElementRef)node_, attributes_ref.InitializeInto());
     if (AXSuccess(result, "AXParameterizedAttributeNamesOf")) {
@@ -249,7 +254,7 @@ AXOptionalNSObject AXElementWrapper::GetAttributeValue(
   }
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFTypeRef> value_ref;
+    ScopedCFTypeRef<CFTypeRef> value_ref;
     AXError result = AXUIElementCopyAttributeValue(
         (__bridge AXUIElementRef)node_, (__bridge CFStringRef)attribute,
         value_ref.InitializeInto());
@@ -283,20 +288,14 @@ AXOptionalNSObject AXElementWrapper::GetParameterizedAttributeValue(
                                                     forParameter:parameter]);
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFTypeRef> parameter_ref(
-        CFBridgingRetain(parameter));
-    // SAFETY: Apple documents -[NSValue objCType] as returning "a C string"
-    // (https://developer.apple.com/documentation/foundation/nsvalue/objctype),
-    // and @encode(...) is a NUL-terminated string literal. Foundation exposes
-    // no length-bearing counterpart, so strcmp is the documented comparison.
-    if ([parameter isKindOfClass:[NSValue class]] &&
-        !UNSAFE_BUFFERS(strcmp([parameter objCType], @encode(NSRange)))) {
-      NSRange range = [parameter rangeValue];
-      parameter_ref.reset(AXValueCreate(kAXValueTypeCFRange, &range));
+    ScopedCFTypeRef<CFTypeRef> parameter_ref(CFBridgingRetain(parameter));
+
+    if (std::optional<NSRange> range = ui::NSValueGetRange(parameter)) {
+      parameter_ref.reset(AXValueCreate(kAXValueTypeCFRange, &range.value()));
     }
 
     // Get value.
-    base::apple::ScopedCFTypeRef<CFTypeRef> value_ref;
+    ScopedCFTypeRef<CFTypeRef> value_ref;
     AXError result = AXUIElementCopyParameterizedAttributeValue(
         (__bridge AXUIElementRef)node_, (__bridge CFStringRef)attribute,
         parameter_ref.get(), value_ref.InitializeInto());
@@ -370,7 +369,7 @@ NSArray* AXElementWrapper::ActionNames() const {
   }
 
   if (IsAXUIElement()) {
-    base::apple::ScopedCFTypeRef<CFArrayRef> attributes_ref;
+    ScopedCFTypeRef<CFArrayRef> attributes_ref;
     if ((AXUIElementCopyActionNames((__bridge AXUIElementRef)node_,
                                     attributes_ref.InitializeInto())) ==
         kAXErrorSuccess) {

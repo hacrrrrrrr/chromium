@@ -9,7 +9,9 @@
 
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "chrome/browser/context_hub/features.h"
 #include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/test/scoped_error_expecter.h"
@@ -113,8 +115,33 @@ TEST_F(ContextHubDatabaseTest, InitializeGreaterVersionThanCurrent) {
 TEST_F(ContextHubDatabaseTest, CallMemoryBankMethodsBeforeInit) {
   EXPECT_FALSE(db_->AddOrUpdateMemoryBankEntry(CreateTestData()));
   EXPECT_FALSE(db_->GetMemoryBankEntry(1).has_value());
+  EXPECT_TRUE(db_->GetMemoryBankEntriesByIds({1}).empty());
   EXPECT_TRUE(db_->GetAllMemoryBankEntries().empty());
   EXPECT_FALSE(db_->DeleteMemoryBankEntries({1}));
+}
+
+// Tests retrieving memory bank entries by IDs.
+TEST_F(ContextHubDatabaseTest, GetMemoryBankEntriesByIds) {
+  ASSERT_TRUE(db_->Init(GetDbPath()));
+
+  MemoryBankEntry entry1 = CreateTestData();
+  entry1.url = GURL("https://example1.com");
+  entry1.tab_title = "Site 1";
+  MemoryBankEntry entry2 = CreateTestData();
+  entry2.url = GURL("https://example2.com");
+  entry2.tab_title = "Site 2";
+
+  EXPECT_TRUE(db_->AddOrUpdateMemoryBankEntry(entry1));
+  EXPECT_TRUE(db_->AddOrUpdateMemoryBankEntry(entry2));
+
+  std::vector<MemoryBankEntry> all_entries = db_->GetAllMemoryBankEntries();
+  ASSERT_EQ(all_entries.size(), 2u);
+
+  std::vector<MemoryBankEntry> retrieved =
+      db_->GetMemoryBankEntriesByIds({all_entries[0].id});
+  ASSERT_EQ(retrieved.size(), 1u);
+  EXPECT_EQ(retrieved[0].id, all_entries[0].id);
+  EXPECT_EQ(retrieved[0].tab_title, all_entries[0].tab_title);
 }
 
 // Tests adding and retrieving memory bank entries.
@@ -199,6 +226,31 @@ TEST_F(ContextHubDatabaseTest, DeleteMemoryBankEntries) {
   EXPECT_FALSE(db_->GetMemoryBankEntry(id_1).has_value());
   EXPECT_FALSE(db_->GetMemoryBankEntry(id_2).has_value());
   EXPECT_TRUE(db_->GetMemoryBankEntry(id_3).has_value());
+}
+
+// Tests that reaching max_memory_bank_entries rejects adding new entries.
+TEST_F(ContextHubDatabaseTest, MaxEntriesLimitRejectsNewEntries) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      features::kMemoryBanks, {{"max_memory_bank_entries", "2"}});
+
+  ASSERT_TRUE(db_->Init(GetDbPath()));
+
+  MemoryBankEntry entry1 = CreateTestData();
+  entry1.url = GURL("https://example.com/1");
+  EXPECT_TRUE(db_->AddOrUpdateMemoryBankEntry(entry1));
+
+  MemoryBankEntry entry2 = CreateTestData();
+  entry2.url = GURL("https://example.com/2");
+  EXPECT_TRUE(db_->AddOrUpdateMemoryBankEntry(entry2));
+
+  // Limit of 2 entries reached. Attempting to add a 3rd new entry should fail.
+  MemoryBankEntry entry3 = CreateTestData();
+  entry3.url = GURL("https://example.com/3");
+  EXPECT_FALSE(db_->AddOrUpdateMemoryBankEntry(entry3));
+
+  // Table should still contain only 2 entries.
+  EXPECT_EQ(db_->GetAllMemoryBankEntries().size(), 2u);
 }
 
 }  // namespace context_hub

@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
+#include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 
 namespace blink {
 
@@ -263,6 +264,9 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
   std::unique_ptr<WebNavigationParams> params =
       WebNavigationParams::CreateWithEmptyHTMLForTesting(url);
   MockPolicyContainerHost mock_policy_container_host;
+  base::UnguessableToken initiator_state_token =
+      base::UnguessableToken::Create();
+  params->initiator_state_token = initiator_state_token;
   params->policy_container = std::make_unique<WebPolicyContainer>(
       WebPolicyContainerPolicies{
           network::ConnectionAllowlists(),
@@ -277,18 +281,48 @@ TEST_F(FrameLoaderTest, PolicyContainerIsStoredOnCommitNavigation) {
       To<LocalFrame>(web_view_impl->GetPage()->MainFrame());
   local_frame->Loader().CommitNavigation(std::move(params), nullptr);
 
-  EXPECT_EQ(*mojom::blink::PolicyContainerPolicies::New(
-                network::ConnectionAllowlists(),
-                network::CrossOriginEmbedderPolicy(
-                    network::mojom::CrossOriginEmbedderPolicyValue::kNone),
-                network::IntegrityPolicy(), network::IntegrityPolicy(),
-                network::mojom::ReferrerPolicy::kAlways,
-                Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
-                /*anonymous=*/false, network::mojom::WebSandboxFlags::kNone,
-                network::mojom::blink::IPAddressSpace::kUnknown,
-                /*can_navigate_top_without_user_gesture=*/true,
-                /*cross_origin_isolation_enabled_by_dip=*/false),
-            local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
+  EXPECT_EQ(
+      *mojom::blink::PolicyContainerPolicies::New(
+          network::ConnectionAllowlists(),
+          network::CrossOriginEmbedderPolicy(
+              network::mojom::CrossOriginEmbedderPolicyValue::kNone),
+          network::IntegrityPolicy(), network::IntegrityPolicy(),
+          network::mojom::ReferrerPolicy::kAlways,
+          Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+          /*is_credentialless=*/false, network::mojom::WebSandboxFlags::kNone,
+          network::mojom::blink::IPAddressSpace::kUnknown,
+          /*can_navigate_top_without_user_gesture=*/true,
+          /*cross_origin_isolation_enabled_by_dip=*/false),
+      local_frame->DomWindow()->GetPolicyContainer()->GetPolicies());
+  EXPECT_EQ(initiator_state_token,
+            local_frame->DomWindow()->GetInitiatorStateToken());
+}
+
+TEST_F(FrameLoaderSimTest, DirectLaunchSchemeBlocked) {
+  const String kScheme("google-chrome");
+  SchemeRegistry::RegisterURLSchemeAsDirectLaunch(kScheme);
+
+  SimRequest main_request("https://example.com/test.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  main_request.Complete(
+      "<a id='link' "
+      "href='google-chrome:https://example.com/dest.html'>link</a>");
+
+  auto* anchor =
+      To<HTMLAnchorElement>(GetDocument().getElementById(AtomicString("link")));
+  ASSERT_NE(anchor, nullptr);
+
+  anchor->click();
+
+  // Verify navigation was synchronously blocked in Blink, logged a security
+  // error, and did not initiate a provisional load.
+  EXPECT_TRUE(ConsoleMessages().Contains(
+      "Not allowed to navigate to direct-launch scheme 'google-chrome' from "
+      "web contexts."));
+  EXPECT_FALSE(GetDocument().GetFrame()->Loader().HasProvisionalNavigation());
+  EXPECT_EQ(GetDocument().Url(), KURL("https://example.com/test.html"));
+
+  SchemeRegistry::RemoveURLSchemeAsDirectLaunchForTest(kScheme);
 }
 
 }  // namespace blink

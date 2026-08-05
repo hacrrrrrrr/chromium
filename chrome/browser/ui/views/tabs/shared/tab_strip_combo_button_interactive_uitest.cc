@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h"
+
 #include "base/test/metrics/user_action_tester.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -9,7 +11,7 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
-#include "chrome/browser/ui/views/tabs/shared/tab_strip_combo_button.h"
+#include "chrome/browser/ui/views/tabs/organizer/organizer_panel_utils.h"
 #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
 #include "chrome/browser/ui/views/test/vertical_tabs_interactive_test_mixin.h"
 #include "chrome/common/pref_names.h"
@@ -17,7 +19,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "components/prefs/pref_service.h"
-#include "components/saved_tab_groups/public/features.h"
 #include "content/public/test/browser_test.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/gfx/animation/animation_test_api.h"
@@ -37,12 +38,12 @@ class TabStripComboButtonInteractiveUiTest
 
   const std::vector<base::test::FeatureRefAndParams> GetEnabledFeatures()
       override {
-    return {{tabs::kVerticalTabs, {}}, {tab_groups::kProjectsPanel, {}}};
+    return {{tabs::kVerticalTabs, {}}, {organizer_panel::kOrganizerPanel, {}}};
   }
 
   auto SetPinned(const char* pref, bool pinned) {
     return Do([this, pref, pinned]() {
-      browser()->profile()->GetPrefs()->SetBoolean(pref, pinned);
+      browser()->GetProfile()->GetPrefs()->SetBoolean(pref, pinned);
     });
   }
 
@@ -74,9 +75,9 @@ class TabStripComboButtonInteractiveUiTest
 
   auto EnsureBothButtonsVisible() {
     return Steps(SetPinned(prefs::kTabSearchPinnedToTabstrip, true),
-                 SetPinned(prefs::kProjectsPanelPinnedToTabstrip, true),
+                 SetPinned(prefs::kEverythingMenuPinnedToTabstrip, true),
                  WaitForShow(kTabSearchButtonElementId),
-                 WaitForShow(kVerticalTabStripProjectsButtonElementId));
+                 WaitForShow(kSavedTabGroupButtonElementId));
   }
 
   auto ExecuteCommand(int command_id) {
@@ -108,12 +109,12 @@ IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
       // Pin Tab Search.
       ExecuteCommand(IDC_TAB_SEARCH_TOGGLE_PIN),
       CheckUserAction("TabStripComboButton.TabSearch.Pinned", 1),
-      // Unpin Projects Panel.
-      ExecuteCommand(IDC_PROJECTS_PANEL_TOGGLE_PIN),
-      CheckUserAction("TabStripComboButton.ProjectsPanel.Unpinned", 1),
-      // Pin Projects Panel.
-      ExecuteCommand(IDC_PROJECTS_PANEL_TOGGLE_PIN),
-      CheckUserAction("TabStripComboButton.ProjectsPanel.Pinned", 1));
+      // Unpin Everything Menu.
+      ExecuteCommand(IDC_EVERYTHING_MENU_TOGGLE_PIN),
+      CheckUserAction("TabStripComboButton.EverythingMenu.Unpinned", 1),
+      // Pin Everything Menu.
+      ExecuteCommand(IDC_EVERYTHING_MENU_TOGGLE_PIN),
+      CheckUserAction("TabStripComboButton.EverythingMenu.Pinned", 1));
 }
 
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
@@ -121,20 +122,17 @@ IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
   using FlatEdge = TabStripFlatEdgeButton::FlatEdge;
   RunTestSequence(
       EnsureBothButtonsVisible(),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId, FlatEdge::kRight),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kRight),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kLeft),
       // Collapse vertical tabs.
       PressButton(kVerticalTabStripCollapseButtonElementId),
-      WaitForEvent(kTabStripRegionElementId,
-                   VerticalTabStripRegionView::kAnimationCompletedEvent),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId,
-                    FlatEdge::kBottom),
+      Do([this]() { RunScheduledLayouts(); }),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kBottom),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kTop),
       // Expand vertical tabs.
       PressButton(kVerticalTabStripCollapseButtonElementId),
-      WaitForEvent(kTabStripRegionElementId,
-                   VerticalTabStripRegionView::kAnimationCompletedEvent),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId, FlatEdge::kRight),
+      Do([this]() { RunScheduledLayouts(); }),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kRight),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kLeft));
 }
 
@@ -143,50 +141,50 @@ IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
   using FlatEdge = TabStripFlatEdgeButton::FlatEdge;
   RunTestSequence(
       EnsureBothButtonsVisible(),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId, FlatEdge::kRight),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kRight),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kLeft),
       // Hide end button via pref.
       SetPinned(prefs::kTabSearchPinnedToTabstrip, false),
       WaitForHide(kTabSearchButtonElementId),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId, FlatEdge::kNone),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kNone),
       // Show end button again.
       SetPinned(prefs::kTabSearchPinnedToTabstrip, true),
       WaitForShow(kTabSearchButtonElementId),
-      CheckFlatEdge(kVerticalTabStripProjectsButtonElementId, FlatEdge::kRight),
+      CheckFlatEdge(kSavedTabGroupButtonElementId, FlatEdge::kRight),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kLeft),
       // Hide start button via pref.
-      SetPinned(prefs::kProjectsPanelPinnedToTabstrip, false),
-      WaitForHide(kVerticalTabStripProjectsButtonElementId),
+      SetPinned(prefs::kEverythingMenuPinnedToTabstrip, false),
+      WaitForHide(kSavedTabGroupButtonElementId),
       CheckFlatEdge(kTabSearchButtonElementId, FlatEdge::kNone),
       // Show start button again.
-      SetPinned(prefs::kProjectsPanelPinnedToTabstrip, true));
+      SetPinned(prefs::kEverythingMenuPinnedToTabstrip, true));
 }
 
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest, UnpinTabSearch) {
-  RunTestSequence(
-      EnsureBothButtonsVisible(), ExecuteCommand(IDC_TAB_SEARCH_TOGGLE_PIN),
-      // Verify button is hidden and pref is updated.
-      WaitForHide(kTabSearchButtonElementId),
-      CheckResult(
-          [this]() {
-            return browser()->profile()->GetPrefs()->GetBoolean(
-                prefs::kTabSearchPinnedToTabstrip);
-          },
-          false));
+  RunTestSequence(EnsureBothButtonsVisible(),
+                  ExecuteCommand(IDC_TAB_SEARCH_TOGGLE_PIN),
+                  // Verify button is hidden and pref is updated.
+                  WaitForHide(kTabSearchButtonElementId),
+                  CheckResult(
+                      [this]() {
+                        return browser()->GetProfile()->GetPrefs()->GetBoolean(
+                            prefs::kTabSearchPinnedToTabstrip);
+                      },
+                      false));
 }
 
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
-                       UnpinProjectsPanel) {
-  RunTestSequence(
-      EnsureBothButtonsVisible(), ExecuteCommand(IDC_PROJECTS_PANEL_TOGGLE_PIN),
-      // Verify button is hidden and pref is updated.
-      WaitForHide(kVerticalTabStripProjectsButtonElementId),
-      CheckResult(
-          [this]() {
-            return browser()->profile()->GetPrefs()->GetBoolean(
-                prefs::kProjectsPanelPinnedToTabstrip);
-          },
-          false));
+                       UnpinEverythingMenu) {
+  RunTestSequence(EnsureBothButtonsVisible(),
+                  ExecuteCommand(IDC_EVERYTHING_MENU_TOGGLE_PIN),
+                  // Verify button is hidden and pref is updated.
+                  WaitForHide(kSavedTabGroupButtonElementId),
+                  CheckResult(
+                      [this]() {
+                        return browser()->GetProfile()->GetPrefs()->GetBoolean(
+                            prefs::kEverythingMenuPinnedToTabstrip);
+                      },
+                      false));
 }
 
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonInteractiveUiTest,
@@ -228,12 +226,12 @@ class TabStripComboButtonEverythingMenuInteractiveUiTest
   }
 
   const std::vector<base::test::FeatureRef> GetDisabledFeatures() override {
-    return {tab_groups::kProjectsPanel};
+    return {organizer_panel::kOrganizerPanel};
   }
 
   auto SetPinned(const char* pref, bool pinned) {
     return Do([this, pref, pinned]() {
-      browser()->profile()->GetPrefs()->SetBoolean(pref, pinned);
+      browser()->GetProfile()->GetPrefs()->SetBoolean(pref, pinned);
     });
   }
 
@@ -276,30 +274,30 @@ IN_PROC_BROWSER_TEST_F(TabStripComboButtonEverythingMenuInteractiveUiTest,
 
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonEverythingMenuInteractiveUiTest,
                        UnpinEverythingMenu) {
-  RunTestSequence(
-      EnsureBothButtonsVisible(),
-      ExecuteCommand(IDC_EVERYTHING_MENU_TOGGLE_PIN),
-      // Verify button is hidden and pref is updated.
-      WaitForHide(kSavedTabGroupButtonElementId),
-      CheckResult(
-          [this]() {
-            return browser()->profile()->GetPrefs()->GetBoolean(
-                prefs::kEverythingMenuPinnedToTabstrip);
-          },
-          false));
+  RunTestSequence(EnsureBothButtonsVisible(),
+                  ExecuteCommand(IDC_EVERYTHING_MENU_TOGGLE_PIN),
+                  // Verify button is hidden and pref is updated.
+                  WaitForHide(kSavedTabGroupButtonElementId),
+                  CheckResult(
+                      [this]() {
+                        return browser()->GetProfile()->GetPrefs()->GetBoolean(
+                            prefs::kEverythingMenuPinnedToTabstrip);
+                      },
+                      false));
 }
 
 class TabStripComboButtonHorizontalInteractiveUiTest
     : public InteractiveBrowserTest {
  public:
   TabStripComboButtonHorizontalInteractiveUiTest() {
-    scoped_feature_list_.InitWithFeatures({tab_groups::kProjectsPanel}, {});
+    scoped_feature_list_.InitWithFeatures({organizer_panel::kOrganizerPanel},
+                                          {});
   }
   ~TabStripComboButtonHorizontalInteractiveUiTest() override = default;
 
   auto SetPinned(const char* pref, bool pinned) {
     return Do([this, pref, pinned]() {
-      browser()->profile()->GetPrefs()->SetBoolean(pref, pinned);
+      browser()->GetProfile()->GetPrefs()->SetBoolean(pref, pinned);
     });
   }
 
@@ -310,14 +308,14 @@ class TabStripComboButtonHorizontalInteractiveUiTest
 IN_PROC_BROWSER_TEST_F(TabStripComboButtonHorizontalInteractiveUiTest,
                        OnlyTabSearchIsPresent) {
   RunTestSequence(
-      // Pin both tab search and projects panel.
+      // Pin both tab search and everything menu.
       SetPinned(prefs::kTabSearchPinnedToTabstrip, true),
-      SetPinned(prefs::kProjectsPanelPinnedToTabstrip, true),
+      SetPinned(prefs::kEverythingMenuPinnedToTabstrip, true),
       // Tab search should be visible.
       WaitForShow(kTabSearchButtonElementId),
-      // Projects panel should NOT be present in the view hierarchy of the combo
-      // button.
-      EnsureNotPresent(kVerticalTabStripProjectsButtonElementId));
+      // Saved tab group button should NOT be present in the view hierarchy of
+      // the combo button.
+      EnsureNotPresent(kSavedTabGroupButtonElementId));
 }
 
 }  // namespace

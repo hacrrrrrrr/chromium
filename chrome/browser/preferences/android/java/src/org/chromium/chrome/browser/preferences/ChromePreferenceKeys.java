@@ -141,6 +141,10 @@ public final class ChromePreferenceKeys {
     public static final String BOOKMARKS_SORT_ORDER = "Chrome.Bookmarks.BookmarkRowSortOrder";
     public static final String BOOKMARKS_VISUALS_PREF = "Chrome.Bookmarks.BookmarkRowDisplay";
 
+    /** Whether the GLIC button is enabled by the user in the bottom bar. */
+    public static final String BOTTOM_BAR_GLIC_BUTTON_ENABLED =
+            "Chrome.BottomBar.GlicButtonEnabled";
+
     /** Whether Chrome is set as the default browser. Default value is false. */
     public static final String CHROME_DEFAULT_BROWSER = "applink.chrome_default_browser";
 
@@ -687,6 +691,10 @@ public final class ChromePreferenceKeys {
     public static final String TAB_PERSISTENCE_STORE_MANAGER_VERSION =
             "Chrome.TabPersistence.StoreManagerVersion";
 
+    /** KeyPrefix for tab store metrics stored in SharedPreferences. */
+    public static final KeyPrefix TAB_STORE_METRICS =
+            new KeyPrefix("Chrome.TabModel.TabStoreMetrics.*");
+
     /**
      * Indicates whether or not there is any persistent (i.e. non-transient) content in chrome that
      * can be viewed offline.
@@ -724,8 +732,7 @@ public final class ChromePreferenceKeys {
 
     /**
      * The number at the end should be consistent with {@link
-     * org.chromium.chrome.browser.ntp_customization.theme_sync.data.
-     * NtpBackgroundDataBase.PlatformType}
+     * org.chromium.chrome.browser.ntp_customization.theme_sync.data. PlatformType}
      */
     public static final KeyPrefix NTP_CUSTOMIZATION_SYNC_HISTORY_DATA =
             new KeyPrefix("Chrome.NtpCustomizationSync.HistoryData.*");
@@ -1103,8 +1110,22 @@ public final class ChromePreferenceKeys {
 
     public static final String VERIFIED_DIGITAL_ASSET_LINKS = "verified_digital_asset_links";
 
+    /** Stores whether the vertical tabs rail is collapsed. */
+    public static final String VERTICAL_TABS_COLLAPSED = "Chrome.VerticalTabs.Collapsed";
+
     /** Stores the user preference for displaying vertical tabs. */
     public static final String VERTICAL_TABS_ENABLED = "Chrome.VerticalTabs.Enabled";
+
+    /** Stores the timestamp when vertical tabs were enabled. */
+    public static final String VERTICAL_TABS_ENABLED_TIMESTAMP =
+            "Chrome.VerticalTabs.EnabledTimestamp";
+
+    /**
+     * Stores the impression count for displaying the "New" badge on the "Show tabs vertically" menu
+     * item.
+     */
+    public static final String VERTICAL_TABS_LAYOUT_TOGGLE_VIEW_COUNT =
+            "Chrome.VerticalTabs.LayoutToggleViewCount";
 
     /** Key for deferred recording of list of uninstalled WebAPK packages. */
     public static final String WEBAPK_UNINSTALLED_PACKAGES = "webapk_uninstalled_packages";
@@ -1185,6 +1206,7 @@ public final class ChromePreferenceKeys {
                 BLUETOOTH_NOTIFICATION_IDS,
                 BOOKMARKS_SORT_ORDER,
                 BOOKMARKS_VISUALS_PREF,
+                BOTTOM_BAR_GLIC_BUTTON_ENABLED,
                 CLIPBOARD_SHARED_URI,
                 CLIPBOARD_SHARED_URI_TIMESTAMP,
                 CLOUD_MANAGEMENT_CLIENT_ID,
@@ -1358,6 +1380,7 @@ public final class ChromePreferenceKeys {
                 TAB_PERSISTENCE_CURRENT_AUTHORITATIVE_STORE.pattern(),
                 TAB_PERSISTENCE_SHADOW_WRITTEN_STORE.pattern(),
                 TAB_PERSISTENCE_STORE_MANAGER_VERSION,
+                TAB_STORE_METRICS.pattern(),
                 TIPS_NOTIFICATIONS_OPT_IN_PROMO_ACCEPTED,
                 TIPS_NOTIFICATIONS_OPT_IN_PROMO_SHOW_COUNT,
                 TIPS_NOTIFICATIONS_OPT_IN_PROMO_LAST_SHOWN_TIMESTAMP,
@@ -1367,7 +1390,10 @@ public final class ChromePreferenceKeys {
                 UMA_ON_RESUME_COUNTER,
                 USB_NOTIFICATION_IDS,
                 USER_ENABLED_DESKTOP_SITE_GLOBAL_SETTING_PREFERENCE_KEY,
+                VERTICAL_TABS_COLLAPSED,
                 VERTICAL_TABS_ENABLED,
+                VERTICAL_TABS_ENABLED_TIMESTAMP,
+                VERTICAL_TABS_LAYOUT_TOGGLE_VIEW_COUNT,
                 WEB_SIGNIN_ACCOUNT_PICKER_ACTIVE_DISMISSAL_COUNT,
                 WINDOW_CONTROLS_OVERLAY_ENABLED_PACKAGES);
     }

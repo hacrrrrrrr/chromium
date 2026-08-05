@@ -10,8 +10,14 @@
 // Commands for the popup menu.
 @protocol PopupMenuCommands
 
-// Called to present the Level Up walkthrough IPH step.
-- (void)showLevelUpWalkthroughIPH;
+// Called to present the Level Up Password Checkup walkthrough IPH step.
+- (void)showLevelUpPasswordCheckupWalkthroughIPH;
+
+// Called to present the Level Up Payment Methods walkthrough IPH step.
+- (void)showLevelUpPaymentMethodsWalkthroughIPH;
+
+// Called to present the Level Up Quick Delete walkthrough IPH step.
+- (void)showLevelUpQuickDeleteWalkthroughIPH;
 
 // Shows the tools menu.
 - (void)showToolsMenuPopup;

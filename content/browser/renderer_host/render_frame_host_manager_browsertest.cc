@@ -4817,15 +4817,15 @@ IN_PROC_BROWSER_TEST_P(RenderFrameHostManagerTest,
                             .root();
   FrameTreeNode* child1 = root->child_at(0);
   FrameTreeNode* child2 = root->child_at(1);
-  std::string a_site_host = root->current_frame_host()
-                                ->GetSiteInstance()
-                                ->GetSecurityPrincipal()
-                                .GetHost();
+  std::string_view a_site_host = root->current_frame_host()
+                                     ->GetSiteInstance()
+                                     ->GetSecurityPrincipal()
+                                     .GetHost();
   EXPECT_EQ("a.com", a_site_host);
-  std::string b_site_host = child2->current_frame_host()
-                                ->GetSiteInstance()
-                                ->GetSecurityPrincipal()
-                                .GetHost();
+  std::string_view b_site_host = child2->current_frame_host()
+                                     ->GetSiteInstance()
+                                     ->GetSecurityPrincipal()
+                                     .GetHost();
   EXPECT_EQ("b.com", b_site_host);
 
   // Navigate the subframe to a cross-site URL, while blocking the request with
@@ -4853,17 +4853,28 @@ IN_PROC_BROWSER_TEST_P(RenderFrameHostManagerTest,
     EXPECT_EQ(4, nav_controller.GetEntryCount());
     EXPECT_EQ(test_url, child1->current_frame_host()->GetLastCommittedURL());
 
-    // Error pages should commit in an opaque origin. This particular error
-    // stays in the current process, so when B2 navigates B1 to C, it stays in
-    // B's process. The origin's precursor should be empty, and more
-    // specifically, it should not be C, to guard against compromised renderers
-    // gaining access to cross-site precursors (crbug.com/502348223).
+    // Error pages should commit in an opaque origin. The precursor of that
+    // origin depends on whether subframe error page isolation is enabled.
     const url::Origin& child1_origin =
         child1->current_frame_host()->GetLastCommittedOrigin();
     EXPECT_TRUE(child1_origin.opaque());
-    EXPECT_TRUE(
-        child1_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL().is_empty());
-
+    if (SiteIsolationPolicy::IsErrorPageIsolationEnabled(
+            /*in_main_frame=*/false)) {
+      // When error page isolation is on, the error commits in its own isolated
+      // process. In this case, the error origin's precursor is currently
+      // derived from the failing URL (on c.com) for both main frame and
+      // subframe cases, which is safe, since there's no attacker code running
+      // in that process.
+      EXPECT_TRUE(IsOriginOpaqueAndCompatibleWithURL(child1, test_url));
+    } else {
+      // When subframe error page isolation is off, the error stays in the
+      // current process, so when B2 navigates B1 to C, it stays in B's process.
+      // The origin's precursor should be empty, and more specifically, it
+      // should not be C, to guard against compromised renderers gaining access
+      // to cross-site precursors (crbug.com/502348223).
+      EXPECT_TRUE(
+          child1_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL().is_empty());
+    }
     // net::ERR_BLOCKED_BY_CLIENT errors in subframes should commit in the
     // the correct process based on whether isolation is enabled or not.
     EXPECT_TRUE(IsExpectedSubframeErrorTransition(
@@ -4888,11 +4899,11 @@ IN_PROC_BROWSER_TEST_P(RenderFrameHostManagerTest,
     SiteInstanceImpl* child1_site_instance =
         child1->current_frame_host()->GetSiteInstance();
 
-    std::string c_site_host =
+    std::string_view c_site_host =
         child1_site_instance->GetSecurityPrincipal().GetHost();
     if (AreAllSitesIsolatedForTesting()) {
       EXPECT_EQ("c.com", c_site_host);
-      EXPECT_EQ(test_url.GetHost(), c_site_host);
+      EXPECT_EQ(test_url.host(), c_site_host);
     } else if (ShouldUseDefaultSiteInstanceGroup()) {
       EXPECT_EQ(
           child1_site_instance->group(),

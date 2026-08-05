@@ -4,6 +4,7 @@
 
 import("//build/config/cast.gni")
 import("//build/config/ui.gni")
+import("//components/vrp_flags/features.gni")
 import("//content/common/features.gni")
 import("//media/media_options.gni")
 import("//printing/buildflags/buildflags.gni")
@@ -71,8 +72,6 @@ target(link_target_type, "renderer") {
     "gpu_benchmarking_extension.h",
     "in_process_renderer_thread.cc",
     "in_process_renderer_thread.h",
-    "lazy_shared_url_loader_factory.cc",
-    "lazy_shared_url_loader_factory.h",
     "local_resource_url_loader_factory.cc",
     "local_resource_url_loader_factory.h",
     "media/audio_decoder.cc",
@@ -249,6 +248,7 @@ target(link_target_type, "renderer") {
     "//components/variations/net",
     "//components/viz/client",
     "//components/viz/common",
+    "//components/vrp_flags:buildflags",
     "//content:content_resources",
     "//content/child",
     "//content/common",
@@ -258,7 +258,6 @@ target(link_target_type, "renderer") {
     "//content/gpu:gpu_sources",
     "//content/public/child:child_sources",
     "//content/public/common:buildflags",
-    "//content/services/auction_worklet",
     "//crypto",
     "//device/base/synchronization",
     "//device/gamepad/public/cpp:shared_with_blink",
@@ -423,31 +422,19 @@ target(link_target_type, "renderer") {
   if (enable_ipc_fuzzer) {
     configs += [ "//tools/ipc_fuzzer:ipc_fuzzer_config" ]
   }
+
+  if (enable_vrp_flags) {
+    deps += [
+      "//components/vrp_flags",
+      "//components/vrp_flags:mojom",
+    ]
+  }
 }
 
 # See comment at the top of //content/BUILD.gn for how this works.
 group("for_content_tests") {
   visibility = [
-    ":audio_decoder_fuzzer",
-    ":audio_decoder_fuzzer__apk__compile_java",
-    ":audio_decoder_fuzzer__apk__compile_resources",
-    ":audio_decoder_fuzzer__apk__create",
-    ":audio_decoder_fuzzer__apk__java",
-    ":audio_decoder_fuzzer__apk__java__dex",
-    ":audio_decoder_fuzzer__apk__java__header",
-    ":audio_decoder_fuzzer__apk__java__validate",
-    ":audio_decoder_fuzzer__library",
-    ":audio_decoder_fuzzer__library__jni_registration__native_sources",
-    ":content_security_policy_util_fuzzer",
-    ":content_security_policy_util_fuzzer__apk__compile_java",
-    ":content_security_policy_util_fuzzer__apk__compile_resources",
-    ":content_security_policy_util_fuzzer__apk__create",
-    ":content_security_policy_util_fuzzer__apk__java",
-    ":content_security_policy_util_fuzzer__apk__java__dex",
-    ":content_security_policy_util_fuzzer__apk__java__header",
-    ":content_security_policy_util_fuzzer__apk__java__validate",
-    ":content_security_policy_util_fuzzer__library",
-    ":content_security_policy_util_fuzzer__library__jni_registration__native_sources",
+    ":*",
     "//content/test/*",
     "//content/web_test:web_test_renderer_public_deps",
   ]

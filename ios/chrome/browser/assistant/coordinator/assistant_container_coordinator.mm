@@ -66,6 +66,8 @@ enum class TransitionState {
   std::vector<AssistantContainerDetent> _detents;
   // The height for the minimized detent.
   NSInteger _minimizedDetentHeight;
+  // Whether the grabber button is hidden.
+  BOOL _grabberHidden;
   // The tab grid state being observed.
   TabGridState* _tabGridState;
 }
@@ -116,6 +118,7 @@ enum class TransitionState {
       initWithViewController:_contentViewController];
   _containerViewController.delegate = _delegate;
   _containerViewController.minimizedDetentHeight = _minimizedDetentHeight;
+  [_containerViewController setGrabberHidden:_grabberHidden animated:NO];
   if (!_detents.empty()) {
     _containerViewController.detents = _detents;
   }
@@ -143,18 +146,12 @@ enum class TransitionState {
                willAppearAnimated:YES];
   }
 
-  // Set up fullscreen observation.
-  if (IsFullscreenRefactoringEnabled()) {
-    FullscreenBrowserAgent* agent =
-        FullscreenBrowserAgent::FromBrowser(self.browser);
-    _fullscreenBrowserAgentObserverBridge =
-        std::make_unique<FullscreenBrowserAgentObserverBridge>(self, agent);
-  } else {
-    FullscreenController* fullscreenController =
-        FullscreenController::FromBrowser(self.browser);
-    _fullscreenUIUpdater =
-        std::make_unique<FullscreenUIUpdater>(fullscreenController, self);
-  }
+  [self.baseViewController
+      registerForTraitChanges:
+          @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
+                   withTarget:self
+                       action:@selector(sizeClassDidChange)];
+  [self sizeClassDidChange];
 
   __weak __typeof(self) weakSelf = self;
   void (^animations)(void) = ^{
@@ -244,6 +241,12 @@ enum class TransitionState {
   if (_containerViewController) {
     _containerViewController.minimizedDetentHeight = height;
   }
+}
+
+- (void)setAssistantContainerGrabberHidden:(BOOL)hidden
+                                  animated:(BOOL)animated {
+  _grabberHidden = hidden;
+  [_containerViewController setGrabberHidden:hidden animated:animated];
 }
 
 - (void)dismissAssistantContainerAnimated:(BOOL)animated
@@ -339,8 +342,7 @@ enum class TransitionState {
   _transitionState = TransitionState::kIdle;
 
   // Cleanup view controller and state.
-  _fullscreenUIUpdater = nullptr;
-  _fullscreenBrowserAgentObserverBridge = nullptr;
+  [self stopFullscreenObservation];
   [_tabGridState removeObserver:self];
   _tabGridState = nil;
 
@@ -359,11 +361,48 @@ enum class TransitionState {
   _contentViewController = nil;
   _delegate = nil;
   _detents.clear();
+  _grabberHidden = NO;
 
   if (_dismissalCompletion) {
     ProceduralBlock completion = _dismissalCompletion;
     _dismissalCompletion = nil;
     completion();
+  }
+}
+
+// Sets up the fullscreen observation.
+- (void)setupFullscreenObservation {
+  if (_fullscreenBrowserAgentObserverBridge || _fullscreenUIUpdater) {
+    return;
+  }
+
+  // Set up fullscreen observation.
+  if (IsFullscreenRefactoringEnabled()) {
+    FullscreenBrowserAgent* agent =
+        FullscreenBrowserAgent::FromBrowser(self.browser);
+    _fullscreenBrowserAgentObserverBridge =
+        std::make_unique<FullscreenBrowserAgentObserverBridge>(self, agent);
+  } else {
+    FullscreenController* fullscreenController =
+        FullscreenController::FromBrowser(self.browser);
+    _fullscreenUIUpdater =
+        std::make_unique<FullscreenUIUpdater>(fullscreenController, self);
+  }
+}
+
+// Stops the fullscreen observation.
+- (void)stopFullscreenObservation {
+  _fullscreenUIUpdater = nullptr;
+  _fullscreenBrowserAgentObserverBridge = nullptr;
+}
+
+// Called when the view's trait collection changes.
+- (void)sizeClassDidChange {
+  if (IsSidePanelLayout(self.baseViewController.traitCollection)) {
+    [self stopFullscreenObservation];
+    [self updateForFullscreenProgress:1];
+  } else {
+    [self setupFullscreenObservation];
   }
 }
 

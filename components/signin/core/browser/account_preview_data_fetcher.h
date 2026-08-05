@@ -28,13 +28,20 @@ namespace signin {
 
 class IdentityManager;
 
+// Test and production exposed list of data types restricted for the statistics
+// API.
+inline constexpr int kRequestedDataTypes[] = {
+    31729, 32904, 37702,  41210,  45873,  48119,
+    48364, 50119, 154522, 330441, 411028, 1164238,
+};
+
 // Helper class to fetch account preview data from the Sync Preview API.
 // Fetches both statistics and entities previews in parallel (after acquiring a
 // SyncPreview OAuth token for the input account). Once both fetches complete,
 // the provided callback is invoked with the account preview data.
 // If the token acquisition or any network request fails or if the response
 // format is unexpected, the callback is invoked with no data (std::nullopt).
-// The fetching starts on construction.
+// The fetching only starts when Start() is called.
 class AccountPreviewDataFetcher {
  public:
   // LINT.IfChange(AccountPreviewDataFetchState)
@@ -62,6 +69,9 @@ class AccountPreviewDataFetcher {
       FetchCompleteCallback callback);
   ~AccountPreviewDataFetcher();
 
+  void Start();
+  bool is_started() const { return is_started_; }
+
  private:
   void OnAccessTokenReceived(GoogleServiceAuthError error,
                              AccessTokenInfo token_info);
@@ -84,6 +94,8 @@ class AccountPreviewDataFetcher {
   // responses from the API calls are malformed or failed.
   std::optional<AccountPreviewData> fetched_data_ = AccountPreviewData();
   base::RepeatingCallback<void(bool)> barrier_callback_;
+
+  bool is_started_ = false;
 
   base::WeakPtrFactory<AccountPreviewDataFetcher> weak_ptr_factory_{this};
 };

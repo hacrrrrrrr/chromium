@@ -15,10 +15,12 @@
 #include "components/send_tab_to_self/features.h"
 #include "components/send_tab_to_self/target_device_info.h"
 #include "components/sync_device_info/device_info.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/models/image_model.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/color/color_id.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/view_class_properties.h"
@@ -93,10 +95,11 @@ SendTabToSelfBubbleDeviceButton::SendTabToSelfBubbleDeviceButton(
   device_guid_ = device_info.cache_guid;
   device_form_factor_ = device_info.form_factor;
   SetEnabled(true);
-  SetSelected(false);
   if (base::FeatureList::IsEnabled(kSendTabToSelfEnhancedDesktopUI)) {
+    GetViewAccessibility().SetRole(ax::mojom::Role::kListBoxOption);
     ApplyDeviceSelectionStyling();
   }
+  SetSelected(false);
 }
 
 void SendTabToSelfBubbleDeviceButton::ApplyDeviceSelectionStyling() {
@@ -123,6 +126,9 @@ void SendTabToSelfBubbleDeviceButton::SetSelected(bool selected) {
   // `CreateCheckmarkIcon()`) that indicates the device is selected.
   if (secondary_view()) {
     secondary_view()->SetVisible(selected);
+  }
+  if (base::FeatureList::IsEnabled(kSendTabToSelfEnhancedDesktopUI)) {
+    GetViewAccessibility().SetIsSelected(selected);
   }
 }
 

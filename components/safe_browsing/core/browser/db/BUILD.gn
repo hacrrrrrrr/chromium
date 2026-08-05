@@ -45,9 +45,11 @@ static_library("database_manager") {
     ":util",
     ":v4_get_hash_protocol_manager",
     ":v4_protocol_manager_util",
+    ":v5_get_hash_protocol_manager",
     "//base",
     "//components/safe_browsing/core/common",
     "//components/safe_browsing/core/common:threat_enums",
+    "//mojo/public/cpp/bindings",
     "//net",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
@@ -69,6 +71,7 @@ static_library("test_database_manager") {
     ":util",
     ":v4_protocol_manager_util",
     "//base",
+    "//components/safe_browsing/core/common:features",
     "//net",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
@@ -140,6 +143,51 @@ static_library("v4_get_hash_protocol_manager") {
   ]
 }
 
+source_set("v5_search_hashes_util") {
+  sources = [
+    "v5_search_hashes_util.cc",
+    "v5_search_hashes_util.h",
+  ]
+
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+
+  public_deps = [
+    ":util",
+    "//components/safe_browsing/core/common/proto:safebrowsingv5_proto",
+  ]
+  deps = [
+    ":v5_search_hashes_cache",
+    "//base",
+    "//components/safe_browsing/core/common",
+    "//google_apis",
+    "//net",
+  ]
+}
+
+source_set("v5_get_hash_protocol_manager") {
+  sources = [
+    "v5_get_hash_protocol_manager.cc",
+    "v5_get_hash_protocol_manager.h",
+  ]
+
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+
+  public_deps = [
+    ":util",
+    ":v5_search_hashes_util",
+  ]
+  deps = [
+    ":v4_protocol_manager_util",
+    ":v5_search_hashes_cache",
+    "//base",
+    "//components/keyed_service/core",
+    "//components/safe_browsing/core/browser/db:v4_protocol_config",
+    "//components/safe_browsing/core/common",
+    "//components/safe_browsing/core/common/proto:webui_proto",
+    "//services/network/public/cpp",
+  ]
+}
+
 static_library("sb_local_database_manager") {
   sources = [
     "sb_local_database_manager.cc",
@@ -152,14 +200,17 @@ static_library("sb_local_database_manager") {
     ":database_manager",
     ":safebrowsing_proto",
     ":sb_database",
+    ":sb_store",
     ":sb_update_protocol_manager",
     ":v4_get_hash_protocol_manager",
     ":v4_protocol_manager_util",
+    ":v5_get_hash_protocol_manager",
     "//base",
     "//build:branding_buildflags",
     "//components/safe_browsing/core/common",
     "//components/safe_browsing/core/common/proto:webui_proto",
     "//crypto",
+    "//mojo/public/cpp/bindings",
     "//net",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
@@ -192,6 +243,7 @@ source_set("v4_protocol_manager_util") {
   deps = [
     ":v4_protocol_config",
     "//base",
+    "//components/safe_browsing/core/common:features",
     "//components/safe_browsing/core/common:safe_browsing_prefs",
     "//google_apis",
     "//net",
@@ -380,7 +432,9 @@ source_set("unit_tests_shared") {
     "sb_protocol_manager_util_unittest.cc",
     "util_unittest.cc",
     "v4_get_hash_protocol_manager_unittest.cc",
+    "v5_get_hash_protocol_manager_unittest.cc",
     "v5_search_hashes_cache_unittest.cc",
+    "v5_search_hashes_util_unittest.cc",
   ]
   deps = [
     ":allowlist_checker_client",
@@ -391,7 +445,9 @@ source_set("unit_tests_shared") {
     ":v4_get_hash_protocol_manager",
     ":v4_protocol_manager_util",
     ":v4_test_util",
+    ":v5_get_hash_protocol_manager",
     ":v5_search_hashes_cache",
+    ":v5_search_hashes_util",
     "//base",
     "//base/test:test_support",
     "//components/history/core/browser",
@@ -427,6 +483,8 @@ source_set("unit_tests_local_db") {
     ":v4_protocol_manager_util",
     ":v4_store_proto",
     ":v4_test_util",
+    ":v5_get_hash_protocol_manager",
+    ":v5_search_hashes_cache",
     "//base",
     "//build:branding_buildflags",
     "//components/crx_file",

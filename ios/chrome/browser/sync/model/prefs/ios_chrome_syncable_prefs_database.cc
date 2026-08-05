@@ -43,7 +43,11 @@ enum {
   kIOSGeminiLiveIntroPlayed = 200013,
   kLevelUpCompletedTasks = 200014,
   kLevelUpHighestLevel = 200015,
-  kLevelUpUIEnabled = 200016
+  kLevelUpUIEnabled = 200016,
+  kLevelUpTabsDeclutteredStat = 200017,
+  kLevelUpTypingSavedStat = 200018,
+  kLevelUpPasswordsVerifiedStat = 200019,
+  kLevelUpPhotoSearchesPerformedStat = 200020
   // See components/sync_preferences/README.md about adding new entries here.
   // vvvvv IMPORTANT! vvvvv
   // Note to the reviewer: IT IS YOUR RESPONSIBILITY to ensure that new syncable
@@ -121,18 +125,37 @@ constexpr auto kIOSChromeSyncablePrefsAllowlist =
           sync_preferences::PrefSensitivity::kNone,
           sync_preferences::MergeBehavior::kNone,
           sync_preferences::WriteBehavior::kWriteToAccountOnly}},
+        {prefs::kLevelUpTabsDeclutteredStat,
+         {syncable_prefs_ids::kLevelUpTabsDeclutteredStat, syncer::PREFERENCES,
+          sync_preferences::PrefSensitivity::kNone,
+          sync_preferences::MergeBehavior::kNone,
+          sync_preferences::WriteBehavior::kWriteToAccountOnly}},
+        {prefs::kLevelUpTypingSavedStat,
+         {syncable_prefs_ids::kLevelUpTypingSavedStat, syncer::PREFERENCES,
+          sync_preferences::PrefSensitivity::kNone,
+          sync_preferences::MergeBehavior::kNone,
+          sync_preferences::WriteBehavior::kWriteToAccountOnly}},
+        {prefs::kLevelUpPasswordsVerifiedStat,
+         {syncable_prefs_ids::kLevelUpPasswordsVerifiedStat,
+          syncer::PREFERENCES, sync_preferences::PrefSensitivity::kNone,
+          sync_preferences::MergeBehavior::kNone,
+          sync_preferences::WriteBehavior::kWriteToAccountOnly}},
+        {prefs::kLevelUpPhotoSearchesPerformedStat,
+         {syncable_prefs_ids::kLevelUpPhotoSearchesPerformedStat,
+          syncer::PREFERENCES, sync_preferences::PrefSensitivity::kNone,
+          sync_preferences::MergeBehavior::kNone,
+          sync_preferences::WriteBehavior::kWriteToAccountOnly}},
     });
 
 }  // namespace
 
-std::optional<sync_preferences::SyncablePrefMetadata>
+const sync_preferences::SyncablePrefMetadata*
 IOSChromeSyncablePrefsDatabase::GetSyncablePrefMetadata(
     std::string_view pref_name) const {
   const auto it = kIOSChromeSyncablePrefsAllowlist.find(pref_name);
   if (it != kIOSChromeSyncablePrefsAllowlist.end()) {
-    DCHECK(!common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name)
-                .has_value());
-    return it->second;
+    DCHECK(!common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name));
+    return &it->second;
   }
   // Check in `common_syncable_prefs_database_`.
   return common_syncable_prefs_database_.GetSyncablePrefMetadata(pref_name);

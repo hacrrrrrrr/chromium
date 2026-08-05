@@ -316,8 +316,8 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
   screen_orientation_delegate_ =
       std::make_unique<ScreenOrientationDelegateChromeos>();
 
-  app_list_client_ =
-      std::make_unique<AppListClientImpl>(user_manager::UserManager::Get());
+  app_list_client_ = std::make_unique<AppListClientImpl>(
+      g_browser_process->local_state(), user_manager::UserManager::Get());
 
   // Must be available at login screen, so initialize before profile.
   accessibility_controller_client_ =
@@ -354,9 +354,14 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
   session_controller_client_ = std::make_unique<SessionControllerClientImpl>(
       CHECK_DEREF(g_browser_process->local_state()));
   session_controller_client_->Init();
-  // By this point ash shell should have initialized its D-Bus signal
-  // listeners, so inform the session manager that Ash is initialized.
-  session_controller_client_->EmitAshInitialized();
+
+  // Emit the ash-initialized upstart signal to start Chrome OS tasks that
+  // expect that Ash is listening to D-Bus signals they emit. For example,
+  // hammerd, which handles detachable base state, communicates the base state
+  // purely by emitting D-Bus signals, and thus has to be run whenever Ash is
+  // started so Ash (DetachableBaseHandler in particular) gets the proper view
+  // of the current detachable base state.
+  ash::SessionManagerClient::Get()->EmitAshInitialized();
 
   system_tray_client_ = std::make_unique<SystemTrayClientImpl>(
       CHECK_DEREF(g_browser_process->platform_part()->GetSystemClock()),
@@ -508,6 +513,7 @@ void ChromeBrowserMainExtraPartsAsh::PostProfileInit(Profile* profile,
   ash_web_view_factory_ = std::make_unique<AshWebViewFactoryImpl>();
 
   quick_insert_client_ = std::make_unique<QuickInsertClientImpl>(
+      g_browser_process->local_state(),
       ash::Shell::Get()->quick_insert_controller(),
       user_manager::UserManager::Get());
 

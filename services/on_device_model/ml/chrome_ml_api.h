@@ -115,6 +115,9 @@ struct ChromeMLModelDescriptor {
   bool enable_speculative_decoding;
 
   ml::ModelPerformanceHint performance_hint;
+
+  // The estimated device VRAM capacity in MB (0 if unknown/unqueried).
+  uint64_t vram_mb = 0;
 };
 
 // Describes an adaptation for a model.
@@ -434,6 +437,7 @@ struct ChromeMLASRStreamOptions {
   uint32_t sample_rate_hz;
   // Function to call with transcribed audio.
   const ChromeMLASRStreamOutputFn* output_fn;
+  int32_t decoder_prefill_backoff;
 };
 
 struct ChromeMLASRAPI {
@@ -599,8 +603,18 @@ struct ChromeMLAPI {
   ChromeMLASRAPI asr_api;
 };
 
-// Signature of the GetChromeMLAPI() function which the shared library exports.
+enum class ChromeMLBackendMode : uint32_t {
+  kLegacy = 0,
+  kLiteRtLmSession = 1,
+  kLiteRtLmConversation = 2,
+};
+
+// TODO(crbug.com/539590008): Remove GetChromeMLAPI(bool) and rename
+// GetChromeMLAPIV2 to GetChromeMLAPI once transitionary period passes.
 using ChromeMLAPIGetter = const ChromeMLAPI* (*)(bool enable_litert_lm);
+
+// Signature of the new GetChromeMLAPIV2() function.
+using ChromeMLAPIGetterV2 = const ChromeMLAPI* (*)(ChromeMLBackendMode mode);
 
 }  // extern "C"
 

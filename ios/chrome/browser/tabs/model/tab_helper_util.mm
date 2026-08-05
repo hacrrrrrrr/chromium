@@ -54,7 +54,6 @@
 #import "ios/chrome/browser/enterprise/connectors/device_trust/features.h"
 #import "ios/chrome/browser/enterprise/data_controls/model/data_controls_tab_helper.h"
 #import "ios/chrome/browser/enterprise/data_protection/model/data_protection_tab_helper.h"
-#import "ios/chrome/browser/enterprise/data_protection/public/features.h"
 #import "ios/chrome/browser/favicon/model/favicon_service_factory.h"
 #import "ios/chrome/browser/find_in_page/model/find_tab_helper.h"
 #import "ios/chrome/browser/history/model/history_service_factory.h"
@@ -72,6 +71,7 @@
 #import "ios/chrome/browser/intelligence/actor/model/actor_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/intelligence/on_device_category_classifier/on_device_category_classifier_tab_helper.h"
 #import "ios/chrome/browser/itunes_urls/model/itunes_urls_handler_tab_helper.h"
 #import "ios/chrome/browser/lens/model/lens_tab_helper.h"
 #import "ios/chrome/browser/lens_overlay/model/lens_overlay_tab_helper.h"
@@ -208,7 +208,7 @@ void AttachTabHelpers(web::WebState* web_state, TabHelperFilter filter_flags) {
             [&]() { return attacher.IsOffTheRecord(); });
   attacher
       .CreateDeferredWhen<ReaderModeTabHelper>(
-          attacher.IsNotInTabHelperFilter() && IsReaderModeAvailable())
+          attacher.IsNotInTabHelperFilter())
       .WithFactory<DistillerServiceFactory>(profile);
 
   attacher.Create<security_interstitials::IOSBlockingPageTabHelper>();
@@ -393,23 +393,22 @@ void AttachTabHelpers(web::WebState* web_state, TabHelperFilter filter_flags) {
 
   attacher.Create<WebViewProxyTabHelper>();
 
-  attacher.CreateWhen<ChooseFileTabHelper>(
-      attacher.IsNotInTabHelperFilter() &&
-      (base::FeatureList::IsEnabled(kIOSChooseFromDrive) ||
-       base::FeatureList::IsEnabled(kIOSCustomFileUploadMenu)));
+  attacher.CreateWhen<ChooseFileTabHelper>(attacher.IsNotInTabHelperFilter());
   attacher.CreateWhen<LastTapLocationTabHelper>(
-      attacher.IsNotInTabHelperFilter() &&
-      base::FeatureList::IsEnabled(kIOSCustomFileUploadMenu));
+      attacher.IsNotInTabHelperFilter());
 
-  if (!attacher.IsOffTheRecord() && !attacher.IsForPrerender() &&
-      IsModelBasedPageClassificationEnabled()) {
-    ios::provider::AttachClassificationMetricsTabHelper(web_state);
+  if (!attacher.IsOffTheRecord() && !attacher.IsForPrerender()) {
+    if (IsModelBasedPageClassificationEnabled()) {
+      ios::provider::AttachClassificationMetricsTabHelper(web_state);
+    }
+    // TODO(crbug.com/526992227): Add feature param to
+    // IsGeminiContextualSuggestionsCuesEnabled for on-device classifier.
+    attacher.CreateWhen<OnDeviceCategoryClassifierTabHelper>(
+        /*enabled=*/false);
   }
 
   attacher.Create<data_controls::DataControlsTabHelper>();
-  if (IsEnableScreenshotProtectionIOSEnabled()) {
-    attacher.Create<DataProtectionTabHelper>();
-  }
+  attacher.Create<DataProtectionTabHelper>();
   attacher.Create<CaptivePortalTabHelper>();
   attacher.Create<PrintTabHelper>();
   attacher.Create<BlockedPopupTabHelper>();

@@ -175,12 +175,10 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   if (entrypoint == ComposeboxEntrypoint::kCobrowse) {
     return SymbolWithPalette(
-        DefaultSymbolWithConfiguration(kArrowUpCircleFillSymbol, config),
-        palette);
+        SymbolWithConfiguration(SymbolArrowUpCircleFill, config), palette);
   } else {
     return SymbolWithPalette(
-        DefaultSymbolWithConfiguration(kRightArrowCircleFillSymbol, config),
-        palette);
+        SymbolWithConfiguration(SymbolRightArrowCircleFill, config), palette);
   }
 }
 
@@ -300,6 +298,9 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   // Whether to trigger a glow effect on appear.
   BOOL _glowOnAppear;
+
+  // Whether to force disable sending.
+  BOOL _disableSending;
 }
 
 /// ComposeboxAnimationContext
@@ -468,11 +469,16 @@ UIImage* SendButtonImage(BOOL highlighted,
 - (void)setEditView:(UIView<TextFieldViewContaining>*)editView {
   _editView = editView;
   _editView.translatesAutoresizingMaskIntoConstraints = NO;
-  _editView.minimumHeight =
-      _theme.inputPlatePosition == ComposeboxInputPlatePosition::kiPad
-          ? kOmniboxIPadMinHeight
-          : kOmniboxMinHeight;
   _editView.accessibilityIdentifier = kComposeboxAccessibilityIdentifier;
+
+  if (_entrypoint == ComposeboxEntrypoint::kCobrowse) {
+    _editView.minimumHeight = kOmniboxCobrowseMinHeight;
+  } else if (_theme.inputPlatePosition == ComposeboxInputPlatePosition::kiPad) {
+    _editView.minimumHeight = kOmniboxIPadMinHeight;
+  } else {
+    _editView.minimumHeight = kOmniboxMinHeight;
+  }
+
   [_omniboxContainer addSubview:_editView];
   [NSLayoutConstraint activateConstraints:@[
     [_editView.leadingAnchor
@@ -595,6 +601,11 @@ UIImage* SendButtonImage(BOOL highlighted,
 }
 
 - (void)updateSendButtonStateIfNeeded {
+  if (_disableSending) {
+    [self enableSendButton:NO];
+    return;
+  }
+
   BOOL allLoaded = YES;
   for (ComposeboxInputItem* item in _currentItems) {
     if (item.state != ComposeboxInputItemState::kLoaded) {
@@ -607,17 +618,18 @@ UIImage* SendButtonImage(BOOL highlighted,
 }
 
 - (void)enableSendButton:(BOOL)enableSending {
-  if (enableSending) {
-    _sendButton.alpha = 1;
-    _sendButton.enabled = YES;
-    [_editView forceDisableReturnKey:NO];
-    [_editView setAllowsReturnKeyWithEmptyText:YES];
-  } else {
-    _sendButton.alpha = kSendButtonDisabledOpacity;
-    _sendButton.enabled = NO;
-    [_editView forceDisableReturnKey:YES];
-    [_editView setAllowsReturnKeyWithEmptyText:NO];
-  }
+  _sendButton.enabled = enableSending;
+  _sendButton.alpha = enableSending ? 1 : kSendButtonDisabledOpacity;
+  BOOL isCobrowse = _entrypoint == ComposeboxEntrypoint::kCobrowse;
+  [self enableKeyboardSendButton:enableSending
+      allowsReturnKeyWithEmptyText:!isCobrowse];
+}
+
+// Enables the send button in the keyboard.
+- (void)enableKeyboardSendButton:(BOOL)enabled
+    allowsReturnKeyWithEmptyText:(BOOL)allowsReturnKeyWithEmptyText {
+  [_editView forceDisableReturnKey:!enabled];
+  [_editView setAllowsReturnKeyWithEmptyText:allowsReturnKeyWithEmptyText];
 }
 
 - (void)updateVisibleControls:(ComposeboxInputPlateControls)controls {
@@ -742,6 +754,11 @@ UIImage* SendButtonImage(BOOL highlighted,
 - (void)updatePreferredContentSizeForNewTextFieldHeight {
   // Trigger -viewDidLayoutSubviews that will call -updatePreferredContentSize.
   [_omniboxContainer layoutIfNeeded];
+}
+
+- (void)disableSending:(BOOL)disableSending {
+  _disableSending = disableSending;
+  [self updateSendButtonStateIfNeeded];
 }
 
 #pragma mark - Actions
@@ -1157,8 +1174,7 @@ UIImage* SendButtonImage(BOOL highlighted,
       configurationWithPointSize:kCloseIndicatorSize
                           weight:UIImageSymbolWeightBold
                            scale:UIImageSymbolScaleMedium];
-  xMarkImageView.image =
-      DefaultSymbolWithConfiguration(kXMarkSymbol, configuration);
+  xMarkImageView.image = SymbolWithConfiguration(SymbolXMark, configuration);
   // The parent button view is the relevant element.
   xMarkImageView.isAccessibilityElement = NO;
   xMarkImageView.tintColor = button.tintColor;
@@ -1207,8 +1223,8 @@ UIImage* SendButtonImage(BOOL highlighted,
   button.accessibilityTraits = UIAccessibilityTraitButton;
   button.accessibilityIdentifier = kComposeboxAIMButtonAccessibilityIdentifier;
 
-  UIImage* icon = CustomSymbolWithPointSize(kMagnifyingglassSparkSymbol,
-                                            kAIMButtonSymbolPointSize);
+  UIImage* icon = SymbolWithPointSize(SymbolMagnifyingglassSpark,
+                                      kAIMButtonSymbolPointSize);
 
   NSString* title = [_state.strings chipLabelForTool:ComposeboxMode::kAIM];
   button.configuration = [self modeIndicatorButtonConfigWithTitle:title
@@ -1231,9 +1247,8 @@ UIImage* SendButtonImage(BOOL highlighted,
 - (UIButton*)createPlusButton {
   UIButton* plusButton =
       [ExtendedTouchTargetButton buttonWithType:UIButtonTypeSystem];
-  [plusButton
-      setImage:DefaultSymbolWithPointSize(kPlusSymbol, kSymbolActionPointSize)
-      forState:UIControlStateNormal];
+  [plusButton setImage:SymbolWithPointSize(SymbolPlus, kSymbolActionPointSize)
+              forState:UIControlStateNormal];
   plusButton.translatesAutoresizingMaskIntoConstraints = NO;
   plusButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
   plusButton.tintColor = [UIColor colorNamed:kTextPrimaryColor];
@@ -1325,8 +1340,8 @@ UIImage* SendButtonImage(BOOL highlighted,
     for (ComposeboxInputItem* tab in tabs) {
       UIImage* faviconIcon =
           tab.leadingIconImage
-              ?: DefaultSymbolWithPointSize(kGlobeAmericasSymbol,
-                                            kAccordionDefaultSymbolPointSize);
+              ?: SymbolWithPointSize(SymbolGlobeAmericas,
+                                     kAccordionDefaultSymbolPointSize);
       [images addObject:faviconIcon];
     }
     [_tabsAccordionStackView updateWithImages:images];
@@ -1400,8 +1415,8 @@ UIImage* SendButtonImage(BOOL highlighted,
 /// Returns the microphone button.
 - (UIButton*)createMicrophoneButton {
   UIButton* micButton =
-      [self createButtonWithImage:CustomSymbolWithPointSize(
-                                      kVoiceSymbol, kSymbolActionPointSize)];
+      [self createButtonWithImage:SymbolWithPointSize(SymbolVoice,
+                                                      kSymbolActionPointSize)];
   micButton.imageView.contentMode = UIViewContentModeScaleAspectFit;
   micButton.accessibilityIdentifier =
       kComposeboxMicButtonAccessibilityIdentifier;
@@ -1444,19 +1459,18 @@ UIImage* SendButtonImage(BOOL highlighted,
   using enum ComposeboxInputPlateControls;
   if ((_visibleControls & kLens) != kNone) {
     _visualSearchButton.hidden = NO;
-    [_visualSearchButton setImage:CustomSymbolWithPointSize(
-                                      kCameraLensSymbol, kSymbolActionPointSize)
-                         forState:UIControlStateNormal];
+    [_visualSearchButton
+        setImage:SymbolWithPointSize(SymbolCameraLens, kSymbolActionPointSize)
+        forState:UIControlStateNormal];
     _visualSearchButton.accessibilityIdentifier =
         kComposeboxLensButtonAccessibilityIdentifier;
     _visualSearchButton.accessibilityLabel =
         l10n_util::GetNSString(IDS_IOS_ACCNAME_LENS);
   } else if ((_visibleControls & kQRScanner) != kNone) {
     _visualSearchButton.hidden = NO;
-    [_visualSearchButton
-        setImage:DefaultSymbolWithPointSize(kQRCodeFinderActionSymbol,
-                                            kSymbolActionPointSize)
-        forState:UIControlStateNormal];
+    [_visualSearchButton setImage:SymbolWithPointSize(SymbolQRCodeFinderAction,
+                                                      kSymbolActionPointSize)
+                         forState:UIControlStateNormal];
 
     _visualSearchButton.accessibilityIdentifier =
         kComposeboxQRCodeButtonAccessibilityIdentifier;
@@ -1508,8 +1522,7 @@ UIImage* SendButtonImage(BOOL highlighted,
   using enum ComposeboxAttachmentOption;
   UIAction* galleryAction = [self
       actionWithTitle:l10n_util::GetNSString(IDS_IOS_COMPOSEBOX_GALLERY_ACTION)
-                image:DefaultSymbolWithPointSize(kPhotoSymbol,
-                                                 kSymbolActionPointSize)
+                image:SymbolWithPointSize(SymbolPhoto, kSymbolActionPointSize)
                hidden:[_state isAttachmentHidden:kGallery]
              disabled:[_state isAttachmentDisabled:kGallery]
              selected:NO
@@ -1522,8 +1535,8 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   UIAction* cameraAction = [self
       actionWithTitle:l10n_util::GetNSString(IDS_IOS_COMPOSEBOX_CAMERA_ACTION)
-                image:DefaultSymbolWithPointSize(kSystemCameraSymbol,
-                                                 kSymbolActionPointSize)
+                image:SymbolWithPointSize(SymbolSystemCamera,
+                                          kSymbolActionPointSize)
                hidden:[_state isAttachmentHidden:kCamera]
              disabled:[_state isAttachmentDisabled:kCamera]
              selected:NO
@@ -1536,8 +1549,7 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   UIAction* fileAction = [self
       actionWithTitle:l10n_util::GetNSString(IDS_IOS_COMPOSEBOX_FILES_ACTION)
-                image:DefaultSymbolWithPointSize(kDocSymbol,
-                                                 kSymbolActionPointSize)
+                image:SymbolWithPointSize(SymbolDoc, kSymbolActionPointSize)
                hidden:[_state isAttachmentHidden:kFile]
              disabled:[_state isAttachmentDisabled:kFile]
              selected:NO
@@ -1557,9 +1569,8 @@ UIImage* SendButtonImage(BOOL highlighted,
       [self actionWithTitle:l10n_util::GetNSString(
                                 IDS_IOS_COMPOSEBOX_ADD_CURRENT_TAB_ACTION)
                       image:favicon
-                                ?: DefaultSymbolWithPointSize(
-                                       kNewTabGroupActionSymbol,
-                                       kSymbolActionPointSize)
+                                ?: SymbolWithPointSize(SymbolNewTabGroupAction,
+                                                       kSymbolActionPointSize)
                      hidden:[_state isAttachmentHidden:kCurrentTab]
                    disabled:[_state isAttachmentDisabled:kCurrentTab]
                    selected:NO
@@ -1572,8 +1583,8 @@ UIImage* SendButtonImage(BOOL highlighted,
   UIAction* selectTabsAction =
       [self actionWithTitle:l10n_util::GetNSString(
                                 IDS_IOS_COMPOSEBOX_SELECT_TAB_ACTION)
-                      image:DefaultSymbolWithPointSize(kNewTabGroupActionSymbol,
-                                                       kSymbolActionPointSize)
+                      image:SymbolWithPointSize(SymbolNewTabGroupAction,
+                                                kSymbolActionPointSize)
                      hidden:[_state isAttachmentHidden:kTab]
                    disabled:[_state isAttachmentDisabled:kTab]
                    selected:NO
@@ -1585,8 +1596,8 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   UIAction* aimAction = [self
       actionWithTitle:[_state.strings menuLabelForTool:ComposeboxMode::kAIM]
-                image:CustomSymbolWithPointSize(kMagnifyingglassSparkSymbol,
-                                                kSymbolActionPointSize)
+                image:SymbolWithPointSize(SymbolMagnifyingglassSpark,
+                                          kSymbolActionPointSize)
                hidden:[_state isToolHidden:ComposeboxMode::kAIM]
              disabled:NO
              selected:_state.activeTool == ComposeboxMode::kAIM
@@ -1611,8 +1622,8 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   UIAction* canvasAction = [self
       actionWithTitle:[_state.strings menuLabelForTool:ComposeboxMode::kCanvas]
-                image:CustomSymbolWithPointSize(kDocumentBadgeSpark,
-                                                kSymbolActionPointSize)
+                image:SymbolWithPointSize(SymbolDocumentBadgeSpark,
+                                          kSymbolActionPointSize)
                hidden:[_state isToolHidden:ComposeboxMode::kCanvas]
              disabled:[_state isToolDisabled:ComposeboxMode::kCanvas]
              selected:_state.activeTool == ComposeboxMode::kCanvas
@@ -1623,8 +1634,8 @@ UIImage* SendButtonImage(BOOL highlighted,
   UIAction* deepSearchAction =
       [self actionWithTitle:[_state.strings
                                 menuLabelForTool:ComposeboxMode::kDeepSearch]
-                      image:CustomSymbolWithPointSize(kDeepSearchSymbol,
-                                                      kSymbolActionPointSize)
+                      image:SymbolWithPointSize(SymbolDeepSearch,
+                                                kSymbolActionPointSize)
                      hidden:[_state isToolHidden:ComposeboxMode::kDeepSearch]
                    disabled:[_state isToolDisabled:ComposeboxMode::kDeepSearch]
                    selected:_state.activeTool == ComposeboxMode::kDeepSearch
@@ -1641,10 +1652,10 @@ UIImage* SendButtonImage(BOOL highlighted,
 
   if (IsComposeboxDriveOptionEnabled()) {
     UIImage* driveSymbol =
-        DefaultSymbolWithPointSize(kFolderSymbol, kSymbolActionPointSize);
+        SymbolWithPointSize(SymbolFolder, kSymbolActionPointSize);
 #if BUILDFLAG(IOS_USE_BRANDED_ASSETS)
     driveSymbol =
-        CustomSymbolWithPointSize(kGoogleDriveSymbol, kSymbolActionPointSize);
+        SymbolWithPointSize(SymbolGoogleDrive, kSymbolActionPointSize);
 #endif
     UIAction* driveAction = [self
         actionWithTitle:l10n_util::GetNSString(IDS_IOS_COMPOSEBOX_DRIVE_ACTION)
@@ -1685,8 +1696,7 @@ UIImage* SendButtonImage(BOOL highlighted,
     UIAction* regularModelOption = [self
         actionWithTitle:[_state.strings
                             menuLabelForModel:ComposeboxModelOption::kRegular]
-                  image:DefaultSymbolWithPointSize(kBoltSymbol,
-                                                   kSymbolActionPointSize)
+                  image:SymbolWithPointSize(SymbolBolt, kSymbolActionPointSize)
                  hidden:regularHidden
                disabled:[_state isModelDisabled:ComposeboxModelOption::kRegular]
                selected:_state.activeModel == ComposeboxModelOption::kRegular
@@ -1698,8 +1708,8 @@ UIImage* SendButtonImage(BOOL highlighted,
     UIAction* autoModelOption = [self
         actionWithTitle:[_state.strings
                             menuLabelForModel:ComposeboxModelOption::kAuto]
-                  image:DefaultSymbolWithPointSize(kSyncEnabledSymbol,
-                                                   kSymbolActionPointSize)
+                  image:SymbolWithPointSize(SymbolSyncEnabled,
+                                            kSymbolActionPointSize)
                  hidden:[_state isModelHidden:ComposeboxModelOption::kAuto]
                disabled:[_state isModelDisabled:ComposeboxModelOption::kAuto]
                selected:_state.activeModel == ComposeboxModelOption::kAuto
@@ -1711,8 +1721,7 @@ UIImage* SendButtonImage(BOOL highlighted,
     UIAction* thinkingModelOption = [self
         actionWithTitle:[_state.strings
                             menuLabelForModel:ComposeboxModelOption::kThinking]
-                  image:DefaultSymbolWithPointSize(kClockSymbol,
-                                                   kSymbolActionPointSize)
+                  image:SymbolWithPointSize(SymbolClock, kSymbolActionPointSize)
                  hidden:[_state isModelHidden:ComposeboxModelOption::kThinking]
                disabled:[_state
                             isModelDisabled:ComposeboxModelOption::kThinking]
@@ -1726,8 +1735,7 @@ UIImage* SendButtonImage(BOOL highlighted,
         actionWithTitle:
             [_state.strings
                 menuLabelForModel:ComposeboxModelOption::kThinkingNoGenUI]
-                  image:DefaultSymbolWithPointSize(kClockSymbol,
-                                                   kSymbolActionPointSize)
+                  image:SymbolWithPointSize(SymbolClock, kSymbolActionPointSize)
                  hidden:[_state isModelHidden:ComposeboxModelOption::
                                                   kThinkingNoGenUI]
                disabled:[_state isModelDisabled:ComposeboxModelOption::
@@ -2103,8 +2111,8 @@ UIImage* SendButtonImage(BOOL highlighted,
   NSString* title = [_state.strings chipLabelForTool:ComposeboxMode::kCanvas];
   UIButtonConfiguration* config =
       [self modeIndicatorButtonConfigWithTitle:title
-                                         image:CustomSymbolWithPointSize(
-                                                   kDocumentBadgeSpark,
+                                         image:SymbolWithPointSize(
+                                                   SymbolDocumentBadgeSpark,
                                                    kAIMButtonSymbolPointSize)];
   NSDirectionalEdgeInsets insets = kModeIndicatorButtonInsets;
   insets.trailing = kModeIndicatorButtonInsets.trailing + kXButtonWidthInButton;
@@ -2143,8 +2151,8 @@ UIImage* SendButtonImage(BOOL highlighted,
       [_state.strings chipLabelForTool:ComposeboxMode::kDeepSearch];
   UIButtonConfiguration* config =
       [self modeIndicatorButtonConfigWithTitle:title
-                                         image:CustomSymbolWithPointSize(
-                                                   kDeepSearchSymbol,
+                                         image:SymbolWithPointSize(
+                                                   SymbolDeepSearch,
                                                    kAIMButtonSymbolPointSize)];
   NSDirectionalEdgeInsets insets = kModeIndicatorButtonInsets;
   insets.trailing = kModeIndicatorButtonInsets.trailing + kXButtonWidthInButton;
@@ -2191,8 +2199,8 @@ UIImage* SendButtonImage(BOOL highlighted,
   UIButtonConfiguration* config = [self
       modeIndicatorButtonConfigWithTitle:
           l10n_util::GetNSString(IDS_IOS_COMPOSEBOX_ASK_ABOUT_THIS_PAGE_ACTION)
-                                   image:CustomSymbolWithPointSize(
-                                             kMagnifyingglassSparkSymbol,
+                                   image:SymbolWithPointSize(
+                                             SymbolMagnifyingglassSpark,
                                              kAIMButtonSymbolPointSize)];
   config.background.backgroundColor = [UIColor clearColor];
   config.baseForegroundColor = [_theme toolButtonTextColorWithActiveState:NO];

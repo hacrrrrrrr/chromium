@@ -10,12 +10,16 @@
 #include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_test_utils.h"
 #include "components/browser_apis/ui_controllers/toolbar/toolbar_ui_api_data_model.mojom.h"
 #include "components/omnibox/browser/location_bar_model_util.h"
+#include "components/omnibox/browser/vector_icons.h"
 #include "components/security_state/core/security_state.h"
 #include "components/vector_icons/vector_icons.h"
+#include "content/public/test/browser_task_environment.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/image_model.h"
 #include "ui/color/color_provider.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/vector_icon_types.h"
 #include "ui/views/vector_icons.h"
 
@@ -31,6 +35,7 @@ class IconTableTest : public testing::Test, public IconTable::Delegate {
     icon_table_.PermitFallbackVectorRasterizationForTesting();
     color_provider_.SetColorForTesting(ui::kColorIcon, SK_ColorBLUE);
     color_provider_.SetColorForTesting(ui::kColorMenuIcon, SK_ColorGREEN);
+    color_provider_.SetColorForTesting(ui::kColorSysPrimary, SK_ColorCYAN);
   }
 
   // IconTable::Delegate:
@@ -41,6 +46,9 @@ class IconTableTest : public testing::Test, public IconTable::Delegate {
   float GetScaleFactor() const override { return scale_factor_; }
 
  protected:
+  // Setup the browser task environment so thread-checkers for particular
+  // browser threads function properly.
+  content::BrowserTaskEnvironment task_environment_;
   ui::ColorProvider color_provider_;
   float scale_factor_ = 1.5f;
 
@@ -239,10 +247,38 @@ TEST_F(IconTableTest, RegisterImageModelTryReuse) {
   ASSERT_FALSE(i4.is_null());
   EXPECT_EQ(i3, i4);
 
-  EXPECT_THAT(
-      icon_table_.GetFullState(),
-      testing::UnorderedElementsAre(MatchesIconUpdate(std::ref(expected_i1)),
-                                    MatchesBitmapIconUpdate(2u)));
+  // Distinct gfx::Image instances with identical bitmap contents should be
+  // reused via deep comparison.
+  SkBitmap bitmap1;
+  bitmap1.allocN32Pixels(16, 16);
+  bitmap1.eraseColor(SK_ColorRED);
+
+  SkBitmap bitmap2;
+  bitmap2.allocN32Pixels(16, 16);
+  bitmap2.eraseColor(SK_ColorRED);
+
+  gfx::Image img1 = gfx::Image::CreateFrom1xBitmap(bitmap1);
+  gfx::Image img2 = gfx::Image::CreateFrom1xBitmap(bitmap2);
+
+  // Verify that operator== returns false for distinct gfx::Image instances.
+  EXPECT_NE(img1, img2);
+  EXPECT_NE(ui::ImageModel::FromImage(img1), ui::ImageModel::FromImage(img2));
+
+  toolbar_ui_api::IconHandle img_handle1 =
+      icon_table_.RegisterImageModelTryReuse(ui::ImageModel::FromImage(img1),
+                                             toolbar_ui_api::IconHandle());
+  ASSERT_FALSE(img_handle1.is_null());
+
+  toolbar_ui_api::IconHandle img_handle2 =
+      icon_table_.RegisterImageModelTryReuse(ui::ImageModel::FromImage(img2),
+                                             img_handle1);
+  ASSERT_FALSE(img_handle2.is_null());
+  EXPECT_EQ(img_handle1, img_handle2);
+
+  EXPECT_THAT(icon_table_.GetFullState(),
+              testing::UnorderedElementsAre(
+                  MatchesIconUpdate(std::ref(expected_i1)),
+                  MatchesBitmapIconUpdate(2u), MatchesBitmapIconUpdate(3u)));
 }
 
 TEST_F(IconTableTest, ScaleFactorChange) {
@@ -303,10 +339,19 @@ TEST_F(IconTableTest, Colors) {
       2u, "webui-toolbar:password_manager", IconType::kIconSet,
       /*color=*/SK_ColorGREEN);
 
+  toolbar_ui_api::IconHandle i3 =
+      icon_table_.RegisterImageModel(ui::ImageModel::FromVectorIcon(
+          omnibox::kStarFilledIcon, ui::kColorSysPrimary));
+  ASSERT_FALSE(i3.is_null());
+  auto expected_i3 = toolbar_ui_api::mojom::IconUpdate::New(
+      3u, "webui-toolbar:star_filled", IconType::kIconSet,
+      /*color=*/SK_ColorCYAN);
+
   EXPECT_THAT(
       icon_table_.GetFullState(),
       testing::UnorderedElementsAre(MatchesIconUpdate(std::ref(expected_i1)),
-                                    MatchesIconUpdate(std::ref(expected_i2))));
+                                    MatchesIconUpdate(std::ref(expected_i2)),
+                                    MatchesIconUpdate(std::ref(expected_i3))));
 }
 
 TEST_F(IconTableTest, AllSecurityIconsAreMapped) {

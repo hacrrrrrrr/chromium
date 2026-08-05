@@ -16,12 +16,13 @@
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/profile/profile_state_test_utils.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
-#import "ios/chrome/browser/shared/coordinator/scene/scene_state_options.h"
+#import "ios/chrome/browser/shared/coordinator/scene/scene_state_prefs.h"
 #import "ios/chrome/browser/shared/coordinator/scene/test/fake_scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider_interface.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
+#import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_manager_ios.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
@@ -68,12 +69,16 @@ class StartSurfaceSceneAgentTest : public PlatformTest {
     SetProfileStateInitStage(profile_state_, ProfileInitStage::kFinal);
     profile_state_.profile = profile_.get();
 
-    scene_state_ = [[FakeSceneState alloc] initWithAppState:app_state_
-                                                    profile:profile_.get()];
+    scene_state_ = [[FakeSceneState alloc] initWithProfile:profile_.get()];
     scene_state_.activationLevel = SceneActivationLevelUnattached;
-    [scene_state_ connectWithOptions:{.profile_state = profile_state_,
-                                      .identifier = "scene"}];
+    scene_state_.profileState = profile_state_;
+    scene_state_.sceneSessionID = "scene";
     scene_state_.UIEnabled = YES;
+    scene_state_.prefs = [[SceneStatePrefs alloc]
+        initWithProfileManager:&profile_manager_
+                   profileName:profile_->GetProfileName()
+             sessionIdentifier:scene_state_.sceneSessionID
+                  sceneSession:nil];
 
     agent_ = [[StartSurfaceSceneAgent alloc] init];
     agent_.sceneState = scene_state_;
@@ -104,6 +109,7 @@ class StartSurfaceSceneAgentTest : public PlatformTest {
     app_state_ = nil;
     profile_state_ = nil;
     [scene_state_ shutdown];
+    scene_state_.prefs = nil;
     scene_state_ = nil;
     agent_ = nil;
     dispatcher_ = nil;
@@ -495,11 +501,10 @@ TEST_F(StartSurfaceSceneAgentTest,
       scene_state_, time_last_background);
 
   // Forcing the current BrowserProvider to be incognito.
-  scene_state_.browserProviderInterface.currentBrowserProvider =
-      scene_state_.browserProviderInterface.incognitoBrowserProvider;
+  auto interface = scene_state_.browserProviderInterface;
+  [scene_state_ setCurrentBrowserProvider:interface.incognitoBrowserProvider];
   CommandDispatcher* dispatcherIncognito =
-      scene_state_.browserProviderInterface.currentBrowserProvider.browser
-          ->GetCommandDispatcher();
+      interface.currentBrowserProvider.browser->GetCommandDispatcher();
 
   [dispatcherIncognito startDispatchingToTarget:application_handler_
                                     forProtocol:@protocol(SceneCommands)];

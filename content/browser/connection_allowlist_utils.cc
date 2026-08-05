@@ -9,23 +9,46 @@
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "content/browser/renderer_host/policy_container_host.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/public/browser/connection_allowlist_util.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/connection_allowlist.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
-#include "third_party/blink/public/common/features_generated.h"
-#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "url/gurl.h"
 
-namespace content {
+namespace {
 
-bool IsConnectionAllowlistsInEarlyHintsEnabled() {
-  return network::features::kConnectionAllowlistsEarlyHints.Get();
+void QueueConnectionAllowlistReport(
+    network::mojom::NetworkContext* network_context,
+    const GURL& url,
+    const GURL& context_url,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const std::optional<base::UnguessableToken>& reporting_source,
+    const std::string& group,
+    bool enforced) {
+  if (!network_context) {
+    return;
+  }
+
+  base::DictValue body;
+  body.Set("connection", url.GetAsReferrer().spec());
+  body.Set("disposition", enforced ? "enforce" : "report");
+
+  network_context->QueueReport("connection-allowlist", group, context_url,
+                               reporting_source, network_anonymization_key,
+                               std::move(body));
 }
+
+}  // namespace
+
+namespace content {
 
 bool ResponseContainsConnectionAllowlist(
     const network::mojom::URLResponseHead* response_head) {
@@ -37,43 +60,59 @@ bool ResponseContainsConnectionAllowlist(
               .has_value());
 }
 
-bool ResponseEnablesConnectionAllowlistsOriginTrial(
-    const GURL& request_url,
-    const net::HttpResponseHeaders* response_headers) {
-  return base::FeatureList::IsEnabled(
-             blink::features::kOverrideConnectionAllowlistOriginTrial) ||
-         blink::TrialTokenValidator().RequestEnablesFeature(
-             request_url, response_headers, "ConnectionAllowlist",
-             base::Time::Now());
-}
-
-bool EnforcesConnectionAllowlist(
+bool HasActiveConnectionAllowlists(
     const PolicyContainerPolicies& initiator_policies) {
-  // The connection allowlist base feature is the kill switch for the feature.
-  // It is checked first. Then connection allowlist also requires origin trial
-  // enabled. In order to check the origin trial status, the initiator policy
-  // container policies need to be retrieved.
   if (!base::FeatureList::IsEnabled(network::features::kConnectionAllowlists)) {
     return false;
   }
-
-  // The origin trial status is tied to the existence of allowlists in policy
-  // container. If the initiator doesn't have an enforced allowlist in its
-  // policies, it means either:
-  // 1. the trial was not active for that context.
-  // 2. or the parsed enforced allowlist is null. For example, the
-  // "Connection-Allowlist" header has an empty field value.
-  // The connection allowlist is not enforced in both cases.
-  return initiator_policies.connection_allowlists.enforced.has_value();
+  return initiator_policies.connection_allowlists.enforced.has_value() ||
+         initiator_policies.connection_allowlists.report_only.has_value();
 }
 
 bool IsRedirectAllowedByConnectionAllowlist(
-    const PolicyContainerPolicies& initiator_policies) {
-  // Note: redirect_behavior defaults to kBlock if not explicitly set in the
-  // Connection-Allowlist header.
-  if (initiator_policies.connection_allowlists.enforced->redirect_behavior ==
-      network::ConnectionAllowlist::RedirectBehavior::kBlock) {
-    // TODO(crbug.com/447954811): Implement reporting.
+    const PolicyContainerPolicies& initiator_policies,
+    const GURL& original_url,
+    network::mojom::NetworkContext* network_context,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const std::optional<base::UnguessableToken>& reporting_source) {
+  if (!base::FeatureList::IsEnabled(network::features::kConnectionAllowlists)) {
+    return true;
+  }
+
+  std::optional<base::UnguessableToken> resolved_reporting_source =
+      reporting_source.has_value()
+          ? reporting_source
+          : initiator_policies.connection_allowlists.reporting_source;
+
+  // 1. Check report-only redirect behavior
+  if (initiator_policies.connection_allowlists.report_only.has_value() &&
+      initiator_policies.connection_allowlists.report_only->redirect_behavior ==
+          network::ConnectionAllowlist::RedirectBehavior::kBlock &&
+      initiator_policies.connection_allowlists.report_only->reporting_endpoint
+          .has_value()) {
+    QueueConnectionAllowlistReport(
+        network_context, original_url,
+        initiator_policies.connection_allowlists.response_url,
+        network_anonymization_key, resolved_reporting_source,
+        *initiator_policies.connection_allowlists.report_only
+             ->reporting_endpoint,
+        /*enforced=*/false);
+  }
+
+  // 2. Check enforced behavior.
+  if (initiator_policies.connection_allowlists.enforced.has_value() &&
+      initiator_policies.connection_allowlists.enforced->redirect_behavior ==
+          network::ConnectionAllowlist::RedirectBehavior::kBlock) {
+    if (initiator_policies.connection_allowlists.enforced->reporting_endpoint
+            .has_value()) {
+      QueueConnectionAllowlistReport(
+          network_context, original_url,
+          initiator_policies.connection_allowlists.response_url,
+          network_anonymization_key, resolved_reporting_source,
+          initiator_policies.connection_allowlists.enforced->reporting_endpoint
+              .value(),
+          /*enforced=*/true);
+    }
     return false;
   }
 
@@ -82,17 +121,52 @@ bool IsRedirectAllowedByConnectionAllowlist(
 
 bool ConnectionAllowlistAllowsUrlAndReportIfNeeded(
     const PolicyContainerPolicies& policies,
-    const GURL& url) {
-  if (!base::FeatureList::IsEnabled(network::features::kConnectionAllowlists) ||
-      !policies.connection_allowlists.enforced.has_value()) {
+    const GURL& url,
+    network::mojom::NetworkContext* network_context,
+    const net::NetworkAnonymizationKey& network_anonymization_key,
+    const std::optional<base::UnguessableToken>& reporting_source) {
+  if (!base::FeatureList::IsEnabled(network::features::kConnectionAllowlists)) {
     return true;
   }
-  if (network::ConnectionAllowlistMatchesUrl(
-          policies.connection_allowlists.enforced.value(), url)) {
-    return true;
+
+  std::optional<base::UnguessableToken> resolved_reporting_source =
+      reporting_source.has_value()
+          ? reporting_source
+          : policies.connection_allowlists.reporting_source;
+
+  // 1. Check report-only allowlist
+  if (policies.connection_allowlists.report_only.has_value()) {
+    if (!network::ConnectionAllowlistMatchesUrl(
+            policies.connection_allowlists.report_only.value(), url)) {
+      if (policies.connection_allowlists.report_only->reporting_endpoint
+              .has_value()) {
+        QueueConnectionAllowlistReport(
+            network_context, url, policies.connection_allowlists.response_url,
+            network_anonymization_key, resolved_reporting_source,
+            *policies.connection_allowlists.report_only->reporting_endpoint,
+            /*enforced=*/false);
+      }
+    }
   }
-  // TODO(crbug.com/482728970): Implement reporting.
-  return false;
+
+  // 2. Check enforced allowlist
+  if (policies.connection_allowlists.enforced.has_value()) {
+    if (network::ConnectionAllowlistMatchesUrl(
+            policies.connection_allowlists.enforced.value(), url)) {
+      return true;
+    }
+    if (policies.connection_allowlists.enforced->reporting_endpoint
+            .has_value()) {
+      QueueConnectionAllowlistReport(
+          network_context, url, policies.connection_allowlists.response_url,
+          network_anonymization_key, resolved_reporting_source,
+          *policies.connection_allowlists.enforced->reporting_endpoint,
+          /*enforced=*/true);
+    }
+    return false;
+  }
+
+  return true;
 }
 
 network::ConnectionAllowlists GetConnectionAllowlistsForWorker(
@@ -113,11 +187,8 @@ network::ConnectionAllowlists GetConnectionAllowlistsForWorker(
   }
 
   // For non-local schemes, the connection allowlist must be provided in the
-  // response headers and the origin trial must be enabled for the request
-  // URL.
-  if (ResponseContainsConnectionAllowlist(response_head) &&
-      ResponseEnablesConnectionAllowlistsOriginTrial(
-          response_url, response_head->headers.get())) {
+  // response headers.
+  if (ResponseContainsConnectionAllowlist(response_head)) {
     return response_head->parsed_headers->connection_allowlists;
   }
 
@@ -125,7 +196,7 @@ network::ConnectionAllowlists GetConnectionAllowlistsForWorker(
 }
 
 bool FrameConnectionAllowlistAllowsRequestAndReportIfNeeded(
-    const RenderFrameHost* render_frame_host,
+    RenderFrameHost* render_frame_host,
     const GURL& url,
     bool is_redirect) {
   if (!base::FeatureList::IsEnabled(network::features::kConnectionAllowlists)) {
@@ -151,18 +222,32 @@ bool FrameConnectionAllowlistAllowsRequestAndReportIfNeeded(
 
   const PolicyContainerPolicies& policies =
       rfh_impl->policy_container_host()->policies();
-  if (!EnforcesConnectionAllowlist(policies)) {
+  if (!HasActiveConnectionAllowlists(policies)) {
     return true;
   }
+
+  network::mojom::NetworkContext* network_context =
+      render_frame_host->GetProcess()
+          ->GetStoragePartition()
+          ->GetNetworkContext();
+  net::NetworkAnonymizationKey network_anonymization_key =
+      render_frame_host->GetIsolationInfoForSubresources()
+          .network_anonymization_key();
+  std::optional<base::UnguessableToken> reporting_source =
+      render_frame_host->GetReportingSource();
 
   if (is_redirect) {
     // For redirects, the connection allowlist either allows or blocks the
     // redirect request based on its `redirects` directive. The request URL is
     // irrelevant to the decision.
-    return IsRedirectAllowedByConnectionAllowlist(policies);
+    return IsRedirectAllowedByConnectionAllowlist(
+        policies, url, network_context, network_anonymization_key,
+        reporting_source);
   }
 
-  return ConnectionAllowlistAllowsUrlAndReportIfNeeded(policies, url);
+  return ConnectionAllowlistAllowsUrlAndReportIfNeeded(
+      policies, url, network_context, network_anonymization_key,
+      reporting_source);
 }
 
 }  // namespace content

@@ -947,7 +947,8 @@ PLATFORM_INFO = {
     },
     'win-arm64-snapdragon-elite-perf': {
         'description': 'Windows Dell Snapdragon Elite',
-        'num_shards': 28,
+        # TODO(crbug.com/541980022): reset to 28 when missing bots are found.
+        'num_shards': 18,
         'platform_os': 'win',
         'is_fyi': False
     },
@@ -1022,7 +1023,7 @@ PLATFORM_INFO = {
     },
     'android-go-wembley-perf': {
         'description': 'Android U',
-        'num_shards': 11,
+        'num_shards': 5,
         'platform_os': 'android',
         'is_fyi': False
     },
@@ -1057,6 +1058,12 @@ PLATFORM_INFO = {
         'is_fyi': False
     },
     'android-pixel10_webview-perf': {
+        'description': 'Android B',
+        'num_shards': 23,
+        'platform_os': 'android',
+        'is_fyi': False
+    },
+    'android-pixel10_webview-perf-pgo': {
         'description': 'Android B',
         'num_shards': 23,
         'platform_os': 'android',

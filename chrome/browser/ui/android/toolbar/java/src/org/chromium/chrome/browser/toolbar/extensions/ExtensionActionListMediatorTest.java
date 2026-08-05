@@ -9,6 +9,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -65,6 +66,7 @@ import org.chromium.chrome.browser.ui.toolbar.AdminPolicy;
 import org.chromium.chrome.browser.ui.toolbar.SiteAccess;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.listmenu.ListMenuButton;
 import org.chromium.ui.listmenu.ListMenuHost;
 import org.chromium.ui.listmenu.MenuModelBridge;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -165,7 +167,7 @@ public class ExtensionActionListMediatorTest {
 
         // Add the JNI mock for ExtensionActionPopupContents:
         ExtensionActionPopupContentsJni.setInstanceForTesting(mPopupContentsJniMock);
-        when(mPopupContentsJniMock.create(anyLong())).thenReturn(mPopupContentsMock);
+        when(mPopupContentsJniMock.create(anyLong(), anyBoolean())).thenReturn(mPopupContentsMock);
 
         // Mock JNI for Context Menu Bridge.
         ExtensionActionContextMenuBridgeJni.setInstanceForTesting(mActionContextMenuBridgeJniMock);
@@ -452,10 +454,12 @@ public class ExtensionActionListMediatorTest {
 
         // Trigger a popup.
         long nativeHostPtr = 123L;
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION1_ID, nativeHostPtr);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION1_ID, nativeHostPtr, /* inspectWithDevTools= */ false);
 
         // Verify the native contents were created.
-        verify(mPopupContentsJniMock).create(nativeHostPtr);
+        verify(mPopupContentsJniMock).create(nativeHostPtr, /* inspectWithDevTools= */ false);
 
         // Simulate a dialog being added.
         observerCaptor.getValue().onDialogAdded(null);
@@ -465,12 +469,27 @@ public class ExtensionActionListMediatorTest {
     }
 
     @Test
+    public void testTriggerPopup_InspectWithDevTools() {
+        long nativeHostPtr = 456L;
+
+        // Trigger a popup for inspection.
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION1_ID, nativeHostPtr, /* inspectWithDevTools= */ true);
+
+        // Verify native contents were created with inspectWithDevTools = true.
+        verify(mPopupContentsJniMock).create(nativeHostPtr, /* inspectWithDevTools= */ true);
+    }
+
+    @Test
     public void testPopOutAction_Unpinned_Popup() {
         // Action 3 is initially not in the model (unpinned).
         assertEquals(2, mModels.size());
 
         // Trigger a popup for Action 3 via the bridge delegate.
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION3_ID, 123L);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION3_ID, 123L, /* inspectWithDevTools= */ false);
         mMediator.reconcileActionItems();
 
         // Action 3 should now be present in the models (popped out).
@@ -508,7 +527,9 @@ public class ExtensionActionListMediatorTest {
         assertItemAt(0, ACTION1_ID, "title of action 1", ICON_RED);
 
         // Execute: Trigger a popup for Action 2 (pinned but hidden).
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION2_ID, 123L);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION2_ID, 123L, /* inspectWithDevTools= */ false);
         mMediator.reconcileActionItems();
 
         // Verify: Action 2 is temporarily added to the list (popped out).
@@ -523,7 +544,9 @@ public class ExtensionActionListMediatorTest {
         assertEquals(2, mModels.size());
 
         // Trigger popup for Action 3 via the bridge delegate.
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION3_ID, 123L);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION3_ID, 123L, /* inspectWithDevTools= */ false);
         mMediator.reconcileActionItems();
 
         // The action is popped out (added to the list).
@@ -552,7 +575,9 @@ public class ExtensionActionListMediatorTest {
         assertEquals("Should return 0 when no action is popped out", 0, reservedWidth);
 
         // Trigger a popup for an unpinned action (Action 3).
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION3_ID, 123L);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION3_ID, 123L, /* inspectWithDevTools= */ false);
         mMediator.reconcileActionItems();
 
         // Now it should reserve the width of one button.
@@ -567,10 +592,12 @@ public class ExtensionActionListMediatorTest {
     public void testPendingPopup_DestroyedOnCancellation() {
         // Trigger a popup.
         long nativeHostPtr = 123L;
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION1_ID, nativeHostPtr);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION1_ID, nativeHostPtr, /* inspectWithDevTools= */ false);
 
         // Verify the native contents were created.
-        verify(mPopupContentsJniMock).create(nativeHostPtr);
+        verify(mPopupContentsJniMock).create(nativeHostPtr, /* inspectWithDevTools= */ false);
 
         // Simulate a cancellation by opening a context menu for another action.
         mBridgeDelegateCaptor.getValue().showContextMenu(ACTION2_ID);
@@ -583,7 +610,9 @@ public class ExtensionActionListMediatorTest {
     public void testPendingPopup_DestroyedOnMediatorTeardown() {
         // Trigger a popup to enter the PopupPending state.
         long nativeHostPtr = 123L;
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION1_ID, nativeHostPtr);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION1_ID, nativeHostPtr, /* inspectWithDevTools= */ false);
 
         // Destroy the mediator before the UI animation finishes.
         mMediator.destroy();
@@ -690,13 +719,81 @@ public class ExtensionActionListMediatorTest {
         verify(action, never()).getHoverCardState();
 
         // Simulate a popup request to immediately move out of the Idle state without side effects.
-        mBridgeDelegateCaptor.getValue().triggerPopup(ACTION1_ID, 123L);
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION1_ID, 123L, /* inspectWithDevTools= */ false);
 
         // Advance timer.
         shadowOf(Looper.getMainLooper())
                 .idleFor(ViewConfiguration.getLongPressTimeout(), TimeUnit.MILLISECONDS);
 
         // Verify hover card was not shown.
+        verify(action, never()).getHoverCardState();
+    }
+
+    // Tests that requesting a context menu gracefully aborts without throwing an
+    // AssertionError if mActionState transitions away from Idle before the async
+    // layout animation runnable executes.
+    @Test
+    public void testRequestShowContextMenu_StateNotIdleWhenCallbackRuns() {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        when(mWindowAndroid.getActivity()).thenReturn(new WeakReference<>(activity));
+
+        ListMenuButton buttonView = mock(ListMenuButton.class);
+        doReturn(buttonView).when(mRecyclerViewDelegate).getButtonViewForId(ACTION1_ID);
+
+        ArgumentCaptor<Runnable> runnableCaptor = ArgumentCaptor.forClass(Runnable.class);
+
+        // Request context menu for ACTION1.
+        mMediator.requestShowContextMenu(ACTION1_ID);
+
+        // Capture the posted runnable waiting for animations/layout to finish.
+        verify(mRecyclerViewDelegate).addOnAnimationsFinishedRunnable(runnableCaptor.capture());
+
+        // Before the runnable executes, state changes to non-Idle (e.g. PopupPending).
+        mBridgeDelegateCaptor
+                .getValue()
+                .triggerPopup(ACTION2_ID, 123L, /* inspectWithDevTools= */ false);
+
+        // Execute the queued context menu callback while state is not Idle.
+        // With the fix, this safely returns without throwing an AssertionError.
+        runnableCaptor.getValue().run();
+    }
+
+    // Tests that requesting a context menu immediately cancels any pending hover card
+    // delay timer, preventing the hover card from showing after context menu display.
+    @Test
+    public void testHoverCard_CancelsPendingRunnableOnContextMenuRequest() {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        when(mWindowAndroid.getActivity()).thenReturn(new WeakReference<>(activity));
+
+        mMediator.reconcileActionItems();
+        ListItem item = mModels.get(0);
+        View.OnHoverListener listener =
+                item.model.get(ExtensionActionButtonProperties.ON_HOVER_LISTENER);
+
+        ExtensionAction action = mock(ExtensionAction.class);
+        ExtensionAction.HoverCardState state = mock(ExtensionAction.HoverCardState.class);
+        when(action.getHoverCardState()).thenReturn(state);
+        doReturn(action).when(mExtensionsToolbarBridge).getAction(eq(ACTION1_ID), any());
+
+        View anchorView = new View(activity);
+        when(mRecyclerViewDelegate.getButtonViewForId(ACTION1_ID)).thenReturn(anchorView);
+
+        // Trigger hover enter to start hover card timer.
+        MotionEvent enterEvent = mock(MotionEvent.class);
+        when(enterEvent.getAction()).thenReturn(MotionEvent.ACTION_HOVER_ENTER);
+        listener.onHover(anchorView, enterEvent);
+
+        // Right-click / context menu request arrives while hover card timer is pending.
+        mMediator.requestShowContextMenu(ACTION1_ID);
+
+        // Fast forward looper past the long press timeout.
+        shadowOf(Looper.getMainLooper())
+                .idleFor(ViewConfiguration.getLongPressTimeout(), TimeUnit.MILLISECONDS);
+
+        // Verify the pending hover card runnable was cancelled and never constructed the hover
+        // card.
         verify(action, never()).getHoverCardState();
     }
 

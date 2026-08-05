@@ -504,6 +504,19 @@ class ManualFillingMediator
         }
     }
 
+    private void updateAtMemoryEnablement() {
+        WebContents webContents = mActivity.getCurrentWebContents();
+        boolean enabled = false;
+        if (webContents != null && !webContents.isDestroyed()) {
+            enabled = ManualFillingComponentBridge.isAtMemoryEnabled(webContents);
+            if (!enabled) {
+                // Hide the @memory bottom sheet if not enabled.
+                ManualFillingComponentBridge.hideAtMemoryBottomSheet(webContents);
+            }
+        }
+        mKeyboardAccessory.setAtMemoryEnabled(enabled);
+    }
+
     void resume() {
         if (!isInitialized()) return;
         pause(); // Resuming dismisses the keyboard. Ensure the accessory doesn't linger.
@@ -1161,6 +1174,7 @@ class ManualFillingMediator
         TraceEvent.begin("ManualFillingMediator#refreshTabs");
         ManualFillingState state = mStateCache.getStateFor(mActivity.getCurrentWebContents());
         state.notifyObservers();
+        updateAtMemoryEnablement();
         KeyboardAccessoryData.Tab[] tabs = state.getTabs();
         mAccessorySheet.setTabs(tabs); // Set the sheet tabs first to invalidate the tabs properly.
         mKeyboardAccessory.setTabs(tabs);

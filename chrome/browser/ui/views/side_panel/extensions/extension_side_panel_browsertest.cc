@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/to_string.h"
@@ -12,6 +15,7 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/side_panel/side_panel_api.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -35,6 +39,7 @@
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_button.h"
 #include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -51,10 +56,12 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/crx_file/id_util.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api_test_utils.h"
+#include "extensions/browser/extension_host_test_helper.h"
 #include "extensions/browser/test_event_router_observer.h"
 #include "extensions/browser/test_image_loader.h"
 #include "extensions/common/constants.h"
@@ -66,6 +73,10 @@
 #include "ui/actions/actions.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/image/image_unittest_util.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
+#include "ui/shell_dialogs/select_file_dialog_factory.h"
+#include "ui/shell_dialogs/select_file_policy.h"
+#include "ui/shell_dialogs/selected_file_info.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/interaction/interaction_test_util_views.h"
@@ -261,7 +272,9 @@ class ExtensionSidePanelBrowserTest : public ExtensionBrowserTest {
   }
 
   ExtensionsToolbarDesktop* GetExtensionsToolbarDesktop() const {
-    return browser()->GetBrowserView().toolbar()->extensions_container();
+    return BrowserView::GetBrowserViewForBrowser(browser())
+        ->toolbar()
+        ->extensions_container();
   }
 
   void WaitForSidePanelToolbarCloseButtonVisibility(bool visible) {
@@ -287,8 +300,9 @@ class ExtensionSidePanelBrowserTest : public ExtensionBrowserTest {
 
   void WaitForSidePanelClose() {
     ASSERT_TRUE(base::test::RunUntil([&]() {
-      return browser()->GetBrowserView().side_panel()->state() ==
-             SidePanel::State::kClosed;
+      return BrowserView::GetBrowserViewForBrowser(browser())
+                 ->side_panel()
+                 ->state() == SidePanel::State::kClosed;
     }));
   }
 
@@ -363,7 +377,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest,
   ASSERT_TRUE(side_panel_extension);
 
   // Check if ActionItem is created.
-  BrowserActions* browser_actions = browser()->browser_actions();
+  BrowserActions* browser_actions = BrowserActions::From(browser());
   actions::ActionItem* action_item =
       GetActionItemForExtension(side_panel_extension.get(), browser_actions);
   EXPECT_EQ(action_item->GetText(),
@@ -459,7 +473,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest, MultipleBrowsers) {
   SidePanelRegistry* const first_global_registry =
       SidePanelRegistry::From(browser());
   EXPECT_TRUE(first_global_registry->GetEntryForKey(extension_key));
-  BrowserActions* browser_actions = browser()->browser_actions();
+  BrowserActions* browser_actions = BrowserActions::From(browser());
   actions::ActionItem* browser_one_action_item =
       GetActionItemForExtension(extension.get(), browser_actions);
   EXPECT_EQ(browser_one_action_item->GetText(),
@@ -469,7 +483,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest, MultipleBrowsers) {
   // registered for the new window's global SidePanelRegistry.
   Browser* second_browser = CreateBrowser(browser()->GetProfile());
   BrowserActions* browser_actions_second_browser =
-      second_browser->browser_actions();
+      BrowserActions::From(second_browser);
 
   SidePanelRegistry* const second_global_registry =
       SidePanelRegistry::From(second_browser);
@@ -537,7 +551,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest,
       test_data_dir_.AppendASCII("api_test/side_panel/simple_default"));
   ASSERT_TRUE(extension);
 
-  BrowserActions* browser_actions = browser()->browser_actions();
+  BrowserActions* browser_actions = BrowserActions::From(browser());
   actions::ActionItem* action_item =
       GetActionItemForExtension(extension.get(), browser_actions);
 
@@ -1234,7 +1248,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest,
   ASSERT_TRUE(extension);
 
   // Check if ActionItem is created.
-  BrowserActions* browser_actions = browser()->browser_actions();
+  BrowserActions* browser_actions = BrowserActions::From(browser());
   actions::ActionItem* action_item =
       GetActionItemForExtension(extension.get(), browser_actions);
   EXPECT_EQ(action_item->GetText(), base::UTF8ToUTF16(extension->short_name()));
@@ -1332,8 +1346,9 @@ class ExtensionOpenSidePanelBrowserTest : public ExtensionSidePanelBrowserTest {
  public:
   ExtensionOpenSidePanelBrowserTest() {
     scoped_feature_list_.InitWithFeatures(
-        {metrics::kCriticalUserJourneyService, metrics::kPinExtensionJourney},
-        {});
+        /*enabled_features=*/{metrics::kCriticalUserJourneyService,
+                              metrics::kPinExtensionJourney},
+        /*disabled_features=*/{features::kExtensionsPinnedByDefault});
   }
   ~ExtensionOpenSidePanelBrowserTest() override = default;
 
@@ -2197,7 +2212,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest, GetLayout) {
   const Extension* ext = LoadExtension(dir.UnpackedPath());
   ASSERT_TRUE(ext);
 
-  auto* prefs = browser()->profile()->GetPrefs();
+  auto* prefs = browser()->GetProfile()->GetPrefs();
 
   // Helper that sets the side panel alignment preference and
   // then verifies that getLayout() returns the expected side.
@@ -2550,6 +2565,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionOnOpenedEventSidePanelBrowserTest,
 
 class ExtensionOnClosedEventSidePanelBrowserTest
     : public ExtensionSidePanelBrowserTest {
+ public:
+  ExtensionOnClosedEventSidePanelBrowserTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        features::kExtensionsPinnedByDefault);
+  }
+
  protected:
   // Helper to load a test extension configured for the onClosed event tests.
   const Extension* CreateOnClosedTestExtension() {
@@ -2616,6 +2637,7 @@ class ExtensionOnClosedEventSidePanelBrowserTest
 
  private:
   std::vector<extensions::TestExtensionDir> test_dirs_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 // Tests that onClosed fires when the hosting tab is closed.
@@ -2637,7 +2659,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionOnClosedEventSidePanelBrowserTest,
   SidePanelEntry* extension_entry =
       GetCurrentTabRegistry()->GetEntryForKey(GetKey(extension->id()));
   ASSERT_TRUE(extension_entry);
+
+  // Restrict the helper to ONLY wait for the side panel host. This prevents it
+  // from accidentally catching the background page's load event.
+  extensions::ExtensionHostTestHelper host_helper(profile(), extension->id());
+  host_helper.RestrictToType(extensions::mojom::ViewType::kExtensionSidePanel);
+
   ShowContextualEntryAndWait(GetKey(extension->id()));
+
+  // Strictly block until the side panel is fully loaded.
+  host_helper.WaitForHostCompletedFirstLoad();
 
   // Close the active tab, which has the panel. This action should trigger the
   // onClosed event in the extension.
@@ -2733,8 +2764,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionOnClosedEventSidePanelBrowserTest,
     SidePanelUI* const browser_to_close_ui =
         browser_to_close->GetFeatures().side_panel_ui();
     TestSidePanelEntryWaiter waiter(extension_entry);
+
+    // Prepare to wait for Extensionhost so that onOpened can be dispatched.
+    extensions::ExtensionHostTestHelper host_helper(profile(), extension->id());
+
     browser_to_close_ui->Show(GetKey(extension->id()));
     waiter.WaitForEntryShown();
+
+    // Ensures onOpened is dispatched before closing the window.
+    host_helper.WaitForHostCompletedFirstLoad();
+
     EXPECT_TRUE(browser_to_close_ui->IsSidePanelShowing());
   }
 
@@ -2805,6 +2844,157 @@ IN_PROC_BROWSER_TEST_F(ExtensionOnClosedEventSidePanelBrowserTest,
 // ExtensionViewHost for both global and contextual extension entries. One
 // example of this is having a link in the page that the user can open in a new
 // tab.
+
+// A SelectFileDialog that immediately reports `folder` as the chosen folder,
+// letting a test drive the <input webkitdirectory> upload flow without real
+// user interaction with the file picker.
+class FolderUploadSelectFileDialog : public ui::SelectFileDialog {
+ public:
+  FolderUploadSelectFileDialog(Listener* listener,
+                               std::unique_ptr<ui::SelectFilePolicy> policy,
+                               const base::FilePath& folder)
+      : ui::SelectFileDialog(listener, std::move(policy)), folder_(folder) {}
+
+ private:
+  ~FolderUploadSelectFileDialog() override = default;
+
+  // ui::SelectFileDialog:
+  void SelectFileImpl(Type type,
+                      const std::u16string& title,
+                      const base::FilePath& default_path,
+                      const FileTypeInfo* file_types,
+                      int file_type_index,
+                      const base::FilePath::StringType& default_extension,
+                      gfx::NativeWindow owning_window,
+                      const GURL* caller) override {
+    listener_->FileSelected(ui::SelectedFileInfo(folder_), /*index=*/0);
+  }
+
+  bool IsRunning(gfx::NativeWindow owning_window) const override {
+    return true;
+  }
+
+  void ListenerDestroyed() override {}
+
+  bool HasMultipleFileTypeChoicesImpl() override { return false; }
+
+  base::FilePath folder_;
+};
+
+class FolderUploadSelectFileDialogFactory : public ui::SelectFileDialogFactory {
+ public:
+  explicit FolderUploadSelectFileDialogFactory(const base::FilePath& folder)
+      : folder_(folder) {}
+
+  ui::SelectFileDialog* Create(
+      ui::SelectFileDialog::Listener* listener,
+      std::unique_ptr<ui::SelectFilePolicy> policy) override {
+    return new FolderUploadSelectFileDialog(listener, std::move(policy),
+                                            folder_);
+  }
+
+ private:
+  base::FilePath folder_;
+};
+
+// Regression test for crbug.com/513847620. Using <input webkitdirectory> in an
+// extension side panel used to crash the browser: selecting a folder shows the
+// "Upload N files to this site?" confirmation as a tab-modal dialog, but the
+// side panel's WebContents had no WebContentsModalDialogManager attached, so
+// showing the dialog dereferenced a null manager. Drive the real folder-upload
+// flow end to end and verify the confirmation dialog is shown without crashing.
+IN_PROC_BROWSER_TEST_F(ExtensionSidePanelBrowserTest,
+                       WebModalDialogInSidePanelDoesNotCrash) {
+  static constexpr char kManifest[] =
+      R"({
+           "name": "Side Panel Extension",
+           "version": "1.0",
+           "manifest_version": 3,
+           "permissions": ["sidePanel"],
+           "side_panel": {"default_path": "panel.html"}
+         })";
+  static constexpr char kPanelHtml[] =
+      R"(<body><input type="file" webkitdirectory></body>)";
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(kManifest);
+  test_dir.WriteFile(FILE_PATH_LITERAL("panel.html"), kPanelHtml);
+  scoped_refptr<const Extension> extension =
+      LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Open the extension's side panel and wait for its view to be shown.
+  SidePanelEntry::Key extension_key = GetKey(extension->id());
+  ShowEntryAndWait(extension_key);
+
+  ExtensionSidePanelCoordinator* coordinator =
+      GetCoordinator(extension->id(), /*web_contents=*/nullptr);
+  ASSERT_TRUE(coordinator);
+  content::WebContents* side_panel_contents =
+      coordinator->GetHostWebContentsForTesting();
+  ASSERT_TRUE(side_panel_contents);
+  ASSERT_TRUE(content::WaitForLoadStop(side_panel_contents));
+
+  // The side panel's WebContents must have a WebContentsModalDialogManager so
+  // it can host the folder-upload confirmation dialog. Its absence is what
+  // caused the crash.
+  web_modal::WebContentsModalDialogManager* manager =
+      web_modal::WebContentsModalDialogManager::FromWebContents(
+          side_panel_contents);
+  ASSERT_TRUE(manager);
+
+  // Observe the manager to detect when a dialog is shown. The observer quits
+  // a RunLoop the instant ShowDialogWithManager fires OnWillShow, which is
+  // synchronous and immune to timing issues with dialog widget lifecycle.
+  base::RunLoop dialog_run_loop(base::RunLoop::Type::kNestableTasksAllowed);
+  class DialogShownObserver
+      : public web_modal::WebContentsModalDialogManager::Observer {
+   public:
+    explicit DialogShownObserver(base::OnceClosure quit)
+        : quit_(std::move(quit)) {}
+    void OnWillShow() override {
+      if (quit_) {
+        std::move(quit_).Run();
+      }
+    }
+
+   private:
+    base::OnceClosure quit_;
+  } dialog_observer(dialog_run_loop.QuitClosure());
+  manager->AddObserver(&dialog_observer);
+
+  // Create a folder with a file in it for the fake picker to "select". Declare
+  // the blocking-allowed scope before `upload_dir` so it outlives it: the
+  // ScopedTempDir destructor deletes the folder (blocking I/O) at end of test,
+  // which must also run while blocking is permitted.
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  base::ScopedTempDir upload_dir;
+  ASSERT_TRUE(upload_dir.CreateUniqueTempDir());
+  ASSERT_TRUE(
+      base::WriteFile(upload_dir.GetPath().AppendASCII("file.txt"), "data"));
+  ui::SelectFileDialog::SetFactory(
+      std::make_unique<FolderUploadSelectFileDialogFactory>(
+          upload_dir.GetPath()));
+
+  // Click the folder-upload input. This drives the exact flow that crashed:
+  // FileSelectHelper opens the folder picker (satisfied by the fake dialog
+  // above), enumerates the folder, then shows the "Upload N files to this
+  // site?" confirmation as a tab-modal dialog on the side panel's WebContents.
+  ASSERT_TRUE(
+      content::ExecJs(side_panel_contents,
+                      "document.querySelector('input[type=file]').click();"));
+
+  // Wait for the confirmation dialog to be shown without crashing.
+  dialog_run_loop.Run();
+
+  // Clean up: close any active dialog to avoid leak reports.
+  if (manager->IsDialogActive()) {
+    manager->CloseAllDialogs();
+  }
+  base::RunLoop().RunUntilIdle();
+  manager->RemoveObserver(&dialog_observer);
+  ui::SelectFileDialog::SetFactory(nullptr);
+}
 
 }  // namespace
 }  // namespace extensions

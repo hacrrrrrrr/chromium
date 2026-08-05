@@ -4,6 +4,7 @@
 
 #include "ui/accessibility/platform/inspect/ax_inspect_utils_mac.h"
 
+#include <ApplicationServices/ApplicationServices.h>
 #import <Cocoa/Cocoa.h>
 #include <CoreGraphics/CoreGraphics.h>
 
@@ -22,6 +23,9 @@
 #include "ui/accessibility/platform/ax_private_attributes_mac.h"
 #include "ui/accessibility/platform/inspect/ax_element_wrapper_mac.h"
 
+using base::apple::CFToNSPtrCast;
+using base::apple::ScopedCFTypeRef;
+
 // TODO(https://crbug.com/406190900): Remove this deprecation pragma.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -30,10 +34,10 @@ namespace ui {
 
 namespace {
 
-const char kChromeTitle[] = "Google Chrome";
-const char kChromiumTitle[] = "Chromium";
-const char kFirefoxTitle[] = "Firefox";
-const char kSafariTitle[] = "Safari";
+constexpr char kChromeTitle[] = "Google Chrome";
+constexpr char kChromiumTitle[] = "Chromium";
+constexpr char kFirefoxTitle[] = "Firefox";
+constexpr char kSafariTitle[] = "Safari";
 
 NSArray* AXChildrenOf(id node) {
   return AXElementWrapper(node).Children();
@@ -50,12 +54,13 @@ bool HasIDOrClass(const std::string& idOrClass, const AXUIElementRef node) {
   AXElementWrapper nsNode((__bridge id)node);
   NSString* nsIDOrClass = base::SysUTF8ToNSString(idOrClass);
   NSString* idValue =
-      *nsNode.GetAttributeValue(NSAccessibilityDOMIdentifierAttribute);
+      *nsNode.GetAttributeValue(CFToNSPtrCast(kAXDOMIdentifierAttribute));
   if ([idValue isEqualToString:nsIDOrClass]) {
     return true;
   }
 
-  NSArray* classList = *nsNode.GetAttributeValue(NSAccessibilityDOMClassList);
+  NSArray* classList =
+      *nsNode.GetAttributeValue(CFToNSPtrCast(kAXDOMClassListAttribute));
   return [classList containsObject:nsIDOrClass];
 }
 
@@ -63,50 +68,50 @@ bool HasIDOrClass(const std::string& idOrClass, const AXUIElementRef node) {
 
 bool IsValidAXAttribute(const std::string& attribute) {
   static NSSet<NSString*>* valid_attributes = [NSSet setWithArray:@[
-    NSAccessibilityAccessKeyAttribute,
-    NSAccessibilityARIAAtomicAttribute,
+    CFToNSPtrCast(kAXAccessKeyAttribute),
+    CFToNSPtrCast(kAXARIAAtomicAttribute),
     NSAccessibilityARIABusyAttribute,
-    NSAccessibilityARIAColumnCountAttribute,
-    NSAccessibilityARIAColumnIndexAttribute,
-    NSAccessibilityARIACurrentAttribute,
-    NSAccessibilityARIALiveAttribute,
-    NSAccessibilityARIAPosInSetAttribute,
-    NSAccessibilityARIARelevantAttribute,
-    NSAccessibilityARIARowCountAttribute,
-    NSAccessibilityARIARowIndexAttribute,
-    NSAccessibilityARIASetSizeAttribute,
+    CFToNSPtrCast(kAXARIAColumnCountAttribute),
+    CFToNSPtrCast(kAXARIAColumnIndexAttribute),
+    CFToNSPtrCast(kAXARIACurrentAttribute),
+    CFToNSPtrCast(kAXARIALiveAttribute),
+    CFToNSPtrCast(kAXARIAPosInSetAttribute),
+    CFToNSPtrCast(kAXARIARelevantAttribute),
+    CFToNSPtrCast(kAXARIARowCountAttribute),
+    CFToNSPtrCast(kAXARIARowIndexAttribute),
+    CFToNSPtrCast(kAXARIASetSizeAttribute),
     NSAccessibilityAutocompleteValueAttribute,
     NSAccessibilityBlockQuoteLevelAttribute,
-    NSAccessibilityBrailleLabelAttribute,
-    NSAccessibilityBrailleRoleDescription,
+    CFToNSPtrCast(kAXBrailleLabelAttribute),
+    CFToNSPtrCast(kAXBrailleRoleDescriptionAttribute),
     NSAccessibilityChromeAXNodeIdAttribute,
     NSAccessibilityColumnHeaderUIElementsAttribute,
     NSAccessibilityDescriptionAttribute,
     NSAccessibilityDetailsElementsAttribute,
-    NSAccessibilityDOMClassList,
-    NSAccessibilityDropEffectsAttribute,
-    NSAccessibilityElementBusyAttribute,
-    NSAccessibilityFocusableAncestorAttribute,
-    NSAccessibilityGrabbedAttribute,
-    NSAccessibilityHasPopupAttribute,
-    NSAccessibilityInvalidAttribute,
+    CFToNSPtrCast(kAXDOMClassListAttribute),
+    CFToNSPtrCast(kAXDropEffectsAttribute),
+    CFToNSPtrCast(kAXElementBusyAttribute),
+    CFToNSPtrCast(kAXFocusableAncestorAttribute),
+    CFToNSPtrCast(kAXGrabbedAttribute),
+    CFToNSPtrCast(kAXHasPopupAttribute),
+    CFToNSPtrCast(kAXInvalidAttribute),
     NSAccessibilityIsMultiSelectable,
-    NSAccessibilityKeyShortcutsValueAttribute,
-    NSAccessibilityLoadedAttribute,
-    NSAccessibilityLoadingProgressAttribute,
-    NSAccessibilityMathFractionNumeratorAttribute,
-    NSAccessibilityMathFractionDenominatorAttribute,
-    NSAccessibilityMathRootRadicandAttribute,
-    NSAccessibilityMathRootIndexAttribute,
-    NSAccessibilityMathBaseAttribute,
-    NSAccessibilityMathSubscriptAttribute,
-    NSAccessibilityMathSuperscriptAttribute,
-    NSAccessibilityMathUnderAttribute,
-    NSAccessibilityMathOverAttribute,
-    NSAccessibilityMathPostscriptsAttribute,
-    NSAccessibilityMathPrescriptsAttribute,
-    NSAccessibilityOwnsAttribute,
-    NSAccessibilityPopupValueAttribute,
+    CFToNSPtrCast(kAXKeyShortcutsAttribute),
+    CFToNSPtrCast(kAXLoadedAttribute),
+    CFToNSPtrCast(kAXLoadingProgressAttribute),
+    CFToNSPtrCast(kAXMathBaseAttribute),
+    CFToNSPtrCast(kAXMathFractionDenominatorAttribute),
+    CFToNSPtrCast(kAXMathFractionNumeratorAttribute),
+    CFToNSPtrCast(kAXMathOverAttribute),
+    CFToNSPtrCast(kAXMathPostscriptsAttribute),
+    CFToNSPtrCast(kAXMathPrescriptsAttribute),
+    CFToNSPtrCast(kAXMathRootIndexAttribute),
+    CFToNSPtrCast(kAXMathRootRadicandAttribute),
+    CFToNSPtrCast(kAXMathSubscriptAttribute),
+    CFToNSPtrCast(kAXMathSuperscriptAttribute),
+    CFToNSPtrCast(kAXMathUnderAttribute),
+    CFToNSPtrCast(kAXOwnsAttribute),
+    CFToNSPtrCast(kAXPopupValueAttribute),
     NSAccessibilityRequiredAttribute,
     NSAccessibilityRoleDescriptionAttribute,
     NSAccessibilitySelectedAttribute,
@@ -120,36 +125,34 @@ bool IsValidAXAttribute(const std::string& attribute) {
   return [valid_attributes containsObject:base::SysUTF8ToNSString(attribute)];
 }
 
-base::apple::ScopedCFTypeRef<AXUIElementRef> FindAXUIElement(
-    const AXUIElementRef node,
-    const char* role) {
+ScopedCFTypeRef<AXUIElementRef> FindAXUIElement(const AXUIElementRef node,
+                                                const char* role) {
   return FindAXUIElement(node, base::BindRepeating(&HasAXRole, role));
 }
 
-base::apple::ScopedCFTypeRef<AXUIElementRef> FindAXUIElement(
+ScopedCFTypeRef<AXUIElementRef> FindAXUIElement(
     const AXUIElementRef node,
     const AXFindCriteria& criteria) {
   if (criteria.Run(node)) {
-    return base::apple::ScopedCFTypeRef<AXUIElementRef>(
-        node, base::scoped_policy::RETAIN);
+    return ScopedCFTypeRef<AXUIElementRef>(node, base::scoped_policy::RETAIN);
   }
 
   NSArray* children = AXChildrenOf((__bridge id)node);
   for (id child in children) {
-    base::apple::ScopedCFTypeRef<AXUIElementRef> found =
+    ScopedCFTypeRef<AXUIElementRef> found =
         FindAXUIElement((__bridge AXUIElementRef)child, criteria);
     if (found) {
       return found;
     }
   }
 
-  return base::apple::ScopedCFTypeRef<AXUIElementRef>();
+  return ScopedCFTypeRef<AXUIElementRef>();
 }
 
-std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXUIElement(
+std::pair<ScopedCFTypeRef<AXUIElementRef>, int> FindAXUIElement(
     const AXTreeSelector& selector) {
   int pid;
-  base::apple::ScopedCFTypeRef<AXUIElementRef> node;
+  ScopedCFTypeRef<AXUIElementRef> node;
   std::tie(node, pid) = FindAXApplication(selector);
 
   // ActiveTab selector.
@@ -171,10 +174,10 @@ std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXUIElement(
   return {node, pid};
 }
 
-std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
+std::pair<ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
     const AXTreeSelector& selector) {
   if (selector.widget) {
-    return {base::apple::ScopedCFTypeRef<AXUIElementRef>(
+    return {ScopedCFTypeRef<AXUIElementRef>(
                 AXUIElementCreateApplication(selector.widget)),
             selector.widget};
   }
@@ -189,7 +192,7 @@ std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
   else if (selector.types & AXTreeSelector::Safari)
     title = kSafariTitle;
   else
-    return {base::apple::ScopedCFTypeRef<AXUIElementRef>(), 0};
+    return {ScopedCFTypeRef<AXUIElementRef>(), 0};
 
   NSArray* windows =
       base::apple::CFToNSOwnershipCast(CGWindowListCopyWindowInfo(
@@ -202,7 +205,7 @@ std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
     std::string window_name = base::SysNSStringToUTF8(
         base::apple::ObjCCast<NSString>(window_info[@"kCGWindowOwnerName"]));
 
-    base::apple::ScopedCFTypeRef<AXUIElementRef> node;
+    ScopedCFTypeRef<AXUIElementRef> node;
 
     // Application pre-defined selectors match or application title exact match.
     bool app_title_match = window_name == selector.pattern;
@@ -218,7 +221,7 @@ std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
         node.reset(AXUIElementCreateApplication(pid));
       }
 
-      base::apple::ScopedCFTypeRef<AXUIElementRef> window =
+      ScopedCFTypeRef<AXUIElementRef> window =
           FindAXWindowChild(node.get(), selector.pattern);
       if (window) {
         node = window;
@@ -229,15 +232,14 @@ std::pair<base::apple::ScopedCFTypeRef<AXUIElementRef>, int> FindAXApplication(
     if (node)
       return {node, pid};
   }
-  return {base::apple::ScopedCFTypeRef<AXUIElementRef>(), 0};
+  return {ScopedCFTypeRef<AXUIElementRef>(), 0};
 }
 
-base::apple::ScopedCFTypeRef<AXUIElementRef> FindAXWindowChild(
-    AXUIElementRef parent,
-    const std::string& pattern) {
+ScopedCFTypeRef<AXUIElementRef> FindAXWindowChild(AXUIElementRef parent,
+                                                  const std::string& pattern) {
   NSArray* children = AXChildrenOf((__bridge id)parent);
   if (children.count == 0) {
-    return base::apple::ScopedCFTypeRef<AXUIElementRef>();
+    return ScopedCFTypeRef<AXUIElementRef>();
   }
 
   id window = children.firstObject;
@@ -245,17 +247,17 @@ base::apple::ScopedCFTypeRef<AXUIElementRef> FindAXWindowChild(
   AXElementWrapper ax_window(window);
   NSString* role = *ax_window.GetAttributeValue(NSAccessibilityRoleAttribute);
   if (base::SysNSStringToUTF8(role) != "AXWindow") {
-    return base::apple::ScopedCFTypeRef<AXUIElementRef>();
+    return ScopedCFTypeRef<AXUIElementRef>();
   }
 
   NSString* window_title =
       *ax_window.GetAttributeValue(NSAccessibilityTitleAttribute);
   if (base::MatchPattern(base::SysNSStringToUTF8(window_title), pattern)) {
-    return base::apple::ScopedCFTypeRef<AXUIElementRef>(
-        (__bridge AXUIElementRef)window, base::scoped_policy::RETAIN);
+    return ScopedCFTypeRef<AXUIElementRef>((__bridge AXUIElementRef)window,
+                                           base::scoped_policy::RETAIN);
   }
 
-  return base::apple::ScopedCFTypeRef<AXUIElementRef>();
+  return ScopedCFTypeRef<AXUIElementRef>();
 }
 
 AXPlatformNode* GetAXPlatformNode(

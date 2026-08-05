@@ -74,11 +74,11 @@ static bool HasNoAttributeOrOnlyStyleAttribute(
   if (attributes.IsEmpty())
     return true;
 
-  unsigned matched_attributes = 0;
+  wtf_size_t matched_attributes = 0;
   if (element->hasAttribute(html_names::kStyleAttr) &&
       (should_style_attribute_be_empty == kAllowNonEmptyStyleAttribute ||
        !element->InlineStyle() || element->InlineStyle()->IsEmpty()))
-    matched_attributes++;
+    ++matched_attributes;
 
   DCHECK_LE(matched_attributes, attributes.size());
   return matched_attributes == attributes.size();
@@ -291,13 +291,11 @@ void ApplyStyleCommand::ApplyBlockStyle(EditingStyle* style,
       Position::FirstPositionInNode(scope),
       visible_end.DeepEquivalent().ParentAnchoredEquivalent());
 
-  const TextIteratorBehavior behavior =
-      RuntimeEnabledFeatures::EnterInOpenShadowRootsEnabled()
-          ? TextIteratorBehavior::
-                AllVisiblePositionsIncludingShadowRootRangeLengthBehavior()
-          : TextIteratorBehavior::AllVisiblePositionsRangeLengthBehavior();
-  const int start_index = TextIterator::RangeLength(start_range, behavior);
-  const int end_index = TextIterator::RangeLength(end_range, behavior);
+  const TextIteratorBehavior behavior = TextIteratorBehavior::
+      AllVisiblePositionsIncludingShadowRootRangeLengthBehavior();
+  const wtf_size_t start_index =
+      TextIterator::RangeLength(start_range, behavior);
+  const wtf_size_t end_index = TextIterator::RangeLength(end_range, behavior);
 
   VisiblePosition paragraph_start(StartOfParagraph(visible_start));
   RelocatablePosition* relocatable_beyond_end =
@@ -1502,7 +1500,7 @@ void ApplyStyleCommand::RemoveInlineStyle(EditingStyle* style,
   // removing the style from this node. e.g. if pushDownStart was at
   // Position("hello", 5) in <b>hello<div>world</div></b>, we want
   // Position("world", 0) instead.
-  const unsigned push_down_start_offset =
+  const wtf_size_t push_down_start_offset =
       push_down_start.ComputeOffsetInContainerNode();
   auto* push_down_start_container =
       DynamicTo<Text>(push_down_start.ComputeContainerNode());
@@ -1754,7 +1752,7 @@ bool ApplyStyleCommand::IsValidCaretPositionInTextNode(
   Node* node = position.ComputeContainerNode();
   if (!position.IsOffsetInAnchor() || !node->IsTextNode())
     return false;
-  int offset_in_text = position.OffsetInContainerNode();
+  wtf_size_t offset_in_text = position.OffsetInContainerNode();
   return offset_in_text > CaretMinOffset(node) &&
          offset_in_text < CaretMaxOffset(node);
 }

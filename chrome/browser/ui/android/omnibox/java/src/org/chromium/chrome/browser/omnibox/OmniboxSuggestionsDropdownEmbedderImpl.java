@@ -25,6 +25,7 @@ import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxLayoutMode;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
@@ -52,6 +53,8 @@ class OmniboxSuggestionsDropdownEmbedderImpl
     private final WindowAndroid mWindowAndroid;
     private final View mAnchorView;
     private final View mAlignmentView;
+    private final Supplier<Integer> mAlignmentViewTargetWidthSupplier;
+    private final Supplier<Integer> mAlignmentViewLeftOffsetSupplier;
     private final boolean mForcePhoneStyleOmnibox;
     private final Supplier<@ControlsPosition Integer> mControlsPositionSupplier;
     private final Supplier<Integer> mKeyboardHeightSupplier;
@@ -80,6 +83,11 @@ class OmniboxSuggestionsDropdownEmbedderImpl
      * @param alignmentView View to which: 1. The dropdown should be horizontally aligned to when
      *     its width is smaller than the anchor view. 2. The dropdown should vertically align to
      *     during animations. This must be a descendant of the anchor view.
+     * @param alignmentViewTargetWidthSupplier Supplier of the target width for the alignment view,
+     *     allowing popover mode to publish target width without mutating layout parameters on the
+     *     alignment view directly (which would cause double margin counting on focus).
+     * @param alignmentViewLeftOffsetSupplier Supplier of the left offset for the alignment view,
+     *     allowing popover mode to publish horizontal shifts.
      * @param baseChromeLayout The base view hosting Chrome that certain views (e.g. the omnibox
      *     suggestion list) will position themselves relative to. If null, the content view will be
      *     used.
@@ -99,6 +107,8 @@ class OmniboxSuggestionsDropdownEmbedderImpl
             WindowAndroid windowAndroid,
             View anchorView,
             View alignmentView,
+            Supplier<Integer> alignmentViewTargetWidthSupplier,
+            Supplier<Integer> alignmentViewLeftOffsetSupplier,
             boolean forcePhoneStyleOmnibox,
             @Nullable View baseChromeLayout,
             Supplier<@ControlsPosition Integer> controlsPositionSupplier,
@@ -110,6 +120,8 @@ class OmniboxSuggestionsDropdownEmbedderImpl
         mWindowAndroid = windowAndroid;
         mAnchorView = anchorView;
         mAlignmentView = alignmentView;
+        mAlignmentViewTargetWidthSupplier = alignmentViewTargetWidthSupplier;
+        mAlignmentViewLeftOffsetSupplier = alignmentViewLeftOffsetSupplier;
         mForcePhoneStyleOmnibox = forcePhoneStyleOmnibox;
         mControlsPositionSupplier = controlsPositionSupplier;
         mKeyboardHeightSupplier = keyboardHeightSupplier;
@@ -146,10 +158,17 @@ class OmniboxSuggestionsDropdownEmbedderImpl
     }
 
     @Override
-    public boolean isTablet() {
+    public boolean isWideWindow() {
         if (mForcePhoneStyleOmnibox) return false;
         return mWindowWidthDp >= DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP
                 && DeviceFormFactor.isWindowOnTablet(mWindowAndroid);
+    }
+
+    @Override
+    public boolean isPhoneStyleWindow() {
+        if (mForcePhoneStyleOmnibox) return true;
+        return !isWideWindow()
+                && mFuseboxLayoutModeSupplier.get() != FuseboxLayoutMode.SUGGESTIONS_POPOVER;
     }
 
     @Override
@@ -273,24 +292,31 @@ class OmniboxSuggestionsDropdownEmbedderImpl
             top = mPositionArray[1] + mAnchorView.getMeasuredHeight() - contentView.getPaddingTop();
         }
 
-        if (isTablet()) {
+        if (isPhoneStyleWindow()) {
+            // Case 1: Phones or phone-sized windows on tablets. Full bleed width with no padding or
+            // positioning adjustments.
+            left = 0;
+            width = mAnchorView.getMeasuredWidth();
+        } else {
             int sideSpacing;
             if (mFuseboxLayoutModeSupplier.get() == FuseboxLayoutMode.SUGGESTIONS_POPOVER) {
-                // Case 1: Popover layout. The suggestions list starts directly at the top of the
-                // alignment view (or shifted by the popover inset if expanded/compact).
-                ViewUtils.getRelativeLayoutPosition(contentView, mAlignmentView, mPositionArray);
+                // Case 2: Popover layout. The suggestions list starts directly at the top of the
+                // anchor view (or shifted by the popover inset if expanded/compact).
+                ViewUtils.getRelativeLayoutPosition(contentView, mAnchorView, mPositionArray);
                 top = mPositionArray[1] - contentView.getPaddingTop();
                 sideSpacing = 0;
             } else if (mFuseboxStateSupplier.get() == FuseboxState.DISABLED) {
-                // Case 2: No fusebox on tablet. Width equal to alignment view and left equivalent
+                // Case 3: No fusebox on tablet. Width equal to alignment view and left equivalent
                 // to left of alignment view. Top minus a small overlap.
-                top -=
-                        mContext.getResources()
-                                .getDimensionPixelSize(
-                                        R.dimen.omnibox_suggestion_list_toolbar_overlap);
+                if (!ChromeFeatureList.sToolbarProgressBarRefactor.isEnabled()) {
+                    top -=
+                            mContext.getResources()
+                                    .getDimensionPixelSize(
+                                            R.dimen.omnibox_suggestion_list_toolbar_overlap);
+                }
                 sideSpacing = OmniboxResourceProvider.getDropdownSideSpacing(mContext);
             } else {
-                // Case 3: Fusebox on tablet. The width of the dropdown should match the alignment
+                // Case 4: Fusebox on tablet. The width of the dropdown should match the alignment
                 // view's width exactly (0 side spacing), and its top should be exactly below the
                 //  bottom of the alignment view.
                 ViewUtils.getRelativeLayoutPosition(contentView, mAlignmentView, mPositionArray);
@@ -303,18 +329,26 @@ class OmniboxSuggestionsDropdownEmbedderImpl
 
             // Tablet positioning logic common between fusebox and non-fusebox cases.
             ViewUtils.getRelativeLayoutPosition(mAnchorView, mAlignmentView, mPositionArray);
-            width = mAlignmentView.getMeasuredWidth() + 2 * sideSpacing;
+            int targetWidth = mAlignmentViewTargetWidthSupplier.get();
+            width = targetWidth + 2 * sideSpacing;
+            int leftOffset = mAlignmentViewLeftOffsetSupplier.get();
             if (mAnchorView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) {
                 // The view will be shifted to the left, so the adjustment needs to be negative.
-                left = -(mAnchorView.getMeasuredWidth() - width - mPositionArray[0] + sideSpacing);
+                left =
+                        -(mAnchorView.getMeasuredWidth()
+                                - width
+                                - mPositionArray[0]
+                                + sideSpacing
+                                - leftOffset);
             } else {
-                left = mPositionArray[0] - sideSpacing;
+                left = mPositionArray[0] - sideSpacing + leftOffset;
             }
-        } else {
-            // Case 4: Phones or phone-sized windows on tablets. Full bleed width with no padding or
-            // positioning adjustments.
-            left = 0;
-            width = mAnchorView.getMeasuredWidth();
+            // Ensures full-width dropdown on narrow windows with popover suggestions.
+            if (mFuseboxLayoutModeSupplier.get() == FuseboxLayoutMode.SUGGESTIONS_POPOVER
+                    && !isWideWindow()) {
+                left = mAnchorView.getLeft();
+                width = mAnchorView.getWidth();
+            }
         }
 
         int keyboardHeight = mKeyboardHeightSupplier.get();

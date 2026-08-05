@@ -23,7 +23,6 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_coordinator.h"
 #import "ios/chrome/browser/menu/ui_bundled/browser_action_factory.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_util.h"
-#import "ios/chrome/browser/omnibox/ui/omnibox_drs_view_controller.h"
 #import "ios/chrome/browser/orchestrator/ui_bundled/omnibox_focus_orchestrator.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_presentation_context.h"
 #import "ios/chrome/browser/prerender/model/prerender_browser_agent.h"
@@ -98,6 +97,73 @@ namespace {
 // Extra vertical spacing when the banner promo is active on split mode.
 constexpr CGFloat kBannerPromoVerticalSpacing = 8;
 
+// Helper function to extract a slice from `cgImage` at `pixelRect`
+// and stretch it to fill `drawRect` in the current graphics context.
+void StretchImageEdge(CGImageRef cgImage,
+                      CGRect pixelRect,
+                      CGRect drawRect,
+                      CGFloat scale) {
+  CGImageRef slice = CGImageCreateWithImageInRect(cgImage, pixelRect);
+  if (slice) {
+    // Orientation is generally Up for view snapshots; scale ensures correct
+    // point sizing.
+    UIImage* edgeImage = [UIImage imageWithCGImage:slice
+                                             scale:scale
+                                       orientation:UIImageOrientationUp];
+    [edgeImage drawInRect:drawRect];
+    CGImageRelease(slice);
+  }
+}
+
+// Returns a new image created by stretching the left and right edges of the
+// provided `snapshot` to fill `targetWidth`. The original `snapshot` is drawn
+// at the given `xOffset`.
+UIImage* PadImageWithEdgeStretching(UIImage* snapshot,
+                                    CGFloat xOffset,
+                                    CGFloat targetWidth) {
+  CGFloat height = snapshot.size.height;
+  if (height <= 0 || targetWidth <= snapshot.size.width) {
+    return snapshot;
+  }
+
+  UIGraphicsImageRendererFormat* format =
+      [UIGraphicsImageRendererFormat defaultFormat];
+  format.scale = snapshot.scale;
+  format.opaque = NO;
+
+  UIGraphicsImageRenderer* renderer = [[UIGraphicsImageRenderer alloc]
+      initWithSize:CGSizeMake(targetWidth, height)
+            format:format];
+
+  return [renderer imageWithActions:^(
+                       UIGraphicsImageRendererContext* UIContext) {
+    [snapshot drawAtPoint:CGPointMake(xOffset, 0)];
+
+    CGImageRef cgImage = snapshot.CGImage;
+    if (!cgImage || CGImageGetWidth(cgImage) == 0) {
+      return;
+    }
+    size_t pixelWidth = CGImageGetWidth(cgImage);
+    size_t pixelHeight = CGImageGetHeight(cgImage);
+
+    // Stretch left edge.
+    if (xOffset > 0) {
+      CGRect leftPixelRect = CGRectMake(0, 0, 1, pixelHeight);
+      CGRect leftDrawRect = CGRectMake(0, 0, xOffset, height);
+      StretchImageEdge(cgImage, leftPixelRect, leftDrawRect, snapshot.scale);
+    }
+
+    // Stretch right edge.
+    CGFloat rightEdge = xOffset + snapshot.size.width;
+    if (rightEdge < targetWidth) {
+      CGRect rightPixelRect = CGRectMake(pixelWidth - 1, 0, 1, pixelHeight);
+      CGRect rightDrawRect =
+          CGRectMake(rightEdge, 0, targetWidth - rightEdge, height);
+      StretchImageEdge(cgImage, rightPixelRect, rightDrawRect, snapshot.scale);
+    }
+  }];
+}
+
 // Helper function to return the domain passkey used to mutate the layout state.
 inline LayoutStateToolbarPassKey PassKey() {
   return layout_state::MainToolbarCoordinatorPassKeyFactory::CreateKey();
@@ -132,9 +198,6 @@ inline LayoutStateToolbarPassKey PassKey() {
 @property(nonatomic, strong) OmniboxFocusOrchestrator* orchestrator;
 /// Whether the omnibox is currently focused.
 @property(nonatomic, assign) BOOL locationBarFocused;
-/// Dynamic response system view controller is an omnibox presenter. Only
-/// defined  when kOmniboxDRSPrototype is set.
-@property(nonatomic, strong) OmniboxDRSViewController* drsViewController;
 
 @end
 
@@ -217,13 +280,6 @@ inline LayoutStateToolbarPassKey PassKey() {
     [self.browser->GetCommandDispatcher()
         startDispatchingToTarget:self
                      forProtocol:@protocol(GuidedTourCommands)];
-  }
-
-  if (base::FeatureList::IsEnabled(kOmniboxDRSPrototype)) {
-    self.drsViewController = [[OmniboxDRSViewController alloc] init];
-    self.drsViewController.proxiedPresenterDelegate =
-        self.popupPresenterDelegate;
-    self.popupPresenterDelegate = self.drsViewController;
   }
 
   self.legacyToolbarMediator = [[LegacyToolbarMediator alloc]
@@ -478,6 +534,13 @@ inline LayoutStateToolbarPassKey PassKey() {
   }
 }
 
+- (void)updateToolbarPositionForActiveBrowser {
+  if (IsChromeNextIaEnabled()) {
+    return;
+  }
+  [self.legacyToolbarMediator setInitialOmniboxPosition];
+}
+
 - (BOOL)isLoadingPrerenderer {
   if (!_started) {
     return NO;
@@ -518,21 +581,11 @@ inline LayoutStateToolbarPassKey PassKey() {
       (_steadyStateOmniboxPosition == ToolbarType::kPrimary);
 
   BOOL toolbarExpanded = focused && !CanShowTabStrip(self.traitEnvironment);
-  if (base::FeatureList::IsEnabled(kOmniboxDRSPrototype) && focused) {
-    [self.baseViewController presentViewController:self.drsViewController
-                                          animated:YES
-                                        completion:nil];
-
-    return;
-
-  } else {
-    [self.orchestrator
-        transitionToStateOmniboxFocused:focused
-                        toolbarExpanded:toolbarExpanded
-                                trigger:[self omniboxFocusTrigger]
-                               animated:animateTransition
-                             completion:completion];
-  }
+  [self.orchestrator transitionToStateOmniboxFocused:focused
+                                     toolbarExpanded:toolbarExpanded
+                                             trigger:[self omniboxFocusTrigger]
+                                            animated:animateTransition
+                                          completion:completion];
 
   [self.primaryToolbarCoordinator.viewController setLocationBarFocused:focused];
   [self.secondaryToolbarCoordinator.viewController
@@ -570,6 +623,9 @@ inline LayoutStateToolbarPassKey PassKey() {
     }
     if (CanShowTabStrip(self.traitEnvironment)) {
       return kTopToolbarIPadHeightFullscreen;
+    }
+    if (IsGlassToolbarEnabled()) {
+      return kGlassCollapsedHeight + 2 * kGlassFullscreenMargin;
     }
     if (!IsSplitToolbarMode(self.traitEnvironment)) {
       return kToolbarHeightFullscreen;
@@ -617,6 +673,9 @@ inline LayoutStateToolbarPassKey PassKey() {
         return height > 0 ? height : 1;
       }
     }
+    if (IsGlassToolbarEnabled()) {
+      return height + kGlassExpandedHeight + 2 * kGlassToolbarMargin;
+    }
     if (ShouldHaveFullHeightTopToolbar(self.traitEnvironment)) {
       return height + kToolbarHeight;
     }
@@ -650,6 +709,9 @@ inline LayoutStateToolbarPassKey PassKey() {
                                           .preferredContentSizeCategory) +
                safeAreaBottom;
       }
+      if (IsGlassToolbarEnabled()) {
+        return kGlassCollapsedHeight + 2 * kGlassFullscreenMargin;
+      }
       return kToolbarHeightFullscreen;
     }
     return 0.0;
@@ -667,6 +729,9 @@ inline LayoutStateToolbarPassKey PassKey() {
       return 0.0;
     }
     if ([self isToolbarPositionBottom]) {
+      if (IsGlassToolbarEnabled()) {
+        return kGlassExpandedHeight + 2 * kGlassToolbarMargin;
+      }
       return kToolbarHeight;
     }
     return 0.0;
@@ -855,6 +920,19 @@ inline LayoutStateToolbarPassKey PassKey() {
     UIImage* toolbarSnapshot = CaptureViewWithOption(
         toolbarView, toolbarView.window.screen.scale, kClientSideRendering);
 
+    // If the toolbar doesn't span the full width of the window (e.g. because of
+    // the App Bar in landscape), pad the snapshot so it matches the full screen
+    // width.
+    CGFloat windowWidth = toolbarView.window.bounds.size.width;
+    CGFloat toolbarHeight = toolbarView.bounds.size.height;
+    if (toolbarSnapshot && toolbarView.bounds.size.width < windowWidth &&
+        toolbarHeight > 0) {
+      CGRect imageRect = [toolbarView convertRect:toolbarView.bounds
+                                           toView:toolbarView.window];
+      toolbarSnapshot = PadImageWithEdgeStretching(
+          toolbarSnapshot, imageRect.origin.x, windowWidth);
+    }
+
     [mediator updateConsumerWithWebState:self.browser->GetWebStateList()
                                              ->GetActiveWebState()
                                 animated:NO];
@@ -942,10 +1020,6 @@ inline LayoutStateToolbarPassKey PassKey() {
 }
 
 - (UIView*)entrypointViewVisualCopy {
-  if (IsToolbarGlassPrototypeEnabled()) {
-    return nil;
-  }
-
   if (IsChromeNextIaEnabled()) {
     if ([self isToolbarPositionBottom] || [self isNTP]) {
       return nil;
@@ -1080,7 +1154,7 @@ inline LayoutStateToolbarPassKey PassKey() {
 
 - (void)focusLocationBarForVoiceOver {
   if (IsChromeNextIaEnabled()) {
-    if (_topToolbarViewController.visible) {
+    if (_topToolbarViewController.hasOmnibox) {
       [_topLocationBarCoordinator focusOmniboxForVoiceOver];
     } else {
       [_bottomLocationBarCoordinator focusOmniboxForVoiceOver];
@@ -1281,8 +1355,13 @@ inline LayoutStateToolbarPassKey PassKey() {
   toolbarViewController.layoutGuideCenter =
       LayoutGuideCenterForBrowser(browser);
   toolbarViewController.layoutState = _layoutState;
-  toolbarViewController.buttonFactory =
+  ToolbarButtonFactory* toolbarButtonFactory =
       [[ToolbarButtonFactory alloc] initWithIncognito:incognito];
+  if (!incognito) {
+    toolbarButtonFactory.geminiHandler =
+        HandlerForProtocol(browser->GetCommandDispatcher(), GeminiCommands);
+  }
+  toolbarViewController.buttonFactory = toolbarButtonFactory;
   toolbarViewController.mutator = mediator;
   toolbarViewController.browserCoordinatorHandler =
       HandlerForProtocol(dispatcher, BrowserCoordinatorCommands);

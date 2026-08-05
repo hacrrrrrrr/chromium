@@ -37,8 +37,6 @@
 #include "chrome/browser/performance_manager/public/user_tuning/user_tuning_utils.h"
 #include "chrome/browser/personal_context/personal_context_eligibility_service_factory.h"
 #include "chrome/browser/preloading/preloading_features.h"
-#include "chrome/browser/privacy_sandbox/privacy_sandbox_service.h"
-#include "chrome/browser/privacy_sandbox/privacy_sandbox_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/regional_capabilities/regional_capabilities_service_factory.h"
@@ -75,7 +73,6 @@
 #include "chrome/browser/ui/webui/settings/password_manager_handler.h"
 #include "chrome/browser/ui/webui/settings/people_handler.h"
 #include "chrome/browser/ui/webui/settings/performance_handler.h"
-#include "chrome/browser/ui/webui/settings/privacy_sandbox_handler.h"
 #include "chrome/browser/ui/webui/settings/profile_info_handler.h"
 #include "chrome/browser/ui/webui/settings/protocol_handlers_handler.h"
 #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
@@ -92,6 +89,7 @@
 #include "chrome/browser/ui/webui/settings/settings_startup_pages_handler.h"
 #include "chrome/browser/ui/webui/settings/shared_settings_localized_strings_provider.h"
 #include "chrome/browser/ui/webui/settings/site_settings_handler.h"
+#include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
@@ -189,16 +187,17 @@
 #else  // !BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/search/background/ntp_custom_background_service_factory.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
+#include "chrome/browser/ui/webui/cr_components/signin/signin_utils_handler.h"
 #include "chrome/browser/ui/webui/cr_components/theme_color_picker/theme_color_picker_handler.h"
 #include "chrome/browser/ui/webui/settings/captions_handler.h"
 #include "chrome/browser/ui/webui/settings/settings_default_browser_handler.h"
 #include "chrome/browser/ui/webui/settings/settings_manage_profile_handler.h"
 #include "chrome/browser/ui/webui/settings/system_handler.h"
 #include "components/language/core/common/language_experiments.h"
+#endif  // BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "chrome/browser/ui/webui/settings/on_device_ai_settings_handler.h"
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
-#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_MAC)
 #include "chrome/browser/ui/webui/settings/mac_system_settings_handler.h"
@@ -268,14 +267,13 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
   AddSettingsPageUIHandler(std::make_unique<MetricsReportingHandler>());
 #endif
 
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   AddSettingsPageUIHandler(std::make_unique<OnDeviceAiSettingsHandler>());
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
   AddSettingsPageUIHandler(std::make_unique<OnStartupHandler>(profile));
   AddSettingsPageUIHandler(std::make_unique<PeopleHandler>(profile));
   AddSettingsPageUIHandler(std::make_unique<ProfileInfoHandler>(profile));
   AddSettingsPageUIHandler(std::make_unique<ProtocolHandlersHandler>(profile));
-  AddSettingsPageUIHandler(std::make_unique<PrivacySandboxHandler>());
   AddSettingsPageUIHandler(std::make_unique<SearchEnginesHandler>(profile));
   AddSettingsPageUIHandler(std::make_unique<SecureDnsHandler>());
   AddSettingsPageUIHandler(std::make_unique<SiteSettingsHandler>(profile));
@@ -310,10 +308,9 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
                                                profile->GetPrefs()->GetBoolean(
                                                    prefs::kSigninAllowed));
 
-  html_source->AddBoolean(
-      "shouldUseMetricsConsentRestructure",
-      metrics::MetricsReportingChoiceService::
-          ShouldUseMetricsConsentRestructure(g_browser_process->local_state()));
+  html_source->AddBoolean("shouldUseMetricsConsentRestructure",
+                          metrics::MetricsReportingChoiceService::
+                              ShouldUseMetricsConsentRestructure());
 
   ProfileAttributesEntry* entry =
       g_browser_process->profile_manager()
@@ -424,13 +421,12 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
           ->GetPaymentsDataManager()
           .ShouldShowBnplSettings());
 
-  html_source->AddBoolean("enableYourSavedInfoSettingsPage",
-                          base::FeatureList::IsEnabled(
-                              autofill::features::kYourSavedInfoSettingsPage));
-
-  html_source->AddBoolean("ambientAutofillEnabled",
-                          base::FeatureList::IsEnabled(
-                              autofill::features::kAutofillAmbientAutofill));
+  html_source->AddBoolean(
+      "shoppingIntegrationEnabled",
+      base::FeatureList::IsEnabled(
+          autofill::features::kAutofillAmbientAutofill) ||
+          base::FeatureList::IsEnabled(
+              autofill::features::kAutofillAiWalletShopping));
 
   AddSettingsPageUIHandler(std::make_unique<AboutHandler>(profile));
   AddSettingsPageUIHandler(std::make_unique<ResetSettingsHandler>(profile));
@@ -489,34 +485,11 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
                    profile, chrome::FaviconUrlFormat::kFavicon2));
   content::URLDataSource::Add(profile,
                               std::make_unique<SanitizedImageSource>(profile));
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
 
-  // Privacy Sandbox
-  PrivacySandboxService* privacy_sandbox_service =
-      PrivacySandboxServiceFactory::GetForProfile(profile);
-  bool is_privacy_sandbox_restricted =
-      privacy_sandbox_service->IsPrivacySandboxRestricted();
-  bool is_restricted_notice_enabled =
-      privacy_sandbox_service->IsRestrictedNoticeEnabled();
-  bool is_ad_privacy_ux_deprecation_enabled = base::FeatureList::IsEnabled(
-      privacy_sandbox::kPrivacySandboxAdPrivacyUxDeprecation);
-  bool is_ad_privacy_available = true;
-  if (is_ad_privacy_ux_deprecation_enabled) {
-    is_ad_privacy_available = false;
-  } else if (is_privacy_sandbox_restricted) {
-    is_ad_privacy_available = is_restricted_notice_enabled;
-  }
-
-  html_source->AddBoolean("isPrivacySandboxRestricted",
-                          is_privacy_sandbox_restricted);
-  html_source->AddBoolean("isPrivacySandboxRestrictedNoticeEnabled",
-                          is_restricted_notice_enabled);
   html_source->AddBoolean(
       "isRelatedWebsiteSetsUiEnabled",
       base::FeatureList::IsEnabled(privacy_sandbox::kRelatedWebsiteSetsUi));
-  html_source->AddBoolean("isPrivacySandboxAdPrivacyUxDeprecationEnabled",
-                          is_ad_privacy_ux_deprecation_enabled);
-  html_source->AddBoolean("isAdPrivacyAvailable", is_ad_privacy_available);
-
   // Performance
   AddSettingsPageUIHandler(std::make_unique<PerformanceHandler>());
   html_source->AddBoolean(
@@ -624,6 +597,9 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
                ->UserIsActivePasswordChangeUser()},
       {"showAiSuggestionsControl",
        base::FeatureList::IsEnabled(contextual_cueing::kContextualCueingV2)},
+      {"showInlineCueMenuControl",
+       base::FeatureList::IsEnabled(features::kGlicSelectionPrompt) &&
+           glic_enablement.ShouldShowSettingsPage()},
       {"showSkillsSettingPage",
        base::FeatureList::IsEnabled(features::kSkillsEnabled)},
       {"showIndigoControl", base::FeatureList::IsEnabled(features::kIndigo)},
@@ -653,6 +629,16 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
     show_ai_features_section |= visible;
   }
 
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  // On Device AI setting.
+  // TODO(crbug.com/466442880): Grey out toggle based on device capability and
+  // enterprise policy.
+  bool show_on_device_ai_settings =
+      base::FeatureList::IsEnabled(features::kShowOnDeviceAiSettings);
+  html_source->AddBoolean("showOnDeviceAiSettings", show_on_device_ai_settings);
+  show_ai_features_section |= show_on_device_ai_settings;
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+
   // Within the AI subpage are separate sections for Glic and for all other AI
   // features, the visibility of these are separately controlled but we want to
   // show the subpage if any of the AI features or Glic are enabled.
@@ -664,15 +650,6 @@ SettingsUI::SettingsUI(content::WebUI* web_ui)
 
   html_source->AddBoolean("replaceSyncPromosWithSignInPromos",
                           syncer::IsReplaceSyncPromosWithSignInPromosEnabled());
-
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)
-  // On Device AI setting.
-  // TODO(crbug.com/466442880): Grey out toggle based on device capability and
-  // enterprise policy.
-  html_source->AddBoolean(
-      "showOnDeviceAiSettings",
-      base::FeatureList::IsEnabled(features::kShowOnDeviceAiSettings));
-#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING) && !BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   html_source->AddBoolean("unoPhase2FollowUp", base::FeatureList::IsEnabled(
@@ -771,6 +748,15 @@ void SettingsUI::BindInterface(
   theme_color_picker_handler_factory_receiver_.Bind(
       std::move(pending_receiver));
 }
+
+void SettingsUI::BindInterface(
+    mojo::PendingReceiver<signin::mojom::SigninPageHandlerFactory>
+        pending_receiver) {
+  if (signin_handler_factory_receiver_.is_bound()) {
+    signin_handler_factory_receiver_.reset();
+  }
+  signin_handler_factory_receiver_.Bind(std::move(pending_receiver));
+}
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
 void SettingsUI::BindInterface(
@@ -822,6 +808,14 @@ void SettingsUI::CreateThemeColorPickerHandler(
       NtpCustomBackgroundServiceFactory::GetForProfile(
           Profile::FromWebUI(web_ui())),
       web_ui()->GetWebContents());
+}
+
+void SettingsUI::CreateSigninPageHandler(
+    mojo::PendingReceiver<signin::mojom::SigninPageHandler> handler) {
+#if BUILDFLAG(ENABLE_DICE_SUPPORT)
+  signin_handler_ = std::make_unique<SigninUtilsHandler>(
+      std::move(handler), Profile::FromWebUI(web_ui()));
+#endif
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 

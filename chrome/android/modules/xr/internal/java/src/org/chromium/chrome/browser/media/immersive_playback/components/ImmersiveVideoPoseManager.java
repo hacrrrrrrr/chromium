@@ -4,93 +4,80 @@
 
 package org.chromium.chrome.browser.media.immersive_playback.components;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import org.chromium.build.annotations.NullMarked;
-import org.chromium.content_public.browser.ImmersiveProjectionType;
+import org.chromium.build.annotations.Nullable;
+import org.chromium.ui.xr.scenecore.XrPose;
+import org.chromium.ui.xr.scenecore.XrSurfaceEntityShape;
+import org.chromium.ui.xr.scenecore.XrVector3;
 
-/** Helper class that manages 3D spatial coordinate calculations and center screen tracking. */
+/** Coordinates spatial layout calculations by delegating to projection-specific strategies. */
 @NullMarked
-public class ImmersiveVideoPoseManager {
-    private static final float[] IDENTITY_ROTATION = new float[] {0f, 0f, 0f, 1f};
-    private static final float[] ORIGIN_TRANSLATION = new float[] {0f, 0f, 0f};
-
+public class ImmersiveVideoPoseManager implements ImmersiveVideoPoseStrategy {
     /** Delegate for providing layout dimensions needed for vertical offset calculations. */
     public interface Delegate {
         /** Returns the layout height of the video surface. */
         float getLayoutHeight();
+
+        /** Returns the radius of the curved surface. */
+        float getCurveRadius();
     }
 
-    private float[] mCenterTranslation = new float[] {0f, 0f, 0.5f};
-    private float[] mCenterRotation = new float[] {0f, 0f, 0f, 1f};
     private final Delegate mDelegate;
+    private @Nullable ImmersiveVideoPoseStrategy mStrategy;
 
-    /**
-     * Creates a new {@link ImmersiveVideoPoseManager}.
-     *
-     * @param delegate The {@link Delegate}.
-     */
     public ImmersiveVideoPoseManager(Delegate delegate) {
         mDelegate = delegate;
     }
 
-    /** Called when the pose of the player panel changes during interaction. */
-    public void onPlayerPanelPoseChanged(
-            float[] translation, float[] rotation, @ImmersiveProjectionType int projectionType) {
-        if (projectionType == ImmersiveProjectionType.QUAD) {
-            mCenterTranslation = translation.clone();
-            mCenterRotation = rotation.clone();
-        }
+    /** Updates the active projection strategy. */
+    public void updateStrategy(@XrSurfaceEntityShape int shape) {
+        mStrategy = createStrategy(shape);
     }
 
-    /** Called when the pose of the control panel changes during interaction. */
-    public void onControlPanelPoseChanged(
-            float[] translation, float[] rotation, @ImmersiveProjectionType int projectionType) {
-        if (projectionType != ImmersiveProjectionType.QUAD) {
-            float[] playerTranslation = translation.clone();
-            playerTranslation[1] -= getVerticalOffset();
-            mCenterTranslation = playerTranslation;
-            mCenterRotation = rotation.clone();
-        }
-    }
-
-    /**
-     * Returns the expected translation for the player panel based on the current projection mode.
-     */
-    public float[] getPlayerPanelTranslation(@ImmersiveProjectionType int projectionType) {
-        return projectionType == ImmersiveProjectionType.QUAD
-                ? mCenterTranslation.clone()
-                : ORIGIN_TRANSLATION;
-    }
-
-    /** Returns the expected rotation for the player panel based on the current projection mode. */
-    public float[] getPlayerPanelRotation(@ImmersiveProjectionType int projectionType) {
-        return projectionType == ImmersiveProjectionType.QUAD
-                ? mCenterRotation.clone()
-                : IDENTITY_ROTATION;
-    }
-
-    /**
-     * Returns the expected translation for the control panel based on projection and vertical
-     * offset.
-     */
-    public float[] getControlPanelTranslation(@ImmersiveProjectionType int projectionType) {
-        float verticalOffset = getVerticalOffset();
-        if (projectionType == ImmersiveProjectionType.QUAD) {
-            return new float[] {0f, verticalOffset, 0f};
+    private ImmersiveVideoPoseStrategy createStrategy(@XrSurfaceEntityShape int shape) {
+        if (shape == XrSurfaceEntityShape.QUAD) {
+            return new ImmersiveVideoPoseStrategyQuad(mDelegate);
+        } else if (shape == XrSurfaceEntityShape.HEMISPHERE) {
+            return new ImmersiveVideoPoseStrategyHemisphere(mDelegate);
         } else {
-            return new float[] {
-                mCenterTranslation[0], mCenterTranslation[1] + verticalOffset, mCenterTranslation[2]
-            };
+            return new ImmersiveVideoPoseStrategySphere(mDelegate);
         }
     }
 
-    /** Returns the expected rotation for the control panel based on the current projection mode. */
-    public float[] getControlPanelRotation(@ImmersiveProjectionType int projectionType) {
-        return projectionType == ImmersiveProjectionType.QUAD
-                ? IDENTITY_ROTATION
-                : mCenterRotation.clone();
+    @Override
+    public void onPlayerPanelPoseChanged(XrPose pose) {
+        assumeNonNull(mStrategy).onPlayerPanelPoseChanged(pose);
     }
 
-    private float getVerticalOffset() {
-        return -mDelegate.getLayoutHeight() / 2f;
+    @Override
+    public void onControlPanelPoseChanged(XrPose pose) {
+        assumeNonNull(mStrategy).onControlPanelPoseChanged(pose);
+    }
+
+    @Override
+    public void onPlayerPanelDragStart(XrVector3 origin, XrVector3 direction) {
+        assumeNonNull(mStrategy).onPlayerPanelDragStart(origin, direction);
+    }
+
+    @Override
+    public void onPlayerPanelDragUpdate(XrVector3 origin, XrVector3 direction) {
+        assumeNonNull(mStrategy).onPlayerPanelDragUpdate(origin, direction);
+    }
+
+    @Override
+    public void onPlayerPanelDragEnd(XrVector3 origin, XrVector3 direction) {
+        assumeNonNull(mStrategy).onPlayerPanelDragEnd(origin, direction);
+    }
+
+    @Override
+    public XrPose getPlayerPanelPose() {
+        return assumeNonNull(mStrategy).getPlayerPanelPose();
+    }
+
+    @Override
+    public XrPose getControlPanelPose() {
+        return assumeNonNull(mStrategy).getControlPanelPose();
     }
 }

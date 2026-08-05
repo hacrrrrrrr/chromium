@@ -60,7 +60,8 @@ chromium-metrics-reviews@google.com.
   <int value="5" label="Non-milestone Update"/>
   <int value="6" label="Added to comparison table"/>
   <int value="7" label="Clear Browsing Data"/>
-  <int value="8" label="Automatic plus address replacement during Autofill"/>
+  <int value="8"
+      label="(Deprecated) Automatic plus address replacement during Autofill"/>
   <int value="9"
       label="ESB value was synced to 'turned on' - for non security settings
              page"/>
@@ -82,7 +83,7 @@ chromium-metrics-reviews@google.com.
   <int value="23" label="User migrated into enhanced security settings bundle"/>
   <int value="24" label="Saved Skill"/>
   <int value="25" label="Deleted Skill"/>
-  <int value="26" label="Showed Autofill AI Wallet error message on fetch"/>
+  <int value="26" label="Showed Autofill AI error message on fetch"/>
   <int value="27" label="Translate"/>
   <int value="28"
       label="Showed Autofill AI Wallet error message (update or migrate
@@ -111,6 +112,9 @@ chromium-metrics-reviews@google.com.
   <int value="50" label="Glic selection affordance hidden for site"/>
   <int value="51" label="Enterprise copy warning toast"/>
   <int value="52" label="Enterprise copy blocked toast"/>
+  <int value="53" label="Indigo delete uploaded photo error"/>
+  <int value="54" label="Indigo delete uploaded photo success"/>
+  <int value="55" label="Showed AtMemory SPII fetch error message"/>
 </enum>
 
 <!-- LINT.ThenChange(/chrome/browser/ui/toasts/api/toast_id.h:ToastId) -->

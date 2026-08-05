@@ -9,6 +9,7 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
+#include "components/autofill/core/browser/foundations/autofill_manager_test_api.h"
 #include "components/autofill/core/browser/metrics/autofill_metrics_test_base.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
@@ -116,7 +117,8 @@ INSTANTIATE_TEST_SUITE_P(,
 TEST_P(AutofillSettingsMetricsTest, LogsAutofillProfileIsEnabledAtPageLoad) {
   autofill_client().SetAutofillProfileEnabled(GetParam());
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
   histogram_tester_.ExpectUniqueSample("Autofill.Address.IsEnabled.PageLoad",
                                        GetParam(), 1);
 }
@@ -126,7 +128,8 @@ TEST_P(AutofillSettingsMetricsTest, LogsAutofillProfileIsEnabledAtPageLoad) {
 TEST_P(AutofillSettingsMetricsTest, AutofillCreditCardIsEnabledAtPageLoad) {
   payments_autofill_client().SetAutofillPaymentMethodsEnabled(GetParam());
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
   histogram_tester_.ExpectUniqueSample("Autofill.CreditCard.IsEnabled.PageLoad",
                                        GetParam(), 1);
 }
@@ -254,7 +257,8 @@ TEST_P(AutofillSettingsMetricsTest,
                                             base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.Address.DisabledReason.PageLoad",
@@ -269,7 +273,8 @@ TEST_P(AutofillSettingsMetricsTest,
                                                base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.Address.DisabledReason.PageLoad",
@@ -284,7 +289,8 @@ TEST_P(AutofillSettingsMetricsTest,
                                                  base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.Address.DisabledReason.PageLoad",
@@ -299,7 +305,8 @@ TEST_P(AutofillSettingsMetricsTest,
       prefs::kAutofillProfileEnabled, base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.Address.DisabledReason.PageLoad",
@@ -383,7 +390,8 @@ TEST_P(AutofillSettingsMetricsTest,
                                             base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.CreditCard.DisabledReason.PageLoad",
@@ -399,7 +407,8 @@ TEST_P(AutofillSettingsMetricsTest,
       prefs::kAutofillCreditCardEnabled, base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.CreditCard.DisabledReason.PageLoad",
@@ -415,7 +424,8 @@ TEST_P(AutofillSettingsMetricsTest,
       prefs::kAutofillCreditCardEnabled, base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.CreditCard.DisabledReason.PageLoad",
@@ -431,7 +441,8 @@ TEST_P(AutofillSettingsMetricsTest,
       prefs::kAutofillCreditCardEnabled, base::Value(GetParam()));
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.CreditCard.DisabledReason.PageLoad",
@@ -486,6 +497,84 @@ TEST_P(AutofillSettingsMetricsTest,
   EXPECT_EQ(user_action_tester.GetActionCount(kUserActionProfileDisabled), 0);
 }
 
+// Tests that IdentityDocs disabled by user setting is logged at startup.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillIdentityDocsDisabledByUserAtStartup) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiIdentityEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtStartup(*autofill_client().GetPrefs());
+
+  histogram_tester_.ExpectUniqueSample(
+      "Autofill.IdentityDocs.DisabledReason.Startup",
+      AutofillPreferenceSetter::kUserSetting, !GetParam());
+}
+
+// Tests that IdentityDocs disabled by user setting is logged at page load.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillIdentityDocsDisabledByUserAtPageLoad) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiIdentityEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtPageLoad(autofill_client());
+
+  histogram_tester_.ExpectUniqueSample(
+      "Autofill.IdentityDocs.DisabledReason.PageLoad",
+      AutofillPreferenceSetter::kUserSetting, !GetParam());
+}
+
+// Tests that Travel disabled by user setting is logged at startup.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillTravelDisabledByUserAtStartup) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiTravelEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtStartup(*autofill_client().GetPrefs());
+
+  histogram_tester_.ExpectUniqueSample("Autofill.Travel.DisabledReason.Startup",
+                                       AutofillPreferenceSetter::kUserSetting,
+                                       !GetParam());
+}
+
+// Tests that Travel disabled by user setting is logged at page load.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillTravelDisabledByUserAtPageLoad) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiTravelEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtPageLoad(autofill_client());
+
+  histogram_tester_.ExpectUniqueSample(
+      "Autofill.Travel.DisabledReason.PageLoad",
+      AutofillPreferenceSetter::kUserSetting, !GetParam());
+}
+
+// Tests that Shopping disabled by user setting is logged at startup.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillShoppingDisabledByUserAtStartup) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiShoppingEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtStartup(*autofill_client().GetPrefs());
+
+  histogram_tester_.ExpectUniqueSample(
+      "Autofill.Shopping.DisabledReason.Startup",
+      AutofillPreferenceSetter::kUserSetting, !GetParam());
+}
+
+// Tests that Shopping disabled by user setting is logged at page load.
+TEST_P(AutofillSettingsMetricsTest,
+       EmitsAutofillShoppingDisabledByUserAtPageLoad) {
+  autofill_client().GetPrefs()->SetUserPref(
+      prefs::kAutofillAiShoppingEntitiesEnabled, base::Value(GetParam()));
+
+  LogAutofillAiSettingsAtPageLoad(autofill_client());
+
+  histogram_tester_.ExpectUniqueSample(
+      "Autofill.Shopping.DisabledReason.PageLoad",
+      AutofillPreferenceSetter::kUserSetting, !GetParam());
+}
+
 // Tests that Autofill Profile disabled by the GPO wildcard blocklist policy is
 // logged as AdminPolicy at startup.
 TEST_P(AutofillSettingsMetricsEnterprisePolicyTest,
@@ -529,7 +618,8 @@ TEST_P(AutofillSettingsMetricsEnterprisePolicyTest,
       /*blocked=*/true);
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.Address.DisabledReason.PageLoad",
@@ -580,7 +670,8 @@ TEST_P(AutofillSettingsMetricsEnterprisePolicyTest,
       AutofillClient::AutofillPolicyDataCategory::kPayments, /*blocked=*/true);
 
   autofill_manager().OnFormsSeen(/*updated_forms=*/{},
-                                 /*removed_forms=*/{});
+                                 /*removed_forms=*/{},
+                                 AutofillManagerTestApi::pass_key());
 
   histogram_tester_.ExpectUniqueSample(
       "Autofill.CreditCard.DisabledReason.PageLoad",

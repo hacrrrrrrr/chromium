@@ -241,6 +241,7 @@ class MockDownloadTargetDeterminerDelegate
                     ConfirmationCallback&));
 #if BUILDFLAG(IS_ANDROID)
   void RequestIncognitoWarningConfirmation(
+      content::WebContents* web_contents,
       IncognitoWarningConfirmationCallback cb) override {
     RequestIncognitoWarningConfirmation_(std::move(cb));
   }
@@ -472,6 +473,8 @@ DownloadTargetDeterminerTest::CreateActiveDownloadItem(
       .WillByDefault(Return(test_case.mime_type));
   ON_CALL(*item, GetReferrerUrl())
       .WillByDefault(ReturnRefOfCopy(download_url));
+  ON_CALL(*item, GetRequestInitiator())
+      .WillByDefault(ReturnRefOfCopy(std::optional<url::Origin>()));
   ON_CALL(*item, GetState())
       .WillByDefault(Return(DownloadItem::IN_PROGRESS));
   ON_CALL(*item, GetTargetDisposition())
@@ -2838,7 +2841,8 @@ TEST_F(DownloadTargetDeterminerTest, TestSanitizeEnvVariable) {
        DownloadItem::TARGET_DISPOSITION_PROMPT,
 
        EXPECT_CRDOWNLOAD},
-      {// 2: File name falling back to dangerous extensions after removing env var.
+      {// 2: File name falling back to dangerous extensions after removing env
+       // var.
        SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
        DownloadFileType::NOT_DANGEROUS, "http://example.com/foo2.lnk.%%",
        "application/octet-stream", FILE_PATH_LITERAL(""),
@@ -2847,7 +2851,8 @@ TEST_F(DownloadTargetDeterminerTest, TestSanitizeEnvVariable) {
        DownloadItem::TARGET_DISPOSITION_PROMPT,
 
        EXPECT_CRDOWNLOAD},
-      {// 3: Double extension bug leading to dangerous extensions after removing env var.
+      {// 3: Double extension bug leading to dangerous extensions after removing
+       // env var.
        SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
        DownloadFileType::NOT_DANGEROUS, "http://example.com/foo2.lnk %%",
        "application/octet-stream", FILE_PATH_LITERAL(""),
@@ -2856,8 +2861,9 @@ TEST_F(DownloadTargetDeterminerTest, TestSanitizeEnvVariable) {
        DownloadItem::TARGET_DISPOSITION_PROMPT,
 
        EXPECT_CRDOWNLOAD},
-      {// 4: Unicode char bug leading to dangerous extensions after removing env var.
-       // NOTE: The space before "%%" is a non-breaking space (U+00A0), not a normal space.
+      {// 4: Unicode char bug leading to dangerous extensions after removing env
+       // var. NOTE: The space before "%%" is a non-breaking space (U+00A0), not
+       // a normal space.
        SAVE_AS, download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
        DownloadFileType::NOT_DANGEROUS, "http://example.com/foo2.lnk %%",
        "application/octet-stream", FILE_PATH_LITERAL(""),
@@ -2890,7 +2896,7 @@ TEST_F(DownloadTargetDeterminerTest, TestSanitizeEnvVariable) {
        "http://example.com/photo.jpg%20%25%25.url", "text/plain",
        FILE_PATH_LITERAL(""),
 
-       FILE_PATH_LITERAL("photo.jpg.url"),
+       FILE_PATH_LITERAL("photo.jpg.download"),
        DownloadItem::TARGET_DISPOSITION_PROMPT,
 
        EXPECT_CRDOWNLOAD},

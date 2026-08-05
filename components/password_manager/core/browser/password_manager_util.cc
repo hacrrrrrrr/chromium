@@ -156,10 +156,20 @@ bool IsAbleToSavePasswords(password_manager::PasswordManagerClient* client) {
 bool IsSavingBlockedByTrustedVaultError(
     const password_manager::PasswordManagerClient* client,
     const password_manager::PasswordFormManagerForUI* form_manager) {
+  // If the user disabled password syncing the passwords will be saved locally,
+  // and saving should not be blocked by trusted vault errors in this case.
   if (!password_manager::sync_util::HasChosenToSyncPasswords(
           client->GetSyncService())) {
     return false;
   }
+
+  // The updates of the locally stored passwords should not be blocked by
+  // trusted vault errors.
+  if (form_manager && form_manager->IsPasswordUpdate() &&
+      !form_manager->IsUpdateAffectingPasswordsStoredInTheGoogleAccount()) {
+    return false;
+  }
+
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   const password_manager::PasswordStoreInterface* account_store =
       client->GetAccountPasswordStore();
@@ -202,10 +212,17 @@ bool IsSavingBlockedByTrustedVaultError(
 }
 
 bool IsSavingBlockedByRecoverableError(
-    const password_manager::PasswordManagerClient* client) {
+    const password_manager::PasswordManagerClient* client,
+    const password_manager::PasswordFormManagerForUI* form_manager) {
 #if BUILDFLAG(IS_IOS)
   if (!password_manager::sync_util::HasChosenToSyncPasswords(
           client->GetSyncService())) {
+    return false;
+  }
+  // The updates of the locally stored passwords should not be blocked by
+  // recoverable errors.
+  if (form_manager && form_manager->IsPasswordUpdate() &&
+      !form_manager->IsUpdateAffectingPasswordsStoredInTheGoogleAccount()) {
     return false;
   }
   const password_manager::PasswordStoreInterface* account_store =

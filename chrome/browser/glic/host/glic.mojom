@@ -41,6 +41,12 @@ enum GlicExperimentalTriggeringState {
   kReady = 2,
 };
 
+// @generate glic_api
+enum FileUploadPolicyState {
+  kEnabled = 0,
+  kDisabled = 1,
+};
+
 // Struct containing data about eligibility for GLIC.
 struct ProfileEnablement {
   // Whether the GLIC feature is enabled.
@@ -160,6 +166,14 @@ interface PreloadPage {
   SetProfileReadyState(ProfileReadyState ready_state);
 };
 
+// State of the web client running inside the webview.
+enum WebClientState {
+  kUninitialized,
+  kResponsive,
+  kUnresponsive,
+  kError,
+};
+
 // Functions provided by the WebUI page.
 interface Page {
   // Called before the page is shown.
@@ -176,6 +190,9 @@ interface Page {
 
   // Notifies the page to adjust the zoom level of its hosted webview.
   Zoom(ZoomAction action);
+
+  // Notifies the page when the web client state changes.
+  WebClientStateChanged(WebClientState state);
 };
 
 // Page handler for pre-loading tasks.
@@ -308,7 +325,7 @@ enum HelpCenterTopic {
   kIneligibleAccount,
 };
 
-// Page handler for the glic WebUI.
+// Page handler for the glic WebUI, implemented by the browser.
 interface PageHandler {
   // Creates a WebClientHandler, for use by a single web client instance.
   CreateWebClient(pending_receiver<WebClientHandler> web_client_receiver);
@@ -350,7 +367,7 @@ interface PageHandler {
   EnableDragResize(bool enabled);
 
   // Notifies the PageHandler that the state of the WebUI has changed.
-  WebUiStateChanged(WebUiState new_state);
+  OnWebUiStateChanged(WebUiState new_state);
 };
 
 // @generate glic_api
@@ -622,6 +639,10 @@ struct WebClientInitialState {
   GeminiEnterpriseSettings? gemini_enterprise_settings;
   // Whether features::kGlicActorAutofillOneTimePassword is enabled.
   bool enable_gmail_otp_opt_in;
+  // Whether the Gmail OTP confirmation dialog is enabled.
+  bool enable_gmail_otp_confirmation;
+  // Whether file upload is allowed by the enterprise policy.
+  FileUploadPolicyState file_upload_policy_state;
 };
 
 // @generate glic_api
@@ -875,6 +896,7 @@ struct SuggestionContent {
 };
 
 // @generate glic_api
+// Next version: 3
 // Enum to specify the source of the Skill.
 // LINT.IfChange(SkillSource)
 [Stable, Extensible]
@@ -886,6 +908,10 @@ enum SkillSource {
   kUserCreated = 2,
   // Skill derived from a first party skill.
   [MinVersion=1] kDerivedFromFirstParty = 3,
+  // Skill sourced from the EnterprisePublishedSkills enterprise policy.
+  [MinVersion=2] kEnterprise = 4,
+  // Skill derived from an enterprise skill.
+  [MinVersion=2] kDerivedFromEnterprise = 5,
 };
 
 // LINT.ThenChange(//components/skills/public/skill.mojom:SkillSource,
@@ -909,6 +935,8 @@ struct SkillPreview {
   string? curated_by;
   // The image URL to show when rendering this skill.
   url.mojom.Url? image_url;
+  // The category of the skill.
+  string? category;
 };
 
 // @generate glic_api
@@ -1147,8 +1175,15 @@ interface ActorClient {
   NotifyActorTaskStateChanged(int32 task_id, ActorTaskState state);
 
   // Requests the web client to show the Gmail OTP opt-in dialog to the user.
-  RequestToShowGmailOtpOptInDialog(int32 task_id)
+  RequestToShowGmailOtpOptInDialog(
+      actor.webui.mojom.GmailOtpOptInRequest request)
       => (actor.webui.mojom.GmailOtpOptInResult result);
+
+  // Requests the web client to show the Gmail OTP confirmation dialog to the
+  // user.
+  RequestToShowGmailOtpConfirmationDialog(
+      actor.webui.mojom.GmailOtpConfirmationRequest request)
+      => (actor.webui.mojom.GmailOtpConfirmationResult result);
 };
 
 // @generate glic_api
@@ -1934,6 +1969,8 @@ enum InvocationSource {
   [MinVersion=26] kTabRestore = 39,
   // Implicitly focused or revealed, e.g., on tab switch or re-focus.
   [MinVersion=26] kReshowInactive = 40,
+  // From the tab context menu.
+  [MinVersion=27] kTabContextMenu = 41,
 };
 
 // LINT.ThenChange(
@@ -1962,6 +1999,20 @@ enum ActuationTarget {
 };
 
 // @generate glic_api
+// Payload for invoking a skill.
+struct SkillsPayload {
+  // Skill ID to trigger.
+  string skill_id;
+
+  // Skill name to show in the Glic client. Empty string is the null state.
+  string skill_name;
+
+  // Skill icon (emoji) to show in the Glic client.
+  // Empty string is the null state.
+  string skill_icon;
+};
+
+// @generate glic_api
 // Payload for Universal Cart invocation.
 struct UniversalCartPayload {
   // This metadata is received from the same Google endpoint we receive the
@@ -1972,6 +2023,8 @@ struct UniversalCartPayload {
 
 union InvocationPayload {
   UniversalCartPayload universal_cart;
+  [MinVersion=3]
+  SkillsPayload skills_payload;
 };
 
 // @generate glic_api
@@ -2000,6 +2053,7 @@ struct InvokeOptions {
   bool disable_zero_state_suggestions;
 
   // Skill ID to trigger.
+  // Deprecated: Use payload.skills_payload.skill_id instead.
   string? skill_id;
 
   // Configuration to override the default ZSS behavior for the invocation.
@@ -2190,6 +2244,8 @@ enum ExperimentalTriggeringUpdateType {
   kTerminalFailed = 5,
   // The interaction yielded to the user.
   [MinVersion=1] kYieldToUser = 6,
+  // The interaction has resumed after a pause or wait state.
+  [MinVersion=2] kResumed = 7,
 };
 
 // Types of subscriber observations that may be observed.
@@ -2211,6 +2267,9 @@ struct ExperimentalTriggeringUpdate {
   // The human-readable text associated with the update, such as response text
   // or status message.
   string data;
+  // Optional structured metadata associated with the update (e.g., choice
+  // options for interactive yields).
+  map<string, string>? metadata;
 };
 
 // Interface for receiving updates during web client interactions.
@@ -2226,8 +2285,7 @@ interface ExperimentalTriggeringUpdatesHandler {
 interface ExperimentalTriggeringClient {
   // Requests the web client to upload a screenshot of the target tab's
   // web contents to remote storage.
-  UploadEncryptedScreenshot(Screenshot screenshot)
-      => (string? file_token);
+  UploadEncryptedScreenshot(Screenshot screenshot) => (string? file_token);
 
   // Register a handler to observe Glic updates.
   GetExperimentalTriggeringUpdates(
@@ -2237,6 +2295,10 @@ interface ExperimentalTriggeringClient {
 
 // Access from the browser to the Glic web client by proxy of the WebUI page.
 interface WebClient {
+  // Lightweight check sent by C++ browser process to verify guest JS event-loop
+  // responsiveness.
+  CheckResponsive() => ();
+
   // Informs the web client that the panel will open. Chrome will wait to open
   // the panel until after this returns, and will use the data in the returned
   // `OpenPanelInfo` to setup the opening panel.
@@ -2261,6 +2323,10 @@ interface WebClient {
   // The Microphone permission has changed either by action within the web
   // client or by user action in the glic settings.
   NotifyMicrophonePermissionStateChanged(bool enabled);
+
+  // Informs the web client that the enterprise policy for file upload has
+  // changed.
+  NotifyFileUploadStateChanged(FileUploadPolicyState state);
 
   // Requests the web client to stop microphone recording.
   StopMicrophone() => ();
@@ -2707,6 +2773,8 @@ enum HostCapability {
   kImgWebDragDrop = 12,
   // Indicates that the host does not show the WebUi preloader.
   kNoWebUiLoader = 13,
+  // Indicates that the host enforces paste eligibility checks.
+  kEnforcesPasteEligibility = 14,
 };
 
 // @generate glic_api

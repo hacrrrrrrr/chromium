@@ -73,6 +73,11 @@ extern const char kGlicOnboardingCompleted[];
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) ||
         // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
 
+#if BUILDFLAG(IS_WIN)
+// The search promotion was accepted by the user.
+extern const char kSearchPromotionAccepted[];
+#endif  // BUILDFLAG(IS_WIN)
+
 #if BUILDFLAG(IS_IOS)
 // The user has opened Chrome (cold start or from background).
 extern const char kChromeOpened[];
@@ -436,6 +441,12 @@ extern const char kIOSPinMVTSiteUsed[];
 // parameter. This includes switching between two windows in multi-window mode
 // when the user opens Chrome from the icon.
 extern const char kIOSChromeOpenedFromIcon[];
+
+// Event fired when the Settings default browser card promo is clicked.
+extern const char kDefaultBrowserSettingsCardPromoUsed[];
+
+// Event fired when the Settings default browser cell promo is dismissed.
+extern const char kDefaultBrowserSettingsCellPromoUsed[];
 
 #endif  // BUILDFLAG(IS_IOS)
 

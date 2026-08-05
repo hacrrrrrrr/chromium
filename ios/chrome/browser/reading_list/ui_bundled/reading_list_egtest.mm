@@ -321,7 +321,7 @@ void AddCurrentPageToReadingList() {
 // If `distillable`, result is can be distilled for offline display.
 std::unique_ptr<net::test_server::HttpResponse> HandleQueryOrCloseSocket(
     const bool& responds_with_content,
-    const base::TimeDelta& delay,
+    base::TimeDelta delay,
     bool distillable,
     const net::test_server::HttpRequest& request) {
   if (!responds_with_content) {
@@ -1119,6 +1119,39 @@ std::unique_ptr<net::test_server::HttpResponse> HandleImageQueryOrCloseSocket(
 
   [ChromeEarlGrey verifyShareActionWithURL:distillablePageURL
                                  pageTitle:kDistillableTitle];
+}
+
+// Tests that sharing an item from the context menu twice in a row does not
+// cause a crash. This verifies that when a new SharingCoordinator is created,
+// the old one is stopped properly to prevent dangling WebStateList observers.
+- (void)testContextMenuRepeatedShare {
+#if TARGET_IPHONE_SIMULATOR
+  // TODO(crbug.com/433982582): Flaky on an iPhone simulator.
+  if ([ChromeEarlGrey isIPhoneIdiom]) {
+    if (!@available(iOS 18, *)) {
+      EARL_GREY_TEST_DISABLED(@"Flakes on iPhone.");
+    }
+  }
+#endif
+  GURL distillablePageURL(self.testServer->GetURL(kDistillableURL));
+  [self addURLToTestReadingList:distillablePageURL];
+
+  // First sharing attempt.
+  LongPressEntry(kDistillableTitle);
+  [ChromeEarlGrey verifyShareActionWithURL:distillablePageURL
+                                 pageTitle:kDistillableTitle];
+
+  // Second sharing attempt.
+  LongPressEntry(kDistillableTitle);
+  [ChromeEarlGrey verifyShareActionWithURL:distillablePageURL
+                                 pageTitle:kDistillableTitle];
+
+  // Close Reading List.
+  TapToolbarButtonWithID(kReadingListNavigationBarCloseButtonID);
+
+  // Perform an action that mutates the WebStateList (e.g. open a new tab) to
+  // trigger any potential crash if dangling WebStateList observers exist.
+  [ChromeEarlGrey openNewTab];
 }
 
 // Tests the Delete context menu action for a reading list entry.

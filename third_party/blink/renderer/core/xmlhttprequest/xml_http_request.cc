@@ -899,9 +899,9 @@ void XMLHttpRequest::send(FormData* body, ExceptionState& exception_state) {
     // TODO (sof): override any author-provided charset= in the
     // content type value to UTF-8 ?
     if (!HasContentTypeRequestHeader()) {
-      AtomicString content_type = AtomicString(StrCat(
-          {"multipart/form-data; boundary=",
-           FetchUtils::NormalizeHeaderValue(http_body->Boundary().data())}));
+      AtomicString content_type = AtomicString(
+          StrCat({"multipart/form-data; boundary=",
+                  FetchUtils::NormalizeHeaderValue(http_body->Boundary())}));
       SetRequestHeaderInternal(http_names::kContentType, content_type);
     }
   }
@@ -1018,7 +1018,7 @@ void XMLHttpRequest::CreateRequest(scoped_refptr<EncodedFormData> http_body,
       task_state_ = CaptureCurrentTaskState(&execution_context);
     }
     async_task_context_.Schedule(&execution_context, "XMLHttpRequest.send",
-                                 probe::AsyncTaskContext::ScanForAds::kTrue);
+                                 probe::AsyncTaskContext::StackOptions::kScan);
     DispatchProgressEvent(event_type_names::kLoadstart, 0, 0);
     // Event handler could have invalidated this send operation,
     // (re)setting the send flag and/or initiating another send

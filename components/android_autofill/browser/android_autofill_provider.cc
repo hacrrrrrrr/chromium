@@ -509,12 +509,8 @@ void AndroidAutofillProvider::OnTextFieldDidScroll(
   }
   CHECK(session_state_ && session_state_->form);
 
-  // IsLinkedForm ensures session_state_ and session_state_->form exist.
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillAndroidFormDataCompareFieldGlobalId)
-          ? !session_state_->form->GetFieldByGlobalId(field, &field_info.index)
-          : !session_state_->form->GetSimilarFieldIndex(field,
-                                                        &field_info.index)) {
+  // `IsLinkedForm()` ensures session_state_ and session_state_->form exist.
+  if (!session_state_->form->GetFieldByGlobalId(field, &field_info.index)) {
     return;
   }
 
@@ -554,6 +550,12 @@ void AndroidAutofillProvider::OnFormSubmitted(AndroidAutofillManager* manager,
                                               const FormData& form,
                                               SubmissionSource source) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (credman_sheet_status_ == CredManBottomSheetLifecycle::kIsShowing) {
+    // Ignore form submissions while CredMan is showing to prevent a compromised
+    // renderer from resetting session state and spoofing the origin (see
+    // crbug.com/534856303).
+    return;
+  }
   if (!IsLinkedManager(manager)) {
     return;
   }
@@ -632,12 +634,7 @@ std::optional<FieldInfo> AndroidAutofillProvider::StartFocusChange(
   }
   CHECK(session_state_ && session_state_->form);
   FieldInfo field_to_focus;
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillAndroidFormDataCompareFieldGlobalId)
-          ? !session_state_->form->GetFieldByGlobalId(field,
-                                                      &field_to_focus.index)
-          : !session_state_->form->GetSimilarFieldIndex(
-                field, &field_to_focus.index)) {
+  if (!session_state_->form->GetFieldByGlobalId(field, &field_to_focus.index)) {
     return std::nullopt;
   }
   field_to_focus.bounds = ToClientAreaBound(field.bounds());
@@ -659,11 +656,7 @@ void AndroidAutofillProvider::MaybeFireFormFieldDidChange(
     return;
   }
   CHECK(session_state_ && session_state_->form);
-  if (base::FeatureList::IsEnabled(
-          features::kAutofillAndroidFormDataCompareFieldGlobalId)
-          ? !session_state_->form->GetFieldByGlobalId(field, &field_info.index)
-          : !session_state_->form->GetSimilarFieldIndex(field,
-                                                        &field_info.index)) {
+  if (!session_state_->form->GetFieldByGlobalId(field, &field_info.index)) {
     return;
   }
   // Propagate the changed values to Java.

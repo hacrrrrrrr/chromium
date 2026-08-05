@@ -120,8 +120,10 @@
 - (void)restart {
   CHECK(self.presenter, base::NotFatalUntil::M150);
   CHECK(self.browser, base::NotFatalUntil::M150);
-  _geminiHandler =
-      HandlerForProtocol(self.browser->GetCommandDispatcher(), GeminiCommands);
+  if (IsPageActionMenuEnabled()) {
+    _geminiHandler = HandlerForProtocol(self.browser->GetCommandDispatcher(),
+                                        GeminiCommands);
+  }
   if (_stopped && self.presenter.presentedViewController) {
     // Stopping animation is still in progress. Wait until it is done to
     // restart.
@@ -133,6 +135,10 @@
   [defaultCenter addObserver:self
                     selector:@selector(applicationDidEnterBackground:)
                         name:UIApplicationDidEnterBackgroundNotification
+                      object:nil];
+  [defaultCenter addObserver:self
+                    selector:@selector(applicationWillEnterForeground:)
+                        name:UIApplicationWillEnterForegroundNotification
                       object:nil];
 
   BOOL isIncognito = self.isOffTheRecord;
@@ -167,9 +173,6 @@
 
   _mediator.SetDownloadTask(_downloadTask.get());
   _mediator.SetConsumer(_viewController);
-  if (base::FeatureList::IsEnabled(kIOSDownloadNoUIUpdateInBackground)) {
-    _mediator.StartObservingNotifications();
-  }
 
   self.presenter.baseViewController = self.baseViewController;
   self.presenter.presentedViewController = _viewController;
@@ -200,9 +203,6 @@
   if (IsDownloadListEnabled()) {
     _mediator.SetDownloadRecordService(nullptr);
   }
-  if (base::FeatureList::IsEnabled(kIOSDownloadNoUIUpdateInBackground)) {
-    _mediator.StopObservingNotifications();
-  }
 
   if (_viewController) {
     [self.presenter dismissAnimated:self.animatesPresentation];
@@ -224,6 +224,7 @@
   [self stopStoreKitCoordinator];
 
   [[InstallationNotifier sharedInstance] unregisterForNotifications:self];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   _stopped = YES;
 }
 
@@ -653,6 +654,10 @@
   [_openInController.presentingViewController
       dismissViewControllerAnimated:YES
                          completion:nil];
+}
+
+- (void)applicationWillEnterForeground:(NSNotification*)note {
+  _mediator.SetGoogleDriveAppInstalled(IsGoogleDriveAppInstalled());
 }
 
 #pragma mark - StoreKitCoordinatorDelegate

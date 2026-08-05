@@ -38,7 +38,7 @@ class CORE_EXPORT IdleSpellCheckController final
   IdleSpellCheckController& operator=(const IdleSpellCheckController&) = delete;
   ~IdleSpellCheckController() override;
 
-  enum class State {
+  enum class State : uint8_t {
 #define V(state) k##state,
     FOR_EACH_IDLE_SPELL_CHECK_CONTROLLER_STATE(V)
 #undef V
@@ -69,6 +69,9 @@ class CORE_EXPORT IdleSpellCheckController final
   void SetNeedsMoreColdModeInvocationForTesting();
   void SkipColdModeTimerForTesting();
   int IdleCallbackHandle() const { return idle_callback_handle_; }
+  uint64_t LastProcessedUndoStepSequenceForTesting() const {
+    return last_processed_undo_step_sequence_;
+  }
 
   void Trace(Visitor*) const override;
 

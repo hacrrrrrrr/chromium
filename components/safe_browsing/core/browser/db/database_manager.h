@@ -31,6 +31,10 @@ class AutoPictureInPictureSafeBrowsingCheckerClient;
 class CrowdDenySafeBrowsingRequest;
 class SafeBrowsingRequest;
 
+namespace autofill {
+class OtpFillingSafeBrowsingCheckerClient;
+}
+
 namespace extensions {
 class Blocklist;
 }  // namespace extensions
@@ -67,6 +71,7 @@ enum class AsyncMatch : int {
 
 struct V4ProtocolConfig;
 class V4GetHashProtocolManager;
+class V5GetHashProtocolManager;
 
 // Base class to either the locally-managed or a remotely-managed database.
 class SafeBrowsingDatabaseManager
@@ -112,6 +117,11 @@ class SafeBrowsingDatabaseManager
     // Currently only used for CSD allowlist.
     virtual void OnCheckAllowlistUrlResult(bool did_match_allowlist) {}
 
+    // Returns a WeakPtr to the V5GetHashProtocolManager for this client. This
+    // is passed in by the client because it is a profile-keyed service.
+    virtual base::WeakPtr<V5GetHashProtocolManager>
+    GetV5GetHashProtocolManager();
+
     // Returns a WeakPtr to this.
     base::WeakPtr<Client> GetWeakPtr();
 
@@ -125,6 +135,7 @@ class SafeBrowsingDatabaseManager
 
     // External clients:
     friend class ::AbusiveNotificationPermissionsManager;
+    friend class autofill::OtpFillingSafeBrowsingCheckerClient;
     friend class ::AutoPictureInPictureSafeBrowsingCheckerClient;
     friend class ::CrowdDenySafeBrowsingRequest;
     friend class extensions::Blocklist;
@@ -200,9 +211,12 @@ class SafeBrowsingDatabaseManager
   virtual bool CheckDownloadUrl(const std::vector<GURL>& url_chain,
                                 Client* client) = 0;
 
-  // Check which prefixes in |extension_ids| are in the safebrowsing blocklist.
-  // Returns true if not, false if further checks need to be made in which case
-  // the result will be passed to |client|.
+  // Check which prefixes in `extension_ids` are in the safebrowsing blocklist.
+  // `extension_ids` is the set of extension IDs to check. Each entry must be
+  // a valid 32-character string formatted with characters 'a'-'p'.
+  // `client` is the client callback listener.
+  // Returns true if none of the extension IDs are blocklisted (determined
+  // synchronously), or false if an asynchronous check is required and pending.
   virtual bool CheckExtensionIDs(const std::set<std::string>& extension_ids,
                                  Client* client) = 0;
 
@@ -350,8 +364,21 @@ class SafeBrowsingDatabaseManager
   // Called when the SafeBrowsingProtocolManager has received the full hash and
   // notification abuse results for prefixes of the |url| argument in
   // CheckNotificationAbuseUrl. This should be called on the UI thread.
+  // TODO(crbug.com/372395685): collapse into
+  // OnNotificationAbuseFullHashesResponse
   void OnThreatMetadataResponse(std::unique_ptr<NotificationAbuseCheck> check,
                                 bool is_abusive);
+
+  // Called when the V5GetHashProtocolManager has received the full hash and
+  // notification abuse results for prefixes of the URL in
+  // CheckNotificationAbuseUrl. This should be called on the UI thread.
+  //   - `check`: The notification abuse check being processed.
+  //   - `threat_type`: The most severe threat type identified.
+  //   - `metadata`: Threat metadata associated with the identified threat.
+  void OnNotificationAbuseFullHashesResponse(
+      std::unique_ptr<NotificationAbuseCheck> check,
+      SBThreatType threat_type,
+      const ThreatMetadata& metadata);
 
   // SafeBrowsingDatabaseManager passes its |ui_task_runner| construction
   // parameter to its RefCountedDeleteOnSequence base class, which exposes its
@@ -385,6 +412,8 @@ class SafeBrowsingDatabaseManager
   NotificationAbuseCheckSet::iterator FindClientNotificationAbuseCheck(
       Client* client);
 
+  // Weak pointer factory for UI thread tasks and callbacks.
+  base::WeakPtrFactory<SafeBrowsingDatabaseManager> weak_factory_{this};
 };  // class SafeBrowsingDatabaseManager
 
 }  // namespace safe_browsing

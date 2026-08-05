@@ -64,7 +64,7 @@ try_.builder(
         ],
     ),
     experiments = {
-        "luci.buildbucket.run_in_turboci": 25,
+        "luci.buildbucket.run_in_turboci": 100,
     },
     main_list_view = "try",
 )
@@ -126,7 +126,7 @@ try_.builder(
         ],
     ),
     experiments = {
-        "luci.buildbucket.run_in_turboci": 25,
+        "luci.buildbucket.run_in_turboci": 100,
     },
 )
 
@@ -176,6 +176,7 @@ try_.builder(
             "debug_try_builder",
         ],
     ),
+    free_space = builders.free_space.high,
     contact_team_email = "chrome-fuchsia-engprod@google.com",
     # This is the only bot that builds //chromecast code for Fuchsia on x64
     # so trigger it when changes are made.
@@ -186,7 +187,7 @@ try_.builder(
     ),
     execution_timeout = 10 * time.hour,
     experiments = {
-        "luci.buildbucket.run_in_turboci": 25,
+        "luci.buildbucket.run_in_turboci": 100,
     },
     main_list_view = "try",
 )
@@ -226,7 +227,7 @@ try_.orchestrator_builder(
         # go/rts-project-proposal
         "chromium_rts.filter_file_analysis": 100,
         # TODO(https://crbug.com/521401232): Increase to 100
-        "luci.buildbucket.run_in_turboci": 50,
+        "luci.buildbucket.run_in_turboci": 100,
     },
     main_list_view = "try",
     use_clang_coverage = True,

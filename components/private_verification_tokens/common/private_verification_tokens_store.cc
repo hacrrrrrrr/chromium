@@ -14,7 +14,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
-#include "components/private_verification_tokens/common/private_verification_tokens_public_key.h"
 #include "url/origin.h"
 
 namespace private_verification_tokens {
@@ -50,13 +49,6 @@ PrivateVerificationTokensStore::PrivateVerificationTokensStore(
                      std::move(cache_initialized_callback)));
 }
 
-void PrivateVerificationTokensStore::CacheKeys(
-    std::vector<PrivateVerificationTokensPublicKey> keys) {
-  for (auto const& k : keys) {
-    public_keys_.try_emplace(k.issuer(), k);
-  }
-}
-
 void PrivateVerificationTokensStore::CacheTokens(
     std::map<url::Origin, TokenWithId> tokens) {
   tokens_ = std::move(tokens);
@@ -70,18 +62,10 @@ void PrivateVerificationTokensStore::InitializeCache(
       weak_ptr_factory_.GetWeakPtr(), std::move(cache_initialized_callback));
 
   if (file_exists) {
-    // There is already a DB file, cache tokens and keys async.
-    base::RepeatingClosure barrier =
-        base::BarrierClosure(2, std::move(on_initialized));
-
-    database_.AsyncCall(&PrivateVerificationTokensDatabase::GetKeys)
-        .Then(base::BindOnce(&PrivateVerificationTokensStore::CacheKeys,
-                             weak_ptr_factory_.GetWeakPtr())
-                  .Then(barrier));
     database_.AsyncCall(&PrivateVerificationTokensDatabase::GetTokensFromEach)
         .Then(base::BindOnce(&PrivateVerificationTokensStore::CacheTokens,
                              weak_ptr_factory_.GetWeakPtr())
-                  .Then(barrier));
+                  .Then(std::move(on_initialized)));
   } else {
     std::move(on_initialized).Run();
   }
@@ -91,11 +75,6 @@ void PrivateVerificationTokensStore::OnCacheInitialized(
     base::OnceCallback<void()> callback) {
   initialized_ = true;
   std::move(callback).Run();
-}
-
-const std::map<url::Origin, PrivateVerificationTokensPublicKey>&
-PrivateVerificationTokensStore::public_keys() const {
-  return public_keys_;
 }
 
 const std::map<url::Origin, TokenWithId>&
@@ -123,6 +102,29 @@ void PrivateVerificationTokensStore::DeleteTokens(
 
 void PrivateVerificationTokensStore::OnTokensDeleted(base::OnceClosure callback,
                                                      bool success) {
+  database_.AsyncCall(&PrivateVerificationTokensDatabase::GetTokensFromEach)
+      .Then(base::BindOnce(&PrivateVerificationTokensStore::CacheTokens,
+                           weak_ptr_factory_.GetWeakPtr())
+                .Then(std::move(callback)));
+}
+
+void PrivateVerificationTokensStore::StoreTokens(
+    std::vector<PrivateVerificationTokensToken> tokens,
+    base::OnceClosure callback) {
+  database_.AsyncCall(&PrivateVerificationTokensDatabase::StoreTokens)
+      .WithArgs(std::move(tokens))
+      .Then(base::BindOnce(&PrivateVerificationTokensStore::OnTokensStored,
+                           weak_ptr_factory_.GetWeakPtr(),
+                           std::move(callback)));
+}
+
+void PrivateVerificationTokensStore::OnTokensStored(base::OnceClosure callback,
+                                                    bool success) {
+  // If the database operation failed, don't bother refreshing the cache.
+  if (!success) {
+    std::move(callback).Run();
+    return;
+  }
   database_.AsyncCall(&PrivateVerificationTokensDatabase::GetTokensFromEach)
       .Then(base::BindOnce(&PrivateVerificationTokensStore::CacheTokens,
                            weak_ptr_factory_.GetWeakPtr())

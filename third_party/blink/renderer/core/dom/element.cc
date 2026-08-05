@@ -2015,6 +2015,11 @@ bool Element::InterestGained(Element* target, InterestState state) {
 bool Element::InterestLost(Element* target,
                            InterestLostCancelable cancelable,
                            InterestLostPopoverBehavior behavior) {
+  bool force_interest = false;
+  probe::WillLoseInterest(this, &force_interest);
+  if (force_interest) {
+    return false;
+  }
   if (!ShouldContinueWithInterest(*this, target, InterestState::kNoInterest)) {
     return false;
   }
@@ -2278,8 +2283,8 @@ ScriptPromise<ScrollResult> Element::scrollIntoView(
 void Element::scrollIntoViewWithOptions(const ScrollIntoViewOptions* options,
                                         ScrollPromiseResolver* resolver) {
   ActivateDisplayLockIfNeeded(DisplayLockActivationReason::kScrollIntoView);
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (!GetLayoutObject() || !GetDocument().GetPage()) {
     return;
@@ -2343,8 +2348,8 @@ void Element::ScrollIntoViewNoVisualUpdate(
 }
 
 void Element::scrollIntoViewIfNeeded(bool center_if_needed) {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   if (!GetLayoutObject()) {
     return;
@@ -2367,8 +2372,8 @@ void Element::scrollIntoViewIfNeeded(bool center_if_needed) {
 }
 
 int Element::OffsetLeft() {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   if (const auto* layout_object = GetLayoutBoxModelObject()) {
     return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                layout_object->OffsetPoint(OffsetParent()).left,
@@ -2379,8 +2384,8 @@ int Element::OffsetLeft() {
 }
 
 int Element::OffsetTop() {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   if (const auto* layout_object = GetLayoutBoxModelObject()) {
     return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                layout_object->OffsetPoint(OffsetParent()).top,
@@ -2391,8 +2396,8 @@ int Element::OffsetTop() {
 }
 
 int Element::OffsetWidth() {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   if (const auto* layout_object = GetLayoutBoxModelObject()) {
     return AdjustForAbsoluteZoom::AdjustLayoutUnit(layout_object->OffsetWidth(),
                                                    layout_object->StyleRef())
@@ -2402,8 +2407,8 @@ int Element::OffsetWidth() {
 }
 
 int Element::OffsetHeight() {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   if (const auto* layout_object = GetLayoutBoxModelObject()) {
     return AdjustForAbsoluteZoom::AdjustLayoutUnit(
                layout_object->OffsetHeight(), layout_object->StyleRef())
@@ -2468,8 +2473,8 @@ bool Element::ShouldUpdateLastRememberedBlockSize() const {
   }
 
   return style->IsHorizontalWritingMode()
-             ? style->ContainIntrinsicHeight().HasAuto()
-             : style->ContainIntrinsicWidth().HasAuto();
+             ? style->EffectiveContainIntrinsicHeight().HasAuto()
+             : style->EffectiveContainIntrinsicWidth().HasAuto();
 }
 
 bool Element::ShouldUpdateLastRememberedInlineSize() const {
@@ -2479,8 +2484,8 @@ bool Element::ShouldUpdateLastRememberedInlineSize() const {
   }
 
   return style->IsHorizontalWritingMode()
-             ? style->ContainIntrinsicWidth().HasAuto()
-             : style->ContainIntrinsicHeight().HasAuto();
+             ? style->EffectiveContainIntrinsicWidth().HasAuto()
+             : style->EffectiveContainIntrinsicHeight().HasAuto();
 }
 
 void Element::SetLastRememberedInlineSize(std::optional<LayoutUnit> size) {
@@ -2539,7 +2544,7 @@ int Element::clientWidth() {
         // |layout_view| is not a scroll-container.
         DCHECK(layout_view->IsScrollContainer());
         return AdjustForAbsoluteZoom::AdjustLayoutUnit(
-                   layout_view->OverflowClipRect(PhysicalOffset()).Width(),
+                   layout_view->OverflowClipRect().Width(),
                    layout_view->StyleRef())
             .Round();
       }
@@ -2582,7 +2587,7 @@ int Element::clientHeight() {
         // |layout_view| is not a scroll-container.
         DCHECK(layout_view->IsScrollContainer());
         return AdjustForAbsoluteZoom::AdjustLayoutUnit(
-                   layout_view->OverflowClipRect(PhysicalOffset()).Height(),
+                   layout_view->OverflowClipRect().Height(),
                    layout_view->StyleRef())
             .Round();
       }
@@ -3177,8 +3182,8 @@ bool Element::HandleScrollByPageCommand(CommandEventType command) {
 }
 
 gfx::Rect Element::BoundsInWidget() const {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kUnknown);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kUnknown);
 
   LocalFrameView* view = GetDocument().View();
   if (!view) {
@@ -3230,7 +3235,7 @@ Vector<gfx::Rect> Element::OutlineRectsInWidget(
     return rects;
   }
 
-  GetDocument().EnsurePaintLocationDataValidForNode(this, reason);
+  GetDocument().UpdateStyleAndLayoutForNode(this, reason);
 
   LayoutBoxModelObject* layout_object = GetLayoutBoxModelObject();
   if (!layout_object) {
@@ -3267,7 +3272,7 @@ gfx::Rect Element::VisibleBoundsInLocalRoot() const {
   PhysicalRect rect(
       gfx::ToRoundedRect(GetLayoutObject()->AbsoluteBoundingBoxRectF()));
   PhysicalRect frame_clip_rect =
-      GetDocument().View()->GetLayoutView()->ClippingRect(PhysicalOffset());
+      GetDocument().View()->GetLayoutView()->ClippingRect();
   rect.Intersect(frame_clip_rect);
 
   // MapToVisualRectInAncestorSpace, called with a null ancestor argument,
@@ -3366,8 +3371,8 @@ Vector<gfx::RectF> Element::GetClientRectsNoAdjustment() {
   // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
   // impact is understood.
   SyncScrollAttemptHeuristic::DidAccessScrollOffset();
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
 
   Vector<gfx::QuadF> quads;
   ClientQuads(quads);
@@ -3409,8 +3414,8 @@ gfx::RectF Element::GetBoundingClientRectNoLifecycleUpdate() const {
 }
 
 DOMRect* Element::GetBoundingClientRect() {
-  GetDocument().EnsurePaintLocationDataValidForNode(
-      this, DocumentUpdateReason::kJavaScript);
+  GetDocument().UpdateStyleAndLayoutForNode(this,
+                                            DocumentUpdateReason::kJavaScript);
   return DOMRect::FromRectF(GetBoundingClientRectNoLifecycleUpdate());
 }
 
@@ -3716,6 +3721,9 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
     if (new_id != GetElementData()->IdForStyleResolution()) {
       AtomicString old_id = GetElementData()->SetIdForStyleResolution(new_id);
       GetDocument().GetStyleEngine().IdChangedForElement(old_id, new_id, *this);
+      if (isConnected()) {
+        GetDocument().MarkOverscrollCommandTargetsDirty();
+      }
     }
 
     ProcessElementRenderBlocking(new_id);
@@ -4144,13 +4152,16 @@ Node::InsertionNotificationRequest Element::InsertedInto(
 
   RecomputeDirectionFromParent();
 
+  // Do not call ComputeIsInCanvasSubtree from here because during
+  // slot assignment it will cause DCHECK failures. If an element is slotted
+  // the checks will be re-run when slot assignment completes.
   auto* parent = ParentOrShadowHostElement();
   if (parent && parent->IsCanvasOrInCanvasSubtree()) {
-    SetIsCanvasOrInCanvasSubtree(true);
+    SetIsInCanvasSubtree(true);
   } else if (!parent && insertion_point.IsDocumentNode()) {
     auto* owner = GetDocument().LocalOwner();
     if (owner && owner->IsCanvasOrInCanvasSubtree()) {
-      SetIsCanvasOrInCanvasSubtree(true);
+      SetIsInCanvasSubtree(true);
     }
   }
 
@@ -4262,6 +4273,10 @@ Node::InsertionNotificationRequest Element::InsertedInto(
     }
   }
 
+  if (insertion_point.isConnected() && !GetIdAttribute().empty()) {
+    GetDocument().MarkOverscrollCommandTargetsDirty();
+  }
+
   return kInsertionDone;
 }
 
@@ -4293,15 +4308,120 @@ void Element::MovedFrom(ContainerNode& old_parent) {
   }
 }
 
-void Element::SetIsCanvasOrInCanvasSubtree(bool value) {
-  if (value == IsCanvasOrInCanvasSubtree()) {
+#if DCHECK_IS_ON()
+void VerifySubtreeIsInCanvas(const Element& element, bool value) {
+  DCHECK(element.IsInCanvasSubtree() == value);
+  if (IsA<HTMLCanvasElement>(element)) {
+    DCHECK(element.IsCanvasOrInCanvasSubtree());
+    // When the verifier starts with an element outside the tree that should
+    // have value false, but then reaches a canvas within the subtree (e.g.
+    // in an iframe or nested), we should set the expected value back to true.
+    value = true;
+  }
+  if (ShadowRoot* shadow_root = element.GetShadowRoot()) {
+    for (Element& child : ElementTraversal::ChildrenOf(*shadow_root)) {
+      VerifySubtreeIsInCanvas(child, value);
+    }
+  }
+  if (auto* slot = ToHTMLSlotElementIfSupportsAssignmentOrNull(element)) {
+    for (Node* node : slot->AssignedNodesNoRecalc()) {
+      if (auto* child = DynamicTo<Element>(node)) {
+        VerifySubtreeIsInCanvas(*child, value);
+      }
+    }
+  }
+  if (const auto* frame_owner = DynamicTo<HTMLFrameOwnerElement>(element)) {
+    if (Document* inner_document = frame_owner->contentDocument()) {
+      if (Element* root = inner_document->documentElement()) {
+        VerifySubtreeIsInCanvas(*root, value);
+      }
+    }
+  }
+  for (Element& child : ElementTraversal::ChildrenOf(element)) {
+    if (child.AssignedSlotWithoutRecalc()) {
+      continue;
+    }
+    VerifySubtreeIsInCanvas(child, value);
+  }
+}
+#endif
+
+void Element::SetIsInCanvasSubtree(bool value) {
+  if (value == IsInCanvasSubtree()) {
+#if DCHECK_IS_ON()
+    if (!GetDocument().IsSlotAssignmentRecalcForbidden()) {
+      VerifySubtreeIsInCanvas(*this, value);
+    }
+#endif
     return;
   }
-  SetElementFlag(ElementFlags::kIsCanvasOrInCanvasSubtree, value);
-  DidChangeIsCanvasOrInCanvasSubtree();
+
+  SetElementFlag(ElementFlags::kIsInCanvasSubtree, value);
+  // Note that this call leads to HTMLFrameOwnerElement updating iframes.
+  DidChangeIsInCanvasSubtree();
+  if (!value && IsA<HTMLCanvasElement>(*this)) {
+    // Nested canvas element must reset the value to true.
+    value = true;
+  }
+
+  if (ShadowRoot* shadow_root = GetShadowRoot()) {
+    for (Element& child : ElementTraversal::ChildrenOf(*shadow_root)) {
+      child.SetIsInCanvasSubtree(value);
+    }
+  }
+  if (auto* slot = ToHTMLSlotElementIfSupportsAssignmentOrNull(*this)) {
+    for (Node* node : slot->AssignedNodesNoRecalc()) {
+      if (auto* child = DynamicTo<Element>(node)) {
+        child->SetIsInCanvasSubtree(value);
+      }
+    }
+  }
+  for (Element& child : ElementTraversal::ChildrenOf(*this)) {
+    if (!child.IsPseudoElement() && child.AssignedSlotWithoutRecalc()) {
+      continue;
+    }
+    child.SetIsInCanvasSubtree(value);
+  }
 }
 
-void Element::DidChangeIsCanvasOrInCanvasSubtree() {
+bool Element::ComputeIsInCanvasSubtree() const {
+  auto& document = GetDocument();
+  const Element* parent = nullptr;
+  if (document.IsFlatTreeTraversalForbidden() ||
+      document.IsInSlotAssignmentRecalc()) {
+    if (IsPseudoElement()) {
+      parent = ParentOrShadowHostElement();
+    } else if (const auto* slot = AssignedSlotWithoutRecalc()) {
+      parent = slot;
+    } else {
+      parent = ParentOrShadowHostElement();
+    }
+  } else {
+    parent = FlatTreeTraversal::ParentElementSkippingSlots(*this);
+  }
+  if (parent) {
+    return parent->IsCanvasOrInCanvasSubtree();
+  }
+
+  if (!isConnected()) {
+    return false;
+  }
+
+  auto* owner = document.LocalOwner();
+  return owner && owner->IsCanvasOrInCanvasSubtree();
+}
+
+bool Element::IsCanvasOrInCanvasSubtree() const {
+  if (IsInCanvasSubtree()) {
+    return true;
+  }
+  if (IsA<HTMLCanvasElement>(*this)) {
+    return true;
+  }
+  return false;
+}
+
+void Element::DidChangeIsInCanvasSubtree() {
   if (auto* layout_object = GetLayoutObject()) {
     layout_object->SetNeedsPaintPropertyUpdate();
     if (layout_object->HasLayer()) {
@@ -4403,7 +4523,7 @@ void Element::RemovedFrom(ContainerNode& insertion_point) {
     document.RemoveFromTopLayerImmediately(this);
   }
 
-  SetIsCanvasOrInCanvasSubtree(false);
+  SetIsInCanvasSubtree(false);
 
   if (NodeRareData* data = RareData()) {
     data->ClearFocusgroupData();
@@ -4462,6 +4582,9 @@ void Element::RemovedFrom(ContainerNode& insertion_point) {
     tracker->RemoveAllOverscroll();
   }
 
+  if (was_in_document && !GetIdAttribute().empty()) {
+    document.MarkOverscrollCommandTargetsDirty();
+  }
 }
 
 void Element::AttachColumnPseudoElements(AttachContext& context) {
@@ -5488,7 +5611,8 @@ StyleRecalcChange Element::RecalcOwnStyle(
   // also clear GetOverscrollContainer() on `this`).
   bool is_valid_overscroll_area =
       new_style && new_style->IsInternalOverscrollPositionAuto() &&
-      style_recalc_context.parent_is_overscroll_container;
+      style_recalc_context.parent_is_overscroll_container &&
+      GetDocument().IsOverscrollCommandTarget(*this);
   Element* parent = parentElement();
 
   if (GetOverscrollContainer() && (!new_style || !is_valid_overscroll_area ||
@@ -5718,7 +5842,10 @@ StyleRecalcChange Element::RecalcOwnStyle(
          "about to be deleted is a waste.";
 
   if (LayoutObject* layout_object = GetLayoutObject()) {
-    DCHECK(new_style);
+    CHECK(old_style) << "Modifying style of an existing LayoutObject - "
+                        "old_style must be non-null";
+    CHECK(new_style) << "Modifying style of an existing LayoutObject - "
+                        "new_style must be non-null";
     if (layout_object->IsText() &&
         IsA<LayoutTextCombine>(layout_object->Parent())) [[unlikely]] {
       // Adjust style for <br> and <wbr> in combined text.
@@ -5726,6 +5853,7 @@ StyleRecalcChange Element::RecalcOwnStyle(
       ComputedStyleBuilder adjust_builder(*new_style);
       StyleAdjuster::AdjustStyleForCombinedText(adjust_builder);
       new_style = adjust_builder.TakeStyle();
+      CHECK(new_style);
     }
     // kEqual means that the computed style didn't change, but there are
     // additional flags in ComputedStyle which may have changed. For instance,
@@ -5867,71 +5995,72 @@ void Element::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
   } else if (NeedsRebuildChildLayoutTrees(whitespace_attacher) &&
              !ChildStyleRecalcBlockedByDisplayLock() &&
              !SkippedContainerStyleRecalc()) {
-    // TODO(crbug.com/972752): Make the condition above a DCHECK instead when
-    // style recalc and dirty bit propagation uses flat-tree traversal.
-    // We create a local WhitespaceAttacher when rebuilding children of an
-    // element with a LayoutObject since whitespace nodes do not rely on layout
-    // objects further up the tree. Also, if this Element's layout object is an
-    // out-of-flow box, in-flow children should not affect whitespace siblings
-    // of the out-of-flow box. However, if this element is a display:contents
-    // element. Continue using the passed in attacher as display:contents
-    // children may affect whitespace nodes further up the tree as they may be
-    // layout tree siblings.
-    WhitespaceAttacher local_attacher;
-    WhitespaceAttacher* child_attacher;
-    const bool has_pseudo_elements = HasPseudoElements();
-    if (has_pseudo_elements) {
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollMarkerGroupAfter,
-                                     local_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonBlockEnd,
-                                     local_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonInlineEnd,
-                                     local_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonInlineStart,
-                                     local_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonBlockStart,
-                                     local_attacher);
-    }
-    LayoutObject* layout_object = GetLayoutObject();
-    if (layout_object || !HasDisplayContentsStyle()) {
-      whitespace_attacher.DidVisitElement(this);
-      if (layout_object && layout_object->WhitespaceChildrenMayChange()) {
-        layout_object->SetWhitespaceChildrenMayChange(false);
-        local_attacher.SetReattachAllWhitespaceNodes();
+    {
+      // TODO(crbug.com/972752): Make the condition above a DCHECK instead when
+      // style recalc and dirty bit propagation uses flat-tree traversal.
+      // We create a local WhitespaceAttacher when rebuilding children of an
+      // element with a LayoutObject since whitespace nodes do not rely on
+      // layout objects further up the tree. Also, if this Element's layout
+      // object is an out-of-flow box, in-flow children should not affect
+      // whitespace siblings of the out-of-flow box. However, if this element is
+      // a display:contents element. Continue using the passed in attacher as
+      // display:contents children may affect whitespace nodes further up the
+      // tree as they may be layout tree siblings.
+      WhitespaceAttacher local_attacher;
+      WhitespaceAttacher* child_attacher;
+      const bool has_pseudo_elements = HasPseudoElements();
+      if (has_pseudo_elements) {
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollMarkerGroupAfter,
+                                       local_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonBlockEnd,
+                                       local_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonInlineEnd,
+                                       local_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonInlineStart,
+                                       local_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollButtonBlockStart,
+                                       local_attacher);
       }
-      child_attacher = &local_attacher;
-    } else {
-      child_attacher = &whitespace_attacher;
-    }
-    RebuildTransitionLayoutTree(*child_attacher);
-    RebuildPseudoElementLayoutTree(kPseudoIdSkeleton, *child_attacher);
-    RebuildOverscrollAreaLayoutTree(*child_attacher);
-    if (has_pseudo_elements) {
-      RebuildPseudoElementLayoutTree(kPseudoIdInterestButton, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdAfter, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdExpandIcon, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdPickerIcon, *child_attacher);
-    }
-    if (GetShadowRoot()) {
-      RebuildShadowRootLayoutTree(*child_attacher);
-    } else {
-      RebuildChildrenLayoutTrees(*child_attacher);
-    }
-    if (has_pseudo_elements) {
-      RebuildPseudoElementLayoutTree(kPseudoIdCheckMark, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdBefore, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdMarker, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollMarkerGroupBefore,
-                                     local_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdBackdrop, *child_attacher);
-      RebuildPseudoElementLayoutTree(kPseudoIdOverscrollBackdrop,
-                                     *child_attacher);
+      LayoutObject* layout_object = GetLayoutObject();
+      if (layout_object || !HasDisplayContentsStyle()) {
+        whitespace_attacher.DidVisitElement(this);
+        if (layout_object && layout_object->WhitespaceChildrenMayChange()) {
+          layout_object->SetWhitespaceChildrenMayChange(false);
+          local_attacher.SetReattachAllWhitespaceNodes();
+        }
+        child_attacher = &local_attacher;
+      } else {
+        child_attacher = &whitespace_attacher;
+      }
+      RebuildTransitionLayoutTree(*child_attacher);
+      RebuildPseudoElementLayoutTree(kPseudoIdSkeleton, *child_attacher);
+      RebuildOverscrollAreaLayoutTree(*child_attacher);
+      if (has_pseudo_elements) {
+        RebuildPseudoElementLayoutTree(kPseudoIdInterestButton,
+                                       *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdAfter, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdExpandIcon, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdPickerIcon, *child_attacher);
+      }
+      if (GetShadowRoot()) {
+        RebuildShadowRootLayoutTree(*child_attacher);
+      } else {
+        RebuildChildrenLayoutTrees(*child_attacher);
+      }
+      if (has_pseudo_elements) {
+        RebuildPseudoElementLayoutTree(kPseudoIdCheckMark, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdBefore, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdMarker, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollMarkerGroupBefore,
+                                       local_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdBackdrop, *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdOverscrollBackdrop,
+                                       *child_attacher);
+        RebuildPseudoElementLayoutTree(kPseudoIdScrollMarker, *child_attacher);
+        RebuildColumnLayoutTrees(*child_attacher);
+      }
     }
     RebuildFirstLetterLayoutTree();
-    if (has_pseudo_elements) {
-      RebuildPseudoElementLayoutTree(kPseudoIdScrollMarker, *child_attacher);
-      RebuildColumnLayoutTrees(*child_attacher);
-    }
     ClearChildNeedsReattachLayoutTree();
   }
   DCHECK(!NeedsStyleRecalc());
@@ -6756,33 +6885,32 @@ void Element::SetTargetedSnapAreaIdsForSnapContainers() {
   std::optional<cc::ElementId> targeted_area_id = std::nullopt;
   const LayoutBox* box = GetLayoutBox();
   while (box) {
-    if (const ComputedStyle* style = box->Style()) {
-      // If this is a snap area, associate it with the first snap area we
-      // encountered, if any, since the previous snap container.
-      if (box->IsScrollContainer() && !style->GetScrollSnapType().is_none) {
-        if (auto* scrollable_area = box->GetScrollableArea()) {
-          scrollable_area->SetTargetedSnapAreaId(targeted_area_id);
-          GetDocument().View()->AddPendingSnapUpdate(scrollable_area);
-        }
-        targeted_area_id.reset();
+    const ComputedStyle& style = box->StyleRef();
+    // If this is a snap area, associate it with the first snap area we
+    // encountered, if any, since the previous snap container.
+    if (box->IsScrollContainer() && !style.GetScrollSnapType().is_none) {
+      if (auto* scrollable_area = box->GetScrollableArea()) {
+        scrollable_area->SetTargetedSnapAreaId(targeted_area_id);
+        GetDocument().View()->AddPendingSnapUpdate(scrollable_area);
       }
-      // Only update |targeted_area_id| if we don't already have one so that we
-      // prefer associating snap containers with their innermost snap targets.
-      const auto& snap_align = style->GetScrollSnapAlign();
-      if (!targeted_area_id &&
-          (snap_align.alignment_block != cc::SnapAlignment::kNone ||
-           snap_align.alignment_inline != cc::SnapAlignment::kNone)) {
-        if (Node* node = box->GetNode()) {
-          targeted_area_id =
-              CompositorElementIdFromDOMNodeId(node->GetDomNodeId());
-        }
-        // Though not spec'd, we should prefer associating snap containers with
-        // their innermost (in DOM hierarchy) snap areas.
-        // This means we can skip any snap areas between this area and its snap
-        // container.
-        box = box->ContainingScrollContainer();
-        continue;
+      targeted_area_id.reset();
+    }
+    // Only update |targeted_area_id| if we don't already have one so that we
+    // prefer associating snap containers with their innermost snap targets.
+    const auto& snap_align = style.GetScrollSnapAlign();
+    if (!targeted_area_id &&
+        (snap_align.alignment_block != cc::SnapAlignment::kNone ||
+         snap_align.alignment_inline != cc::SnapAlignment::kNone)) {
+      if (Node* node = box->GetNode()) {
+        targeted_area_id =
+            CompositorElementIdFromDOMNodeId(node->GetDomNodeId());
       }
+      // Though not spec'd, we should prefer associating snap containers with
+      // their innermost (in DOM hierarchy) snap areas.
+      // This means we can skip any snap areas between this area and its snap
+      // container.
+      box = box->ContainingScrollContainer();
+      continue;
     }
     box = box->ContainingBlock();
   }
@@ -6791,11 +6919,10 @@ void Element::SetTargetedSnapAreaIdsForSnapContainers() {
 void Element::ClearTargetedSnapAreaIdsForSnapContainers() {
   const LayoutBox* box = GetLayoutBox();
   while (box) {
-    if (const ComputedStyle* style = box->Style()) {
-      if (box->IsScrollContainer() && !style->GetScrollSnapType().is_none) {
-        if (auto* scrollable_area = box->GetScrollableArea()) {
-          scrollable_area->SetTargetedSnapAreaId(std::nullopt);
-        }
+    if (box->IsScrollContainer() &&
+        !box->StyleRef().GetScrollSnapType().is_none) {
+      if (auto* scrollable_area = box->GetScrollableArea()) {
+        scrollable_area->SetTargetedSnapAreaId(std::nullopt);
       }
     }
     box = box->ContainingBlock();
@@ -8263,9 +8390,11 @@ void Element::Focus(const FocusParams& params) {
     if (Element* new_focus_target = GetFocusableArea()) {
       // Unlike the specification, we re-run focus() for new_focus_target
       // because we can't change |this| in a member function.
-      new_focus_target->Focus(FocusParams(
-          SelectionBehaviorOnFocus::kReset, mojom::blink::FocusType::kForward,
-          /*capabilities=*/nullptr, params_to_use.options));
+      // Forward the caller's FocusType so we don't set
+      // WasLastFocusFromUserGesture incorrectly.
+      new_focus_target->Focus(
+          FocusParams(SelectionBehaviorOnFocus::kReset, params_to_use.type,
+                      /*capabilities=*/nullptr, params_to_use.options));
     }
     // 2. If new focus target is null, then:
     //  2.1. If no fallback target was specified, then return.
@@ -8347,9 +8476,14 @@ void Element::Focus(const FocusParams& params) {
 }
 
 void Element::SetFocused(bool now_focused, mojom::blink::FocusType focus_type) {
-  EnsureRareData().SetWasLastFocusFromUserGesture(
-      focus_type != mojom::blink::FocusType::kNone &&
-      focus_type != mojom::blink::FocusType::kScript);
+  // FocusType::kPage represents a page-level focus change (e.g. switching
+  // tabs) rather than focusing a different element, so preserve the existing
+  // value in that case.
+  if (focus_type != mojom::blink::FocusType::kPage) {
+    EnsureRareData().SetWasLastFocusFromUserGesture(
+        focus_type != mojom::blink::FocusType::kNone &&
+        focus_type != mojom::blink::FocusType::kScript);
+  }
   // Recurse up author shadow trees to mark shadow hosts if it matches :focus.
   // TODO(kochi): Handle UA shadows which marks multiple nodes as focused such
   // as <input type="date"> the same way as author shadow.
@@ -8861,6 +8995,11 @@ void Element::ActiveViewTransitionTypeStateChanged() {
   PseudoStateChanged(CSSSelector::kPseudoActiveViewTransitionType);
 }
 
+void Element::OverscrollTargetStateChanged() {
+  SetNeedsStyleRecalc(kLocalStyleChange, StyleChangeReasonForTracing::Create(
+                                             style_change_reason::kOverscroll));
+}
+
 bool Element::MatchesOverscrollOpen() const {
   if (!RuntimeEnabledFeatures::OverscrollGesturesEnabled()) {
     return false;
@@ -8906,7 +9045,7 @@ void Element::SetHasFocusWithinUpToAncestor(bool has_focus_within,
     // focus even if its own HasFocusWithin state has not changed.
     if (element != this && need_snap_container_search) {
       if (const LayoutBox* box = element->GetLayoutBoxForScrolling()) {
-        if (box->Style() && !box->StyleRef().GetScrollSnapType().is_none) {
+        if (!box->StyleRef().GetScrollSnapType().is_none) {
           // TODO(crbug.com/340983092): We should be able to just call
           // LocalFrameView::AddPendingSnapUpdate, but that results in a snap
           // which cancels ongoing scroll animations.
@@ -10340,18 +10479,6 @@ bool Element::ShouldStoreComputedStyle(const ComputedStyle& style) const {
   }
 
   return style.Display() == EDisplay::kContents;
-}
-
-bool Element::IsInCanvasSubtree() const {
-  auto* parent = ParentOrShadowHostElement();
-  if (parent) {
-    return parent->IsCanvasOrInCanvasSubtree();
-  }
-  if (!isConnected()) {
-    return false;
-  }
-  auto* owner = GetDocument().LocalOwner();
-  return owner && owner->IsCanvasOrInCanvasSubtree();
 }
 
 AtomicString Element::ComputeInheritedLanguage() const {
@@ -13769,7 +13896,7 @@ bool Element::RecalcSelfOrAncestorHasContainerTiming() const {
   if (IsHTMLElement()) {
     if (FastHasAttribute(html_names::kContainertimingAttr)) {
       return true;
-    } else if (FastHasAttribute(html_names::kContainertimingIgnoreAttr)) {
+    } else if (HasContainerTimingIgnoreAttribute()) {
       return false;
     }
   }
@@ -13786,7 +13913,7 @@ void Element::UpdateDescendantHasContainerTiming(bool has_container_timing) {
   while (element) {
     if (element->IsHTMLElement()) {
       if (element->FastHasAttribute(html_names::kContainertimingAttr) ||
-          element->FastHasAttribute(html_names::kContainertimingIgnoreAttr)) {
+          element->HasContainerTimingIgnoreAttribute()) {
         element = ElementTraversal::NextSkippingChildren(*element, this);
         continue;
       }
@@ -13810,11 +13937,16 @@ void Element::UpdateDescendantHasContainerTiming(bool has_container_timing) {
   }
 }
 
+bool Element::HasContainerTimingIgnoreAttribute() const {
+  return FastHasAttribute(html_names::kContainertimingignoreAttr) ||
+         FastHasAttribute(html_names::kContainertimingIgnoreAttr);
+}
+
 bool Element::DoesChildContainerTimingNeedChange(const Node& node) const {
   auto* element = DynamicTo<Element>(node);
   if (element && element->IsHTMLElement() &&
       (element->FastHasAttribute(html_names::kContainertimingAttr) ||
-       element->FastHasAttribute(html_names::kContainertimingIgnoreAttr))) {
+       element->HasContainerTimingIgnoreAttribute())) {
     return false;
   }
   return SelfOrAncestorHasContainerTiming() !=

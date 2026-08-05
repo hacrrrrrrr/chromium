@@ -267,6 +267,9 @@ public class Features {
     @Deprecated
     public static final String RESTRICT_SENSITIVE_WEB_CONTENT = "RESTRICT_SENSITIVE_WEB_CONTENT";
 
+    // WebContentBuilder
+    public static final String WEB_CONTENT = "WEB_CONTENT";
+
     // WebSettingsCompat.setUserAgentMetadataFromMap
     // WebSettingsCompat.getUserAgentMetadataMap
     public static final String USER_AGENT_METADATA = "USER_AGENT_METADATA";
@@ -397,6 +400,10 @@ public class Features {
     public static final String COMMITTED_NAVIGATION_GET_PAGE_NON_NULL =
             "COMMITTED_NAVIGATION_GET_PAGE_NON_NULL";
 
+    // WebViewNavigationListener.onNavigationVisible()
+    public static final String WEB_VIEW_NAVIGATION_LISTENER_NAVIGATION_VISIBLE =
+            "WEB_VIEW_NAVIGATION_LISTENER_NAVIGATION_VISIBLE";
+
     // SupportLibWebViewChromium weakly reference WebView
     public static final String PROVIDER_WEAKLY_REF_WEBVIEW = "PROVIDER_WEAKLY_REF_WEBVIEW";
 
@@ -496,4 +503,12 @@ public class Features {
     // HttpCache.getQuotaBytes
     // HttpCache.setQuotaBytes
     public static final String HTTP_CACHE_MANAGER = "HTTP_CACHE_MANAGER";
+
+    // Profile.setCrossOriginIsolatedAllowList
+    // Profile.getCrossOriginIsolatedAllowList
+    public static final String CROSS_ORIGIN_ISOLATED_ALLOW_LIST =
+            "CROSS_ORIGIN_ISOLATED_ALLOW_LIST";
+
+    // Navigation.getResponseHeaders
+    public static final String NAVIGATION_GET_RESPONSE_HEADERS = "NAVIGATION_GET_RESPONSE_HEADERS";
 }

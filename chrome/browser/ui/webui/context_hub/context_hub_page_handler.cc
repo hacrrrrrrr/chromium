@@ -4,22 +4,17 @@
 
 #include "chrome/browser/ui/webui/context_hub/context_hub_page_handler.h"
 
-#include <array>
 #include <vector>
 
+#include "base/check.h"
 #include "base/functional/bind.h"
-#include "base/rand_util.h"
-#include "base/strings/strcat.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/context_hub/auto_todos/auto_todo_entry.h"
 #include "chrome/browser/context_hub/context_hub_service.h"
 #include "chrome/browser/context_hub/context_hub_service_factory.h"
 #include "chrome/browser/context_hub/memory_bank/memory_bank_entry.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/personal_context/proto/features/auto_todos.pb.h"
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
@@ -60,7 +55,7 @@ class BrowserTabProvider : public ContextHubPageHandler::TabProvider {
   }
 
   void SwitchToTab(content::WebContents* web_contents,
-                   int32_t tab_id) override {
+                   int64_t tab_id) override {
     if (!web_contents) {
       return;
     }
@@ -92,23 +87,38 @@ class BrowserTabProvider : public ContextHubPageHandler::TabProvider {
 #endif
 
 ContextHubPageHandler::ContextHubPageHandler(
+    mojo::PendingRemote<browser::context_hub::mojom::Page> page,
     mojo::PendingReceiver<browser::context_hub::mojom::PageHandler> receiver,
     Profile* profile,
     content::WebContents* web_contents,
     std::unique_ptr<TabProvider> tab_provider)
-    : receiver_(this, std::move(receiver)),
+    : page_(std::move(page)),
+      receiver_(this, std::move(receiver)),
       tab_provider_(std::move(tab_provider)),
       profile_(profile),
       web_contents_(web_contents) {
+  CHECK(page_.is_bound());
   if (!tab_provider_) {
 #if !BUILDFLAG(IS_ANDROID)
     tab_provider_ = std::make_unique<BrowserTabProvider>();
 #endif
   }
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    service_observation_.Observe(service);
+  }
 }
 
 ContextHubPageHandler::~ContextHubPageHandler() = default;
 
+void ContextHubPageHandler::OnAutoTodosChanged(
+    base::span<const context_hub::AutoTodoEntry> entries) {
+  page_->OnAutoTodosChanged(std::vector(std::from_range, entries));
+}
+
+// TODO(crbug.com/540562062): Update this to GenerateFirstPartyAutoTodos and
+// allow the cache change notification to return the updated Todos.
 void ContextHubPageHandler::GenerateAutoTodos(
     GenerateAutoTodosCallback callback) {
   context_hub::ContextHubService* service =
@@ -118,49 +128,90 @@ void ContextHubPageHandler::GenerateAutoTodos(
     return;
   }
 
-  service->GenerateAutoTodos(
-      base::BindOnce(&ContextHubPageHandler::OnAutoTodosGenerated,
-                     weak_factory_.GetWeakPtr(), std::move(callback)));
+  service->GenerateFirstPartyAutoTodos(std::move(callback));
 }
 
-void ContextHubPageHandler::OnAutoTodosGenerated(
-    GenerateAutoTodosCallback callback,
-    std::optional<personal_context::proto::AutoTodosResponse> result) {
-  std::optional<std::vector<browser::context_hub::mojom::AutoTodoItemPtr>>
-      mojo_todos;
-  if (result.has_value() && result.value().todos_size() > 0) {
-    mojo_todos.emplace();
-    for (const personal_context::proto::AutoTodoItem& todo :
-         result.value().todos()) {
-      browser::context_hub::mojom::AutoTodoItemPtr mojo_todo =
-          browser::context_hub::mojom::AutoTodoItem::New();
-      mojo_todo->title = todo.title();
-      mojo_todo->description = todo.description();
-      mojo_todo->actionable_url = GURL(todo.actionable_url());
-      mojo_todo->score =
-          std::round(todo.importance_score() * 100.0f) / 100.0f;
-      for (const personal_context::proto::SourceReference& ref :
-           todo.source_references()) {
-        if (ref.has_gmail()) {
-          browser::context_hub::mojom::GmailReferencePtr gmail =
-              browser::context_hub::mojom::GmailReference::New();
-          gmail->message_url = GURL(ref.gmail().message_url());
-          mojo_todo->source_references.push_back(
-              browser::context_hub::mojom::SourceReference::NewGmail(
-                  std::move(gmail)));
-        } else if (ref.has_photos()) {
-          browser::context_hub::mojom::PhotosReferencePtr photos =
-              browser::context_hub::mojom::PhotosReference::New();
-          photos->photos_url = GURL(ref.photos().photos_url());
-          mojo_todo->source_references.push_back(
-              browser::context_hub::mojom::SourceReference::NewPhotos(
-                  std::move(photos)));
-        }
-      }
-      mojo_todos->push_back(std::move(mojo_todo));
-    }
+void ContextHubPageHandler::GetAutoTodos(GetAutoTodosCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (!service) {
+    std::move(callback).Run({}, {});
+    return;
   }
-  std::move(callback).Run(std::move(mojo_todos));
+
+  service->GetAutoTodos(base::BindOnce(
+      [](GetAutoTodosCallback callback,
+         std::vector<context_hub::AutoTodoEntry> entries) {
+        std::vector<context_hub::AutoTodoEntry> first_party_todos;
+        std::vector<context_hub::AutoTodoEntry> third_party_todos;
+        for (auto& entry : entries) {
+          if (entry.is_first_party()) {
+            first_party_todos.push_back(std::move(entry));
+          } else if (entry.is_third_party()) {
+            third_party_todos.push_back(std::move(entry));
+          }
+        }
+        std::move(callback).Run(std::move(first_party_todos),
+                                std::move(third_party_todos));
+      },
+      std::move(callback)));
+}
+
+void ContextHubPageHandler::UpdateAutoTodo(
+    const context_hub::AutoTodoEntry& todo,
+    UpdateAutoTodoCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (!service) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  service->UpdateAutoTodo(todo, std::move(callback));
+}
+
+void ContextHubPageHandler::SetTodoFeedback(
+    browser::context_hub::mojom::AutoTodoItemFeedbackPtr feedback,
+    SetTodoFeedbackCallback callback) {
+  CHECK(feedback);
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    service->SetTodoFeedback(std::move(feedback));
+  }
+  std::move(callback).Run();
+}
+
+void ContextHubPageHandler::DeleteTodoFeedback(
+    const std::string& id,
+    DeleteTodoFeedbackCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    service->DeleteTodoFeedback(id);
+  }
+  std::move(callback).Run();
+}
+
+void ContextHubPageHandler::ClearTodoFeedbacks(
+    ClearTodoFeedbacksCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    service->ClearTodoFeedbacks();
+  }
+  std::move(callback).Run();
+}
+
+void ContextHubPageHandler::GetTodoFeedbacks(
+    GetTodoFeedbacksCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    std::move(callback).Run(service->GetTodoFeedbacks());
+    return;
+  }
+  std::move(callback).Run({});
 }
 
 void ContextHubPageHandler::GetAllMemoryBankEntries(
@@ -248,6 +299,22 @@ std::vector<browser::context_hub::mojom::TabInfoPtr> ToMojoTabs(
   return mojo_tabs;
 }
 
+std::vector<browser::context_hub::mojom::ChatMessagePtr> ToMojoChatHistory(
+    const std::vector<optimization_guide::proto::ChatHistoryTurn>& history) {
+  std::vector<browser::context_hub::mojom::ChatMessagePtr> mojo_history;
+  mojo_history.reserve(history.size());
+  for (const auto& turn : history) {
+    auto mojo_msg = browser::context_hub::mojom::ChatMessage::New();
+    mojo_msg->role =
+        turn.role() == optimization_guide::proto::ChatHistoryTurn::ROLE_USER
+            ? browser::context_hub::mojom::ChatRole::kUser
+            : browser::context_hub::mojom::ChatRole::kAssistant;
+    mojo_msg->content = turn.message_content();
+    mojo_history.push_back(std::move(mojo_msg));
+  }
+  return mojo_history;
+}
+
 }  // namespace
 
 void ContextHubPageHandler::GetTabs(GetTabsCallback callback) {
@@ -256,19 +323,20 @@ void ContextHubPageHandler::GetTabs(GetTabsCallback callback) {
 }
 
 void ContextHubPageHandler::RetrieveAndGroupTabs(
+    const std::string& user_command,
     RetrieveAndGroupTabsCallback callback) {
   context_hub::ContextHubService* service =
       ContextHubServiceFactory::GetForProfile(profile_);
   if (!service || !tab_provider_) {
-    std::move(callback).Run({}, {});
+    std::move(callback).Run({}, {}, /*llm_response=*/nullptr);
     return;
   }
 
   service->GroupTabs(
-      GetOpenTabs(tab_provider_.get(), web_contents_),
+      GetOpenTabs(tab_provider_.get(), web_contents_), user_command,
       base::BindOnce(
           [](RetrieveAndGroupTabsCallback callback,
-             std::vector<context_hub::TabGroupData> groups,
+             std::vector<context_hub::TabGroupEntry> groups,
              std::vector<context_hub::TabData> ungrouped_tabs) {
             std::vector<browser::context_hub::mojom::TabGroupPtr> mojo_groups;
             for (const auto& group : groups) {
@@ -278,14 +346,130 @@ void ContextHubPageHandler::RetrieveAndGroupTabs(
               mojo_groups.push_back(std::move(mojo_group));
             }
 
+            // TODO(crbug.com/535675010): Add LLM Response.
             std::move(callback).Run(std::move(mojo_groups),
-                                    ToMojoTabs(ungrouped_tabs));
+                                    ToMojoTabs(ungrouped_tabs),
+                                    /*llm_response=*/nullptr);
           },
           std::move(callback)));
 }
 
-void ContextHubPageHandler::SwitchToTab(int32_t tab_id) {
+void ContextHubPageHandler::GetExistingTabGroupsAndChats(
+    GetExistingTabGroupsAndChatsCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (!service || !tab_provider_) {
+    std::move(callback).Run({}, {}, {});
+    return;
+  }
+
+  std::vector<context_hub::TabData> open_tabs =
+      GetOpenTabs(tab_provider_.get(), web_contents_);
+  std::vector<browser::context_hub::mojom::ChatMessagePtr> mojo_history =
+      ToMojoChatHistory(service->GetTabGroupChatHistory());
+
+  if (open_tabs.empty()) {
+    std::move(callback).Run({}, {}, std::move(mojo_history));
+    return;
+  }
+
+  service->GetTabGroups(base::BindOnce(
+      [](std::vector<context_hub::TabData> open_tabs,
+         std::vector<browser::context_hub::mojom::ChatMessagePtr> mojo_history,
+         GetExistingTabGroupsAndChatsCallback callback,
+         std::vector<context_hub::TabGroupEntry> stored_groups) {
+        base::flat_map<int32_t, size_t> tab_index_map;
+        for (size_t i = 0; i < open_tabs.size(); ++i) {
+          // Populate the map with tab ID to index.
+          tab_index_map.emplace(open_tabs[i].id, i);
+        }
+
+        std::vector<browser::context_hub::mojom::TabGroupPtr> mojo_groups;
+        // For each stored group, go through each tab in the group and find
+        // the corresponding tab by ID in the open tabs list. Delete the tab ID from
+        // the map once added to a group.
+        for (const auto& entry : stored_groups) {
+          std::vector<context_hub::TabData> group_tabs;
+          for (int64_t tab_id_64 : entry.tab_ids) {
+            int32_t tab_id = static_cast<int32_t>(tab_id_64);
+            auto it = tab_index_map.find(tab_id);
+            if (it != tab_index_map.end()) {
+              group_tabs.push_back(open_tabs[it->second]);
+              tab_index_map.erase(it);
+            }
+          }
+          auto mojo_group = browser::context_hub::mojom::TabGroup::New();
+          mojo_group->label = entry.label;
+          mojo_group->tabs = ToMojoTabs(group_tabs);
+          mojo_groups.push_back(std::move(mojo_group));
+        }
+
+        // Any remaining tab IDs in the map are ungrouped tabs.
+        std::vector<context_hub::TabData> ungrouped_tabs;
+        for (const auto& tab : open_tabs) {
+          if (tab_index_map.contains(tab.id)) {
+            ungrouped_tabs.push_back(tab);
+          }
+        }
+
+        std::move(callback).Run(std::move(mojo_groups),
+                                ToMojoTabs(ungrouped_tabs),
+                                std::move(mojo_history));
+      },
+      std::move(open_tabs), std::move(mojo_history), std::move(callback)));
+}
+
+void ContextHubPageHandler::SwitchToTab(int64_t tab_id) {
   if (tab_provider_) {
     tab_provider_->SwitchToTab(web_contents_, tab_id);
   }
+}
+
+void ContextHubPageHandler::ClearTabGroups(ClearTabGroupsCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (!service) {
+    std::move(callback).Run();
+    return;
+  }
+
+  service->DeleteAllTabGroups(std::move(callback));
+}
+
+void ContextHubPageHandler::ClearTabGroupChatHistory(
+    ClearTabGroupChatHistoryCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (service) {
+    service->ClearTabGroupChatHistory();
+  }
+  std::move(callback).Run();
+}
+
+void ContextHubPageHandler::AskGeminiWithContext(
+    const std::string& user_command,
+    const std::vector<int64_t>& memory_bank_entry_ids,
+    AskGeminiWithContextCallback callback) {
+  context_hub::ContextHubService* service =
+      ContextHubServiceFactory::GetForProfile(profile_);
+  if (!service) {
+    auto response = browser::context_hub::mojom::ChatMessage::New();
+    response->role = browser::context_hub::mojom::ChatRole::kAssistant;
+    response->content = "Service unavailable.";
+    std::move(callback).Run(std::move(response));
+    return;
+  }
+
+  service->ExecuteMemoryBankChat(
+      memory_bank_entry_ids, user_command,
+      base::BindOnce(
+          [](AskGeminiWithContextCallback callback,
+             std::optional<std::string> response_text) {
+            auto response = browser::context_hub::mojom::ChatMessage::New();
+            response->role = browser::context_hub::mojom::ChatRole::kAssistant;
+            response->content =
+                response_text.value_or("Failed to generate response.");
+            std::move(callback).Run(std::move(response));
+          },
+          std::move(callback)));
 }

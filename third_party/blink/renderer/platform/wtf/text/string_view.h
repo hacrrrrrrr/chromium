@@ -59,7 +59,7 @@ class WTF_EXPORT StringView {
   DISALLOW_NEW();
 
  public:
-  using size_type = string_size_t;
+  using size_type = wtf_size_t;
   static constexpr size_type npos = kNotFound;
 
   // A buffer that allows for short strings to be held on the stack during a
@@ -193,7 +193,7 @@ class WTF_EXPORT StringView {
   // If you'd like to iterate code units, just use [] and length().
   //
   // * Iterate code units
-  //    for (string_size_t i = 0; i < view.length(); ++i) {
+  //    for (wtf_size_t i = 0; i < view.length(); ++i) {
   //      UChar code_unit = view[i];
   //      ...
   // * Iterate code points
@@ -305,6 +305,16 @@ class WTF_EXPORT StringView {
     // with a zero offset and the same length we can just access the impl
     // directly since this == StringView(m_impl).
     if (impl_->RawByteSpan().data() == Bytes() && length_ == impl_->length()) {
+      return GetPtr(impl_);
+    }
+    return nullptr;
+  }
+
+  // Like SharedImpl(), but also succeeds when this view is a *prefix* of its
+  // backing StringImpl (starts at the beginning of the impl's buffer but may be
+  // shorter than the whole impl). Returns that StringImpl on success.
+  StringImpl* SharedSubImpl() const {
+    if (impl_->RawByteSpan().data() == Bytes()) {
       return GetPtr(impl_);
     }
     return nullptr;

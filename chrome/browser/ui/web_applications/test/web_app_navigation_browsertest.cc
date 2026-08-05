@@ -24,8 +24,8 @@
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
-#include "chrome/browser/web_applications/web_app_install_finalizer.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
+#include "chrome/browser/web_applications/web_app_origin_association_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -243,7 +243,7 @@ void WebAppNavigationBrowserTest::SetUpOnMainThread() {
   host_resolver()->AddRule("*", "127.0.0.1");
   // By default, all SSL cert checks are valid. Can be overridden in tests.
   cert_verifier_.mock_cert_verifier()->set_default_result(net::OK);
-  profile_ = browser()->profile();
+  profile_ = browser()->GetProfile();
 }
 
 void WebAppNavigationBrowserTest::TearDownOnMainThread() {

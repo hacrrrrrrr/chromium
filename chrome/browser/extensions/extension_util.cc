@@ -25,6 +25,8 @@
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/site_instance.h"
 #include "extensions/browser/disable_reason.h"
+#include "extensions/browser/extension_mojo_binder_registry.h"
+#include "extensions/browser/extension_mojo_binder_registry_factory.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registrar.h"
 #include "extensions/browser/extension_registry.h"
@@ -44,6 +46,11 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+#include "chrome/common/extensions/manifest_handlers/settings_overrides_handler.h"
+#include "extensions/common/manifest_handlers/chrome_url_overrides_handler.h"
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/profiles/profile_helper.h"
@@ -97,12 +104,7 @@ bool IsForceInstalledExtension(const ExtensionId& extension_id,
       pref->GetType() != base::Value::Type::DICT) {
     return false;
   }
-  for (const auto item : pref->GetValue()->GetDict()) {
-    if (extension_id == item.first) {
-      return true;
-    }
-  }
-  return false;
+  return pref->GetValue()->GetDict().Find(extension_id) != nullptr;
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
@@ -372,13 +374,47 @@ GURL GetExtensionsPageUrl(const ExtensionId& extension_id) {
 
 bool IsMojoJsEnabledForExtension(const ExtensionId& extension_id,
                                  content::BrowserContext* context) {
-  if (extension_id != extension_misc::kAimEligibilityExtensionId) {
-    return false;
-  }
   const Extension* extension =
       ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
           extension_id);
-  return extension && Manifest::IsComponentLocation(extension->location());
+  return ExtensionMojoBinderRegistryFactory::GetForBrowserContext(context)
+      ->IsMojoJsEnabled(extension);
 }
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+DseNtpOverrideType GetDseNtpOverrideType(const Extension& extension) {
+  enum Flags {
+    kNone = 0,
+    kDse = 1 << 0,
+    kNtp = 1 << 1,
+  };
+
+  int mask = kNone;
+
+  const SettingsOverrides* settings_overrides =
+      SettingsOverrides::Get(&extension);
+  if (settings_overrides && settings_overrides->search_engine.has_value() &&
+      settings_overrides->search_engine->is_default) {
+    mask |= kDse;
+  }
+
+  const URLOverrides::URLOverrideMap& url_overrides =
+      URLOverrides::GetChromeURLOverrides(&extension);
+  if (url_overrides.contains("newtab")) {
+    mask |= kNtp;
+  }
+
+  switch (mask) {
+    case kDse:
+      return DseNtpOverrideType::kDse;
+    case kNtp:
+      return DseNtpOverrideType::kNtp;
+    case kDse | kNtp:
+      return DseNtpOverrideType::kBoth;
+    default:
+      return DseNtpOverrideType::kNone;
+  }
+}
+#endif
 
 } // namespace extensions::util

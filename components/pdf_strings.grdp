@@ -338,8 +338,32 @@
       <message name="IDS_PDF_INK2_ANNOTATION_COLOR_TAN_3" desc="The button label for selecting the 'tan 3' brush color for drawing strokes in the PDF viewer.">
         Tan 3
       </message>
+      <message name="IDS_PDF_INK2_ANNOTATION_REDONE" desc="The confirmation announcement read by screen readers when an annotation action is redone." is_accessibility_with_no_ui="true">
+        Annotation redone
+      </message>
+      <message name="IDS_PDF_INK2_ANNOTATION_UNDONE" desc="The confirmation announcement read by screen readers when an annotation action is undone." is_accessibility_with_no_ui="true">
+        Annotation undone
+      </message>
       <message name="IDS_PDF_INK2_TEXT_ANNOTATION" desc="The button label for entering 'text annotation mode' in the PDF viewer, which allows for adding and editing text annotations.">
         Add text annotations
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_DELETED" desc="The confirmation announcement read by screen readers when a text annotation is deleted in the PDF viewer." is_accessibility_with_no_ui="true">
+        Deleted
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_DOWN" desc="The confirmation announcement read by screen readers when a text annotation is moved down in the PDF viewer." is_accessibility_with_no_ui="true">
+        Moved down
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_LEFT" desc="The confirmation announcement read by screen readers when a text annotation is moved left in the PDF viewer." is_accessibility_with_no_ui="true">
+        Moved left
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_RIGHT" desc="The confirmation announcement read by screen readers when a text annotation is moved right in the PDF viewer." is_accessibility_with_no_ui="true">
+        Moved right
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_MOVED_UP" desc="The confirmation announcement read by screen readers when a text annotation is moved up in the PDF viewer." is_accessibility_with_no_ui="true">
+        Moved up
+      </message>
+      <message name="IDS_PDF_INK2_TEXT_ANNOTATION_RESIZED" desc="The confirmation announcement read by screen readers when a text annotation is resized in the PDF viewer." is_accessibility_with_no_ui="true">
+        Resized
       </message>
       <message name="IDS_PDF_INK2_TEXT_ANNOTATIONS_AX_LABEL" desc="Accessibility label for the list of existing text annotations in the PDF that the user can select for editing.">
         Annotation

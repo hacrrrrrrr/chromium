@@ -25,7 +25,6 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.DeviceInfo;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
 import org.chromium.base.TimeUtils;
@@ -284,8 +283,22 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
         removeInvalidInstanceData();
         List<InstanceInfo> result = new ArrayList<>();
         SparseBooleanArray visibleTasks = MultiWindowUtils.getVisibleTasks();
+
+        Profile profile = null;
+        TabModelOrchestrator orchestrator = mTabModelOrchestratorSupplier.get();
+        if (orchestrator != null) {
+            TabModelSelector selector = orchestrator.getTabModelSelector();
+            if (selector != null) {
+                profile = selector.getCurrentModel().getProfile();
+            }
+        }
+        boolean isIncognitoForced = profile != null && IncognitoUtils.isIncognitoModeForced(profile);
+
         for (int i : MultiWindowUtils.getPersistedInstanceIds(persistedInstanceType)) {
             if (!includeDeleted && ChromeMultiInstancePersistentStore.readMarkedForDeletion(i)) {
+                continue;
+            }
+            if (isIncognitoForced && ChromeMultiInstancePersistentStore.readNormalTabCount(i) > 0) {
                 continue;
             }
             @InstanceInfo.Type int type = InstanceInfo.Type.OTHER;
@@ -441,6 +454,16 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
                 ChromeFeatureList.sAllocInstanceIdIncreasedDefaultRange.isEnabled()
                         ? TabWindowManager.MAX_SELECTORS_1000
                         : getMaxInstances();
+        boolean lastWindowClosedByApp =
+                MultiWindowUtils.isNewStartupWindowPolicyEnabled()
+                        && ChromeMultiInstancePersistentStore.readLastSessionExitType()
+                                == LastSessionExitType.LAST_WINDOW_CLOSED_BY_APP;
+        if (lastWindowClosedByApp) {
+            // Clear the non-default session type after it has been first processed during an app
+            // launch to prevent it from being incorrectly used subsequently.
+            ChromeMultiInstancePersistentStore.clearLastSessionExitType();
+        }
+
         for (int i = 0; i < maxRange; ++i) {
             int persistedTaskId = ChromeMultiInstancePersistentStore.readTaskId(i);
             if (persistedTaskId != INVALID_TASK_ID) {
@@ -451,10 +474,7 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
             }
 
             boolean instanceExists = ChromeMultiInstancePersistentStore.hasInstance(i);
-            if (instanceExists
-                    && !isRelaunch
-                    && (DeviceInfo.isDesktop()
-                            && ChromeFeatureList.sOnStartupWindowPolicy.isEnabled())) {
+            if (instanceExists && !isRelaunch && lastWindowClosedByApp) {
                 // This supports updated default id allocation / startup behavior where a newly
                 // created activity will refrain from using existing instance state and will be
                 // created as a brand-new window instead.
@@ -875,6 +895,15 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
 
     @Override
     public void closeWindows(List<Integer> instanceIds, @CloseWindowAppSource int source) {
+        if (MultiWindowUtils.isNewStartupWindowPolicyEnabled()) {
+            Set<Integer> activeInstanceIds =
+                    MultiWindowUtils.getPersistedInstanceIds(PersistedInstanceType.ACTIVE);
+            if (!activeInstanceIds.isEmpty() && instanceIds.containsAll(activeInstanceIds)) {
+                TabbedStartupWindowPolicyDelegate.getInstance()
+                        .maybeSaveWindowStateOnSessionTermination(
+                                LastSessionExitType.LAST_WINDOW_CLOSED_BY_APP);
+            }
+        }
         boolean shouldCloseCurrentInstance = false;
         var appTasksById = MultiWindowUtils.getAppTasksById(mActivity);
         for (int instanceId : instanceIds) {
@@ -1055,9 +1084,14 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
             ChromeMultiInstancePersistentStore.writeClosureTime(mInstanceId);
         }
         if (mActivity.isFinishing()) {
-            ChromeMultiInstancePersistentStore.writeIsRecoverable(mInstanceId, false);
-            // Notify Recent Tabs page that the instance is closing.
-            notifyInstancesClosed(Collections.singletonList(mInstanceId), isPermanentDeletion);
+            boolean isQuitInProgress = isAppQuitInProgress();
+            if (!isQuitInProgress || MultiWindowUtils.hasNoNormalTabs(mInstanceId)) {
+                ChromeMultiInstancePersistentStore.writeIsRecoverable(mInstanceId, false);
+            }
+            if (!isQuitInProgress) {
+                // Notify Recent Tabs page that the instance is closing.
+                notifyInstancesClosed(Collections.singletonList(mInstanceId), isPermanentDeletion);
+            }
         }
 
         if (mInstanceId != INVALID_WINDOW_ID) {
@@ -1081,7 +1115,11 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
     @Override
     public void onTopResumedActivityChanged(boolean isTopResumedActivity) {
         super.onTopResumedActivityChanged(isTopResumedActivity);
-        if (isTopResumedActivity) {
+        // Do not update last accessed time if the activity is finishing. This is to avoid
+        // undesirably marking a finishing activity as recently accessed in a scenario where
+        // multiple activities are finishing as a result of a bulk shutdown, so that we persist
+        // accurate instance state for the window that was truly accessed last.
+        if (isTopResumedActivity && !mActivity.isFinishing()) {
             ChromeMultiInstancePersistentStore.writeLastAccessedTime(mInstanceId);
         }
     }
@@ -1092,7 +1130,8 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
         // We persist last closed time when the activity is stopped as a fallback for when
         // #onDestroy() is not called for a finishing activity.
         ChromeMultiInstancePersistentStore.writeClosureTime(mInstanceId);
-        if (mActivity.isFinishing()) {
+        if (mActivity.isFinishing()
+                && (!isAppQuitInProgress() || MultiWindowUtils.hasNoNormalTabs(mInstanceId))) {
             ChromeMultiInstancePersistentStore.writeIsRecoverable(mInstanceId, false);
         }
     }
@@ -1261,8 +1300,21 @@ class MultiInstanceManagerApi31 extends MultiInstanceManagerImpl
         return Objects.requireNonNullElse(MultiWindowUtils.sMaxInstancesForTesting, mMaxInstances);
     }
 
+    private static boolean isAppQuitInProgress() {
+        return MultiWindowUtils.isNewStartupWindowPolicyEnabled()
+                && ChromeMultiInstancePersistentStore.readLastSessionExitType()
+                        == LastSessionExitType.QUIT;
+    }
+
     @Override
     public void showInstanceCreationLimitMessage() {
+        // TODO(crbug.com/527595823): Remove this helper method post-launch and call
+        // MultiWindowUtils.showInstanceCreationLimitToast directly.
+        if (MultiWindowUtils.isWindowManagerDeprecated()) {
+            MultiWindowUtils.showInstanceCreationLimitToast(mActivity);
+            return;
+        }
+
         if (mIsCreationLimitMessageEnqueued) return;
 
         MessageDispatcher messageDispatcher = getMessageDispatcher();

@@ -164,18 +164,18 @@ export class InternetDetailDialogElement extends
     };
   }
 
-  guid: string;
-  private managedProperties_: ManagedProperties;
-  private deviceState_: OncMojo.DeviceStateProperties|null;
-  private showTechnologyBadge_: boolean;
-  private showConfigurableSections_: boolean;
-  private disabled_: boolean;
-  private globalPolicy_: GlobalPolicy;
-  private apnExpanded_: boolean;
-  private isApnRevampEnabled_: boolean;
-  private isApnRevampAndAllowApnModificationPolicyEnabled_: boolean;
-  private isNumCustomApnsLimitReached_: boolean;
-  private errorToastMessage_: string;
+  declare guid: string;
+  declare private managedProperties_: ManagedProperties;
+  declare private deviceState_: OncMojo.DeviceStateProperties|null;
+  declare private showTechnologyBadge_: boolean;
+  declare private showConfigurableSections_: boolean;
+  declare private disabled_: boolean;
+  declare private globalPolicy_: GlobalPolicy;
+  declare private apnExpanded_: boolean;
+  declare private isApnRevampEnabled_: boolean;
+  declare private isApnRevampAndAllowApnModificationPolicyEnabled_: boolean;
+  declare private isNumCustomApnsLimitReached_: boolean;
+  declare private errorToastMessage_: string;
   private didSetFocus_: boolean = false;
 
   /**
@@ -184,7 +184,8 @@ export class InternetDetailDialogElement extends
    */
   private propertiesReceived_: boolean = false;
   private networkConfig_: CrosNetworkConfigInterface;
-  private browserProxy_: InternetDetailDialogBrowserProxy;
+  private browserProxy_: InternetDetailDialogBrowserProxy =
+      InternetDetailDialogBrowserProxyImpl.getInstance();
 
   /** @override */
   constructor() {
@@ -209,7 +210,6 @@ export class InternetDetailDialogElement extends
   override connectedCallback() {
     super.connectedCallback();
 
-    this.browserProxy_ = InternetDetailDialogBrowserProxyImpl.getInstance();
     const dialogArgs = this.browserProxy_.getDialogArguments();
 
     ColorChangeUpdater.forDocument().start();

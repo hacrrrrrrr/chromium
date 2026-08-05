@@ -9,13 +9,19 @@
 
 #include "base/check.h"
 #include "base/functional/bind.h"
+#include "base/metrics/histogram_functions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/global_features.h"
+#include "chrome/browser/performance_manager/public/user_tuning/battery_saver_mode_manager.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+
+#if BUILDFLAG(IS_MAC)
+#include "base/mac/mac_util.h"
+#endif
 
 namespace {
 // The maximum number of windows tracked by this service that can be eligible
@@ -50,6 +56,12 @@ GlassFrameService::GlassFrameService(BrowserProcess& process)
       prefs::kGlassFrameEnabled,
       base::BindRepeating(&GlassFrameService::OnGlassFrameEnabledPrefChanged,
                           base::Unretained(this)));
+  CHECK(
+      performance_manager::user_tuning::BatterySaverModeManager::HasInstance());
+  auto* const bsm_manager =
+      performance_manager::user_tuning::BatterySaverModeManager::GetInstance();
+  is_battery_saver_mode_active_ = bsm_manager->IsBatterySaverActive();
+  battery_saver_observation_.Observe(bsm_manager);
 
   // Pre-populate the deque with the most recently activated browsers.
   browser_collection->ForEach(
@@ -60,13 +72,17 @@ GlassFrameService::GlassFrameService(BrowserProcess& process)
           return false;
         }
 
-        activated_browsers_.push_back(browser);
+        if (browser->GetType() == BrowserWindowInterface::TYPE_NORMAL) {
+          activated_browsers_.push_back(browser);
+        }
 
         // Keep iterating if we haven't hit the maximum number of tracked
         // windows.
         return true;
       },
       BrowserCollection::Order::kActivation);
+
+  LogGlassFramePreferredLook();
 }
 
 GlassFrameService::~GlassFrameService() = default;
@@ -75,13 +91,7 @@ base::CallbackListSubscription
 GlassFrameService::RegisterGlassFrameEligibilityChangedCallback(
     BrowserWindowInterface* browser_window_interface,
     GlassFrameEligibilityChangedCallback callback) {
-  return callbacks_.Add(base::BindRepeating(
-      [](BrowserWindowInterface* target_browser,
-         GlassFrameEligibilityChangedCallback target_callback,
-         const base::flat_set<BrowserWindowInterface*>& eligible) {
-        target_callback.Run(eligible.contains(target_browser));
-      },
-      browser_window_interface, std::move(callback)));
+  return window_callbacks_[browser_window_interface].Add(std::move(callback));
 }
 
 bool GlassFrameService::IsBrowserWindowEligible(
@@ -90,6 +100,10 @@ bool GlassFrameService::IsBrowserWindowEligible(
 }
 
 void GlassFrameService::OnBrowserActivated(BrowserWindowInterface* browser) {
+  if (browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
+    return;
+  }
+
   // If the browser is already in the list, remove it since it
   // needs to be re-added to the front of the list.
   auto it = std::find(activated_browsers_.begin(), activated_browsers_.end(),
@@ -105,14 +119,15 @@ void GlassFrameService::OnBrowserActivated(BrowserWindowInterface* browser) {
 
   activated_browsers_.push_front(browser);
 
-  const base::flat_set<BrowserWindowInterface*> new_eligible =
-      GetEligibleBrowserWindowInterfaces();
-  callbacks_.Notify(new_eligible);
+  NotifyEligibilityChanged();
 }
 
 void GlassFrameService::OnBrowserClosed(BrowserWindowInterface* browser) {
-  const base::flat_set<BrowserWindowInterface*> old_eligible =
-      GetEligibleBrowserWindowInterfaces();
+  if (browser->GetType() != BrowserWindowInterface::TYPE_NORMAL) {
+    return;
+  }
+
+  window_callbacks_.erase(browser);
 
   auto it = std::find(activated_browsers_.begin(), activated_browsers_.end(),
                       browser);
@@ -120,11 +135,22 @@ void GlassFrameService::OnBrowserClosed(BrowserWindowInterface* browser) {
     activated_browsers_.erase(it);
   }
 
-  const base::flat_set<BrowserWindowInterface*> new_eligible =
-      GetEligibleBrowserWindowInterfaces();
-  if (old_eligible != new_eligible) {
-    callbacks_.Notify(new_eligible);
+  NotifyEligibilityChanged();
+}
+
+void GlassFrameService::OnBatterySaverActiveChanged(bool is_active) {
+  if (is_battery_saver_mode_active_ == is_active) {
+    return;
   }
+  is_battery_saver_mode_active_ = is_active;
+  NotifyEligibilityChanged();
+}
+
+void GlassFrameService::OnBatterySaverModeManagerDestroyed() {
+  // Reset the BatterySaverModeManager observation to prevent having
+  // a dangling pointer to the BatterySaverModeManager on destruction.
+  battery_saver_observation_.Reset();
+  is_battery_saver_mode_active_ = false;
 }
 
 base::flat_set<BrowserWindowInterface*>
@@ -144,9 +170,32 @@ GlassFrameService::GetEligibleBrowserWindowInterfaces() {
           prefs::kGlassFrameEnabled)) {
     return {};
   }
+
+  if (is_battery_saver_mode_active_) {
+    return {};
+  }
+
   return MostRecentActivatedBrowsers();
 }
 
 void GlassFrameService::OnGlassFrameEnabledPrefChanged() {
-  callbacks_.Notify(GetEligibleBrowserWindowInterfaces());
+  NotifyEligibilityChanged();
+}
+
+void GlassFrameService::NotifyEligibilityChanged() {
+  const base::flat_set<BrowserWindowInterface*> eligible =
+      GetEligibleBrowserWindowInterfaces();
+  for (auto& [browser, callback_list] : window_callbacks_) {
+    callback_list.Notify(eligible.contains(browser));
+  }
+}
+
+void GlassFrameService::LogGlassFramePreferredLook() {
+#if BUILDFLAG(IS_MAC)
+  if (base::mac::MacOSMajorVersion() == 26) {
+    base::UmaHistogramEnumeration(
+        "Mac.GlassFrame.MacOS26LiquidGlassPreferredLook",
+        base::mac::GetMacOS26LiquidGlassPreferredLook());
+  }
+#endif  // BUILDFLAG(IS_MAC)
 }

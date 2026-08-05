@@ -56,6 +56,7 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.pdf.PdfUtils.PdfHyperlinkClickResult;
 import org.chromium.chrome.browser.pdf.PdfUtils.PdfLoadResult;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.ui.native_page.NativePageHost;
@@ -204,7 +205,8 @@ public class PdfCoordinator
                 new View.OnAttachStateChangeListener() {
                     @Override
                     public void onViewAttachedToWindow(View view) {
-                        loadPdfFile();
+                        // Post to avoid modifying view hierarchy during attachment traversal.
+                        view.post(() -> loadPdfFile());
                     }
 
                     @Override
@@ -225,6 +227,7 @@ public class PdfCoordinator
             if (reuseFragment) {
                 mChromePdfViewerFragment = (ChromePdfViewerFragment) fragment;
                 mChromePdfViewerFragment.setDelegate(this);
+                mChromePdfViewerFragment.setPagesPerRow(false);
                 if (mPdfFilePath == null) mPdfFilePath = mChromePdfViewerFragment.getFilePath();
                 String restoredFileName = mChromePdfViewerFragment.getFileName();
                 if (mTitle == null && restoredFileName != null) mTitle = restoredFileName;
@@ -796,8 +799,18 @@ public class PdfCoordinator
             }
         }
 
+        @VisibleForTesting
+        static int getSafePageIndex(int pageIndex, int pageCount) {
+            return pageCount > 0
+                    ? Math.min(Math.max(0, pageIndex), pageCount - 1)
+                    : Math.max(0, pageIndex);
+        }
+
         void scrollToPage(int pageIndex) {
             if (mPdfView != null) {
+                PdfDocument pdfDocument = mPdfView.getPdfDocument();
+                int pageCount = pdfDocument != null ? pdfDocument.getPageCount() : 0;
+                int safePageIndex = getSafePageIndex(pageIndex, pageCount);
                 // 1. Get the current height of the view in pixels.
                 float viewHeightPx = mPdfView.getHeight();
 
@@ -812,7 +825,7 @@ public class PdfCoordinator
 
                 // 4. Use the single-argument scrollToPosition.
                 // The internal logic will center this offset, resulting in a top-aligned page.
-                mPdfView.scrollToPosition(new PdfPoint(pageIndex, 0f, yOffsetPoints));
+                mPdfView.scrollToPosition(new PdfPoint(safePageIndex, 0f, yOffsetPoints));
             }
         }
 
@@ -883,8 +896,11 @@ public class PdfCoordinator
             PdfDocument pdfDocument = pdfView.getPdfDocument();
             assert pdfDocument != null;
 
+            int pageCount = pdfDocument.getPageCount();
+            int safePageIndex = getSafePageIndex(pageIndex, pageCount);
+
             pdfDocument.getPageInfo(
-                    pageIndex,
+                    safePageIndex,
                     new Continuation<PageInfo>() {
                         @Override
                         public CoroutineContext getContext() {
@@ -1003,7 +1019,18 @@ public class PdfCoordinator
     @Override
     public void onDownloadComplete(String pdfFilePath, String pdfFileName) {
         mTitle = pdfFileName;
-        loadPdfFile(pdfFilePath);
+        // `mIsPdfLoaded` is true when the PDF is reloaded. In this case, a new download is
+        // triggered while the current PDF is still loaded. Since the `PdfCoordinator` is reused,
+        // `mIsPdfLoaded` remains true. We then reload the fragment with the new file path.
+        // This reload flow is only used when fragment reuse is disabled.
+        if (mIsPdfLoaded) {
+            assert !PdfUtils.isReuseFragmentEnabled();
+            mPdfFilePath = pdfFilePath;
+            mUri = PdfUtils.getContentUri(mPdfFilePath, mTitle, mTabId, mIsIncognito);
+            reload();
+        } else {
+            loadPdfFile(pdfFilePath);
+        }
     }
 
     /** Returns the filepath of the pdf document. */
@@ -1021,6 +1048,15 @@ public class PdfCoordinator
     @Override
     public void resetLoadState() {
         mIsPdfLoaded = false;
+        if (mChromePdfViewerFragment != null) {
+            mChromePdfViewerFragment.setPagesPerRow(false);
+        }
+        // Reset two-pages-per-row state early so the overflow menu doesn't show a stale label while
+        // loading, and to prevent permanent out-of-sync state if loading fails or is aborted before
+        // onDocumentLoaded() is invoked.
+        if (mToolbarCoordinator != null) {
+            mToolbarCoordinator.resetTwoPagesPerRow();
+        }
     }
 
     private void loadPdfFile() {
@@ -1033,7 +1069,7 @@ public class PdfCoordinator
         if (mView.getParent() == null) {
             return;
         }
-        mUri = PdfUtils.getUriFromFilePath(mPdfFilePath);
+        mUri = PdfUtils.getContentUri(mPdfFilePath, mTitle, mTabId, mIsIncognito);
         PdfUtils.recordIsUriNull(mUri == null);
         loadPdfInternal();
     }
@@ -1042,6 +1078,12 @@ public class PdfCoordinator
     public void reload() {
         if (mUri == null) {
             return;
+        }
+        // Reset two-pages-per-row state early so the overflow menu doesn't show a stale label while
+        // reloading, and to prevent permanent out-of-sync state if the reload fails or is aborted
+        // before onDocumentLoaded() is invoked.
+        if (mToolbarCoordinator != null) {
+            mToolbarCoordinator.resetTwoPagesPerRow();
         }
         int page = -1;
         float zoom = -1f;
@@ -1074,6 +1116,10 @@ public class PdfCoordinator
         args.putFloat(ChromePdfViewerFragment.KEY_SAVED_ZOOM, zoom);
         args.putBoolean(ChromePdfViewerFragment.KEY_RESTORE_POSITION_PENDING, pending);
         mChromePdfViewerFragment.setArguments(args);
+
+        if (mView.getParent() == null) {
+            return;
+        }
 
         // Add new fragment and load document again.
         loadPdfInternal();
@@ -1289,10 +1335,12 @@ public class PdfCoordinator
     @Override
     public boolean onLinkClicked(Uri uri) {
         if (!PdfUtils.isInlinePdfV2Enabled()) {
+            PdfUtils.recordHyperlinkClickResult(PdfHyperlinkClickResult.IGNORED_V2_DISABLED);
             return false;
         }
         String scheme = uri.getScheme();
         if (scheme == null || !ALLOWED_LINK_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) {
+            PdfUtils.recordHyperlinkClickResult(PdfHyperlinkClickResult.BLOCKED_INVALID_SCHEME);
             return false;
         }
         LoadUrlParams params = new LoadUrlParams(uri.toString(), PAGE_TRANSITION_TYPE);
@@ -1300,6 +1348,7 @@ public class PdfCoordinator
         // TODO(crbug.com/484103003): Reconsider initiator origin if renderer initiated is true.
         params.setInitiatorOrigin(Origin.create(new GURL(mUrl)));
         mNativePageHost.loadUrl(params, mIsIncognito);
+        PdfUtils.recordHyperlinkClickResult(PdfHyperlinkClickResult.SUCCESS_LOAD_INITIATED);
         return true;
     }
 

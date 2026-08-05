@@ -1,6 +1,8 @@
 # Copyright 2018 The Chromium Authors
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Generated file. DO NOT EDIT.
 
 import("//third_party/abseil-cpp/absl.gni")
 
@@ -10,7 +12,7 @@ absl_source_set("civil_time") {
     "include/cctz/civil_time.h",
     "include/cctz/civil_time_detail.h",
   ]
-  public_deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+  deps = [ "//third_party/abseil-cpp/absl/base:config" ]
 }
 
 absl_source_set("time_zone") {
@@ -32,16 +34,19 @@ absl_source_set("time_zone") {
     "src/tzfile.h",
     "src/zone_info_source.cc",
   ]
-  if (is_win) {
-    sources += [
-      "src/time_zone_name_win.cc",
-      "src/time_zone_name_win.h",
-    ]
-  }
   public = [
     "include/cctz/time_zone.h",
     "include/cctz/zone_info_source.h",
   ]
+  deps = [
+    ":civil_time",
+    "//third_party/abseil-cpp/absl/base:config",
+  ]
+
+  if (is_win) {
+    sources += [ "src/time_zone_name_win.cc" ]
+    public += [ "src/time_zone_name_win.h" ]
+  }
   defines = []
   if (is_apple) {
     frameworks = [ "Foundation.framework" ]
@@ -49,17 +54,58 @@ absl_source_set("time_zone") {
     # Work-around for https://github.com/llvm/llvm-project/issues/117630
     defines += [ "_XOPEN_SOURCE=700" ]
   }
-  public_deps = [
-    ":civil_time",
-    "//third_party/abseil-cpp/absl/base:config",
-  ]
   if (is_fuchsia) {
-    deps = [
+    deps += [
       "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.intl:fuchsia.intl_hlcpp",
       "//third_party/fuchsia-sdk/sdk/pkg/async",
       "//third_party/fuchsia-sdk/sdk/pkg/async-loop-cpp",
       "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
       "//third_party/fuchsia-sdk/sdk/pkg/zx",
     ]
+  }
+}
+
+absl_source_set("test_time_zone_names") {
+  testonly = true
+  sources = [ "src/test_time_zone_names.cc" ]
+  public = [ "src/test_time_zone_names.h" ]
+  visibility = [ ":*" ]
+  deps = [ "//third_party/abseil-cpp/absl/base:config" ]
+}
+
+absl_test("civil_time_test") {
+  sources = [ "src/civil_time_test.cc" ]
+  deps = [
+    ":civil_time",
+    "//third_party/abseil-cpp/absl/base:config",
+  ]
+}
+
+absl_test("time_zone_format_test") {
+  sources = [ "src/time_zone_format_test.cc" ]
+  deps = [
+    ":civil_time",
+    ":time_zone",
+    "//third_party/abseil-cpp/absl/base:config",
+  ]
+}
+
+absl_test("time_zone_lookup_test") {
+  sources = [ "src/time_zone_lookup_test.cc" ]
+  deps = [
+    ":civil_time",
+    ":test_time_zone_names",
+    ":time_zone",
+    "//third_party/abseil-cpp/absl/base:config",
+  ]
+}
+
+absl_test("time_zone_name_win_test") {
+  deps = [
+    ":time_zone",
+    "//third_party/abseil-cpp/absl/base:config",
+  ]
+  if (is_win) {
+    sources = [ "src/time_zone_name_win_test.cc" ]
   }
 }

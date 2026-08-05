@@ -1400,7 +1400,11 @@ activity_reporter::ActivityReporter* BrowserProcessImpl::activity_reporter() {
             system_network_context_manager()->GetSharedURLLoaderFactory(),
             // Never send cookies for activity reports.
             base::BindRepeating([](const GURL& url) { return false; })),
-        base::BindRepeating(&chrome::GetChannel),
+        base::BindRepeating(&chrome::GetChannel), base::BindRepeating([] {
+          std::string brand;
+          google_brand::GetBrand(&brand);
+          return brand;
+        }),
         base::BindRepeating(&updater::SetActive),
 #if BUILDFLAG(IS_WIN)
         InstallUtil::IsPerUserInstall()
@@ -1641,6 +1645,7 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   storage_monitor::StorageMonitor::Create();
 #endif
 
+  features_->PreMainMessageLoopRun();
   platform_part_->PreMainMessageLoopRun();
 
   InitializeNetworkTimeTracker();

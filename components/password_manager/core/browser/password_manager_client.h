@@ -23,6 +23,7 @@
 #include "components/password_manager/core/browser/leak_detection_dialog_utils.h"
 #include "components/password_manager/core/browser/manage_passwords_referrer.h"
 #include "components/password_manager/core/browser/password_cross_domain_confirmation_popup_controller.h"
+#include "components/password_manager/core/browser/password_store/actionable_error.h"
 #include "components/password_manager/core/browser/password_store/password_store_backend_error.h"
 #include "components/password_manager/core/browser/undo_password_change_controller.h"
 #include "components/password_manager/core/browser/webauthn_credentials_delegate.h"
@@ -133,6 +134,11 @@ enum class ErrorMessageFlowType { kSaveFlow, kFillFlow };
 // main frame here are also referring to the primary main frame.
 class PasswordManagerClient {
  public:
+  enum class PasswordFillTrigger {
+    kPasswordManagerAutofill,
+    kAgentTask,
+  };
+
   using CredentialsCallback = base::OnceCallback<void(const PasswordForm*)>;
   using ReauthSucceeded = base::StrongAlias<class ReauthSucceededTag, bool>;
 
@@ -365,6 +371,10 @@ class PasswordManagerClient {
 
   // Gets the sync service associated with this client.
   virtual const syncer::SyncService* GetSyncService() const = 0;
+
+  // Returns the current sync or trusted vault error state that requires user
+  // action, or ActionableError::kNoError if there is none.
+  virtual ActionableError GetActionableError() const;
 
   // Gets the affiliation service associated with this client.
   virtual affiliations::AffiliationService* GetAffiliationService() = 0;
@@ -610,6 +620,11 @@ class PasswordManagerClient {
   // TODO(crbug.com/509852350): Figure out if this is needed on iOS and
   //  implement it.
   virtual bool IsActorTaskActive();
+
+  // Notifies the client that a password fill event occurred.
+  virtual void OnPasswordFilled(PasswordManagerDriver* driver,
+                                const GURL& url,
+                                PasswordFillTrigger trigger_type);
 };
 
 }  // namespace password_manager

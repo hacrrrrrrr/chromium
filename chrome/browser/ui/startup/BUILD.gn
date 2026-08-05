@@ -153,6 +153,7 @@ source_set("impl") {
     "//chrome/browser/sync",
     "//chrome/browser/sync:factories",
     "//chrome/browser/ui:simple_message_box_headers",
+    "//chrome/browser/ui/browser_window:create_browser_window",
     "//chrome/browser/ui/dialogs",
     "//chrome/browser/ui/profiles",
     "//chrome/browser/webauthn",
@@ -228,7 +229,6 @@ source_set("impl") {
       "//chrome/browser/prefs",
       "//chrome/browser/prefs:util",
       "//chrome/browser/privacy_sandbox:headers",
-      "//chrome/browser/privacy_sandbox/notice:desktop_entrypoint_handlers_helper",
       "//chrome/browser/profile_resetter",
       "//chrome/browser/profiles:misc",
       "//chrome/browser/profiles:profile_io_data",
@@ -236,6 +236,7 @@ source_set("impl") {
       "//chrome/browser/search",
       "//chrome/browser/search_engines",
       "//chrome/browser/ui:chrome_pages",
+      "//chrome/browser/ui:session_crashed_bubble",
       "//chrome/browser/ui:ui_features",
       "//chrome/browser/ui/browser_window",
       "//chrome/browser/ui/extensions",
@@ -248,6 +249,7 @@ source_set("impl") {
       "//chrome/browser/ui/toasts/api:toasts",
       "//chrome/browser/ui/waap:manager",
       "//chrome/browser/ui/waap:window_metrics_manager",
+      "//chrome/browser/ui/webui/settings",
       "//chrome/browser/ui/webui/whats_new",
       "//chrome/browser/web_applications",
       "//chrome/common",
@@ -358,6 +360,7 @@ source_set("impl") {
     ]
     deps += [
       "//chrome/browser/signin:signin_promo",
+      "//chrome/browser/ui/webui:chrome_web_contents_handler",
       "//chrome/credential_provider/common:common_constants",
     ]
   }

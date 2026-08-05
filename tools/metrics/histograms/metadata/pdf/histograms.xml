@@ -58,7 +58,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="PDF.EngineLifetime" units="ms" expires_after="2026-11-15">
+<histogram name="PDF.EngineLifetime" units="ms" expires_after="2027-01-17">
   <owner>rhalavati@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -68,7 +68,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="PDF.FirstPaintTime" units="ms" expires_after="2026-11-15">
+<histogram name="PDF.FirstPaintTime" units="ms" expires_after="2027-01-17">
   <owner>rhalavati@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -80,7 +80,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="PDF.FormType" enum="PDFFormTypes" expires_after="2026-11-15">
+<histogram name="PDF.FormType" enum="PDFFormTypes" expires_after="2027-01-17">
   <owner>dhoss@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -155,6 +155,26 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="PDF.Ink2EmojiFontLoadFailed" enum="Boolean"
+    expires_after="2026-12-16">
+  <owner>andyphan@chromium.org</owner>
+  <owner>thestig@chromium.org</owner>
+  <summary>
+    Tracks emoji font load failures for Ink text annotations in the PDF viewer.
+    Recorded when an emoji font fails to load. Always records true.
+  </summary>
+</histogram>
+
+<histogram name="PDF.Ink2FontLoaded" enum="Boolean" expires_after="2026-12-16">
+  <owner>andyphan@chromium.org</owner>
+  <owner>thestig@chromium.org</owner>
+  <summary>
+    Tracks the success or failure of loading fonts for Ink text annotations in
+    the PDF viewer. Recorded when attempting to load a font. Records true on
+    success and false on failure.
+  </summary>
+</histogram>
+
 <histogram name="PDF.Ink2StrokeBrushType" enum="PDFInk2StrokeBrushType"
     expires_after="2026-12-16">
   <owner>andyphan@chromium.org</owner>
@@ -182,7 +202,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="PDF.Ink2StrokeInputDeviceType"
-    enum="PDFInk2StrokeInputDeviceType" expires_after="2026-08-09">
+    enum="PDFInk2StrokeInputDeviceType" expires_after="2026-12-16">
   <owner>andyphan@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -224,6 +244,30 @@ chromium-metrics-reviews@google.com.
   </token>
 </histogram>
 
+<histogram name="PDF.Ink2TextAnnotationAlignment"
+    enum="PDFInk2TextAnnotationAlignment" expires_after="2026-12-16">
+  <owner>thestig@chromium.org</owner>
+  <owner>andyphan@chromium.org</owner>
+  <summary>
+    Tracks the text alignment (left, center, or right) used for an Ink2 text
+    annotation in the PDF viewer. This is recorded whenever a non-empty text
+    annotation is committed by the user (either created or edited), but not if
+    it occurs as part of undo or redo operations.
+  </summary>
+</histogram>
+
+<histogram name="PDF.Ink2TextAnnotationBold" enum="Boolean"
+    expires_after="2026-12-16">
+  <owner>thestig@chromium.org</owner>
+  <owner>andyphan@chromium.org</owner>
+  <summary>
+    Tracks whether an Ink2 text annotation in the PDF viewer has the bold style
+    applied. This is recorded whenever a non-empty text annotation is committed
+    by the user (either created or edited), but not if it occurs as part of undo
+    or redo operations.
+  </summary>
+</histogram>
+
 <histogram name="PDF.Ink2TextAnnotationColor" enum="PDFInk2TextAnnotationColor"
     expires_after="2026-12-16">
   <owner>thestig@chromium.org</owner>
@@ -233,6 +277,31 @@ chromium-metrics-reviews@google.com.
     recorded whenever a non-empty text annotation is committed by the user
     (either created or edited), but not if it occurs as part of undo or redo
     operations.
+  </summary>
+</histogram>
+
+<histogram name="PDF.Ink2TextAnnotationItalic" enum="Boolean"
+    expires_after="2026-12-16">
+  <owner>thestig@chromium.org</owner>
+  <owner>andyphan@chromium.org</owner>
+  <summary>
+    Tracks whether an Ink2 text annotation in the PDF viewer has the italic
+    style applied. This is recorded whenever a non-empty text annotation is
+    committed by the user (either created or edited), but not if it occurs as
+    part of undo or redo operations.
+  </summary>
+</histogram>
+
+<histogram name="PDF.Ink2TextAnnotationSize" units="pixels"
+    expires_after="2026-12-16">
+  <owner>thestig@chromium.org</owner>
+  <owner>andyphan@chromium.org</owner>
+  <summary>
+    Tracks the font size used for an Ink2 text annotation in the PDF viewer. The
+    value recorded are integer font sizes and assumes there are no fractional
+    sizes. This is recorded whenever a non-empty text annotation is committed by
+    the user (either created or edited), but not if it occurs as part of undo or
+    redo operations.
   </summary>
 </histogram>
 
@@ -289,7 +358,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="PDF.LoadedWithV2InkAnnotations2"
-    enum="PDFLoadedWithV2InkAnnotations" expires_after="2026-08-09">
+    enum="PDFLoadedWithV2InkAnnotations" expires_after="2026-12-16">
   <owner>andyphan@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -318,7 +387,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="PDF.PageHasText" enum="Boolean" expires_after="2026-11-15">
+<histogram name="PDF.PageHasText" enum="Boolean" expires_after="2027-01-17">
   <owner>rhalavati@chromium.org</owner>
   <owner>thestig@chromium.org</owner>
   <summary>
@@ -336,7 +405,7 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="PDF.RenderAndPaintTime" units="ms" expires_after="2026-11-29">
+<histogram name="PDF.RenderAndPaintTime" units="ms" expires_after="2027-01-31">
   <owner>thestig@chromium.org</owner>
   <owner>ask@chromium.org</owner>
   <summary>
@@ -347,7 +416,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="PDF.RenderAndPaintVisiblePagesTime" units="ms"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>thestig@chromium.org</owner>
   <owner>ask@chromium.org</owner>
   <summary>
@@ -357,7 +426,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="PDF.RenderPaintAndFlushTime" units="ms"
-    expires_after="2026-11-29">
+    expires_after="2027-01-31">
   <owner>thestig@chromium.org</owner>
   <owner>ask@chromium.org</owner>
   <summary>
@@ -491,7 +560,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="PDF.SkiaFontMapperWindows.EnumFontsTime" units="ms"
-    expires_after="2026-11-20">
+    expires_after="2027-01-24">
   <owner>anthonyvd@chromium.org</owner>
   <owner>ajgo@chromium.org</owner>
   <summary>

@@ -103,6 +103,31 @@ std::vector<std::string> DumpAccessibilityTreeTest::Dump() {
                            base::SPLIT_WANT_NONEMPTY);
 }
 
+void DumpAccessibilityTreeTest::RunApgPatternThirdPartyTest(
+    const base::FilePath::CharType* file_path) {
+  base::FilePath source_dir;
+  CHECK(base::PathService::Get(base::DIR_SRC_TEST_DATA_ROOT, &source_dir));
+  base::FilePath test_file =
+      source_dir
+          .Append(FILE_PATH_LITERAL(
+              "third_party/aria-practices/src/content/patterns"))
+          .Append(base::FilePath(file_path));
+
+  base::FilePath expectation_path =
+      source_dir.Append(FILE_PATH_LITERAL("content/test/data/accessibility"))
+          .Append(base::FilePath::FromASCII(kApgPatternThirdParty))
+          .Append(base::FilePath(file_path).BaseName());
+
+  // The HTTP server serves files relative to the registered directory.
+  // The registered directory is third_party/aria-practices/src/content.
+  // So the URL path should be relative to that.
+  // file_path is something like "meter/examples/meter.html".
+  base::FilePath relative_path(file_path);
+  std::string dir = "patterns/" + relative_path.DirName().MaybeAsASCII();
+  RunTest(ui::kAXModeComplete | ui::AXMode::kScreenReader, test_file,
+          dir.c_str(), expectation_path);
+}
+
 void DumpAccessibilityTreeTest::ChooseFeatures(
     std::vector<base::test::FeatureRef>* enabled_features,
     std::vector<base::test::FeatureRef>* disabled_features) {
@@ -3120,6 +3145,13 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
   RunHtmlTest(FILE_PATH_LITERAL("input-radio-checkbox-label.html"));
 }
 
+#if BUILDFLAG(IS_ANDROID)
+IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
+                       AccessibilityInputRadioSiblingWithSpan) {
+  RunHtmlTest(FILE_PATH_LITERAL("input-radio-sibling-with-span.html"));
+}
+#endif  // BUILDFLAG(IS_ANDROID)
+
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest,
                        AccessibilityInputRadioChunked) {
   RunHtmlTest(FILE_PATH_LITERAL("input-radio-chunked.html"));
@@ -4648,69 +4680,6 @@ IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest, ReusedMapChangeMapName) {
 IN_PROC_BROWSER_TEST_P(YieldingParserDumpAccessibilityTreeTest,
                        ReusedMapChangeMapName) {
   RunRegressionTest(FILE_PATH_LITERAL("reused-map-change-map-name.html"));
-}
-
-// Enable language detection for both static and dynamic content.
-class DumpAccessibilityTreeWithLanguageDetectionTest
-    : public DumpAccessibilityTreeTest {
- public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    DumpAccessibilityTreeTest::SetUpCommandLine(command_line);
-
-    command_line->AppendSwitch(
-        ::switches::kEnableExperimentalAccessibilityLanguageDetectionDynamic);
-  }
-
-  void RunLanguageDetectionTest(const base::FilePath::CharType* file_path) {
-    base::FilePath test_path =
-        GetTestFilePath("accessibility", "language-detection");
-    {
-      base::ScopedAllowBlockingForTesting allow_blocking;
-      ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
-    }
-    base::FilePath language_detection_file =
-        test_path.Append(base::FilePath(file_path));
-
-    RunTest(ui::kAXModeComplete | ui::AXMode::kScreenReader,
-            language_detection_file, "accessibility/language-detection");
-  }
-};
-
-INSTANTIATE_TEST_SUITE_P(
-    All,
-    DumpAccessibilityTreeWithLanguageDetectionTest,
-    ::testing::ValuesIn(DumpAccessibilityTestBase::TreeTestPasses()),
-    DumpAccessibilityTreeTestPassToString());
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangAttribute) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("lang-attribute.html"));
-}
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangAttributeNested) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("lang-attribute-nested.html"));
-}
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangAttributeSwitching) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("lang-attribute-switching.html"));
-}
-
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangDetectionDynamicBasic) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("dynamic-basic.html"));
-}
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangDetectionDynamicMultipleInserts) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("dynamic-multiple-inserts.html"));
-}
-
-IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeWithLanguageDetectionTest,
-                       LangDetectionDynamicReparenting) {
-  RunLanguageDetectionTest(FILE_PATH_LITERAL("dynamic-reparenting.html"));
 }
 
 IN_PROC_BROWSER_TEST_P(DumpAccessibilityTreeTest, ComboboxItemVisibility) {

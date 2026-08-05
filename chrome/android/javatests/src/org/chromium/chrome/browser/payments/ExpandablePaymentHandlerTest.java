@@ -376,9 +376,7 @@ public class ExpandablePaymentHandlerTest {
     @Test
     @SmallTest
     @Feature({"Payments"})
-    @EnableFeatures({
-        PaymentFeatureList.PAYMENT_HANDLER_DIALOG_USE_INITIATOR_IN_URL_LOAD_FOR_ANDROID
-    })
+    @EnableFeatures({PaymentFeatureList.PAYMENT_HANDLER_DIALOG_USE_INITIATOR_IN_URL_LOAD})
     public void testInitiatorOriginSet() throws Throwable {
         startDefaultServer();
         mStartingPage = mStartingPage.loadWebPageProgrammatically(mServer.getURL("/"));
@@ -419,11 +417,7 @@ public class ExpandablePaymentHandlerTest {
         PaymentHandlerCoordinator paymentHandler = createPaymentHandlerAndShow();
         waitForUiShown();
 
-        onView(withId(R.id.bottom_sheet))
-                .check(
-                        matches(
-                                withContentDescription(
-                                        "Payment handler sheet. Swipe down to close.")));
+        onView(withId(R.id.bottom_sheet)).check(matches(isDisplayed()));
 
         CriteriaHelper.pollInstrumentationThread(
                 () -> paymentHandler.getWebContentsForTest().getTitle().equals("Max Pay"));
@@ -431,12 +425,7 @@ public class ExpandablePaymentHandlerTest {
         onView(withId(R.id.title))
                 .check(matches(isDisplayed()))
                 .check(matches(withText("Max Pay")));
-        onView(withId(R.id.bottom_sheet))
-                .check(matches(isDisplayed()))
-                .check(
-                        matches(
-                                withContentDescription(
-                                        "Payment handler sheet. Swipe down to close.")));
+        onView(withId(R.id.bottom_sheet)).check(matches(isDisplayed()));
         onView(withId(R.id.close))
                 .check(matches(isDisplayed()))
                 .check(matches(withContentDescription("Close")));

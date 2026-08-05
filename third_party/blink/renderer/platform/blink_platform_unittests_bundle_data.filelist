@@ -133,6 +133,7 @@
 ../../web_tests/external/wpt/fonts/noto/NotoSansDevanagari-Regular.ttf
 ../../web_tests/external/wpt/fonts/noto/NotoSansMongolian-regular.woff2
 ../../web_tests/external/wpt/fonts/noto/NotoSansNko-regular-webfont.woff2
+../../web_tests/external/wpt/fonts/noto/cjk-kr/NotoSansCJKkr-Regular-subset.otf
 ../../web_tests/external/wpt/fonts/noto/cjk/NotoSansCJKjp-Regular-subset-chws.otf
 ../../web_tests/external/wpt/fonts/noto/cjk/NotoSansCJKjp-Regular-subset-halt-3002.otf
 ../../web_tests/external/wpt/fonts/noto/cjk/NotoSansCJKjp-Regular-subset-halt-300C.otf
@@ -154,11 +155,15 @@
 ../../web_tests/external/wpt/jpegxl/resources/animation-2loops.jxl
 ../../web_tests/external/wpt/jpegxl/resources/animation-infiniteloop.jxl
 ../../web_tests/external/wpt/jpegxl/resources/basic.jxl
+../../web_tests/external/wpt/jpegxl/resources/color-management-p3-cicp.jxl
 ../../web_tests/external/wpt/jpegxl/resources/conformance_alpha_nonpremultiplied.jxl
 ../../web_tests/external/wpt/jpegxl/resources/conformance_animation_spline.jxl
 ../../web_tests/external/wpt/jpegxl/resources/conformance_cmyk_layers.jxl
 ../../web_tests/external/wpt/jpegxl/resources/conformance_patches.jxl
 ../../web_tests/external/wpt/jpegxl/resources/conformance_sunset_logo.jxl
+../../web_tests/external/wpt/jpegxl/resources/gray-32x32.jxl
+../../web_tests/external/wpt/jpegxl/resources/gray-with-icc.jxl
+../../web_tests/external/wpt/jpegxl/resources/green-32x32.jxl
 ../../web_tests/external/wpt/jpegxl/resources/green_queen_modular_e3.jxl
 ../../web_tests/external/wpt/jpegxl/resources/green_queen_vardct_e3.jxl
 ../../web_tests/external/wpt/jpegxl/resources/has_permutation.jxl
@@ -176,6 +181,7 @@
 ../../web_tests/external/wpt/jpegxl/resources/sdr_alpha.jxl
 ../../web_tests/external/wpt/jpegxl/resources/smallest_valid.jxl
 ../../web_tests/external/wpt/jpegxl/resources/spline_on_first_frame.jxl
+../../web_tests/external/wpt/jpegxl/resources/transparent-32x32.jxl
 ../../web_tests/external/wpt/jpegxl/resources/with_icc.jxl
 ../../web_tests/images/bmp-suite/bad/badbitcount.bmp
 ../../web_tests/images/bmp-suite/bad/badbitssize.bmp
@@ -425,6 +431,7 @@
 ../../web_tests/images/resources/avif/red-full-range-mode-0-420-8bpc.avif
 ../../web_tests/images/resources/avif/red-full-range-mode-1-420-8bpc.avif
 ../../web_tests/images/resources/avif/red-full-range-unspecified-420-8bpc.avif
+../../web_tests/images/resources/avif/red-icc-version-zero.avif
 ../../web_tests/images/resources/avif/red-limited-range-420-10bpc.avif
 ../../web_tests/images/resources/avif/red-limited-range-420-12bpc.avif
 ../../web_tests/images/resources/avif/red-limited-range-420-8bpc.avif

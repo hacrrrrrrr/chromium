@@ -25,6 +25,7 @@ class MockToolbarUiHandler extends TestBrowserProxy {
     return Promise.resolve({
       adjustedText: text,
       adjustedUrl: null,
+      pageTitle: null,
     });
   }
 }
@@ -51,6 +52,7 @@ suite('ReadOnlyOmniboxFocus', function() {
     browserVersion: 0,
     uiVersion: 0,
     textPieces: [],
+    placeholder: null,
     inlineAutocompletion: '',
     additionalText: '',
     formattedFullUrl: '',

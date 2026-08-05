@@ -12,33 +12,30 @@ namespace blink {
 
 namespace shape_interpolation_functions {
 
-InterpolationValue MaybeConvertCSSValue(const CSSValue& value,
-                                        const CSSProperty& property,
-                                        ShapeReferenceBox box) {
+InterpolationValue MaybeConvertCSSValue(const BasicShapeCssInfo& info,
+                                        const CSSProperty& property) {
   InterpolationValue result =
-      basic_shape_interpolation_functions::MaybeConvertCSSValue(value, property,
-                                                                box);
+      basic_shape_interpolation_functions::MaybeConvertCSSValue(info, property);
   if (result) {
     return result;
   }
-  return CSSShapeInterpolationType::MaybeConvertCSSValue(value, property, box);
+  return CSSShapeInterpolationType::MaybeConvertCSSValue(info, property);
 }
 
-InterpolationValue MaybeConvertBasicShape(const BasicShape* shape,
+InterpolationValue MaybeConvertBasicShape(const BasicShapeInfo& info,
                                           const CSSProperty& property,
-                                          double zoom,
-                                          ShapeReferenceBox box) {
-  if (!shape) {
+                                          double zoom) {
+  if (!info.shape) {
     return nullptr;
   }
-  switch (shape->GetType()) {
+  switch (info.shape->GetType()) {
     case BasicShape::kStylePathType:
     case BasicShape::kStyleShapeType:
-      return CSSShapeInterpolationType::MaybeConvertBasicShape(shape, property,
-                                                               zoom, box);
+      return CSSShapeInterpolationType::MaybeConvertBasicShape(info, property,
+                                                               zoom);
     default:
       return basic_shape_interpolation_functions::MaybeConvertBasicShape(
-          shape, property, zoom, box);
+          info, property, zoom);
   }
 }
 
@@ -69,9 +66,10 @@ InterpolableValue* CreateNeutralValue(
       non_interpolable);
 }
 
-BasicShape* CreateBasicShape(const InterpolableValue& interpolable_value,
-                             const NonInterpolableValue& non_interpolable,
-                             const CSSToLengthConversionData& conversion_data) {
+BasicShapeInfo CreateBasicShape(
+    const InterpolableValue& interpolable_value,
+    const NonInterpolableValue& non_interpolable,
+    const CSSToLengthConversionData& conversion_data) {
   if (non_interpolable.GetType() ==
       CSSShapeInterpolationType::ShapeNonInterpolableValueType()) {
     return CSSShapeInterpolationType::CreateShape(
@@ -79,14 +77,6 @@ BasicShape* CreateBasicShape(const InterpolableValue& interpolable_value,
   }
   return basic_shape_interpolation_functions::CreateBasicShape(
       interpolable_value, non_interpolable, conversion_data);
-}
-
-ShapeReferenceBox GetBox(const NonInterpolableValue& value) {
-  if (value.GetType() ==
-      CSSShapeInterpolationType::ShapeNonInterpolableValueType()) {
-    return CSSShapeInterpolationType::GetBox(value);
-  }
-  return basic_shape_interpolation_functions::GetBox(value);
 }
 
 }  // namespace shape_interpolation_functions

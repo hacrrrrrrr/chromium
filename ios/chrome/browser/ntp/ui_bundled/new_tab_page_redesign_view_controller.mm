@@ -123,6 +123,7 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
   NTPIdentityDiscButton* _identityDiscButton;
 
   UIImage* _avatarImage;
+  BOOL _hasAITier;
   NSString* _avatarName;
   NSString* _avatarEmail;
   BOOL _avatarImageLoaded;
@@ -164,6 +165,8 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
       [[NewTabPageBottomSheetViewController alloc] init];
   _bottomSheetViewController.delegate = self;
   _bottomSheetViewController.feedViewController = _feedViewController;
+  _bottomSheetViewController.magicStackViewController =
+      _magicStackViewController;
   [self addChildViewController:_bottomSheetViewController];
   [self.view addSubview:_bottomSheetViewController.view];
   [_bottomSheetViewController didMoveToParentViewController:self];
@@ -275,9 +278,10 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
 
   if (_avatarImageLoaded) {
     if (_avatarImage) {
-      [_identityDiscButton updateAccountImage:_avatarImage
-                                         name:_avatarName
-                                        email:_avatarEmail];
+      [_identityDiscButton updateAccountWithName:_avatarName
+                                           email:_avatarEmail
+                                     avatarImage:_avatarImage
+                                       hasAITier:_hasAITier];
     } else {
       [_identityDiscButton setSignedOutAccountImage];
     }
@@ -345,6 +349,7 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
   self.NTPContentDelegate = nil;
   self.NTPShortcutsHandler = nil;
   self.mostVisitedViewController = nil;
+  self.magicStackViewController = nil;
   [self setFeedViewController:nil];
   [_bottomSheetViewController invalidate];
   _bottomSheetViewController = nil;
@@ -503,6 +508,18 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
   }
 }
 
+- (void)setMagicStackViewController:
+    (UIViewController*)magicStackViewController {
+  if (_magicStackViewController == magicStackViewController) {
+    return;
+  }
+  _magicStackViewController = magicStackViewController;
+  if (_bottomSheetViewController) {
+    _bottomSheetViewController.magicStackViewController =
+        magicStackViewController;
+  }
+}
+
 - (void)setMostVisitedViewController:
     (UIViewController*)mostVisitedViewController {
   if (_mostVisitedViewController == mostVisitedViewController) {
@@ -572,7 +589,6 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
 
 - (CGFloat)centeredFakeOmniboxTop {
   CGFloat screenHeight = self.view.bounds.size.height;
-  CGFloat fakeOmniboxHeight = content_suggestions::FakeOmniboxHeight();
   // During the initial view loading sequence (e.g. before initial layout pass
   // occurs), screen height bounds will be 0. We fallback to the dynamic
   // top-down logo offset to avoid negative constraint values during early
@@ -583,7 +599,7 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
         content_suggestions::DoodleHeight(_logoState, self.traitCollection);
     return safeAreaTop + kLogoTopMargin + logoHeight + kLogoToOmniboxSpacing;
   }
-  return (screenHeight - fakeOmniboxHeight) * 0.5;
+  return screenHeight * 0.35;
 }
 
 #pragma mark - SearchEngineLogoConsumer
@@ -604,10 +620,6 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
   return NO;
 }
 
-- (void)didChangeOmniboxPosition:(NewTabPageHeaderView*)headerView {
-  // TODO(crbug.com/526677926): To be implemented in Phase 2.
-}
-
 #pragma mark - UserAccountImageUpdateDelegate
 
 - (void)setSignedOutAccountImage {
@@ -620,15 +632,20 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
   }
 }
 
-- (void)updateAccountImage:(UIImage*)image
-                      name:(NSString*)name
-                     email:(NSString*)email {
-  _avatarImage = image;
+- (void)updateAccountWithName:(NSString*)name
+                        email:(NSString*)email
+                  avatarImage:(UIImage*)avatarImage
+                    hasAITier:(BOOL)hasAITier {
+  _avatarImage = avatarImage;
+  _hasAITier = hasAITier;
   _avatarName = name;
   _avatarEmail = email;
   _avatarImageLoaded = YES;
   if (_identityDiscButton) {
-    [_identityDiscButton updateAccountImage:image name:name email:email];
+    [_identityDiscButton updateAccountWithName:name
+                                         email:email
+                                   avatarImage:avatarImage
+                                     hasAITier:hasAITier];
   }
 }
 
@@ -792,7 +809,7 @@ constexpr CGFloat kHintLabelYOffset = -1.0;
     _plusButton.accessibilityLabel = l10n_util::GetNSString(
         IDS_IOS_COMPOSEBOX_ADD_ATTACHMENT_BUTTON_ACCESSIBILITY_LABEL);
     [_plusButton
-        setImage:DefaultSymbolWithPointSize(kPlusSymbol, kSymbolActionPointSize)
+        setImage:SymbolWithPointSize(SymbolPlus, kSymbolActionPointSize)
         forState:UIControlStateNormal];
     [_plusButton addTarget:self.NTPShortcutsHandler
                     action:@selector(openMultimodalActionsMenu)

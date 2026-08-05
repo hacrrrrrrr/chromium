@@ -52,6 +52,8 @@
       switches::kEeaListCountryOverride);
   config.additional_args.push_back(
       "--" + std::string(switches::kForceSearchEngineChoiceScreen));
+  config.features_enabled.push_back(
+      switches::kSearchEngineChoiceScreenSnackbar);
   // Relaunches the app at each test to re-display the choice screen.
   config.relaunch_policy = ForceRelaunchByKilling;
 
@@ -151,15 +153,8 @@
 }
 
 // Test that the snippet can be expanded or collapsed.
-// TODO(crbug.com/333519732): Test is flaky on simulator.
-#if TARGET_OS_SIMULATOR
-#define MAYBE_testUserActionWhenExpandingSnippetChevron \
-  FLAKY_testUserActionWhenExpandingSnippetChevron
-#else
-#define MAYBE_testUserActionWhenExpandingSnippetChevron \
-  testUserActionWhenExpandingSnippetChevron
-#endif
-- (void)MAYBE_testUserActionWhenExpandingSnippetChevron {
+// TODO(crbug.com/333519732): Test is flaky.
+- (void)FLAKY_testUserActionWhenExpandingSnippetChevron {
   // Checks that the choice screen is shown
   [SearchEngineChoiceEarlGreyUI verifySearchEngineChoiceScreenIsDisplayed];
   if ([ChromeEarlGrey isIPadIdiom]) {
@@ -245,6 +240,41 @@
              static_cast<int>(
                  search_engines::SearchEngineChoiceScreenEvents::kDefaultWasSet)
       forHistogram:eventHistogram]);
+}
+
+// Tests that the snackbar is not displayed after confirming the Search Engine
+// Choice screen in EEA.
+- (void)testSearchEngineChoiceScreenSnackbarNotShown {
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    // The feature is not available on iPad.
+    return;
+  }
+  // Check that the choice screen is shown.
+  [SearchEngineChoiceEarlGreyUI verifySearchEngineChoiceScreenIsDisplayed];
+
+  // Select a search engine.
+  NSString* searchEngineToSelect = [SearchEngineChoiceEarlGreyUI
+      searchEngineNameWithPrepopulatedEngine:TemplateURLPrepopulateData::bing];
+  [SearchEngineChoiceEarlGreyUI
+      selectSearchEngineCellWithName:searchEngineToSelect
+                     scrollDirection:kGREYDirectionDown
+                              amount:50];
+
+  // Tap on the Continue button. This scrolls the table down to the bottom.
+  id<GREYMatcher> continueButtonMatcher =
+      grey_accessibilityID(kSearchEngineContinueButtonIdentifier);
+  [[[EarlGrey selectElementWithMatcher:continueButtonMatcher]
+      assertWithMatcher:grey_notNil()] performAction:grey_tap()];
+
+  [SearchEngineChoiceEarlGreyUI confirmSearchEngineChoiceScreen];
+
+  // Wait for the NTP / FakeOmnibox to appear to ensure UI transition completes.
+  [ChromeEarlGrey waitForSufficientlyVisibleElementWithMatcher:
+                      chrome_test_util::FakeOmnibox()];
+
+  // Verify that the snackbar is not displayed.
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::SnackbarViewMatcher()]
+      assertWithMatcher:grey_nil()];
 }
 
 @end

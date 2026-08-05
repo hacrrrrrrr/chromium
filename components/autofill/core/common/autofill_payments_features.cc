@@ -170,8 +170,20 @@ BASE_FEATURE(kAutofillEnableCvcStorageAndFillingStandaloneFormEnhancement,
 #endif
 
 // When enabled, in-product help UI will be shown the first time a card added
-// outside of Chrome appears in Autofill card suggestions."
+// outside of Chrome appears in Autofill card suggestions.
 BASE_FEATURE(kAutofillEnableDownstreamCardAwarenessIph,
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#else
+             base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+        // BUILDFLAG(IS_CHROMEOS)
+
+// When enabled, IBAN regex pattern matching is expanded to support more
+// formats.
+BASE_FEATURE(kAutofillEnableExpandIbanRegexPattern,
+             "AutofillEnableExpandIbanRegexPattern",
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // When enabled, card flat rate benefit will not be shown on merchants in the
@@ -242,6 +254,9 @@ BASE_FEATURE(kAutofillEnablePrefetchingRiskDataForRetrieval,
 // prompted to turn it back on in instances where they can benefit from it.
 BASE_FEATURE(kAutofillEnableResurrectingPaymentsUsers,
              base::FEATURE_DISABLED_BY_DEFAULT);
+const base::FeatureParam<int> kAutofillEnableResurrectingPaymentsUsersTreatment{
+    &kAutofillEnableResurrectingPaymentsUsers,
+    "autofill_enable_resurrecting_payments_churned_users_treatment", 1};
 
 // When enabled, the 'Save and Fill' suggestion will be offered in the credit
 // card dropdown menu for users who don't have any cards saved in Autofill.
@@ -251,7 +266,7 @@ BASE_FEATURE(kAutofillEnableSaveAndFill, base::FEATURE_DISABLED_BY_DEFAULT);
 // When enabled, show Pix settings as a separate preference menu item instead of
 // bundling them together with the non-card payment preference menu item.
 BASE_FEATURE(kAutofillEnableSeparatePixPreferenceItem,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -294,6 +309,24 @@ BASE_FEATURE(kAutofillEnableWalletBranding, base::FEATURE_ENABLED_BY_DEFAULT);
 // Pay and Google Wallet into consistency with branding requirements.
 BASE_FEATURE(kAutofillEnableWalletBrandingV2,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, shows the Wallet Reminder Notice after payment form submission
+// if higher-priority Autofill features (such as mandatory re-auth, VCN, or card
+// save) do not take precedence.
+BASE_FEATURE(kAutofillEnableWalletReminderNotice,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, PaymentsFormDataImporter prefers FormFieldData::user_input() over
+// FormFieldData::value() for import to avoid silently importing obfuscated
+// values.
+// TODO(crbug.com/526738761): Clean up after launch.
+BASE_FEATURE(kAutofillFixCvcImport, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, card upload legal message lines are parsed for the word
+// "personalization" for feature launch metrics. This flag is temporary, is
+// enabled by default, and functions as a kill switch in case of unexpected
+// problems from the parsing logic.
+BASE_FEATURE(kAutofillParseLegalMessageLines, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When enabled, Payments Autofill Buy Now Pay Later (BNPL) will use each
 // corresponding issuer's blocklist instead of allowlist to check for website

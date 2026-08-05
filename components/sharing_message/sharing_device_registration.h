@@ -31,12 +31,6 @@ class SharingDeviceRegistration {
   // Un-registers device with sharing sync preferences.
   virtual void UnregisterDevice(RegistrationCallback callback) = 0;
 
-  // Returns if device can handle receiving phone numbers for calling.
-  virtual bool IsClickToCallSupported() const = 0;
-
-  // Returns if device can handle receiving of shared clipboard contents.
-  virtual bool IsSharedClipboardSupported() const = 0;
-
   // Returns if device can handle receiving of sms fetcher requests.
   virtual bool IsSmsFetcherSupported() const = 0;
 

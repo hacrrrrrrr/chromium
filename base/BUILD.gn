@@ -208,6 +208,7 @@ source_set("asan_raw_ptr_service") {
 
     deps += [
       ":compiler_specific",
+      ":dcheck_is_on",
       ":debugging_buildflags",
       ":feature_buildflags",
       ":fuzzing_buildflags",
@@ -550,8 +551,6 @@ component("base") {
     "metrics/persistent_memory_allocator.h",
     "metrics/persistent_sample_map.cc",
     "metrics/persistent_sample_map.h",
-    "metrics/puma_histogram_functions.cc",
-    "metrics/puma_histogram_functions.h",
     "metrics/ranges_manager.cc",
     "metrics/ranges_manager.h",
     "metrics/record_histogram_checker.h",
@@ -1010,7 +1009,6 @@ component("base") {
     "types/to_address.h",
     "types/token_type.h",
     "types/variant_util.h",
-    "types/zip.h",
     "unguessable_token.cc",
     "unguessable_token.h",
     "uuid.cc",
@@ -2002,6 +2000,8 @@ component("base") {
       "win/scoped_windows_thread_environment.h",
       "win/scoped_winrt_initializer.cc",
       "win/scoped_winrt_initializer.h",
+      "win/scoped_wintrust_data.cc",
+      "win/scoped_wintrust_data.h",
       "win/security_descriptor.cc",
       "win/security_descriptor.h",
       "win/security_util.cc",
@@ -2015,6 +2015,8 @@ component("base") {
       "win/sid.h",
       "win/startup_information.cc",
       "win/startup_information.h",
+      "win/trust_util.cc",
+      "win/trust_util.h",
       "win/variant_conversions.h",
       "win/variant_vector.cc",
       "win/variant_vector.h",
@@ -2054,6 +2056,7 @@ component("base") {
 
     libs += [
       "cfgmgr32.lib",
+      "crypt32.lib",
       "ntdll.lib",
       "onecore.lib",
       "pdh.lib",
@@ -2065,6 +2068,7 @@ component("base") {
       "userenv.lib",
       "wbemuuid.lib",
       "winmm.lib",
+      "wintrust.lib",
     ]
     all_dependent_configs += [
       ":base_win_linker_flags",
@@ -2637,6 +2641,7 @@ group("base_rust") {
     ":file_path",
     ":run_loop",
     ":sequenced_task_runner",
+    ":unguessable_token",
   ]
 }
 
@@ -2752,6 +2757,17 @@ rust_static_library("feature") {
   cxx_bindings = [ "feature.rs" ]
   allow_unsafe = true
   deps = [ "//base" ]
+}
+
+rust_static_library("unguessable_token") {
+  sources = [ "unguessable_token.rs" ]
+  crate_root = "unguessable_token.rs"
+  cxx_bindings = [ "unguessable_token.rs" ]
+  allow_unsafe = true
+  deps = [
+    "//base",
+    "//third_party/rust/subtle/v2:lib",
+  ]
 }
 
 rust_static_library("sequenced_task_runner") {
@@ -3184,6 +3200,7 @@ component("i18n") {
     ":base",
     "//base/i18n:base_i18n_export",
     "//base/i18n:language_tag",
+    "//base/i18n:language_tag_value_converters",
     "//base/i18n:time_formatting_types",
     "//base/i18n:timezone",
     "//base/i18n/icubridge",
@@ -3797,7 +3814,6 @@ test("base_unittests") {
     "metrics/persistent_histogram_storage_unittest.cc",
     "metrics/persistent_memory_allocator_unittest.cc",
     "metrics/persistent_sample_map_unittest.cc",
-    "metrics/puma_histogram_functions_unittest.cc",
     "metrics/ranges_manager_unittest.cc",
     "metrics/runtime_field_trial_overrides_unittest.cc",
     "metrics/sample_map_unittest.cc",
@@ -4021,7 +4037,6 @@ test("base_unittests") {
     "types/to_address_unittest.cc",
     "types/token_type_unittest.cc",
     "types/variant_util_unittest.cc",
-    "types/zip_unittest.cc",
     "unguessable_token_unittest.cc",
     "unsafe_buffers_unittest.cc",
     "uuid_unittest.cc",
@@ -4242,6 +4257,7 @@ test("base_unittests") {
       "win/shortcut_unittest.cc",
       "win/sid_unittest.cc",
       "win/startup_information_unittest.cc",
+      "win/trust_util_unittest.cc",
       "win/variant_conversions_unittest.cc",
       "win/variant_vector_unittest.cc",
       "win/vector_unittest.cc",
@@ -4797,7 +4813,6 @@ if (enable_nocompile_tests) {
       "unsafe_buffers_nocompile.nc",
       "values_nocompile.nc",
     ]
-    sources += [ "containers/adapters_nocompile.nc" ]
     deps = [
       ":base",
       "//base/i18n:language_tag",

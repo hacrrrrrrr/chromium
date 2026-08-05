@@ -6,10 +6,17 @@ package org.chromium.chrome.browser.omnibox.suggestions.base;
 
 import android.content.Context;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.Drawable.ConstantState;
+import android.graphics.drawable.LayerDrawable;
 import android.text.Spannable;
+import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
+import android.view.Gravity;
 
 import androidx.annotation.CallSuper;
+import androidx.annotation.ColorInt;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.VisibleForTesting;
 
@@ -27,15 +34,13 @@ import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteUIContext;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionHost;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionProcessor;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewProperties.Action;
-import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
 import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.AutocompleteMatch.MatchClassification;
 import org.chromium.components.omnibox.OmniboxCapabilities;
 import org.chromium.components.omnibox.OmniboxFeatures;
+import org.chromium.components.omnibox.PageClassificationUtils;
 import org.chromium.components.omnibox.action.ActionPresentationMode;
-import org.chromium.ui.base.DeviceFormFactor;
-import org.chromium.ui.base.DeviceInput;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.url.GURL;
 
@@ -53,6 +58,7 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
     private final int mDecorationImageSizePx;
     private final int mSuggestionSizePx;
     private final boolean mShouldShowRemoveButton;
+    private @Nullable ConstantState mRemoveButtonDrawableState;
 
     /**
      * @param uiContext Context object containing common UI dependencies.
@@ -73,9 +79,7 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
                         .getDimensionPixelSize(R.dimen.omnibox_suggestion_content_height);
         mActionChipsProcessor = new ActionChipsProcessor(uiContext.host, uiContext.actionDelegate);
 
-        mShouldShowRemoveButton =
-                DeviceFormFactor.isNonMultiDisplayContextOnTablet(mContext)
-                        && DeviceInput.supportsPrecisionPointer();
+        mShouldShowRemoveButton = OmniboxCapabilities.hasPrecisionPointerExperience(mContext);
     }
 
     /**
@@ -151,14 +155,18 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
             AutocompleteInput input,
             AutocompleteMatch suggestion,
             int position) {
+        // Suppress remove and refine actions in Hub and Tab Search overlay contexts.
+        if (PageClassificationUtils.isHubOrTabSearch(input.getPageClassification())) {
+            return;
+        }
+
         if (mShouldShowRemoveButton) {
             if (suggestion.isDeletable()) {
                 setActionButtons(
                         model,
                         List.of(
                                 new Action(
-                                        OmniboxDrawableState.forSmallIcon(
-                                                mContext, R.drawable.btn_close, true),
+                                        getRemoveButtonIconState(),
                                         OmniboxResourceProvider.getString(
                                                 mContext,
                                                 R.string.accessibility_omnibox_remove_suggestion),
@@ -201,13 +209,42 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
     }
 
     /**
+     * Returns the icon state for the remove suggestion button. Wraps the standard close button icon
+     * in a LayerDrawable to scale it as needed while keeping it centered within the button view.
+     */
+    private OmniboxDrawableState getRemoveButtonIconState() {
+        Drawable layerDrawable;
+        if (mRemoveButtonDrawableState == null) {
+            int sizePx =
+                    mContext.getResources()
+                            .getDimensionPixelSize(
+                                    R.dimen.omnibox_suggestion_remove_button_icon_size);
+            Drawable baseIcon = OmniboxResourceProvider.getDrawable(mContext, R.drawable.btn_close);
+            LayerDrawable drawable = new LayerDrawable(new Drawable[] {baseIcon});
+            drawable.setLayerGravity(0, Gravity.CENTER);
+            drawable.setLayerWidth(0, sizePx);
+            drawable.setLayerHeight(0, sizePx);
+            mRemoveButtonDrawableState = drawable.getConstantState();
+            layerDrawable = drawable;
+        } else {
+            layerDrawable = mRemoveButtonDrawableState.newDrawable();
+        }
+        return new OmniboxDrawableState(
+                layerDrawable,
+                /* useRoundedCorners= */ false,
+                /* isLarge= */ false,
+                /* allowTint= */ true);
+    }
+
+    /**
      * Process the click event.
      *
      * @param suggestion Selected suggestion.
      * @param position Position of the suggestion on the list.
+     * @param modifiers The modifier keys pressed during click/activation (metaState).
      */
-    protected void onSuggestionClicked(AutocompleteMatch suggestion, int position) {
-        mSuggestionHost.onSuggestionClicked(suggestion, position, suggestion.getUrl());
+    protected void onSuggestionClicked(AutocompleteMatch suggestion, int position, int modifiers) {
+        mSuggestionHost.onSuggestionClicked(suggestion, position, suggestion.getUrl(), modifiers);
     }
 
     /**
@@ -224,10 +261,12 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
      *
      * @param suggestion Selected suggestion.
      * @param position Position of the suggesiton on the list.
+     * @param eventTime Uptime of the touch down event in milliseconds.
      */
-    protected void onSuggestionTouchDownEvent(AutocompleteMatch suggestion, int position) {
+    protected void onSuggestionTouchDownEvent(
+            AutocompleteMatch suggestion, int position, long eventTime) {
         try (TimingMetric metric = OmniboxMetrics.recordTouchDownProcessTime()) {
-            mSuggestionHost.onSuggestionTouchDown(suggestion, position);
+            mSuggestionHost.onSuggestionTouchDown(suggestion, position, eventTime);
         }
     }
 
@@ -238,8 +277,8 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
             PropertyModel model,
             int position) {
         model.set(
-                BaseSuggestionViewProperties.ON_CLICK,
-                () -> onSuggestionClicked(suggestion, position));
+                BaseSuggestionViewProperties.ON_ACTIVATE,
+                (modifiers) -> onSuggestionClicked(suggestion, position, modifiers));
         model.set(
                 BaseSuggestionViewProperties.ON_LONG_CLICK,
                 () -> onSuggestionLongClicked(suggestion));
@@ -260,11 +299,11 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
                 && suggestion.isSearchSuggestion()) {
             model.set(
                     BaseSuggestionViewProperties.ON_TOUCH_DOWN_EVENT,
-                    () -> onSuggestionTouchDownEvent(suggestion, position));
+                    (eventTime) -> onSuggestionTouchDownEvent(suggestion, position, eventTime));
         }
 
-        // Action chips should not be provided in the hub.
-        if (input.getPageClassification() != PageClassification.ANDROID_HUB_VALUE
+        // Action chips should not be provided in the hub or tab search overlay.
+        if (!PageClassificationUtils.isHubOrTabSearch(input.getPageClassification())
                 && allowOmniboxActions()) {
             mActionChipsProcessor.populateModel(suggestion, model, position);
         }
@@ -276,8 +315,8 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
             fetchImage(model, suggestion.getImageUrl());
         }
 
-        // Action button should not be provided in the hub.
-        if (input.getPageClassification() != PageClassification.ANDROID_HUB_VALUE) {
+        // Action button should not be provided in the hub or tab search overlay.
+        if (!PageClassificationUtils.isHubOrTabSearch(input.getPageClassification())) {
             addActionButtonIfAvailable(suggestion, model, position);
         }
     }
@@ -366,8 +405,7 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
                     url,
                     icon -> {
                         if (icon != null) {
-                            setOmniboxDrawableState(
-                                    model, OmniboxDrawableState.forFavIcon(icon, mContext));
+                            setOmniboxDrawableState(model, OmniboxDrawableState.forFavIcon(icon));
                         }
                     });
         }
@@ -386,10 +424,25 @@ public abstract class BaseSuggestionViewProcessor implements SuggestionProcessor
                     imageUrl,
                     drawable -> {
                         if (drawable != null) {
-                            setOmniboxDrawableState(
-                                    model, OmniboxDrawableState.forImage(drawable, mContext));
+                            setOmniboxDrawableState(model, OmniboxDrawableState.forImage(drawable));
                         }
                     });
         }
+    }
+
+    /**
+     * Applies text color to a target spannable string.
+     *
+     * @param text Target spannable string to apply color to.
+     * @param color Target color integer.
+     */
+    protected static void applyTextColor(@Nullable Spannable text, @ColorInt int color) {
+        if (TextUtils.isEmpty(text)) return;
+
+        text.setSpan(
+                new ForegroundColorSpan(color),
+                /* start= */ 0,
+                /* end= */ text.length(),
+                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
     }
 }

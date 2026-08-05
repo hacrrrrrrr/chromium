@@ -27,7 +27,6 @@
 #include "content/browser/bluetooth/web_bluetooth_service_impl.h"
 #include "content/browser/browser_context_impl.h"
 #include "content/browser/browser_main_loop.h"
-#include "content/browser/browsing_topics/browsing_topics_document_host.h"
 #include "content/browser/contacts/contacts_manager_impl.h"
 #include "content/browser/content_index/content_index_service_impl.h"
 #include "content/browser/cookie_store/cookie_store_manager.h"
@@ -38,7 +37,6 @@
 #include "content/browser/image_capture/image_capture_impl.h"
 #include "content/browser/indexed_db/indexed_db_internals.mojom.h"
 #include "content/browser/indexed_db/indexed_db_internals_ui.h"
-#include "content/browser/interest_group/ad_auction_service_impl.h"
 #include "content/browser/keyboard_lock/keyboard_lock_service_impl.h"
 #include "content/browser/loader/content_security_notifier.h"
 #include "content/browser/media/media_web_contents_observer.h"
@@ -48,8 +46,6 @@
 #include "content/browser/picture_in_picture/picture_in_picture_service_impl.h"
 #include "content/browser/preloading/anchor_element_interaction_host_impl.h"
 #include "content/browser/preloading/speculation_rules/speculation_host_impl.h"
-#include "content/browser/private_aggregation/private_aggregation_internals.mojom.h"
-#include "content/browser/private_aggregation/private_aggregation_internals_ui.h"
 #include "content/browser/process_internals/process_internals.mojom.h"
 #include "content/browser/process_internals/process_internals_ui.h"
 #include "content/browser/quota/quota_context.h"
@@ -66,7 +62,6 @@
 #include "content/browser/security/cpsp/child_process_security_policy_impl.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_host.h"
-#include "content/browser/shared_storage/shared_storage_worklet_host.h"
 #include "content/browser/speech/speech_recognition_dispatcher_host.h"
 #include "content/browser/storage_access/storage_access_handle.h"
 #include "content/browser/tracing/traces_internals/traces_internals.mojom.h"
@@ -746,6 +741,20 @@ void BindBatteryMonitor(
   GetDeviceService().BindBatteryMonitor(std::move(receiver));
 }
 
+void BindVibrationManager(
+    RenderFrameHost* host,
+    mojo::PendingReceiver<device::mojom::VibrationManager> receiver) {
+  if (host->IsNestedWithinFencedFrame()) {
+    bad_message::ReceivedBadMessage(
+        host->GetProcess(), bad_message::BadMessageReason::
+                                BIBI_BIND_VIBRATION_MANAGER_FOR_FENCED_FRAME);
+    return;
+  }
+  GetDeviceService().BindVibrationManager(
+      std::move(receiver), static_cast<RenderFrameHostImpl*>(host)
+                               ->CreateVibrationManagerListener());
+}
+
 #if BUILDFLAG(ENABLE_COMPUTE_PRESSURE)
 void BindPressureManager(
     RenderFrameHost* host,
@@ -903,12 +912,6 @@ void PopulateBinderMapWithContext(
         }));
   }
 
-  if (base::FeatureList::IsEnabled(network::features::kBrowsingTopics) &&
-      base::FeatureList::IsEnabled(
-          blink::features::kBrowsingTopicsDocumentAPI)) {
-    map->Add<blink::mojom::BrowsingTopicsDocumentService>(
-        &BrowsingTopicsDocumentHost::CreateMojoService);
-  }
   map->Add<blink::mojom::DeclarativePerformanceObserverHost>(
       base::BindRepeating(&DeclarativePerformanceObserver::Bind));
 #if !BUILDFLAG(IS_ANDROID)
@@ -1387,10 +1390,6 @@ void PopulateBinderMapWithContext(
       &ContentIndexServiceImpl::CreateForFrame);
   map->Add<blink::mojom::KeyboardLockService>(
       &KeyboardLockServiceImpl::CreateMojoService);
-  if (base::FeatureList::IsEnabled(network::features::kInterestGroupStorage)) {
-    map->Add<blink::mojom::AdAuctionService>(
-        &AdAuctionServiceImpl::CreateMojoService);
-  }
   map->Add<blink::mojom::MediaSessionService>(&MediaSessionServiceImpl::Create);
   map->Add<blink::mojom::PictureInPictureService>(
       &PictureInPictureServiceImpl::Create);
@@ -1401,9 +1400,6 @@ void PopulateBinderMapWithContext(
   map->Add<device::mojom::VRService>(
       &EmptyBinderForFrame<device::mojom::VRService>);
 #endif
-  RegisterWebUIControllerInterfaceBinder<
-      private_aggregation_internals::mojom::Factory,
-      PrivateAggregationInternalsUI>(map);
   RegisterWebUIControllerInterfaceBinder<storage::mojom::IdbInternalsHandler,
                                          indexed_db::IndexedDBInternalsUI>(map);
   RegisterWebUIControllerInterfaceBinder<::mojom::ProcessInternalsHandler,
@@ -1452,13 +1448,7 @@ void PopulateBinderMapWithContext(
   map->Add<blink::mojom::AnchorElementInteractionHost>(
       &AnchorElementInteractionHostImpl::Create);
 
-  map->Add<device::mojom::VibrationManager>(
-      [](RenderFrameHost* host,
-         mojo::PendingReceiver<device::mojom::VibrationManager> receiver) {
-        GetDeviceService().BindVibrationManager(
-            std::move(receiver), static_cast<RenderFrameHostImpl*>(host)
-                                     ->CreateVibrationManagerListener());
-      });
+  map->Add<device::mojom::VibrationManager>(&BindVibrationManager);
 
 #if BUILDFLAG(IS_CHROMEOS)
   if (base::FeatureList::IsEnabled(features::kWebLockScreenApi)) {
@@ -1476,7 +1466,7 @@ void PopulateBinderMapWithContext(
     map->Add<vrp_flags::mojom::VrpFlagsFactory>(base::BindRepeating(
         [](content::RenderFrameHost* frame_host,
            mojo::PendingReceiver<vrp_flags::mojom::VrpFlagsFactory> receiver) {
-          VrpFlagsFactoryImpl::Bind(std::move(receiver));
+          VrpFlagsFactoryImpl::Bind(frame_host, std::move(receiver));
         }));
   }
 #endif
@@ -1817,36 +1807,6 @@ void PopulateBinderMap(SharedWorkerHost* host, mojo::BinderMap* map) {
   PopulateSharedWorkerBinders(host, map);
 }
 
-// Shared storage worklets
-SharedStorageWorkletHost* GetContextForHost(SharedStorageWorkletHost* host) {
-  return host;
-}
-
-void PopulateSharedStorageWorkletBinders(SharedStorageWorkletHost* host,
-                                         mojo::BinderMap* map) {
-  // Ignore requests to bind UkmRecorderFactory and FeatureObserver, since there
-  // is no current plan to support them for worklets and the renderer always
-  // tries to bind them. TODO(crbug.com/366293454).
-  map->Add<ukm::mojom::UkmRecorderFactory>(base::DoNothing());
-  map->Add<blink::mojom::FeatureObserver>(base::DoNothing());
-
-  // SharedStorageWorkletHost binders
-  // base::Unretained(host) is safe because the map is owned by
-  // |SharedStorageWorkletHost::broker_|.
-  map->Add<blink::mojom::LockManager>(base::BindRepeating(
-      &SharedStorageWorkletHost::GetLockManager, base::Unretained(host)));
-  map->Add<blink::mojom::ReportingServiceProxy>(
-      base::BindRepeating(&CreateReportingServiceProxyForSharedStorageWorklet,
-                          base::Unretained(host)));
-}
-
-void PopulateBinderMapWithContext(
-    SharedStorageWorkletHost* host,
-    mojo::BinderMapWithContext<SharedStorageWorkletHost*>* map) {}
-
-void PopulateBinderMap(SharedStorageWorkletHost* host, mojo::BinderMap* map) {
-  PopulateSharedStorageWorkletBinders(host, map);
-}
 
 // Service workers
 ServiceWorkerVersionInfo GetContextForHost(ServiceWorkerHost* host) {

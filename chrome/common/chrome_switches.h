@@ -100,7 +100,6 @@ extern const char kEnableAudioDebugRecordingsFromExtension[];
 extern const char kEnableAutoReload[];
 extern const char kEnableBookmarkUndo[];
 extern const char kEnableDomainReliability[];
-extern const char kEnableDevToolsGreenDevUi[];
 #if BUILDFLAG(IS_CHROMEOS)
 extern const char kEnableDevToolsPwaHandler[];
 #endif
@@ -153,6 +152,7 @@ extern const char kNoFirstRun[];
 extern const char kNoPings[];
 extern const char kNoProxyServer[];
 extern const char kNoStartupWindow[];
+extern const char kNotebookHomeURL[];
 extern const char kOnTheFlyMhtmlHashComputation[];
 extern const char kOpenInNewWindow[];
 extern const char kFocus[];
@@ -293,6 +293,7 @@ extern const char kGuest[];
 #endif
 
 extern const char kGlicGuestURL[];
+extern const char kSkillsV2Origin[];
 extern const char kGlicGeminiEnterpriseSettingsOverride[];
 extern const char kGlicAlwaysOpenFre[];
 extern const char kGlicAlwaysSkipFre[];

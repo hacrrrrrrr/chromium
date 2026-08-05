@@ -11,7 +11,9 @@
 #include "base/feature_list_internal.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/runtime_field_trial_overrides.h"
 #include "base/strings/strcat.h"
+#include "components/variations/proto/variations_seed.pb.h"
 #include "components/variations/service/variations_service.h"
 
 namespace metrics {
@@ -51,13 +53,17 @@ void RuntimeMutableFeaturesHandlerBase::HandleFetchRuntimeMutableFeatures(
     // FeatureList::RuntimeMutableFeatureState object or the FieldTrial
     // object, both of which are const from the point of view of this
     // handler.
-    std::string_view trial_name;
-    std::string_view group_name;
+    std::string trial_name;
+    std::string group_name;
     bool runtime_override = false;
     if (!feature_state.field_trial_name.empty()) {
       // The feature is being controlled by a runtime-mutable field trial.
       trial_name = feature_state.field_trial_name;
-      group_name = feature_state.group_name;
+      auto runtime_override_info =
+          base::RuntimeFieldTrialOverrides::GetInstance()->GetRuntimeOverride(
+              feature_state.field_trial_name);
+      CHECK(runtime_override_info.has_value());
+      group_name = runtime_override_info->group_name;
       runtime_override = true;
     } else {
       // The feature is not being controlled by a runtime-mutable field trial.
@@ -75,8 +81,10 @@ void RuntimeMutableFeaturesHandlerBase::HandleFetchRuntimeMutableFeatures(
         feature_list->IsFeatureOverriddenFromCommandLine(feature.name)
             ? "[command-line] "
             : "";
-    std::string_view final_trial_name = trial_name.empty() ? "-" : trial_name;
-    std::string_view final_group_name = group_name.empty() ? "-" : group_name;
+    std::string_view final_trial_name =
+        trial_name.empty() ? std::string_view("-") : trial_name;
+    std::string_view final_group_name =
+        group_name.empty() ? std::string_view("-") : group_name;
 
     // Append the feature attributes to the features_list.
     features_list.Append(
@@ -120,7 +128,19 @@ void RuntimeMutableFeaturesHandlerBase::HandleUploadSeed(
   DVLOG(1) << "RuntimeMutableFeaturesHandler: UploadSeed (size: "
            << seed_bytes.size() << " bytes)";
 
-  // TODO: Process seed when API is available.
+  if (variations_service_) {
+    variations::VariationsSeed seed;
+    // TODO(crbug.com/524226260): Expose an error if the loaded seed cannot be
+    // properly parsed, simulated and applied.
+    const bool parsed =
+        seed.ParseFromArray(seed_bytes.data(), seed_bytes.size());
+    DVLOG(1) << "RuntimeMutableFeaturesHandler: parsing uploaded seed "
+             << (parsed ? "succeeded" : "failed");
+    if (parsed) {
+      variations_service_->SimulateAndApplyUploadedSeed(
+          base::PassKey<RuntimeMutableFeaturesHandlerBase>(), seed);
+    }
+  }
 
   delegate_->ResolvePageCallback(callback_id, base::Value());
 }

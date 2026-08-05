@@ -791,6 +791,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method setBindGroup
 [Worker]     method setImmediates
 [Worker]     method setPipeline
+[Worker]     method setResourceTable
 [Worker]     method writeTimestamp
 [Worker]     setter label
 [Worker] interface GPUComputePipeline
@@ -820,6 +821,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method createRenderBundleEncoder
 [Worker]     method createRenderPipeline
 [Worker]     method createRenderPipelineAsync
+[Worker]     method createResourceTable
 [Worker]     method createSampler
 [Worker]     method createShaderModule
 [Worker]     method createTexture
@@ -933,6 +935,16 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter label
 [Worker]     method constructor
 [Worker]     method getBindGroupLayout
+[Worker]     setter label
+[Worker] interface GPUResourceTable
+[Worker]     attribute @@toStringTag
+[Worker]     getter label
+[Worker]     getter size
+[Worker]     method constructor
+[Worker]     method destroy
+[Worker]     method insert
+[Worker]     method remove
+[Worker]     method update
 [Worker]     setter label
 [Worker] interface GPUSampler
 [Worker]     attribute @@toStringTag
@@ -1660,6 +1672,19 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter startTime
 [Worker]     method constructor
 [Worker]     method toJSON
+[Worker] interface PerformanceLongAnimationFrameTiming : PerformanceEntry
+[Worker]     attribute @@toStringTag
+[Worker]     getter blockingDuration
+[Worker]     getter firstUIEventTimestamp
+[Worker]     getter layoutDuration
+[Worker]     getter renderStart
+[Worker]     getter scriptCount
+[Worker]     getter scripts
+[Worker]     getter styleAndLayoutStart
+[Worker]     getter styleDuration
+[Worker]     getter userTimingEntries
+[Worker]     method constructor
+[Worker]     method toJSON
 [Worker] interface PerformanceMark : PerformanceEntry
 [Worker]     attribute @@toStringTag
 [Worker]     getter detail
@@ -1713,6 +1738,22 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter workerMatchedSourceType
 [Worker]     getter workerRouterEvaluationStart
 [Worker]     getter workerStart
+[Worker]     method constructor
+[Worker]     method toJSON
+[Worker] interface PerformanceScriptTiming : PerformanceEntry
+[Worker]     attribute @@toStringTag
+[Worker]     getter executionStart
+[Worker]     getter forcedLayoutDuration
+[Worker]     getter forcedStyleAndLayoutDuration
+[Worker]     getter forcedStyleDuration
+[Worker]     getter invoker
+[Worker]     getter invokerType
+[Worker]     getter pauseDuration
+[Worker]     getter sourceCharPosition
+[Worker]     getter sourceColumn
+[Worker]     getter sourceFunctionName
+[Worker]     getter sourceLine
+[Worker]     getter sourceURL
 [Worker]     method constructor
 [Worker]     method toJSON
 [Worker] interface PerformanceServerTiming
@@ -3922,10 +3963,12 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter closed
 [Worker]     getter congestionControl
 [Worker]     getter datagrams
+[Worker]     getter draining
 [Worker]     getter incomingBidirectionalStreams
 [Worker]     getter incomingUnidirectionalStreams
 [Worker]     getter protocol
 [Worker]     getter ready
+[Worker]     getter responseHeaders
 [Worker]     method close
 [Worker]     method constructor
 [Worker]     method createBidirectionalStream

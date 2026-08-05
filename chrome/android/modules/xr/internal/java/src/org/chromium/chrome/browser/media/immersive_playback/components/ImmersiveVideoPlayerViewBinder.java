@@ -9,6 +9,8 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.xr.scenecore.XrCurvedSurfaceEntityHolder;
+import org.chromium.ui.xr.scenecore.XrFloatSize3d;
+import org.chromium.ui.xr.scenecore.XrPose;
 import org.chromium.ui.xr.scenecore.XrSpace;
 import org.chromium.ui.xr.scenecore.XrSurfaceEntityHolder;
 import org.chromium.ui.xr.scenecore.XrSurfaceEntityShape;
@@ -33,32 +35,37 @@ public class ImmersiveVideoPlayerViewBinder {
             view.setSurfaceStereoMode(model.get(ImmersiveVideoPlayerProperties.STEREO_MODE));
         } else if (propertyKey == ImmersiveVideoPlayerProperties.SHAPE) {
             int shape = model.get(ImmersiveVideoPlayerProperties.SHAPE);
-            boolean isQuad = shape == XrSurfaceEntityShape.QUAD;
+            boolean resizable = shape == XrSurfaceEntityShape.QUAD;
+            boolean movable = shape == XrSurfaceEntityShape.QUAD;
             view.setSurfaceShape(shape);
+            view.removeEdgeFeathering();
+            view.getResizableComponent().setResizable(resizable, /* maintainAspectRatio= */ true);
+            view.getMovableComponent().setMovable(movable, /* scaleInZ= */ false);
 
-            view.getResizableComponent()
-                    .setResizable(/* resizable= */ isQuad, /* maintainAspectRatio= */ true);
-            view.getMovableComponent().setMovable(/* movable= */ isQuad, /* scaleInZ= */ false);
-
-            if (isQuad && view.getSurfaceShape() == XrSurfaceEntityShape.QUAD) {
+            if (shape == XrSurfaceEntityShape.QUAD) {
                 Float aspectRatio = model.get(ImmersiveVideoPlayerProperties.DEFAULT_ASPECT_RATIO);
                 Float width = model.get(ImmersiveVideoPlayerProperties.DEFAULT_SPATIAL_WIDTH);
                 if (width != null && aspectRatio != null && width > 0 && aspectRatio > 0) {
                     float height = width / aspectRatio;
                     view.setEntitySize(width, height);
                 }
-            } else if (view instanceof XrCurvedSurfaceEntityHolder) {
+            } else if (shape == XrSurfaceEntityShape.HEMISPHERE) {
+                Float featherRadius =
+                        model.get(ImmersiveVideoPlayerProperties.DEFAULT_FEATHER_RADIUS);
+                float feather = featherRadius != null ? featherRadius : 0f;
+                view.setRectangleEdgeFeathering(feather, feather);
+            }
+
+            if (view instanceof XrCurvedSurfaceEntityHolder) {
                 Float radius = model.get(ImmersiveVideoPlayerProperties.DEFAULT_CURVE_RADIUS);
                 if (radius != null && radius > 0) {
                     ((XrCurvedSurfaceEntityHolder) view).setEntityRadius(radius);
                 }
             }
-        } else if (propertyKey == ImmersiveVideoPlayerProperties.POSE_TRANSLATION
-                || propertyKey == ImmersiveVideoPlayerProperties.POSE_ROTATION) {
-            float[] translation = model.get(ImmersiveVideoPlayerProperties.POSE_TRANSLATION);
-            float[] rotation = model.get(ImmersiveVideoPlayerProperties.POSE_ROTATION);
-            if (translation != null && rotation != null) {
-                view.setEntityPose(translation, rotation, XrSpace.ACTIVITY);
+        } else if (propertyKey == ImmersiveVideoPlayerProperties.POSE) {
+            XrPose pose = model.get(ImmersiveVideoPlayerProperties.POSE);
+            if (pose != null) {
+                view.setEntityPose(pose, XrSpace.ACTIVITY);
             }
         } else if (propertyKey == ImmersiveVideoPlayerProperties.PIXEL_WIDTH
                 || propertyKey == ImmersiveVideoPlayerProperties.PIXEL_HEIGHT) {
@@ -82,14 +89,16 @@ public class ImmersiveVideoPlayerViewBinder {
             Float aspectRatio = model.get(ImmersiveVideoPlayerProperties.DEFAULT_ASPECT_RATIO);
             if (minWidth != null && aspectRatio != null && minWidth > 0 && aspectRatio > 0) {
                 float minHeight = minWidth / aspectRatio;
-                view.getResizableComponent().setMinSize(minWidth, minHeight, 0f);
+                view.getResizableComponent()
+                        .setMinSize(XrFloatSize3d.create(minWidth, minHeight, 0f));
             }
         } else if (propertyKey == ImmersiveVideoPlayerProperties.DEFAULT_MAX_WIDTH) {
             Float maxWidth = model.get(ImmersiveVideoPlayerProperties.DEFAULT_MAX_WIDTH);
             Float aspectRatio = model.get(ImmersiveVideoPlayerProperties.DEFAULT_ASPECT_RATIO);
             if (maxWidth != null && aspectRatio != null && maxWidth > 0 && aspectRatio > 0) {
                 float maxHeight = maxWidth / aspectRatio;
-                view.getResizableComponent().setMaxSize(maxWidth, maxHeight, 0f);
+                view.getResizableComponent()
+                        .setMaxSize(XrFloatSize3d.create(maxWidth, maxHeight, 0f));
             }
         }
     }

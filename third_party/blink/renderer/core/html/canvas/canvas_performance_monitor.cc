@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/heap/process_heap.h"
 #include "third_party/blink/renderer/platform/wtf/bit_field.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace {
 
@@ -134,6 +135,12 @@ namespace blink {
 
 void CanvasPerformanceMonitor::CurrentTaskDrawsToContext(
     CanvasRenderingContext* context) {
+  // TODO(crbug.com/534893134): support canvas performance metrics on worker
+  // threads (e.g. OffscreenCanvas) as a follow-up.
+  if (!IsMainThread()) {
+    return;
+  }
+
   if (!is_render_task_) {
     // The current task was not previously known to be a render task.
 
@@ -298,8 +305,10 @@ void CanvasPerformanceMonitor::RecordMetrics(TimeTicks start_time,
   }
 }
 
-void CanvasPerformanceMonitor::DidProcessTask(TimeTicks start_time,
-                                              TimeTicks end_time) {
+void CanvasPerformanceMonitor::DidProcessTask(
+    TimeTicks start_time,
+    TimeTicks end_time,
+    TimeTicks /*desired_execution_time*/) {
   DCHECK(is_render_task_);
   Thread::Current()->RemoveTaskTimeObserver(this);
 

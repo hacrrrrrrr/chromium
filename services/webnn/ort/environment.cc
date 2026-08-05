@@ -20,7 +20,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
-#include "base/types/zip.h"
 #include "base/version.h"
 #include "services/webnn/ort/logging.h"
 #include "services/webnn/ort/ort_data_type.h"
@@ -139,7 +138,7 @@ bool IsDiscreteGpu(const OrtEpDevice* device) {
       ort_api->HardwareDevice_Metadata(hardware_device);
 
   auto [keys, values] = GetKeyValueSpans(ort_api, device_metadata);
-  for (auto [key, value] : base::zip(keys, values)) {
+  for (auto [key, value] : std::views::zip(keys, values)) {
     if (std::string_view(key) == "Discrete") {
       return std::string_view(value) == "1";
     }
@@ -220,9 +219,10 @@ std::vector<const OrtEpDevice*> SelectEpDevicesForCpu(
   const OrtEpDevice* first_cpu = SelectFirstEpDeviceForDeviceType(
       sorted_devices, OrtHardwareDeviceType_CPU);
 
-  // Handle the rare case where no CPU EP device is available.
+  // Having no CPU EP is expected since `sorted_devices` for the compiler
+  // process filters out the default CPU EP.
   if (!first_cpu) {
-    LOG(ERROR) << "[WebNN] No CPU execution provider available.";
+    VLOG(2) << "[WebNN] No CPU execution provider available.";
     return selected_devices;
   }
 
@@ -286,7 +286,7 @@ std::string_view GetOsDriverVersion(const OrtEpDevice* ep_device) {
   // onnxruntime_ep_device_ep_metadata_keys.h once it's available.
   constexpr std::string_view kOrtEpDeviceEpMetadataKeyOSDriverVersion =
       "os_driver_version";
-  for (auto [key, value] : base::zip(keys, values)) {
+  for (auto [key, value] : std::views::zip(keys, values)) {
     if (key == kOrtEpDeviceEpMetadataKeyOSDriverVersion) {
       return std::string_view(value);
     }
@@ -602,7 +602,7 @@ ConvertEpListForIntrospection(base::span<const OrtEpDevice* const> ep_devices) {
     CHECK(ep_metadata);
 
     auto [keys, values] = GetKeyValueSpans(ort_api, ep_metadata);
-    for (auto [key, value] : base::zip(keys, values)) {
+    for (auto [key, value] : std::views::zip(keys, values)) {
       if (std::string_view(key) == "version") {
         ep_details->version = value;
         break;
@@ -612,6 +612,40 @@ ConvertEpListForIntrospection(base::span<const OrtEpDevice* const> ep_devices) {
     ep_details_list.push_back(std::move(ep_details));
   }
   return ep_details_list;
+}
+
+// Returns true if the EP device supports offline compilation.
+bool EpDeviceSupportsOfflineCompilation(const OrtEpDevice* ep_device) {
+  const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
+
+  std::string_view ep_name = ort_api->EpDevice_EpName(ep_device);
+  auto ep_it = kKnownEPs.find(ep_name);
+  if (ep_it == kKnownEPs.end()) {
+    return false;
+  }
+
+  const OrtHardwareDevice* hardware_device =
+      ort_api->EpDevice_Device(ep_device);
+  mojom::Device device_type =
+      OrtToWebnnDeviceType(ort_api->HardwareDevice_Type(hardware_device));
+
+  const auto& offline_support = ep_it->second.offline_compilation_support;
+  auto support_it = std::ranges::find(offline_support, device_type,
+                                      &OfflineCompilationSupport::device_type);
+  if (support_it == offline_support.end()) {
+    VLOG(2) << "[WebNN] [" << ep_name
+            << "] does not support offline compilation for device type: "
+            << DeviceTypeToString(device_type);
+    return false;
+  }
+  uint32_t device_id = ort_api->HardwareDevice_DeviceId(hardware_device);
+  if (!std::ranges::contains(support_it->device_ids, device_id)) {
+    VLOG(2) << "[WebNN] [" << ep_name
+            << "] does not support offline compilation for device ID: 0x"
+            << std::hex << device_id;
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -886,55 +920,61 @@ std::vector<const OrtEpDevice*> Environment::SelectEpDevices(
 
 std::optional<EpDeviceInfo> Environment::SelectEpDeviceForCompiler(
     OrtHardwareDeviceType device_type) {
-  std::vector<const OrtEpDevice*> selected_devices =
-      SelectEpDevices(GetRegisteredEpDevices(), device_type);
-  if (selected_devices.empty()) {
+  if (device_type == OrtHardwareDeviceType_CPU) {
+    VLOG(2) << "[WebNN] CPU device is not supported for offline compilation.";
     return std::nullopt;
   }
-  // Only the first selected device matters since the rest are CPU EPs for
-  // fallback which should run in the renderer process.
+
+  base::span<const OrtEpDevice* const> registered_ep_devices =
+      GetRegisteredEpDevices();
+
+  // Filter out EP devices that don't support offline compilation before running
+  // EP selection, so selection only considers compiler-eligible devices.
+  // Skipped when testing online compilation on real hardware or when all
+  // compiler devices are explicitly allowed.
+  const bool allow_all_compiler_devices =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kWebNNOrtDisableVirtualDevices) ||
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kWebNNOrtAllowAllCompilerDevices);
+  std::vector<const OrtEpDevice*> candidate_devices;
+  for (const OrtEpDevice* ep_device : registered_ep_devices) {
+    if (allow_all_compiler_devices ||
+        EpDeviceSupportsOfflineCompilation(ep_device)) {
+      candidate_devices.push_back(ep_device);
+    }
+  }
+
+  std::vector<const OrtEpDevice*> selected_devices =
+      SelectEpDevices(candidate_devices, device_type);
+  if (selected_devices.empty()) {
+    VLOG(1) << "[WebNN] No suitable EP device found for compiler, device type: "
+            << DeviceTypeToString(OrtToWebnnDeviceType(device_type));
+    return std::nullopt;
+  }
   const OrtEpDevice* selected_ep_device = selected_devices[0];
 
   const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
-
-  std::string_view ep_name = ort_api->EpDevice_EpName(selected_ep_device);
-  // Only allow selecting from EPs listed in `kKnownEPs`.
-  const auto ep_it = kKnownEPs.find(ep_name);
-  if (ep_it == kKnownEPs.end()) {
-    return std::nullopt;
-  }
-
-  const OrtHardwareDevice* hardware_device =
+  std::string_view selected_ep_name =
+      ort_api->EpDevice_EpName(selected_ep_device);
+  const OrtHardwareDevice* selected_hardware_device =
       ort_api->EpDevice_Device(selected_ep_device);
-  const OrtHardwareDeviceType hardware_device_type =
-      ort_api->HardwareDevice_Type(hardware_device);
-  uint32_t device_id = ort_api->HardwareDevice_DeviceId(hardware_device);
+  mojom::Device selected_device_type = OrtToWebnnDeviceType(
+      ort_api->HardwareDevice_Type(selected_hardware_device));
+  uint32_t selected_device_id =
+      ort_api->HardwareDevice_DeviceId(selected_hardware_device);
+  uint32_t selected_vendor_id =
+      ort_api->HardwareDevice_VendorId(selected_hardware_device);
 
-  mojom::Device selected_device_type =
-      OrtToWebnnDeviceType(hardware_device_type);
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWebNNOrtDisableVirtualDevices)) {
-    const auto& offline_support = ep_it->second.offline_compilation_support;
-    auto support_it =
-        std::ranges::find(offline_support, selected_device_type,
-                          &OfflineCompilationSupport::device_type);
-    if (support_it == offline_support.end()) {
-      VLOG(1) << "[WebNN] [" << ep_name
-              << "] does not support offline compilation for device type: "
-              << DeviceTypeToString(selected_device_type);
-      return std::nullopt;
-    }
-    if (!std::ranges::contains(support_it->device_ids, device_id)) {
-      VLOG(1) << "[WebNN] [" << ep_name
-              << "] does not support offline compilation for device ID: 0x"
-              << std::hex << device_id;
-      return std::nullopt;
-    }
-  }
+  VLOG(1) << "[WebNN] Selected EP device for compiler: " << selected_ep_name
+          << ", device type: " << DeviceTypeToString(selected_device_type)
+          << ", device ID: 0x" << std::hex << selected_device_id
+          << ", vendor ID: 0x" << selected_vendor_id;
 
-  return EpDeviceInfo{.ep_name = std::string(ep_name),
+  return EpDeviceInfo{.ep_name = std::string(selected_ep_name),
                       .device_type = selected_device_type,
-                      .device_id = device_id};
+                      .device_id = selected_device_id,
+                      .vendor_id = selected_vendor_id};
 }
 
 // static
@@ -967,6 +1007,11 @@ const OrtEpDevice* Environment::FindRegisteredEpDevice(
     uint32_t registered_device_id =
         ort_api->HardwareDevice_DeviceId(hardware_device);
     if (registered_device_id != device_info.device_id) {
+      continue;
+    }
+    uint32_t registered_vendor_id =
+        ort_api->HardwareDevice_VendorId(hardware_device);
+    if (registered_vendor_id != device_info.vendor_id) {
       continue;
     }
     const OrtHardwareDeviceType registered_device_type =

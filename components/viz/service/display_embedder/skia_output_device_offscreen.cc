@@ -105,16 +105,6 @@ void SkiaOutputDeviceOffscreen::EnsureBackbuffer() {
   if (auto* gr_context = context_state_->gr_context()) {
     auto backend_format =
         gr_context->defaultBackendFormat(sk_color_type_, GrRenderable::kYes);
-#if BUILDFLAG(IS_MAC)
-    DCHECK_EQ(context_state_->gr_context_type(), gpu::GrContextType::kGL);
-    // Because SkiaOutputSurface may use IOSurface, we need to ensure that we
-    // are using the correct texture target for IOSurfaces (which depends on the
-    // GL implementation). Otherwise the validateSurface will fail because of
-    // the textureType mismatch.
-    backend_format = GrBackendFormats::MakeGL(
-        GrBackendFormats::AsGLFormatEnum(backend_format),
-        gpu::GetTextureTargetForIOSurfaces());
-#endif
     DCHECK(backend_format.isValid())
         << "GrBackendFormat is invalid for color_type: " << sk_color_type_;
 
@@ -157,12 +147,9 @@ void SkiaOutputDeviceOffscreen::EnsureBackbuffer() {
     skgpu::graphite::TextureInfo texture_info = gpu::GraphiteBackendTextureInfo(
         context_state_->gr_context_type(),
         SkColorTypeToSinglePlaneSharedImageFormat(sk_color_type_),
-        /*readonly=*/false,
         /*plane_index=*/0,
         /*is_yuv_plane=*/false, /*mipmapped=*/false,
-        /*scanout_dcomp_surface=*/false,
-        /*supports_multiplanar_rendering=*/false,
-        /*supports_multiplanar_copy=*/false);
+        /*scanout_dcomp_surface=*/false);
     graphite_texture_ =
         context_state_->gpu_main_graphite_recorder()->createBackendTexture(
             gfx::SizeToSkISize(size_), texture_info);

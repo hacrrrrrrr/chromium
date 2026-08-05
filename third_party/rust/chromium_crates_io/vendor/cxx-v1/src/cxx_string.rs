@@ -11,6 +11,7 @@ use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 use core::marker::{PhantomData, PhantomPinned};
 use core::mem::MaybeUninit;
+use core::panic::RefUnwindSafe;
 use core::pin::Pin;
 use core::slice;
 use core::str::{self, Utf8Error};
@@ -308,6 +309,7 @@ pub struct StackString {
 }
 
 unsafe impl Sync for StackString {}
+impl RefUnwindSafe for StackString {}
 
 impl StackString {
     pub fn new() -> Self {

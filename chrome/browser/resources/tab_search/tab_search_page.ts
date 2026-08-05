@@ -1094,9 +1094,6 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
         Math.round(Date.now() - updateStartTime));
   }
 
-  getSearchTextForTesting(): string {
-    return this.searchText_;
-  }
 
   protected onSelectedChange_(
       e: CustomEvent<

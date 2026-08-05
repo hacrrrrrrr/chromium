@@ -1760,6 +1760,7 @@ TEST_F(ElementTest, OverscrollBackdropPseudoElement) {
       <div id="container" overscrollcontainer>
         <div id="menu" overscrollarea></div>
       </div>
+      <button command="toggle-overscroll" commandfor="menu"></button>
       )HTML");
 
     GetDocument().UpdateStyleAndLayoutTree();
@@ -1786,6 +1787,7 @@ TEST_F(ElementTest, OverscrollBackdropPseudoElement) {
       <div id="container" overscrollcontainer>
         <div id="menu" overscrollarea></div>
       </div>
+      <button command="toggle-overscroll" commandfor="menu"></button>
       )HTML");
 
     GetDocument().UpdateStyleAndLayoutTree();
@@ -1824,6 +1826,7 @@ TEST_F(ElementTest, OverscrollBackdropClickDisposeCrash) {
     <div id="container" overscrollcontainer>
       <div id="menu" overscrollarea></div>
     </div>
+    <button command="toggle-overscroll" commandfor="menu"></button>
   )HTML");
 
   GetDocument().UpdateStyleAndLayoutTree();
@@ -1842,6 +1845,41 @@ TEST_F(ElementTest, OverscrollBackdropClickDisposeCrash) {
   Event* event = Event::Create(event_type_names::kClick);
 
   backdrop->DispatchEvent(*event);
+}
+
+TEST_F(ElementTest, DelegatesFocusWasLastFocusFromUserGesture) {
+  SetBodyContent("<div id='host'></div>");
+  ShadowRoot* shadow_root =
+      SetShadowContent("<div id='probe' contenteditable='true'></div>", "host");
+  shadow_root->SetDelegatesFocus(true);
+  UpdateAllLifecyclePhasesForTest();
+
+  Element* host = GetElementById("host");
+  Element* probe = shadow_root->getElementById(AtomicString("probe"));
+  ASSERT_TRUE(host);
+  ASSERT_TRUE(probe);
+
+  EXPECT_FALSE(probe->WasLastFocusFromUserGesture());
+
+  host->Focus();
+  EXPECT_EQ(probe, GetDocument().FocusedElement());
+  EXPECT_FALSE(probe->WasLastFocusFromUserGesture());
+
+  probe->blur();
+  EXPECT_NE(probe, GetDocument().FocusedElement());
+
+  host->Focus(FocusParams(SelectionBehaviorOnFocus::kRestore,
+                          mojom::blink::FocusType::kScript, nullptr));
+  EXPECT_EQ(probe, GetDocument().FocusedElement());
+  EXPECT_FALSE(probe->WasLastFocusFromUserGesture());
+
+  probe->blur();
+  EXPECT_NE(probe, GetDocument().FocusedElement());
+
+  host->Focus(FocusParams(SelectionBehaviorOnFocus::kRestore,
+                          mojom::blink::FocusType::kMouse, nullptr));
+  EXPECT_EQ(probe, GetDocument().FocusedElement());
+  EXPECT_TRUE(probe->WasLastFocusFromUserGesture());
 }
 
 }  // namespace blink

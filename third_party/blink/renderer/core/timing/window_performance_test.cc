@@ -1719,6 +1719,7 @@ TEST_P(WindowPerformanceTest, UserInteractionTraceEvents) {
   }
 
   auto analyzer = trace_analyzer::Stop();
+  ASSERT_TRUE(analyzer);
   analyzer->AssociateAsyncBeginEndEvents();
 
   trace_analyzer::TraceEventVector events;
@@ -1827,7 +1828,7 @@ TEST_P(WindowPerformanceTest, ContainerTimingTraceEvent) {
   base::DictValue arg_dict = events[0]->GetKnownArgAsDict("data");
   std::string* element_type = arg_dict.FindString("elementType");
   ASSERT_TRUE(element_type);
-  EXPECT_EQ(*element_type, "container-paints");
+  EXPECT_EQ(*element_type, "");
   EXPECT_EQ(arg_dict.FindInt("startTime").value_or(-1), 2000);
   EXPECT_EQ(arg_dict.FindInt("firstRenderTime").value_or(-1), 1000);
   EXPECT_EQ(arg_dict.FindInt("duration").value_or(-1), 0);

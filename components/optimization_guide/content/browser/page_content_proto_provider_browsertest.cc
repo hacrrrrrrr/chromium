@@ -14,15 +14,12 @@
 #include "base/android/device_info.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
-#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
-#include "base/test/test_timeouts.h"
 #include "base/time/time.h"
-#include "base/timer/elapsed_timer.h"
 #include "components/optimization_guide/content/browser/mock_media_transcript_provider.h"
 #include "components/optimization_guide/content/browser/no_response_ai_page_content_agent.h"
 #include "components/optimization_guide/content/browser/page_content_test_utils.h"
@@ -34,7 +31,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -44,7 +40,6 @@
 #include "content/public/test/media_start_stop_observer.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/common/shell_switches.h"
-#include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "services/media_session/public/cpp/test/mock_media_session.h"
@@ -1618,6 +1613,47 @@ IN_PROC_BROWSER_TEST_F(PageContentProtoProviderBrowserTestFencedFrame,
                    b_geometry.visible_bounding_box());
 }
 
+IN_PROC_BROWSER_TEST_F(PageContentProtoProviderBrowserTest,
+                       AIPageContentInnerWebContents) {
+  LoadPage(https_server()->GetURL("a.com", "/iframe.html"), nullptr);
+
+  content::WebContents::CreateParams inner_params(
+      web_contents()->GetBrowserContext());
+  std::unique_ptr<content::WebContents> inner_wc =
+      content::WebContents::Create(inner_params);
+
+  const GURL inner_url = https_server()->GetURL("b.com", "/simple.html");
+  content::NavigationController::LoadURLParams load_params(inner_url);
+  inner_wc->GetController().LoadURLWithParams(load_params);
+  EXPECT_TRUE(content::WaitForLoadStop(inner_wc.get()));
+
+  content::WebContents* inner_wc_ptr = inner_wc.get();
+
+  content::RenderFrameHost* iframe_rfh =
+      content::ChildFrameAt(web_contents(), 0);
+  ASSERT_TRUE(iframe_rfh);
+
+  base::test::TestFuture<content::RenderFrameHost*> future;
+  iframe_rfh->PrepareForInnerWebContentsAttach(future.GetCallback());
+
+  content::RenderFrameHost* frame_to_attach_to = future.Get();
+  ASSERT_TRUE(frame_to_attach_to);
+
+  web_contents()->AttachInnerWebContents(std::move(inner_wc),
+                                         frame_to_attach_to,
+                                         /*is_full_page=*/false);
+
+  base::RunLoop run_loop2;
+  GetAIPageContent(
+      inner_wc_ptr, GetAIPageContentOptions(),
+      base::BindOnce(&PageContentProtoProviderBrowserTest::SetPageContent,
+                     base::Unretained(this), run_loop2.QuitClosure()));
+  run_loop2.Run();
+
+  EXPECT_TRUE(has_page_content());
+  AssertHasText(page_content().root_node(), "Non empty simple page\n\n");
+}
+
 IN_PROC_BROWSER_TEST_P(PageContentProtoProviderBrowserTestMultiProcess,
                        AIPageContentMetadata) {
   // TODO(crbug.com/403325367) When remote frames are supported, this same test
@@ -2271,7 +2307,6 @@ IN_PROC_BROWSER_TEST_F(PageContentProtoProviderBrowserTest,
   EXPECT_EQ(form_node_relative.content_attributes().form_data().action_url(),
             https_server()->GetURL("/relative/next").spec());
 }
-
 
 IN_PROC_BROWSER_TEST_F(PageContentProtoProviderBrowserTest,
                        FragmentVisibleBoundingBoxes) {

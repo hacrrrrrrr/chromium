@@ -151,10 +151,6 @@ BASE_DECLARE_FEATURE(kDocumentIsolationPolicy);
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kConnectionAllowlists);
 
-// Should connection allowlists in Early Hints responses be enforced?
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(bool, kConnectionAllowlistsEarlyHints);
-
 // To actually use the prefetch results, it's also necessary to enable
 // kNetworkContextPrefetchUseCache, below.
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
@@ -166,16 +162,6 @@ BASE_DECLARE_FEATURE(kNetworkContextPrefetchUseMatches);
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kCloneDevToolsConnectionOnlyIfRequested);
 
-// Should Sec-Ad-Auction-Event-Recording-Eligible be sent on requests made
-// with attributionsrc, and should Ad-Auction-Register-Event responses on
-// those requests be processed?
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE(kAdAuctionEventRegistration);
-
-// Runtime flag that changes default Permissions Policy for features
-// join-ad-interest-group and run-ad-auction to a more restricted EnableForSelf.
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE(kAdInterestGroupAPIRestrictedPolicyByDefault);
 
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kDeprecateUnload);
@@ -270,20 +256,6 @@ BASE_DECLARE_FEATURE_PARAM(bool,
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kSharedStorageTransactionalBatchUpdate);
 
-// Backend storage + kill switch for Interest Group API origin trials.
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE(kInterestGroupStorage);
-// Backend storage + kill switch for Interest Group API origin trials.
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(int, kInterestGroupStorageMaxOwners);
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(int, kInterestGroupStorageMaxStoragePerOwner);
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(int, kInterestGroupStorageMaxGroupsPerOwner);
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(int, kInterestGroupStorageMaxNegativeGroupsPerOwner);
-COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
-BASE_DECLARE_FEATURE_PARAM(int, kInterestGroupStorageMaxOpsBeforeMaintenance);
 
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kIncreaseCookieAccessCacheSize);
@@ -318,6 +290,11 @@ BASE_DECLARE_FEATURE(kCSPScriptSrcHashesInV1);
 // See https://chromestatus.com/feature/5202380930678784
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kCacheSharingForPervasiveResources);
+
+// When enabled along with kCacheSharingForPervasiveResources, pervasive
+// shared dictionaries are supported via an unpartitioned, single-keyed store.
+COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
+BASE_DECLARE_FEATURE(kPervasiveSharedDictionaries);
 
 // When enabled, sends SameSite=Lax cookies for FedCM requests in addition to
 // SameSite=None.
@@ -457,6 +434,9 @@ BASE_DECLARE_FEATURE(kDirectSocketsUdpSendRequireMulticastPermissionPolicy);
 // service.
 COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
 BASE_DECLARE_FEATURE(kBrowserInitiatedFileUploadValidation);
+
+COMPONENT_EXPORT(NETWORK_CPP_FLAGS_AND_SWITCHES)
+BASE_DECLARE_FEATURE(kSafeRevalidation);
 
 }  // namespace network::features
 

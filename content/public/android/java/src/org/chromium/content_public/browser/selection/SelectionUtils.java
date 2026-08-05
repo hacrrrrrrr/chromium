@@ -42,6 +42,16 @@ public class SelectionUtils {
     }
 
     /**
+     * Truncates oversized selected text for display in menu items.
+     *
+     * @param text The selected text.
+     * @return Truncated text with an ellipsis if it exceeds MAX_SELECTION_TEXT_LENGTH_FOR_MENU.
+     */
+    public static String sanitizeTextForMenu(String text) {
+        return sanitizeQuery(text, MAX_SEARCH_QUERY_LENGTH);
+    }
+
+    /**
      * Perform a share action.
      *
      * @param context Context used to start activity.

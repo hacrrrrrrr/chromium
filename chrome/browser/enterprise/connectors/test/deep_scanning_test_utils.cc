@@ -96,8 +96,7 @@ void EventReportValidator::ExpectUnscannedFileEvent(
           [this, expected_unscanned_file_event](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_unscanned_file_event());
@@ -144,15 +143,13 @@ void EventReportValidator::ExpectUnscannedFileEvent(
   profile_identifier_ = expected_profile_identifier;
   content_transfer_method_ = expected_content_transfer_method;
   EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) {
-            ValidateReport(&report);
-            if (!done_closure_.is_null()) {
-              done_closure_.Run();
-            }
-          });
+      .WillOnce([this](bool include_device_info, base::DictValue report,
+                       policy::CloudPolicyClient::ResultCallback callback) {
+        ValidateReport(&report);
+        if (!done_closure_.is_null()) {
+          done_closure_.Run();
+        }
+      });
 }
 
 void EventReportValidator::ExpectUnscannedFileEvents(
@@ -188,8 +185,7 @@ void EventReportValidator::ExpectUnscannedFileEvents(
            expected_mimetypes, barrier_closure](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_unscanned_file_event());
@@ -239,108 +235,6 @@ void EventReportValidator::ExpectUnscannedFileEvents(
           });
 }
 
-void EventReportValidator::ExpectUnscannedFileEvents(
-    const std::string& expected_url,
-    const std::string& expected_tab_url,
-    const std::string& expected_source,
-    const std::string& expected_destination,
-    const std::vector<std::string>& expected_filenames,
-    const std::vector<std::string>& expected_sha256s,
-    const std::string& expected_trigger,
-    const std::vector<std::string>& expected_scan_ids,
-    const std::string& expected_reason,
-    const std::set<std::string>* expected_mimetypes,
-    int64_t expected_content_size,
-    const std::string& expected_result,
-    const std::string& expected_profile_username,
-    const std::string& expected_profile_identifier,
-    const std::optional<std::string>& expected_content_transfer_method) {
-  DCHECK_EQ(expected_filenames.size(), expected_sha256s.size());
-  DCHECK_EQ(expected_filenames.size(), expected_scan_ids.size());
-  for (size_t i = 0; i < expected_filenames.size(); ++i) {
-    filenames_and_hashes_[expected_filenames[i]] = expected_sha256s[i];
-    scan_ids_[expected_filenames[i]] = expected_scan_ids[i];
-    results_[expected_filenames[i]] = expected_result;
-  }
-
-  base::RepeatingClosure barrier_closure = base::BarrierClosure(
-      expected_filenames.size(),
-      base::BindLambdaForTesting([this, expected_reason]() {
-        if (expected_reason == "TOO_MANY_REQUESTS") {
-          // When throttled, ValidateReport will erase from scan_ids_ if the
-          // file did not have a scan id. Exactly one file should have been
-          // scanned.
-          EXPECT_EQ(scan_ids_.size(), 1ul);
-        }
-      }).Then(done_closure_ ? std::move(done_closure_) : base::DoNothing()));
-
-  event_key_ = kKeyUnscannedFileEvent;
-  url_ = expected_url;
-  tab_url_ = expected_tab_url;
-  source_ = expected_source;
-  destination_ = expected_destination;
-  mimetypes_ = expected_mimetypes;
-  trigger_ = expected_trigger;
-  unscanned_reason_ = expected_reason;
-  content_size_ = expected_content_size;
-  username_ = expected_profile_username;
-  profile_identifier_ = expected_profile_identifier;
-  content_transfer_method_ = expected_content_transfer_method;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .Times(expected_filenames.size())
-      .WillRepeatedly(
-          [this, barrier_closure](
-              bool include_device_info, base::DictValue report,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
-            ValidateReport(&report);
-            barrier_closure.Run();
-          });
-}
-
-void EventReportValidator::ExpectDangerousDeepScanningResult(
-    const std::string& expected_url,
-    const std::string& expected_tab_url,
-    const std::string& expected_source,
-    const std::string& expected_destination,
-    const std::string& expected_filename,
-    const std::string& expected_sha256,
-    const std::string& expected_threat_type,
-    const std::string& expected_trigger,
-    const std::set<std::string>* expected_mimetypes,
-    int64_t expected_content_size,
-    const std::string& expected_result,
-    const std::string& expected_profile_username,
-    const std::string& expected_profile_identifier,
-    const std::optional<std::string>& expected_scan_id) {
-  event_key_ = kKeyDangerousDownloadEvent;
-  url_ = expected_url;
-  tab_url_ = expected_tab_url;
-  source_ = expected_source;
-  destination_ = expected_destination;
-  filenames_and_hashes_[expected_filename] = expected_sha256;
-  threat_type_ = expected_threat_type;
-  mimetypes_ = expected_mimetypes;
-  trigger_ = expected_trigger;
-  content_size_ = expected_content_size;
-  results_[expected_filename] = expected_result;
-  username_ = expected_profile_username;
-  profile_identifier_ = expected_profile_identifier;
-  if (expected_scan_id.has_value()) {
-    scan_ids_[expected_filename] = expected_scan_id.value();
-  }
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) {
-            ValidateReport(&report);
-            if (!done_closure_.is_null()) {
-              done_closure_.Run();
-            }
-          });
-}
-
 void EventReportValidator::ExpectSensitiveDataEvents(
     const std::vector<chrome::cros::reporting::proto::DlpSensitiveDataEvent>
         expected_sensitive_data_events,
@@ -375,8 +269,7 @@ void EventReportValidator::ExpectSensitiveDataEvents(
            scan_ids, barrier_closure](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_sensitive_data_event());
@@ -438,96 +331,13 @@ void EventReportValidator::ExpectSensitiveDataEvent(
   content_transfer_method_ = expected_content_transfer_method;
   user_justification_ = expected_user_justification;
   EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) {
-            ValidateReport(&report);
-            if (!done_closure_.is_null()) {
-              done_closure_.Run();
-            }
-          });
-}
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-void EventReportValidator::ExpectDataMaskingEvent(
-    const std::string& expected_profile_username,
-    const std::string& expected_profile_identifier,
-    extensions::api::enterprise_reporting_private::DataMaskingEvent
-        expected_event) {
-  event_key_ = kKeySensitiveDataEvent;
-  url_ = expected_event.url;
-  tab_url_ = expected_event.url;
-  username_ = expected_profile_username;
-  profile_identifier_ = expected_profile_identifier;
-  expected_data_masking_rules_builder_ = base::BindRepeating(
-      [](const extensions::api::enterprise_reporting_private::DataMaskingEvent&
-             event) { return event.Clone(); },
-      std::move(expected_event));
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) {
-            ValidateReport(&report);
-            if (!done_closure_.is_null()) {
-              done_closure_.Run();
-            }
-          });
-}
-#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-
-void EventReportValidator::ExpectSensitiveDataEvents(
-    const std::string& expected_url,
-    const std::string& expected_tab_url,
-    const std::string& expected_source,
-    const std::string& expected_destination,
-    const std::vector<std::string>& expected_filenames,
-    const std::vector<std::string>& expected_sha256s,
-    const std::string& expected_trigger,
-    const std::vector<ContentAnalysisResponse::Result>& expected_dlp_verdicts,
-    const std::set<std::string>* expected_mimetypes,
-    int64_t expected_content_size,
-    const std::vector<std::string>& expected_results,
-    const std::string& expected_profile_username,
-    const std::string& expected_profile_identifier,
-    const std::vector<std::string>& expected_scan_ids,
-    const std::optional<std::string>& expected_content_transfer_method,
-    const std::optional<std::u16string>& expected_user_justification) {
-  for (size_t i = 0; i < expected_filenames.size(); ++i) {
-    filenames_and_hashes_[expected_filenames[i]] = expected_sha256s[i];
-    dlp_verdicts_[expected_filenames[i]] = expected_dlp_verdicts[i];
-    results_[expected_filenames[i]] = expected_results[i];
-    scan_ids_[expected_filenames[i]] = expected_scan_ids[i];
-  }
-
-  event_key_ = kKeySensitiveDataEvent;
-  url_ = expected_url;
-  tab_url_ = expected_tab_url;
-  source_ = expected_source;
-  destination_ = expected_destination;
-  mimetypes_ = expected_mimetypes;
-  trigger_ = expected_trigger;
-  content_size_ = expected_content_size;
-  username_ = expected_profile_username;
-  profile_identifier_ = expected_profile_identifier;
-  content_transfer_method_ = expected_content_transfer_method;
-  user_justification_ = expected_user_justification;
-
-  base::RepeatingClosure barrier_closure = base::BarrierClosure(
-      expected_filenames.size(),
-      done_closure_ ? std::move(done_closure_) : base::DoNothing());
-
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .Times(expected_filenames.size())
-      .WillRepeatedly(
-          [this, barrier_closure](
-              bool include_device_info, base::DictValue report,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
-            ValidateReport(&report);
-            barrier_closure.Run();
-          });
+      .WillOnce([this](bool include_device_info, base::DictValue report,
+                       policy::CloudPolicyClient::ResultCallback callback) {
+        ValidateReport(&report);
+        if (!done_closure_.is_null()) {
+          done_closure_.Run();
+        }
+      });
 }
 
 void EventReportValidator::ExpectSensitiveDataEventWarnThenBypass(
@@ -566,12 +376,12 @@ void EventReportValidator::ExpectSensitiveDataEventWarnThenBypass(
   EXPECT_CALL(*client_, UploadSecurityEventReport)
       .WillOnce([this, expected_filename](
                     bool include_device_info, base::DictValue report,
-                    base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                        callback) { ValidateReport(&report); })
+                    policy::CloudPolicyClient::ResultCallback callback) {
+        ValidateReport(&report);
+      })
       .WillOnce([this, expected_filename, expected_user_justifications](
                     bool include_device_info, base::DictValue report,
-                    base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                        callback) {
+                    policy::CloudPolicyClient::ResultCallback callback) {
         results_[expected_filename] =
             EventResultToString(EventResult::BYPASSED);
         user_justification_ = expected_user_justifications[1];
@@ -594,8 +404,7 @@ void EventReportValidator::
           [expected_dangerous_download_event, expected_mimetypes](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_dangerous_download_event());
@@ -617,8 +426,7 @@ void EventReportValidator::
           [this, expected_sensitive_data_event, expected_mimetypes](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_sensitive_data_event());
@@ -676,14 +484,13 @@ void EventReportValidator::
   scan_ids_[expected_filename] = expected_scan_id;
   content_transfer_method_ = expected_content_transfer_method;
   EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) { ValidateReport(&report); })
+      .WillOnce([this](bool include_device_info, base::DictValue report,
+                       policy::CloudPolicyClient::ResultCallback callback) {
+        ValidateReport(&report);
+      })
       .WillOnce([this, expected_filename, expected_dlp_verdict](
                     bool include_device_info, base::DictValue report,
-                    base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                        callback) {
+                    policy::CloudPolicyClient::ResultCallback callback) {
         event_key_ = kKeySensitiveDataEvent;
         threat_type_ = std::nullopt;
         dlp_verdicts_[expected_filename] = expected_dlp_verdict;
@@ -726,14 +533,13 @@ void EventReportValidator::
   profile_identifier_ = expected_profile_identifier;
   scan_ids_[expected_filename] = expected_scan_id;
   EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) { ValidateReport(&report); })
+      .WillOnce([this](bool include_device_info, base::DictValue report,
+                       policy::CloudPolicyClient::ResultCallback callback) {
+        ValidateReport(&report);
+      })
       .WillOnce([this, expected_filename, expected_threat_type](
                     bool include_device_info, base::DictValue report,
-                    base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                        callback) {
+                    policy::CloudPolicyClient::ResultCallback callback) {
         event_key_ = kKeyDangerousDownloadEvent;
         threat_type_ = expected_threat_type;
         dlp_verdicts_.erase(expected_filename);
@@ -753,8 +559,7 @@ void EventReportValidator::ExpectDangerousDownloadEvent(
           [this, expected_dangerous_download_event, expected_mimetypes](
               bool include_device_info,
               ::chrome::cros::reporting::proto::UploadEventsRequest request,
-              base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                  callback) {
+              policy::CloudPolicyClient::ResultCallback callback) {
             // There should only be 1 event per test.
             ASSERT_EQ(1, request.events_size());
             ASSERT_TRUE(request.events().Get(0).has_dangerous_download_event());
@@ -772,41 +577,6 @@ void EventReportValidator::ExpectDangerousDownloadEvent(
             EXPECT_THAT(dangerous_download_event,
                         EqualsProto(expected_dangerous_download_event));
 
-            if (!done_closure_.is_null()) {
-              done_closure_.Run();
-            }
-          });
-}
-
-void EventReportValidator::ExpectDangerousDownloadEvent(
-    const std::string& expected_url,
-    const std::string& expected_tab_url,
-    const std::string& expected_filename,
-    const std::string& expected_sha256,
-    const std::string& expected_threat_type,
-    const std::string& expected_trigger,
-    const std::set<std::string>* expected_mimetypes,
-    int64_t expected_content_size,
-    const std::string& expected_result,
-    const std::string& expected_profile_username,
-    const std::string& expected_profile_identifier) {
-  event_key_ = kKeyDangerousDownloadEvent;
-  url_ = expected_url;
-  tab_url_ = expected_tab_url;
-  filenames_and_hashes_[expected_filename] = expected_sha256;
-  threat_type_ = expected_threat_type;
-  mimetypes_ = expected_mimetypes;
-  trigger_ = expected_trigger;
-  content_size_ = expected_content_size;
-  results_[expected_filename] = expected_result;
-  username_ = expected_profile_username;
-  profile_identifier_ = expected_profile_identifier;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
-      .WillOnce(
-          [this](bool include_device_info, base::DictValue report,
-                 base::OnceCallback<void(policy::CloudPolicyClient::Result)>
-                     callback) {
-            ValidateReport(&report);
             if (!done_closure_.is_null()) {
               done_closure_.Run();
             }

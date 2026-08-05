@@ -220,6 +220,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
   void GrantCommitScheme(int child_id, const std::string& scheme) override;
   void GrantRequestScheme(int child_id, const std::string& scheme) override;
   bool CanRequestURL(int child_id, const GURL& url) override;
+  bool CanRequestURL(ChildProcessId child_id, const GURL& url);
   bool CanReadFile(ChildProcessId child_id,
                    const base::FilePath& file) override;
   bool CanCreateReadWriteFile(int child_id,
@@ -371,7 +372,7 @@ class CONTENT_EXPORT ChildProcessSecurityPolicyImpl
       const BrowsingInstanceId& browsing_instance_id,
       const url::Origin& origin,
       const OriginAgentClusterIsolationState& oac_isolation_state,
-      bool is_oac_enabled_by_default);
+      const OriginAgentClusterIsolationState& default_isolation_state);
 
   // Adds `origin` to the IsolatedOrigins list for only the BrowsingInstance of
   // `isolation_context`, without isolating all subdomains. For use when the

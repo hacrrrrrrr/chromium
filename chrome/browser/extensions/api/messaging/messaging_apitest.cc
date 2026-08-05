@@ -1970,65 +1970,6 @@ IN_PROC_BROWSER_TEST_F(OnMessagePromiseReturnMessagingApiTest,
       << message_;
 }
 
-// Tests that DevTools extensions do not support promise-based one-time
-// messaging. Specifically, if an `onMessage` listener in a DevTools extension
-// returns a `Promise`, it should not be treated as an asynchronous response,
-// and the message channel should be closed immediately, causing the sender's
-// `Promise` to reject.
-IN_PROC_BROWSER_TEST_F(OnMessagePromiseReturnMessagingApiTest,
-                       DevToolsExtension_NoPromiseMessaging) {
-  TestExtensionDir test_dir;
-  test_dir.WriteManifest(
-      R"({
-          "name": "DevTools Extension No Promise Messaging test",
-          "version": "0.1",
-          "manifest_version": 3,
-          "background": {"service_worker": "background.js"},
-          "devtools_page": "devtools.html"
-        })");
-  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"), "");
-
-  // Background page registers an `onMessage` listener that returns a `Promise`.
-  // Since this is a DevTools extension, this `Promise` return should not
-  // be supported (it won't keep the channel open).
-  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
-                     R"(chrome.runtime.onMessage.addListener((msg) => {
-                          return Promise.resolve('response');
-                        });
-                        chrome.test.sendMessage('ready');)");
-
-  test_dir.WriteFile(FILE_PATH_LITERAL("page.html"),
-                     "<script src='page.js'></script>");
-  // Extension page sends a message and expects it to fail because
-  // the listener's `Promise` is ignored and the channel is closed.
-  test_dir.WriteFile(FILE_PATH_LITERAL("page.js"),
-                     R"(chrome.test.runTests([
-                          function testPromiseMessagingNotSupported() {
-                            chrome.runtime.sendMessage('ping', (response) => {
-                              chrome.test.assertNe(
-                                  undefined, chrome.runtime.lastError);
-                              chrome.test.assertTrue(
-                                  chrome.runtime.lastError.message.includes(
-                                      'The message port closed before a ' +
-                                      'response was received'));
-                              chrome.test.assertEq(undefined, response);
-                              chrome.test.succeed();
-                            });
-                          }
-                        ]);)");
-
-  ResultCatcher catcher;
-  ExtensionTestMessageListener ready_listener("ready");
-  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
-  ASSERT_TRUE(extension);
-  ASSERT_TRUE(ready_listener.WaitUntilSatisfied());
-
-  // Navigate to the extension page to run the test.
-  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(),
-                            extension->GetResourceURL("page.html")));
-  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
-}
-
 using OnMessageExternalAsyncMessagingApiTest = MessagingApiTest;
 
 // Tests that the channel for a sole onMessageExternal listener will not stay
@@ -2061,6 +2002,125 @@ IN_PROC_BROWSER_TEST_F(OnMessageExternalAsyncMessagingApiTest,
   ASSERT_TRUE(RunExtensionTest("messaging/on_message_external_async/sender",
                                {.custom_arg = receiver->id().c_str()}))
       << message_;
+}
+
+// Tests that an `externally_connectable` web page receives a response when
+// sending a one-time message if the extension's
+// `chrome.runtime.onMessageExternal` listener replies asynchronously by
+// returning a `Promise`.
+IN_PROC_BROWSER_TEST_F(OnMessageExternalAsyncMessagingApiTest,
+                       WebPageReceiveResponseFromAsyncPromise) {
+  // Create an extension manifest and background script where the
+  // `chrome.runtime.onMessageExternal` listener returns a `Promise`.
+  static constexpr char kManifest[] = R"(
+      {
+        "name": "ConnectableExtension",
+        "version": "1.0",
+        "manifest_version": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "externally_connectable": {
+          "matches": ["*://example.com/*"]
+        }
+      })";
+  static constexpr char kBackground[] = R"(
+    chrome.runtime.onMessageExternal.addListener((message, sender) => {
+      return Promise.resolve('reply_from_promise');
+    });
+  )";
+
+  // Load the unpacked extension and verify that it loaded successfully.
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  dir.WriteFile(FILE_PATH_LITERAL("background.js"), kBackground);
+  const Extension* extension = LoadExtension(dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Navigate the browser to a web page whose origin matches the
+  // `externally_connectable` pattern in the extension manifest.
+  GURL url = embedded_test_server()->GetURL("example.com", "/simple.html");
+  content::WebContents* web_contents = GetActiveWebContents();
+  ASSERT_TRUE(content::NavigateToURL(web_contents, url));
+  content::RenderFrameHost* frame = web_contents->GetPrimaryMainFrame();
+  ASSERT_TRUE(frame);
+
+  // Execute a script in the web page that sends a message to the extension
+  // using `await chrome.runtime.sendMessage()` and verify that the `Promise`
+  // resolves with the expected asynchronous reply.
+  static constexpr char kWebPageScript[] = R"(
+    (async () => {
+      const response = await chrome.runtime.sendMessage('%s', 'Hello');
+      return response;
+    })();
+  )";
+
+  EXPECT_EQ(
+      "reply_from_promise",
+      content::EvalJs(
+          frame, base::StringPrintf(kWebPageScript, extension->id().c_str())));
+}
+
+// Tests that an `externally_connectable` web page receives a response when
+// sending a one-time message if the extension's
+// `chrome.runtime.onMessageExternal` listener replies asynchronously by
+// returning `true` and invoking `sendResponse()`.
+IN_PROC_BROWSER_TEST_F(OnMessageExternalAsyncMessagingApiTest,
+                       WebPageReceiveResponseFromAsyncSendResponse) {
+  // Create an extension manifest and background script where the
+  // `chrome.runtime.onMessageExternal` listener returns `true` and calls
+  // `sendResponse()` asynchronously.
+  static constexpr char kManifest[] = R"(
+      {
+        "name": "ConnectableExtension",
+        "version": "1.0",
+        "manifest_version": 3,
+        "background": {
+          "service_worker": "background.js"
+        },
+        "externally_connectable": {
+          "matches": ["*://example.com/*"]
+        }
+      })";
+  static constexpr char kBackground[] = R"(
+    chrome.runtime.onMessageExternal.addListener(
+        (message, sender, sendResponse) => {
+      setTimeout(() => {
+        sendResponse('reply_from_send_response');
+      }, 1);
+      return true;
+    });
+  )";
+
+  // Load the unpacked extension and verify that it loaded successfully.
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  dir.WriteFile(FILE_PATH_LITERAL("background.js"), kBackground);
+  const Extension* extension = LoadExtension(dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Navigate the browser to a web page whose origin matches the
+  // `externally_connectable` pattern in the extension manifest.
+  GURL url = embedded_test_server()->GetURL("example.com", "/simple.html");
+  content::WebContents* web_contents = GetActiveWebContents();
+  ASSERT_TRUE(content::NavigateToURL(web_contents, url));
+  content::RenderFrameHost* frame = web_contents->GetPrimaryMainFrame();
+  ASSERT_TRUE(frame);
+
+  // Execute a script in the web page that sends a message to the extension
+  // using `await chrome.runtime.sendMessage()` and verify that the `Promise`
+  // resolves with the expected asynchronous `sendResponse()` reply.
+  static constexpr char kWebPageScript[] = R"(
+    (async () => {
+      const response = await chrome.runtime.sendMessage('%s', 'Hello');
+      return response;
+    })();
+  )";
+
+  EXPECT_EQ(
+      "reply_from_send_response",
+      content::EvalJs(
+          frame, base::StringPrintf(kWebPageScript, extension->id().c_str())));
 }
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 using PolyfillSupportMessagingErrorsApiTest = MessagingApiTestWithPageUrlLoad;

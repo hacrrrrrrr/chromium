@@ -16,11 +16,13 @@
 #include "chrome/browser/dictation/stream_provider.h"
 #include "chrome/browser/dictation/target.h"
 #include "chrome/browser/dictation/test_util.h"
+#include "chrome/browser/glic/test_support/non_interactive_glic_test.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/views/dictation/onboarding_dialog_controller.h"
 #include "chrome/common/extensions/api/dictation_private.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/platform_browser_test.h"
 #include "content/public/browser/global_dom_node_id.h"
@@ -29,6 +31,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/common/switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "third_party/blink/public/common/context_menu_data/edit_flags.h"
 #include "third_party/blink/public/common/dom/dom_node_id.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -126,13 +129,15 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceDisabledBrowserTest,
   EXPECT_EQ(DictationKeyedService::Get(profile()), nullptr);
 }
 
+// Ensure the context menu entrypoint is shown both before, during, and after a
+// session is active.
 IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
                        ShouldShowContextMenuItem) {
   EXPECT_TRUE(dictation_service().ShouldShowContextMenuItem());
 
   StartSession();
 
-  EXPECT_FALSE(dictation_service().ShouldShowContextMenuItem());
+  EXPECT_TRUE(dictation_service().ShouldShowContextMenuItem());
 
   dictation_service().EndSession();
 
@@ -161,6 +166,121 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
   ASSERT_NE(provider->GetTarget(), nullptr);
   EXPECT_EQ(provider->GetTarget()->global_dom_node_id().target_element_dom_id,
             blink::DOMNodeIdType(123));
+  EXPECT_FALSE(provider->GetTarget()->richly_editable());
+}
+
+// Ensure the context menu item can be used to start a new stream in the same
+// tab as an existing session.
+IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
+                       ExecuteContextMenuCommandExistingSessionSameTab) {
+  // Start a first stream
+  SimulateInvokeViaContextMenu(web_contents()->GetPrimaryMainFrame(),
+                               blink::DOMNodeIdType(123));
+
+  ASSERT_NE(session_controller(), nullptr);
+  ListenerStreamProvider* stream1_provider = attached_stream();
+  auto stream1_id = stream1_provider->stream_id_for_testing();
+  ExtensionWaitForStreamStart(profile(), stream1_id);
+  ExtensionSendStreamStateUpdate(
+      profile(), stream1_id,
+      extensions::api::dictation_private::StreamState::kTranscribing);
+
+  // Now that a session and stream are active, verify that we can still trigger
+  // dictation from the context menu. This should gracefully end and finalize
+  // the first stream and start a new stream.
+  SimulateInvokeViaContextMenu(web_contents()->GetPrimaryMainFrame(),
+                               blink::DOMNodeIdType(456));
+
+  ExtensionWaitForStreamEnd(profile(), stream1_id);
+  ASSERT_NE(attached_stream(), nullptr);
+  auto stream2_id = attached_stream()->stream_id_for_testing();
+  EXPECT_NE(stream1_id, stream2_id);
+  EXPECT_EQ(attached_stream()
+                ->GetTarget()
+                ->global_dom_node_id()
+                .target_element_dom_id,
+            blink::DOMNodeIdType(456));
+
+  // Ensure the finalized transcript can be sent for stream 1 after stream 2
+  // started.
+  ExtensionSendTranscriptUpdate(
+      profile(), stream1_id,
+      extensions::api::dictation_private::TranscriptionType::kFinal, "Final");
+  EXPECT_EQ(stream1_provider->GetLatestTranscriptionForTesting(), "Final");
+}
+
+// Ensure the context menu item can be used to start a new stream in a second
+// window, while a session is already active in another window.
+IN_PROC_BROWSER_TEST_F(
+    DictationKeyedServiceBrowserTest,
+    ExecuteContextMenuCommandExistingSessionDifferentWindow) {
+  // Start dictation in the first window.
+  SimulateInvokeViaContextMenu(web_contents()->GetPrimaryMainFrame(),
+                               blink::DOMNodeIdType(123));
+  ListenerStreamProvider* stream1_provider = attached_stream();
+  auto stream1_id = stream1_provider->stream_id_for_testing();
+  ExtensionWaitForStreamStart(profile(), stream1_id);
+  ExtensionSendStreamStateUpdate(
+      profile(), stream1_id,
+      extensions::api::dictation_private::StreamState::kTranscribing);
+
+  // Create a second window and trigger the context menu entry point from it.
+  Browser* second_browser = CreateBrowser(profile());
+  content::WebContents* window2_contents =
+      second_browser->tab_strip_model()->GetActiveWebContents();
+  SimulateInvokeViaContextMenu(window2_contents->GetPrimaryMainFrame(),
+                               blink::DOMNodeIdType(456));
+
+  // Ensure stream 1 had EndStream called on it.
+  ExtensionWaitForStreamEnd(profile(), stream1_id);
+
+  // The session should should now be targeting the new element in the second
+  // window.
+  ASSERT_NE(attached_stream(), nullptr);
+  auto stream2_id = attached_stream()->stream_id_for_testing();
+  EXPECT_NE(stream1_id, stream2_id);
+  EXPECT_EQ(attached_stream()
+                ->GetTarget()
+                ->global_dom_node_id()
+                .target_element_dom_id,
+            blink::DOMNodeIdType(456));
+  EXPECT_EQ(attached_stream()
+                ->GetTarget()
+                ->global_dom_node_id()
+                .document.AsRenderFrameHostIfValid(),
+            window2_contents->GetPrimaryMainFrame());
+
+  // Ensure final transcript can be sent for stream 1 after stream 2 started.
+  ExtensionSendTranscriptUpdate(
+      profile(), stream1_id,
+      extensions::api::dictation_private::TranscriptionType::kFinal, "Final");
+  EXPECT_EQ(stream1_provider->GetLatestTranscriptionForTesting(), "Final");
+}
+
+IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
+                       ExecuteContextMenuCommandRichlyEditable) {
+  content::ContextMenuParams params;
+  params.is_editable = true;
+  params.edit_flags = blink::ContextMenuDataEditFlags::kCanEditRichly;
+  params.form_field_dom_node_id = content::GlobalDOMNodeId(
+      web_contents()->GetPrimaryMainFrame()->GetWeakDocumentPtr(),
+      blink::DOMNodeIdType(123));
+  TestRenderViewContextMenu menu(*web_contents()->GetPrimaryMainFrame(),
+                                 params);
+  menu.Init();
+
+  ASSERT_TRUE(menu.IsItemPresent(IDC_CONTENT_CONTEXT_DICTATION));
+  ASSERT_TRUE(menu.IsItemEnabled(IDC_CONTENT_CONTEXT_DICTATION));
+
+  menu.ExecuteCommand(IDC_CONTENT_CONTEXT_DICTATION, 0);
+
+  ASSERT_NE(session_controller(), nullptr);
+  StreamProvider* provider = session_controller()->attached_stream_provider();
+  ASSERT_NE(provider, nullptr);
+  ASSERT_NE(provider->GetTarget(), nullptr);
+  EXPECT_EQ(provider->GetTarget()->global_dom_node_id().target_element_dom_id,
+            blink::DOMNodeIdType(123));
+  EXPECT_TRUE(provider->GetTarget()->richly_editable());
 }
 
 // TODO(crbug.com/502587072): Add tests which have the test extension simulate
@@ -277,7 +397,7 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
 
   // Start a second stream while the first is finalizing. The controller should
   // immediately enter kStreamInitializing.
-  controller->StartDictationStream(DefaultInPageTargetId(web_contents()),
+  controller->StartDictationStream(DefaultInPageTarget(web_contents()),
                                    DictationStreamStartTrigger::kSessionStart);
   EXPECT_EQ(controller->GetState(), SessionState::kStreamInitializing);
 
@@ -377,9 +497,9 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
       content::GetDOMNodeId(*web_contents()->GetPrimaryMainFrame(), "#text_id");
   ASSERT_TRUE(dom_node_id.has_value());
 
-  StartSession(content::GlobalDOMNodeId{
+  StartSession(TargetDetails(content::GlobalDOMNodeId{
       web_contents()->GetPrimaryMainFrame()->GetWeakDocumentPtr(),
-      blink::DOMNodeIdType(dom_node_id.value())});
+      blink::DOMNodeIdType(dom_node_id.value())}));
 
   SessionController* controller = session_controller();
   ListenerStreamProvider* provider = static_cast<ListenerStreamProvider*>(
@@ -437,9 +557,9 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
 
   // Start a new session and stream, commit some text, and stop.
   {
-    StartSession(content::GlobalDOMNodeId{
+    StartSession(TargetDetails(content::GlobalDOMNodeId{
         web_contents()->GetPrimaryMainFrame()->GetWeakDocumentPtr(),
-        blink::DOMNodeIdType(dom_node_id.value())});
+        blink::DOMNodeIdType(dom_node_id.value())}));
 
     ASSERT_TRUE(attached_stream());
     auto stream_id = attached_stream()->stream_id_for_testing();
@@ -484,6 +604,83 @@ IN_PROC_BROWSER_TEST_F(DictationKeyedServiceBrowserTest,
   }
 
   EXPECT_EDITABLE_TEXT_EQ("#text_id", "Hello World");
+}
+
+// TODO(b/533465625): Ideally we could also make this a child of
+// DictationBrowserTestBase so we get all the helpers.
+// TODO(crbug.com/537848278): Simplify this test suite to GlicBrowserTest.
+class DictationGlicBrowserTest : public glic::NonInteractiveGlicTest {
+ public:
+  DictationGlicBrowserTest()
+      : scoped_feature_list_(CreateEnablingFeatureList()) {}
+  ~DictationGlicBrowserTest() override = default;
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    glic::NonInteractiveGlicTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(
+        extensions::switches::kAllowlistedExtensionID,
+        std::string(kDictationTestExtensionId));
+  }
+
+  void SetUpOnMainThread() override {
+    glic::NonInteractiveGlicTest::SetUpOnMainThread();
+    GetProfile()->GetPrefs()->SetBoolean(
+        prefs::kPrefDictationOnboardingCompleted, true);
+    LoadTestExtensionInManualMode(GetProfile());
+  }
+
+  DictationKeyedService& dictation_service() {
+    return *DictationKeyedService::Get(GetProfile());
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+// Ensure basic stream setup, state changes, and end work correctly for streams
+// started for a Glic guest.
+IN_PROC_BROWSER_TEST_F(DictationGlicBrowserTest, BasicStreamFunctions) {
+  RunTestSequence(OpenGlic(), CheckGlicInstanceIsShowing());
+
+  content::RenderFrameHost* glic_rfh = FindGlicGuestMainFrame();
+  ASSERT_TRUE(glic_rfh);
+
+  // Start a session using the Glic guest document rather than the normal tab
+  // document.
+  content::GlobalDOMNodeId target_id(glic_rfh->GetWeakDocumentPtr(),
+                                     blink::DOMNodeIdType(123));
+
+  tabs::TabInterface* tab = chrome_test_utils::GetActiveTab(this);
+  CHECK(tab);
+  dictation_service().StartSession(*tab, TargetDetails(target_id),
+                                   DictationSessionEntryPoint::kContextMenu);
+
+  SessionController* controller = dictation_service().session_controller();
+  ASSERT_NE(controller, nullptr);
+
+  ListenerStreamProvider* provider = static_cast<ListenerStreamProvider*>(
+      controller->attached_stream_provider());
+  ASSERT_NE(provider, nullptr);
+
+  ExtensionWaitForStreamStart(GetProfile(), provider->stream_id_for_testing());
+
+  ExtensionSendStreamStateUpdate(GetProfile(),
+                                 provider->stream_id_for_testing(),
+                                 ExtensionStreamState::kTranscribing);
+  EXPECT_EQ(provider->GetState(), StreamProvider::StreamState::kTranscribing);
+
+  ExtensionSendTranscriptUpdate(GetProfile(), provider->stream_id_for_testing(),
+                                ExtensionTranscriptionType::kPartial, "Hello");
+  EXPECT_EQ(provider->GetLatestTranscriptionForTesting(), "Hello");
+
+  controller->UiRequestEndActiveStream();
+  ExtensionSendStreamStateUpdate(GetProfile(),
+                                 provider->stream_id_for_testing(),
+                                 ExtensionStreamState::kComplete);
+  EXPECT_EQ(controller->GetState(), SessionState::kInactive);
+
+  dictation_service().EndSession();
+  RunTestSequence(CloseGlic());
 }
 
 }  // namespace

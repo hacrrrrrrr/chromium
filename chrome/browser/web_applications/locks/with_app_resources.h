@@ -12,13 +12,13 @@ namespace web_app {
 class ExtensionsManager;
 class OsIntegrationManager;
 class WebAppIconManager;
-class WebAppInstallFinalizer;
 class WebAppInstallManager;
 class WebAppLockManager;
 class WebAppRegistrar;
 class WebAppSyncBridge;
 class WebAppTranslationManager;
 class WebAppUiManager;
+class WebAppIsolationDelegate;
 
 // A mixin class that provides access to web app components that allow
 // read/write access to web app data. A lock class that needs this kind of
@@ -38,8 +38,6 @@ class WithAppResources {
   // Will CHECK-fail if accessed before the lock is granted.
   WebAppSyncBridge& sync_bridge();
   // Will CHECK-fail if accessed before the lock is granted.
-  WebAppInstallFinalizer& install_finalizer();
-  // Will CHECK-fail if accessed before the lock is granted.
   OsIntegrationManager& os_integration_manager();
   // Will CHECK-fail if accessed before the lock is granted.
   WebAppInstallManager& install_manager();
@@ -49,6 +47,8 @@ class WithAppResources {
   WebAppTranslationManager& translation_manager();
   // Will CHECK-fail if accessed before the lock is granted.
   WebAppUiManager& ui_manager();
+  // Will CHECK-fail if accessed before the lock is granted.
+  WebAppIsolationDelegate& isolation_delegate();
 
  protected:
   WithAppResources();

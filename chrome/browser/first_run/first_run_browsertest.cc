@@ -108,6 +108,18 @@ class FirstRunMasterPrefsBrowserTestBase : public InProcessBrowserTest {
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
   }
 
+#if BUILDFLAG(IS_LINUX)
+  bool SetUpUserDataDirectory() override {
+    if (!InProcessBrowserTest::SetUpUserDataDirectory()) {
+      return false;
+    }
+    base::FilePath user_data_dir;
+    base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+    base::WriteFile(user_data_dir.Append("EULA Accepted"), "");
+    return true;
+  }
+#endif
+
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
   void SetUpInProcessBrowserTestFixture() override {
     InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
@@ -249,7 +261,7 @@ class FirstRunMasterPrefsWithTrackedPreferences
 
 IN_PROC_BROWSER_TEST_F(FirstRunMasterPrefsWithTrackedPreferences,
                        TrackedPreferencesSurviveFirstRun) {
-  const PrefService* user_prefs = browser()->profile()->GetPrefs();
+  const PrefService* user_prefs = browser()->GetProfile()->GetPrefs();
   EXPECT_EQ("example.com", user_prefs->GetString(prefs::kHomePage));
   EXPECT_FALSE(user_prefs->GetBoolean(prefs::kHomePageIsNewTabPage));
 
@@ -445,7 +457,7 @@ class FirstRunMasterPrefsImportBookmarkFaviconBrowserTest
 
 IN_PROC_BROWSER_TEST_P(FirstRunMasterPrefsImportBookmarkFaviconBrowserTest,
                        ImportBookmarksDict) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   bookmarks::BookmarkModel* bookmark_model =
       BookmarkModelFactory::GetForBrowserContext(profile);
 

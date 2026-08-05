@@ -99,17 +99,12 @@
         },
         "temp_directory": {
           "type": "string",
-          "description": "The absolute or relative path to a directory where interim files are stored."
+          "description": "The relative path (recommended for workspace isolation) or absolute path to a directory where interim files are stored."
         }
       },
       "required": [
         "vcs",
         "harness",
-        "orchestration_pattern",
-        "use_reclient",
-        "is_debug_build",
-        "repo_type",
-        "output_directory",
         "temp_directory"
       ]
     },
@@ -182,6 +177,39 @@
         "next_stage"
       ]
     },
+    "RefactoringMeta": {
+      "type": "object",
+      "properties": {
+        "original_commit": {
+          "type": "string"
+        },
+        "file_mappings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "original_file": {
+                "type": "string"
+              },
+              "new_files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "original_file",
+              "new_files"
+            ]
+          }
+        }
+      },
+      "required": [
+        "original_commit",
+        "file_mappings"
+      ]
+    },
     "ProjectSpec": {
       "type": "object",
       "properties": {
@@ -190,7 +218,8 @@
           "enum": [
             "IMPLEMENTATION",
             "REVIEW",
-            "AUDIT"
+            "AUDIT",
+            "REFACTORING"
           ]
         },
         "execution_path": {
@@ -259,6 +288,18 @@
         },
         "environment": {
           "$ref": "#/definitions/EnvironmentDef"
+        },
+        "refactoring_meta": {
+          "$ref": "#/definitions/RefactoringMeta"
+        },
+        "routing_overlay": {
+          "type": "string",
+          "description": "Optional path to an internal routing overlay file (e.g., in google3) to merge with ROUTING.md."
+        },
+        "active_protocol": {
+          "type": "string",
+          "enum": ["MAGI", "TDD", "REVIEW"],
+          "description": "Identifies the active protocol for tagging and tracking."
         }
       },
       "required": [
@@ -270,7 +311,8 @@
         "context_resolved",
         "approach_confirmed",
         "ambiguity_level",
-        "environment"
+        "environment",
+        "active_protocol"
       ]
     },
     "ReviewFeedback": {

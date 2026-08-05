@@ -114,20 +114,20 @@ export class SearchPageElement extends SearchPageElementBase {
     };
   }
 
-  feedbackContext: FeedbackContext;
-  descriptionTemplate = '';
-  descriptionPlaceholderText: string = '';
-  private helpContentSearchResultCount: number = 0;
-  private noHelpContentDisplayed = false;
+  declare feedbackContext: FeedbackContext;
+  declare descriptionTemplate: string;
+  declare descriptionPlaceholderText: string;
+  declare private helpContentSearchResultCount: number;
+  declare private noHelpContentDisplayed: boolean;
   private helpContentProvider: HelpContentProviderInterface;
   /**
    * The event handler called when the iframe is loaded. It is set in the
    * html.
    */
-  private resolveIframeLoaded: Function;
+  private resolveIframeLoaded: Function|null = null;
   /**  A promise that resolves when the iframe loading is completed. */
-  private iframeLoaded: Promise<void>;
-  private iframe: HTMLIFrameElement|null;
+  private iframeLoaded: Promise<void>|null = null;
+  private iframe: HTMLIFrameElement|null = null;
   /**  The content list received when query is empty. */
   private popularHelpContentList: HelpContent[];
   /**
@@ -163,6 +163,10 @@ export class SearchPageElement extends SearchPageElementBase {
 
   constructor() {
     super();
+    this.descriptionTemplate = '';
+    this.descriptionPlaceholderText = '';
+    this.helpContentSearchResultCount = 0;
+    this.noHelpContentDisplayed = false;
 
     this.helpContentProvider = getHelpContentProvider();
     this.lastPostedQuerySeqNo = -1;

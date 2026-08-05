@@ -423,47 +423,6 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
   return element_info;
 }
 
-std::unique_ptr<protocol::DictionaryValue>
-InspectorGreenDevFloatyAnchorHighlight(
-    Node* node,
-    const InspectorGreenDevFloatyAnchorConfig& config,
-    float scale) {
-  LayoutObject* layout_object = node->GetLayoutObject();
-  if (!layout_object) {
-    LOG(ERROR) << "No layout object";
-    return nullptr;
-  }
-
-  LocalFrameView* containing_view = node->GetDocument().View();
-  if (!containing_view) {
-    LOG(ERROR) << "No containing view";
-    return nullptr;
-  }
-
-  std::unique_ptr<protocol::DictionaryValue> floaty_info =
-      protocol::DictionaryValue::create();
-
-  gfx::QuadF content_quad;
-  gfx::QuadF padding_quad;
-  gfx::QuadF border_quad;
-  gfx::QuadF margin_quad;
-  InspectorHighlightBase::BuildNodeQuads(node, &content_quad, &padding_quad,
-                                         &border_quad, &margin_quad);
-
-  gfx::RectF bounding_box = border_quad.BoundingBox();
-  if (bounding_box.IsEmpty()) {
-    bounding_box = content_quad.BoundingBox();
-  }
-
-  double x = (bounding_box.x() + bounding_box.width() / 2) * scale;
-  double y = (bounding_box.y() + bounding_box.height() / 2) * scale;
-  floaty_info->setDouble("x", x);
-  floaty_info->setDouble("y", y);
-  floaty_info->setInteger("nodeId", config.node_id);
-
-  return floaty_info;
-}
-
 namespace {
 std::unique_ptr<protocol::DictionaryValue> BuildTextNodeInfo(Text* text_node) {
   std::unique_ptr<protocol::DictionaryValue> text_info =
@@ -2234,7 +2193,7 @@ void InspectorHighlight::AppendDistanceInfo(Node* node) {
   boxes_ = std::make_unique<protocol::Array<protocol::Array<double>>>();
   computed_style_ = protocol::DictionaryValue::create();
 
-  node->GetDocument().EnsurePaintLocationDataValidForNode(
+  node->GetDocument().UpdateStyleAndLayoutForNode(
       node, DocumentUpdateReason::kInspector);
   LayoutObject* layout_object = node->GetLayoutObject();
   if (!layout_object)
@@ -2495,7 +2454,7 @@ bool InspectorHighlight::GetBoxModel(
     Node* node,
     std::unique_ptr<protocol::DOM::BoxModel>* model,
     bool use_absolute_zoom) {
-  node->GetDocument().EnsurePaintLocationDataValidForNode(
+  node->GetDocument().UpdateStyleAndLayoutForNode(
       node, DocumentUpdateReason::kInspector);
   LayoutObject* layout_object = node->GetLayoutObject();
   LocalFrameView* view = node->GetDocument().View();

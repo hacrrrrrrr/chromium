@@ -632,9 +632,15 @@ bool CorsURLLoaderFactory::IsValidRequest(
   if (!process_id_.is_browser() && request.is_outermost_main_frame &&
       !is_outermost_main_frame_ &&
       request.mode != mojom::RequestMode::kNavigate) {
-    mojo::ReportBadMessage(
-        "CorsURLLoaderFactory: is_outermost_main_frame does not match factory");
-    return false;
+    // The request value is renderer-controlled, while the factory value is
+    // browser-derived. Initial empty documents in opener-retaining popups can
+    // legitimately use a factory inherited from their creating subframe.
+    // Canonicalize to the factory's less-privileged value so Network Service
+    // downstream cookie policy does not allow top-level storage-access.
+    request.is_outermost_main_frame = is_outermost_main_frame_;
+    UMA_HISTOGRAM_BOOLEAN(
+        "NetworkService.CorsURLLoaderFactory.IsOutermostMainFrameClamped",
+        true);
   }
 
   // Check if this is an untrusted factory being provided parameters that should
@@ -791,7 +797,7 @@ bool CorsURLLoaderFactory::IsValidRequest(
       // Allowed destinations from unprivileged process:
       case network::mojom::RequestDestination::kAudio:
       case network::mojom::RequestDestination::kAudioWorklet:
-      case network::mojom::RequestDestination::kDictionary:
+      case network::mojom::RequestDestination::kCompressionDictionary:
       case network::mojom::RequestDestination::kDocument:
       case network::mojom::RequestDestination::kEmbed:
       case network::mojom::RequestDestination::kEmpty:

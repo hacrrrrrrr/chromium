@@ -2496,6 +2496,11 @@ void CSSAnimations::MaybeApplyPendingUpdate(Element* element) {
             new_transition->reversing_adjusted_start_value,
             new_transition->reversing_shortening_factor);
     transitions_.Set(property, running_transition);
+
+    if (RuntimeEnabledFeatures::EventTimingMatchingHTMLEnabled()) {
+      event_delegate->OnEventCondition(*transition_effect,
+                                       transition_effect->GetPhase());
+    }
   }
 
   if (pending_update_.NeedsNamedTriggerUpdate()) {
@@ -2660,6 +2665,18 @@ void CSSAnimations::CalculateTransitionUpdateForPropertyHandle(
   }
 
   bool is_attr_tainted = false;
+  if (property.IsCSSCustomProperty()) {
+    const Document& document = state.animating_element.GetDocument();
+    CSSPropertyName property_name = property.GetCSSPropertyName();
+    CSSPropertyRef custom_ref(&property_name, document);
+    CSSVariableData* old_data = state.old_style.GetVariableData(
+        property.CustomPropertyName(), custom_ref.GetProperty().IsInherited());
+    CSSVariableData* new_data = after_change_style.GetVariableData(
+        property.CustomPropertyName(), custom_ref.GetProperty().IsInherited());
+    is_attr_tainted = (old_data && old_data->IsAttrTainted()) ||
+                      (new_data && new_data->IsAttrTainted());
+  }
+
   if (!start || !end) {
     const Document& document = state.animating_element.GetDocument();
     const CSSValue* start_css_value =
@@ -2690,18 +2707,6 @@ void CSSAnimations::CalculateTransitionUpdateForPropertyHandle(
       // TODO(crbug.com/1425925): Handle newly registered custom properties
       // correctly. If that bug is fixed, then this should never happen.
       return;
-    }
-    if (property.IsCSSCustomProperty()) {
-      CSSPropertyName property_name = property.GetCSSPropertyName();
-      CSSPropertyRef custom_ref(&property_name, document);
-      CSSVariableData* old_data = state.old_style.GetVariableData(
-          property.CustomPropertyName(),
-          custom_ref.GetProperty().IsInherited());
-      CSSVariableData* new_data = after_change_style.GetVariableData(
-          property.CustomPropertyName(),
-          custom_ref.GetProperty().IsInherited());
-      is_attr_tainted = (old_data && old_data->IsAttrTainted()) ||
-                        (new_data && new_data->IsAttrTainted());
     }
     start = InterpolationValue(
         MakeGarbageCollected<InterpolableList>(0),
@@ -2776,6 +2781,7 @@ void CSSAnimations::CalculateTransitionUpdateForPropertyHandle(
       transition_type, start.interpolable_value->Clone(),
       start.non_interpolable_value));
   start_keyframe->SetOffset(0);
+  start_keyframe->SetIsAttrTainted(is_attr_tainted);
   keyframes.push_back(start_keyframe);
 
   TransitionKeyframe* end_keyframe =
@@ -2784,6 +2790,7 @@ void CSSAnimations::CalculateTransitionUpdateForPropertyHandle(
       transition_type, end.interpolable_value->Clone(),
       end.non_interpolable_value));
   end_keyframe->SetOffset(1);
+  end_keyframe->SetIsAttrTainted(is_attr_tainted);
   keyframes.push_back(end_keyframe);
 
   if (property.GetCSSProperty().IsCompositableProperty() &&

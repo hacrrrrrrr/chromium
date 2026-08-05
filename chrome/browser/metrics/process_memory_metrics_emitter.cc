@@ -386,6 +386,8 @@ const Metric kAllocatorDumpNamesForMetrics[] = {
      "nonpurgeable_size", EmitTo::kSizeInUmaOnly, nullptr},
     {"ioaccelerator", "IOAccelerator.Purgeable", MetricSize::kLarge,
      "purgeable_size", EmitTo::kSizeInUmaOnly, nullptr},
+    {"gpu/angle/metal", "ANGLEMetal", MetricSize::kLarge, kSize,
+     EmitTo::kSizeInUmaOnly, nullptr},
 #endif
     {"java_heap", "JavaHeap", MetricSize::kLarge, kEffectiveSize,
      EmitTo::kSizeInUkmAndUma, &Memory_Experimental::SetJavaHeap},
@@ -1818,7 +1820,7 @@ namespace {
 // Returns true iff the given |process| is responsible for hosting the
 // main-frame of the given |page|.
 bool HostsMainFrame(const ProcessNode* process, const PageNode* page) {
-  const FrameNode* main_frame = page->GetMainFrameNode();
+  const FrameNode* main_frame = page->GetPrimaryMainFrameNode();
   if (main_frame == nullptr) {
     // |process| can't host a frame that doesn't exist.
     return false;

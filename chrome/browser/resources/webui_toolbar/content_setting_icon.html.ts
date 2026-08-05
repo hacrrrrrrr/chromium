@@ -10,19 +10,19 @@ export function getHtml(this: ContentSettingIconElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
 <!-- TODO: crbug.com/489109708 - Fix anchor highlights. -->
-<cr-icon-button id="button" class="${this.getIconClass_()}"
-    title="${this.state.tooltip}" aria-label="${this.getAriaLabel_()}"
+<toolbar-chip-button id="chip"
+    ?has-label="${Boolean(this.state.explanatoryString)}"
+    .tooltip="${this.state.tooltip}" .ariaLabel="${this.getAriaLabel_()}"
     @click="${this.onClick_}" @auxclick="${this.onAuxclick_}"
     @contextmenu="${this.onContextmenu_}"
     @pointerenter="${this.onPointerenter_}"
     @pointerleave="${this.onPointerleave_}"
-    @pointercancel="${this.onPointercancel_}">
-</cr-icon-button>
-<!-- TODO: crbug.com/489109708 - The animation text should actually be part of
-           the button (clicks should active bubble), and pause animation. -->
-<div id="label" @animationend="${this.onLabelAnimationend_}">
-  ${this.state.explanatoryString}
-</div>
+    @pointercancel="${this.onPointercancel_}"
+    @pointerdown="${this.onPointerdown_}">
+  <div id="icon" slot="prefix-icon"
+      style="mask-image: ${this.getIconUrl_()};"></div>
+  <span id="label">${this.state.explanatoryString}</span>
+</toolbar-chip-button>
 <!--_html_template_end_-->`;
   // clang-format on
 }

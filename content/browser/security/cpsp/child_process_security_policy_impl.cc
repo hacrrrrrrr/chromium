@@ -35,6 +35,7 @@
 #include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/security/cpsp/child_process_security_policy_impl.rs.h"
+#include "content/browser/security/cpsp/process_state.rs.h"
 #include "content/browser/site_info.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/url_info.h"
@@ -1208,8 +1209,12 @@ ChildProcessSecurityPolicyImpl* ChildProcessSecurityPolicyImpl::GetInstance() {
 
 void ChildProcessSecurityPolicyImpl::Add(ChildProcessId child_id,
                                          BrowserContext* browser_context) {
+  DCHECK(browser_context);
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(child_id);
+
   if (IsRustEnabled(GetRustPolicy(CpspRustFeature::kProcessState))) {
-    rust::child_process_security_policy::add_process(child_id);
+    rust::child_process_security_policy::create_state_for_process(child_id);
   }
   // Note: We explicitly continue to create process_state_ even when in
   // Rust-only mode, since the values tracked by ProcessState have only
@@ -1223,9 +1228,6 @@ void ChildProcessSecurityPolicyImpl::Add(ChildProcessId child_id,
   // Rust, this would only be able to early-return here if/when the
   // ProcessState lifetime management is moved over to Rust.
 
-  DCHECK(browser_context);
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(child_id);
   base::AutoLock lock(lock_);
   process_states_.CreateStateForProcess(child_id, browser_context);
 }
@@ -1262,6 +1264,21 @@ void ChildProcessSecurityPolicyImpl::AddForTesting(
 void ChildProcessSecurityPolicyImpl::Remove(ChildProcessId child_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(child_id);
+
+  if (IsRustEnabled(GetRustPolicy(CpspRustFeature::kProcessState))) {
+    rust::child_process_security_policy::prepare_to_remove_state(child_id);
+  }
+
+  // Note: We explicitly continue with C++ state removal as well even when in
+  // Rust-only mode, since the values tracked by ProcessState have only
+  // partially been implemented by the Rust version so far.
+  //
+  // TODO: Currently, the Rust implementation also depends on the reference
+  // counting done below in RemoveProcessReference() to manage its ProcessState
+  // lifetime. Even when ProcessState is fully implemented in Rust, this would
+  // only be able to early-return here if/when the ProcessState lifetime
+  // management is moved over to Rust.
+
   base::AutoLock lock(lock_);
   process_states_.PrepareToRemoveState(child_id);
 }
@@ -1700,6 +1717,13 @@ bool ChildProcessSecurityPolicyImpl::HasOriginCheckExemptionForWebView(
 
 bool ChildProcessSecurityPolicyImpl::CanRequestURL(int child_id,
                                                    const GURL& url) {
+  // TODO(crbug.com/379869738): Remove this conversion when the public
+  // ChildProcessSecurityPolicy API is migrated to ChildProcessId.
+  return CanRequestURL(ChildProcessId::FromUnsafeValue(child_id), url);
+}
+
+bool ChildProcessSecurityPolicyImpl::CanRequestURL(ChildProcessId child_id,
+                                                   const GURL& url) {
   if (!url.is_valid()) {
     return false;  // Can't request invalid URLs.
   }
@@ -1735,9 +1759,7 @@ bool ChildProcessSecurityPolicyImpl::CanRequestURL(int child_id,
   {
     base::AutoLock lock(lock_);
 
-    // TODO(crbug.com/379869738) Remove FromUnsafeValue.
-    if (auto* state = process_states_.GetProcessStateForQuery(
-            ChildProcessId::FromUnsafeValue(child_id))) {
+    if (auto* state = process_states_.GetProcessStateForQuery(child_id)) {
       // Otherwise, we consult the child process's security state to see if it
       // is allowed to request the URL.
       if (state->CanRequestURL(url)) {
@@ -2065,14 +2087,12 @@ bool ChildProcessSecurityPolicyImpl::HasPermissionsForFileSystemFile(
         child_id, filesystem_url.mount_filesystem_id(), permissions);
   }
 
-  // If |filesystem_url.origin()| is not committable in this process, then this
-  // page should not be able to place content in that origin via the filesystem
-  // API either.
-  // TODO(lukasza): Audit whether CanAccessDataForOrigin can be used directly
-  // here.
+  // If |filesystem_url.origin()| is not accessible in this process, then this
+  // page should not be able to access or place content in that origin via the
+  // filesystem API either.
   // TODO(crbug.com/379869738) Remove GetUnsafeValue.
-  if (!CanCommitURL(child_id.GetUnsafeValue(),
-                    filesystem_url.origin().GetURL())) {
+  if (!CanAccessDataForOrigin(child_id.GetUnsafeValue(),
+                              filesystem_url.origin())) {
     return false;
   }
 
@@ -3092,13 +3112,10 @@ void ChildProcessSecurityPolicyImpl::RemoveStateForBrowserContext(
 void ChildProcessSecurityPolicyImpl::
     RemoveOriginAgentClusterRequestsForBrowserContext(
         const BrowserContext& browser_context) {
-  // TODO(crbug.com/522298905): Add FFI for base::UnguessableToken so that
-  // `UniqueToken()` can be used to represent BrowserContext ID in Rust. For
-  // now, fall back to its string representation in `UniqueId()`.
   RUST_CPP_VOID_FUNCTION(
       rust::child_process_security_policy::
           remove_origin_agent_cluster_requests_for_browser_context(
-              browser_context.UniqueId()),
+              browser_context.UniqueToken()),
       RemoveOriginAgentClusterRequestsForBrowserContext_Cpp(browser_context));
 }
 
@@ -3375,13 +3392,10 @@ bool ChildProcessSecurityPolicyImpl::
     HasOriginEverRequestedOriginAgentClusterValue(
         BrowserContext* browser_context,
         const url::Origin& origin) {
-  // TODO(crbug.com/522298905): Add FFI for base::UnguessableToken so that
-  // `UniqueToken()` can be used to represent BrowserContext ID in Rust. For
-  // now, fall back to its string representation in `UniqueId()`.
   RUST_CPP_RETURN_FUNCTION(
       rust::child_process_security_policy::
           has_origin_ever_requested_origin_agent_cluster_value(
-              browser_context->UniqueId(),
+              browser_context->UniqueToken(),
               // Make a copy of the origin for Rust to own.
               std::make_unique<url::Origin>(origin)),
       HasOriginEverRequestedOriginAgentClusterValue_Cpp(
@@ -3469,7 +3483,7 @@ void ChildProcessSecurityPolicyImpl::RecordDefaultOriginAgentClusterOriginIfNew(
       rust::child_process_security_policy::
           record_default_origin_agent_cluster_origin_if_new(
               isolation_context.browsing_instance_id(),
-              browser_context->UniqueId(),
+              browser_context->UniqueToken(),
               // Make a copy of the origin for Rust to own.
               std::make_unique<url::Origin>(origin),
               ToRustOriginAgentClusterIsolationState(
@@ -3683,11 +3697,6 @@ void ChildProcessSecurityPolicyImpl::
   // TODO(crbug.com/482216433): Support this check on the Rust side.
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // TODO(crbug.com/482216433): Support this lookup on the Rust side.
-  bool is_oac_enabled_by_default =
-      SiteIsolationPolicy::AreOriginAgentClustersEnabledByDefault(
-          isolation_context.browser_context());
-
   RUST_CPP_VOID_FUNCTION(
       rust::child_process_security_policy::
           add_origin_agent_cluster_state_for_browsing_instance(
@@ -3695,10 +3704,11 @@ void ChildProcessSecurityPolicyImpl::
               // Make a copy of the origin for Rust to own.
               std::make_unique<url::Origin>(origin),
               ToRustOriginAgentClusterIsolationState(oac_isolation_state),
-              is_oac_enabled_by_default),
+              ToRustOriginAgentClusterIsolationState(
+                  isolation_context.default_isolation_state())),
       AddOriginAgentClusterStateForBrowsingInstance_Cpp(
           isolation_context.browsing_instance_id(), origin, oac_isolation_state,
-          is_oac_enabled_by_default));
+          isolation_context.default_isolation_state()));
 }
 
 void ChildProcessSecurityPolicyImpl::
@@ -3706,15 +3716,11 @@ void ChildProcessSecurityPolicyImpl::
         const BrowsingInstanceId& browsing_instance_id,
         const url::Origin& origin,
         const OriginAgentClusterIsolationState& oac_isolation_state,
-        bool is_oac_enabled_by_default) {
-  // We should only explicitly record states from OAC header requests, either
-  // opt-ins or opt-outs. Opt-outs only make sense if OAC is enabled by
-  // default.
-  DCHECK(oac_isolation_state.logical_oac_status() ==
-             AgentClusterKey::OACStatus::kOriginKeyedByHeader ||
-         (oac_isolation_state.logical_oac_status() ==
-              AgentClusterKey::OACStatus::kSiteKeyedByHeader &&
-          is_oac_enabled_by_default));
+        const OriginAgentClusterIsolationState& default_isolation_state) {
+  // We should only be registering an isolation state if it deviates from the
+  // default isolation state (e.g., if it's explicitly requested by a header or
+  // if an ad frame's process isolation is being bypassed).
+  DCHECK(oac_isolation_state != default_isolation_state);
 
   // We ought to have validated the origin prior to getting here.  If the
   // origin isn't valid at this point, something has gone wrong.
@@ -3743,13 +3749,10 @@ void ChildProcessSecurityPolicyImpl::
 bool ChildProcessSecurityPolicyImpl::RecordOriginAgentClusterRequestIfNew(
     BrowserContext* browser_context,
     const url::Origin& origin) {
-  // TODO(crbug.com/522298905): Add FFI for base::UnguessableToken so that
-  // `UniqueToken()` can be used to represent BrowserContext ID in Rust. For
-  // now, fall back to its string representation in `UniqueId()`.
   RUST_CPP_RETURN_FUNCTION(
       rust::child_process_security_policy::
           record_origin_agent_cluster_request_if_new(
-              browser_context->UniqueId(),
+              browser_context->UniqueToken(),
               // Make a copy of the origin for Rust to own.
               std::make_unique<url::Origin>(origin)),
       RecordOriginAgentClusterRequestIfNew_Cpp(browser_context, origin));
@@ -4046,21 +4049,16 @@ void ChildProcessSecurityPolicyImpl::ProcessStateMaps::RemoveProcessReference(
   process_reference_counts_.erase(itr);
 
   // TODO(crbug.com/522872468): Figure out ProcessState lifetime management in
-  // Rust. For now, rely on C++ to do the reference counting for ProcessState
-  // and CPSP Handles to know when it's safe to remove the ProcessState on the
-  // Rust side, which is here. Note that for now, this will keep Rust's
-  // ProcessState available to be read or modified without distinguishing
-  // whether it's in pending removal state or not. Eventually, this call should
-  // be moved to `Remove()`, and at that time the Rust side should create a
-  // pending remove data structure to ensure that the ProcessState can be
-  // queried but not modified in the time window between CPSP::Remove() and
-  // here.
+  // Rust. For now, rely on C++ to do the reference counting for
+  // RenderProcessHost and CPSP Handles to know when it's safe to remove the
+  // ProcessState on the Rust side.
   //
   // Similarly to Add(), we avoid an early return here in Rust-only mode and
   // allow the C++ cleanup code to complete, since Rust doesn't yet support
   // everything in ProcessState.
   if (IsRustEnabled(GetRustPolicy(CpspRustFeature::kProcessState))) {
-    rust::child_process_security_policy::remove_process(child_id);
+    rust::child_process_security_policy::complete_pending_state_removal(
+        child_id);
   }
 
   // |child_id| could be inside tasks that are on the IO thread task queues. We

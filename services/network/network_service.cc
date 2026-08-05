@@ -38,6 +38,7 @@
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/trace_event.h"
 #include "base/types/pass_key.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -68,6 +69,7 @@
 #include "net/dns/public/dns_config_overrides.h"
 #include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/doh_provider_entry.h"
+#include "net/dns/public/insecure_dns_mode.h"
 #include "net/dns/system_dns_config_change_notifier.h"
 #include "net/dns/test_dns_config_service.h"
 #include "net/filter/filter_source_stream.h"
@@ -425,6 +427,8 @@ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
     return;
   }
 
+  TRACE_EVENT0("loading", "NetworkService::Initialize");
+
   initialized_ = true;
 
 #if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARMEL)
@@ -511,7 +515,6 @@ void NetworkService::Initialize(mojom::NetworkServiceParamsPtr params,
       std::make_unique<SCTAuditingCache>(kMaxSCTAuditingCacheEntries);
 #endif
 
-  metrics_updater_ = std::make_unique<RestrictedCookieManagerMetrics>();
 }
 
 NetworkService::~NetworkService() {
@@ -729,6 +732,7 @@ void NetworkService::SetSSLKeyLogFile(base::File file) {
 void NetworkService::CreateNetworkContext(
     mojo::PendingReceiver<mojom::NetworkContext> receiver,
     mojom::NetworkContextParamsPtr params) {
+  TRACE_EVENT0("loading", "NetworkService::CreateNetworkContext");
   if (time_to_first_context_timer_) {
     base::UmaHistogramMediumTimes(
         "NetworkService.TimeToFirstCreateNetworkContext",
@@ -756,26 +760,16 @@ void NetworkService::CreateNetworkContext(
 }
 
 void NetworkService::ConfigureStubHostResolver(
-    bool insecure_dns_client_enabled,
+    net::InsecureDnsMode insecure_dns_mode,
     bool happy_eyeballs_v3_enabled,
     net::SecureDnsMode secure_dns_mode,
     const net::DnsOverHttpsConfig& dns_over_https_config,
     bool additional_dns_types_enabled,
-    const std::vector<net::IPEndPoint>& fallback_doh_nameservers,
-    bool insecure_dns_via_platform_apis_enabled) {
+    const std::vector<net::IPEndPoint>& fallback_doh_nameservers) {
   // Enable or disable the insecure part of DnsClient. "DnsClient" is the class
   // that implements the stub resolver.
-  net::HostResolverManager::InsecureDnsMode mode;
-  if (insecure_dns_client_enabled && insecure_dns_via_platform_apis_enabled) {
-    mode = net::HostResolverManager::InsecureDnsMode::kEnabledPlatform;
-  } else if (insecure_dns_client_enabled) {
-    mode = net::HostResolverManager::InsecureDnsMode::kEnabledBuiltIn;
-  } else {
-    mode = net::HostResolverManager::InsecureDnsMode::kDisabled;
-  }
-
   host_resolver_manager_->SetInsecureDnsClientEnabled(
-      mode, additional_dns_types_enabled);
+      insecure_dns_mode, additional_dns_types_enabled);
 
   // Configure DNS over HTTPS.
   DCHECK(dns_config_overrides_set_by_ == FunctionTag::None ||
@@ -1304,6 +1298,14 @@ NetworkService::GetDefaultURLLoaderNetworkServiceObserver() {
     return default_url_loader_network_service_observer_.get();
   }
   return nullptr;
+}
+
+RestrictedCookieManager::UmaMetricsUpdater*
+NetworkService::GetMetricsUpdater() {
+  if (!metrics_updater_) {
+    metrics_updater_ = std::make_unique<RestrictedCookieManagerMetrics>();
+  }
+  return metrics_updater_.get();
 }
 
 void NetworkService::ResetMetricsUpdaterForTesting() {

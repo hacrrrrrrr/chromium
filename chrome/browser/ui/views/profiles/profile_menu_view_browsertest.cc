@@ -591,7 +591,8 @@ IN_PROC_BROWSER_TEST_F(ProfileMenuViewExtensionsTest,
   // Wait for browser widget destruction. Below will crash due to raw_ptr
   // detection if the profile bubble outlives the browser.
   tab_strip->CloseWebContentsAt(0, TabCloseTypes::CLOSE_NONE);
-  views::test::WidgetDestroyedWaiter(browser()->GetBrowserView().GetWidget())
+  views::test::WidgetDestroyedWaiter(
+      BrowserView::GetBrowserViewForBrowser(browser())->GetWidget())
       .Wait();
 }
 
@@ -698,7 +699,7 @@ class ProfileMenuViewSignoutTest : public ProfileMenuViewTestBase,
   // SigninBrowserTestBase:
   void SetUpOnMainThread() override {
     SigninBrowserTestBase::SetUpOnMainThread();
-    SetTargetBrowser(GetProfile() == browser()->profile()
+    SetTargetBrowser(GetProfile() == browser()->GetProfile()
                          ? browser()
                          : CreateBrowser(GetProfile()));
 
@@ -1139,7 +1140,7 @@ class ProfileMenuViewSigninPendingTest : public ProfileMenuViewTestBase,
     SetTargetBrowser(browser());
 
     // Add an account, non-syncing and in authentication error.
-    Profile* profile = browser()->profile();
+    Profile* profile = browser()->GetProfile();
     signin::IdentityManager* identity_manager =
         IdentityManagerFactory::GetForProfile(profile);
     account_info_ = signin::MakePrimaryAccountAvailable(
@@ -1246,7 +1247,7 @@ class ProfileMenuClickTest : public InProcessBrowserTest,
     SetTargetBrowser(browser());
   }
 
-  Profile* GetProfile() { return browser()->profile(); }
+  Profile* GetProfile() { return browser()->GetProfile(); }
 
   virtual ProfileMenuViewBase::ActionableItem GetExpectedActionableItemAtIndex(
       size_t index) = 0;
@@ -1783,7 +1784,7 @@ PROFILE_MENU_CLICK_WITH_FEATURE_TEST(
 IN_PROC_BROWSER_TEST_P(
     ProfileMenuClickTest_SigninDisallowed_ReplaceSyncPromosEnabled,
     PRE_ProfileMenuClickTest_SigninDisallowed_ReplaceSyncPromosEnabled) {
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kSigninAllowedOnNextStartup, false);
 }
 
@@ -1819,7 +1820,7 @@ PROFILE_MENU_CLICK_WITH_FEATURE_TEST(
 IN_PROC_BROWSER_TEST_P(
     ProfileMenuClickTest_SigninDisallowed_ReplaceSyncPromosDisabled,
     PRE_ProfileMenuClickTest_SigninDisallowed_ReplaceSyncPromosDisabled) {
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       prefs::kSigninAllowedOnNextStartup, false);
 }
 
@@ -2278,7 +2279,7 @@ PROFILE_MENU_CLICK_WITH_FEATURE_TEST(
 
   // Bookmarks with previously syncing account creates a different type of promo
   // to be shown.
-  browser()->profile()->GetPrefs()->SetString(
+  browser()->GetProfile()->GetPrefs()->SetString(
       prefs::kGoogleServicesLastSyncingGaiaId, account_info.gaia.ToString());
   batch_upload_test_helper().SetReturnDescriptions(syncer::BOOKMARKS,
                                                    /*item_count=*/5);

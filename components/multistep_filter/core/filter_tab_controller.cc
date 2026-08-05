@@ -11,6 +11,7 @@
 #include "base/check_deref.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/uuid.h"
 #include "components/multistep_filter/core/annotation_index/annotation_index_client.h"
@@ -24,6 +25,7 @@
 #include "components/multistep_filter/core/storage/filter_store.h"
 #include "components/multistep_filter/core/suggestion/filter_suggestion_generator.h"
 #include "components/multistep_filter/core/verification/filter_application_verifier.h"
+#include "components/multistep_filter/core/verification/suggestion_application_result.h"
 
 namespace multistep_filter {
 
@@ -31,9 +33,29 @@ namespace {
 
 void LogSuggestionCleared(MultistepFilterLogRouter* log_router,
                           const FilterNavigationMetadata& metadata) {
+  std::string_view reason = "new_page";
+  if (metadata.prev_url.is_empty()) {
+    reason = "initial_navigation";
+  } else if (metadata.url.GetHost() != metadata.prev_url.GetHost()) {
+    reason = "different_host";
+  } else if (metadata.url.path() != metadata.prev_url.path()) {
+    reason = "different_path";
+  } else if (metadata.has_user_gesture) {
+    reason = "user_gesture";
+  }
+
   MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
-                       LogEventType::kSuggestionCleared,
-                       metadata.url.GetHost());
+                       LogEventType::kSuggestionCleared, metadata.url.GetHost())
+      << LogDetail{"reason", reason};
+}
+
+void LogSuggestionPreserved(MultistepFilterLogRouter* log_router,
+                            const FilterNavigationMetadata& metadata,
+                            std::string_view reason) {
+  MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
+                       LogEventType::kSuggestionPreserved,
+                       metadata.url.GetHost())
+      << LogDetail{"reason", std::string(reason)};
 }
 
 void LogUrlEligibilityCheck(MultistepFilterLogRouter* log_router,
@@ -76,6 +98,7 @@ void LogSuggestionGenerationStarted(MultistepFilterLogRouter* log_router,
                        LogEventType::kSuggestionGenerationStarted,
                        metadata.url.GetHost());
 }
+
 void LogSuggestionApplicationOutcome(
     MultistepFilterLogRouter* log_router,
     MultistepFilterMetricsTracker& metrics_tracker,
@@ -96,53 +119,31 @@ void LogSuggestionApplicationOutcome(
         << LogDetail{"is_error_page", metadata.is_error_page_navigation}
         << LogDetail{"net_error_code", metadata.net_error_code}
         << LogDetail{"http_response_code", metadata.http_response_code};
-    metrics_tracker.OnSuggestionApplicationAnnotationExtractionFinished(
-        /*was_applied_successfully=*/false);
+    metrics_tracker.OnSuggestionApplicationFinished(
+        SuggestionApplicationResult::kFailedErrorPage);
     return;
   }
 
-  if (!extracted_annotation) {
+  const FilterApplicationVerifier::Result result =
+      FilterApplicationVerifier::Verify(*suggested_filters,
+                                        extracted_annotation);
+
+  std::string_view outcome_str =
+      SuggestionApplicationResultToString(result.outcome);
+  if (result.outcome == SuggestionApplicationResult::kFailedAttributeMismatch) {
     MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
                          LogEventType::kSuggestionApplied,
                          metadata.url.GetHost())
-        << LogDetail{"application_outcome", "error_no_extracted_annotations"};
-    metrics_tracker.OnSuggestionApplicationAnnotationExtractionFinished(
-        /*was_applied_successfully=*/false);
-    return;
+        << LogDetail{"application_outcome", outcome_str}
+        << LogDetail{"missing_filter_keys",
+                     base::JoinString(result.missing_keys, ", ")};
+  } else {
+    MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
+                         LogEventType::kSuggestionApplied,
+                         metadata.url.GetHost())
+        << LogDetail{"application_outcome", outcome_str};
   }
-  const FilterApplicationVerifier::Result result =
-      FilterApplicationVerifier::Verify(*suggested_filters,
-                                        *extracted_annotation);
-  switch (result.outcome) {
-    case FilterApplicationVerifier::Result::Outcome::kNoExtractedAnnotations:
-      MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
-                           LogEventType::kSuggestionApplied,
-                           metadata.url.GetHost())
-          << LogDetail{"application_outcome", "error_no_extracted_annotations"};
-      break;
-    case FilterApplicationVerifier::Result::Outcome::kCountMismatch:
-      MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
-                           LogEventType::kSuggestionApplied,
-                           metadata.url.GetHost())
-          << LogDetail{"application_outcome", "error_filter_count_mismatch"};
-      break;
-    case FilterApplicationVerifier::Result::Outcome::kSuccess:
-      MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
-                           LogEventType::kSuggestionApplied,
-                           metadata.url.GetHost())
-          << LogDetail{"application_outcome", "success"};
-      break;
-    case FilterApplicationVerifier::Result::Outcome::kAttributeMismatch:
-      MULTISTEP_FILTER_LOG(log_router, metadata.navigation_id,
-                           LogEventType::kSuggestionApplied,
-                           metadata.url.GetHost())
-          << LogDetail{"application_outcome", "error_attribute_mismatch"}
-          << LogDetail{"missing_filter_keys",
-                       base::JoinString(result.missing_keys, ", ")};
-      break;
-  }
-  metrics_tracker.OnSuggestionApplicationAnnotationExtractionFinished(
-      result.is_success());
+  metrics_tracker.OnSuggestionApplicationFinished(result.outcome);
 }
 }  // namespace
 
@@ -171,25 +172,35 @@ base::WeakPtr<FilterTabController> FilterTabController::GetWeakPtr() {
 
 void FilterTabController::OnNavigationFinished(
     const FilterNavigationMetadata& metadata) {
-  metrics_tracker_.OnNavigationFinished(metadata);
-  weak_ptr_factory_.InvalidateWeakPtrs();
+  const bool is_background_redirect_on_same_page =
+      !metadata.has_user_gesture && !metadata.prev_url.is_empty() &&
+      metadata.url.GetHost() == metadata.prev_url.GetHost() &&
+      metadata.url.path() == metadata.prev_url.path();
+
+  if (!is_background_redirect_on_same_page) {
+    metrics_tracker_.OnNavigationFinished(metadata);
+    weak_ptr_factory_.InvalidateWeakPtrs();
+  }
+
   // Set up ScopedClosureRunners to ensure that the test observer is always
   // notified of pipeline completion (with std::nullopt results) even if the
   // navigation is determined to be ineligible and returns early. This is an
   // invariant that tests rely on to verify early abort paths without hanging.
   //
-  // Exception: For same-url reloads (same_url_non_same_document), we explicitly
-  // release these runners because we want to preserve any existing suggestion
-  // rather than triggering the fallback cleanups.
+  // Exception: For same-url reloads (same_url_non_same_document) and background
+  // redirects on the same page, we explicitly release these runners because we
+  // want to preserve any existing suggestion rather than triggering the
+  // fallback cleanups.
   base::ScopedClosureRunner extraction_runner_fallback(
       base::BindOnce(&FilterTabController::OnExtractionFinished, GetWeakPtr(),
                      metadata, std::nullopt));
   base::ScopedClosureRunner generation_runner_fallback(base::BindOnce(
       &FilterTabController::OnSuggestionGenerated, GetWeakPtr(), std::nullopt));
 
-  bool is_same_page =
+  const bool is_same_page =
       metadata.is_same_document_navigation || metadata.url == metadata.prev_url;
-  if (!is_same_page) {
+
+  if (!is_same_page && !is_background_redirect_on_same_page) {
     LogSuggestionCleared(log_router_, metadata);
     delegate_->ClearSuggestion();
   }
@@ -220,6 +231,24 @@ void FilterTabController::OnNavigationFinished(
   if (!metadata.has_user_gesture) {
     LogUrlEligibilityCheck(log_router_, metadata, /*eligible=*/false,
                            "no_user_gesture");
+    if (is_background_redirect_on_same_page) {
+      std::ignore = extraction_runner_fallback.Release();
+      std::ignore = generation_runner_fallback.Release();
+      LogSuggestionPreserved(log_router_, metadata,
+                             "background_redirect_same_page");
+    }
+    return;
+  }
+
+  if (!service_->CanUseModelExecutionFeatures()) {
+    LogUrlEligibilityCheck(log_router_, metadata, /*eligible=*/false,
+                           "model_execution_features_disabled");
+    return;
+  }
+
+  if (!service_->IsSmartSuggestionsEnabled()) {
+    LogUrlEligibilityCheck(log_router_, metadata, /*eligible=*/false,
+                           "smart_suggestions_disabled");
     return;
   }
 
@@ -241,11 +270,13 @@ void FilterTabController::OnNavigationFinished(
 
 void FilterTabController::OnSuggestionShown(
     const UrlFilterSuggestion& suggestion) {
+  // Store the retention state before storing the suggestion impression record.
+  RetentionStateSnapshot retention_snapshot = service_->GetRetentionState();
   service_->RecordSuggestionImpression();
   service_->DeleteAnnotationsForTask(suggestion.task_type,
                                      suggestion.triggering_navigation_id,
                                      suggestion.triggering_host);
-  metrics_tracker_.OnSuggestionShown(suggestion);
+  metrics_tracker_.OnSuggestionShown(suggestion, retention_snapshot);
 }
 
 void FilterTabController::OnSuggestionReopened() {
@@ -293,7 +324,7 @@ void FilterTabController::OnSupportedTasksFetched(
 void FilterTabController::OnSuggestionGenerated(
     std::optional<UrlFilterSuggestion> suggestion) {
   if (suggestion) {
-    delegate_->OnSuggestionGenerated(
+    delegate_->ShowSuggestion(
         suggestion,
         MultistepFilterUiDelegate::SuggestionUiCallbacks{
             .on_suggestion_shown =
@@ -305,7 +336,8 @@ void FilterTabController::OnSuggestionGenerated(
                 &FilterTabController::OnUserDecision, GetWeakPtr()),
         });
   } else {
-    delegate_->OnSuggestionGenerated(std::nullopt, {});
+    delegate_->ShowSuggestion(std::nullopt, {});
+    metrics_tracker_.OnPreservedSuggestionCleared();
   }
   if (observer_for_test_) {
     observer_for_test_->OnSuggestionGeneratedForTest(suggestion);  // IN-TEST

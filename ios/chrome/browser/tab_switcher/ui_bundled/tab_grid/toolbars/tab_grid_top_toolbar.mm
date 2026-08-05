@@ -30,6 +30,7 @@
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/toolbars/tab_grid_toolbar_scrolling_background.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/toolbars/tab_grid_toolbars_grid_delegate.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/toolbars/tab_grid_toolbars_utils.h"
+#import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/device_form_factor.h"
@@ -67,7 +68,8 @@ CGFloat HorizontalMargin() {
   UIButton* _selectAllButton;
   UILabel* _selectedTabsLabel;
   UIButton* _searchButton;
-  UIButton* _doneButton;
+  UIButton* _exitTabGridButton;
+  UIButton* _exitSelectionButton;
   UIButton* _overflowMenuButton;
   // Search mode
   UISearchBar* _searchBar;
@@ -103,6 +105,10 @@ CGFloat HorizontalMargin() {
 
   // The layout guide center for this view.
   LayoutGuideCenter* _layoutGuideCenter;
+
+  // Constraints for selection mode, activated the first time selection mode is
+  // entered.
+  NSArray<NSLayoutConstraint*>* _selectionModeConstraints;
 }
 
 - (instancetype)initWithLayoutGuideCenter:
@@ -140,6 +146,11 @@ CGFloat HorizontalMargin() {
   self.selectedTabsCount = 0;
   // Reset the Select All button to its default title.
   [self configureSelectionButtonTitleSelectAll:YES];
+  if (_mode == TabGridMode::kSelection) {
+    [NSLayoutConstraint activateConstraints:_selectionModeConstraints];
+  } else {
+    [NSLayoutConstraint deactivateConstraints:_selectionModeConstraints];
+  }
   [self setButtonsForTraitCollection:self.traitCollection];
   if (mode == TabGridMode::kSearch) {
     // Focus the search bar, and make it a first responder once the user enter
@@ -194,8 +205,8 @@ CGFloat HorizontalMargin() {
   _selectAllButton.enabled = enabled;
 }
 
-- (void)setDoneButtonEnabled:(BOOL)enabled {
-  _doneButton.enabled = enabled;
+- (void)setExitTabGridButtonEnabled:(BOOL)enabled {
+  _exitTabGridButton.enabled = enabled;
 }
 
 - (void)setIncognitoBackgroundHidden:(BOOL)hidden {
@@ -313,6 +324,32 @@ CGFloat HorizontalMargin() {
 
 #pragma mark - Private
 
+// Constraints for the selection mode.
+- (NSArray<NSLayoutConstraint*>*)constraintsForSelectionModeWithContainerView:
+    (UIView*)containerView {
+  NSLayoutConstraint* centeredLabelConstraint =
+      [_selectedTabsLabel.centerXAnchor
+          constraintEqualToAnchor:containerView.centerXAnchor];
+  centeredLabelConstraint.priority = UILayoutPriorityDefaultHigh;
+
+  return @[
+    // Horizontal layout:
+    [_selectAllButton.leadingAnchor
+        constraintEqualToAnchor:containerView.leadingAnchor
+                       constant:HorizontalMargin()],
+    centeredLabelConstraint,
+    [_selectedTabsLabel.leadingAnchor
+        constraintGreaterThanOrEqualToAnchor:_selectAllButton.trailingAnchor
+                                    constant:HorizontalMargin()],
+    [_selectedTabsLabel.trailingAnchor
+        constraintLessThanOrEqualToAnchor:_exitSelectionButton.leadingAnchor
+                                 constant:-HorizontalMargin()],
+    [_exitSelectionButton.trailingAnchor
+        constraintEqualToAnchor:containerView.trailingAnchor
+                       constant:-HorizontalMargin()],
+  ];
+}
+
 // Returns a new button to be used.
 - (UIButton*)createButtonWithImage:(UIImage*)image
                              title:(NSString*)title
@@ -399,7 +436,7 @@ CGFloat HorizontalMargin() {
       case TabGridMode::kSelection:
         _selectAllButton.hidden = NO;
         _selectedTabsLabel.hidden = NO;
-        _doneButton.hidden = NO;
+        _exitSelectionButton.hidden = NO;
         _overflowMenuButton.hidden = YES;
         break;
     }
@@ -421,9 +458,8 @@ CGFloat HorizontalMargin() {
           // button in the App Bar.
           _overflowMenuConstraint.active = YES;
           _overflowMenuBeforeDoneConstraint.active = NO;
-          _doneButton.hidden = YES;
         } else {
-          _doneButton.hidden = NO;
+          _exitTabGridButton.hidden = NO;
         }
         break;
       }
@@ -436,7 +472,7 @@ CGFloat HorizontalMargin() {
       case TabGridMode::kSelection:
         _selectAllButton.hidden = NO;
         _selectedTabsLabel.hidden = NO;
-        _doneButton.hidden = NO;
+        _exitSelectionButton.hidden = NO;
         _overflowMenuButton.hidden = YES;
         break;
     }
@@ -473,14 +509,31 @@ CGFloat HorizontalMargin() {
                           underName:kTabGridPageControlGuide];
   [_pageControl setScrollViewScrolledToEdge:_scrolledToEdge];
 
-  _doneButton = [self
+  _exitTabGridButton = [self
       createButtonWithImage:nil
                       title:l10n_util::GetNSString(IDS_IOS_TAB_GRID_DONE_BUTTON)
-             targetSelector:@selector(doneButtonTapped:)];
-  _doneButton.accessibilityIdentifier = kTabGridDoneButtonIdentifier;
+             targetSelector:@selector(exitTabGridButtonTapped:)];
+  _exitTabGridButton.accessibilityIdentifier =
+      kTabGridExitTabGridButtonIdentifier;
+
+  if (@available(iOS 26, *)) {
+    _exitSelectionButton =
+        [self createButtonWithImage:DefaultDoneButtonForToolbar()
+                              title:nil
+                     targetSelector:@selector(exitSelectionButtonTapped:)];
+    _exitSelectionButton.tintColor = [UIColor colorNamed:kBlueColor];
+  } else {
+    _exitSelectionButton =
+        [self createButtonWithImage:nil
+                              title:l10n_util::GetNSString(
+                                        IDS_IOS_TAB_GRID_DONE_BUTTON)
+                     targetSelector:@selector(exitSelectionButtonTapped:)];
+  }
+  _exitSelectionButton.accessibilityIdentifier =
+      kTabGridExitSelectionButtonIdentifier;
 
   UIImage* overflowMenuImage =
-      DefaultSymbolWithPointSize(kMenuSymbol, kSymbolSearchImagePointSize);
+      SymbolWithPointSize(SymbolMenu, kSymbolSearchImagePointSize);
   _overflowMenuButton = [self createButtonWithImage:overflowMenuImage
                                               title:nil
                                      targetSelector:nil];
@@ -508,7 +561,7 @@ CGFloat HorizontalMargin() {
                                               weight:UIFontWeightSemibold]];
 
   UIImage* searchImage =
-      DefaultSymbolWithPointSize(kSearchSymbol, kSymbolSearchImagePointSize);
+      SymbolWithPointSize(SymbolSearch, kSymbolSearchImagePointSize);
   _searchButton = [self createButtonWithImage:searchImage
                                         title:nil
                                targetSelector:@selector(searchButtonTapped:)];
@@ -545,7 +598,6 @@ CGFloat HorizontalMargin() {
 
 // Configures and returns the overflow menu.
 - (UIMenu*)createOverflowMenu {
-  UIMenu* menu = nil;
   NSMutableArray<UIMenuElement*>* menuElements = [[NSMutableArray alloc] init];
 
   ActionFactory* actionFactory = [[ActionFactory alloc]
@@ -563,41 +615,40 @@ CGFloat HorizontalMargin() {
                   }]];
   }
 
-    // Only display the Close All Tabs button if there are open tabs or groups.
-    if (_closeAllActionEnabled) {
-      UIButton* currentOverflowMenuButton = _overflowMenuButton;
-      [menuElements addObject:[actionFactory actionToCloseAllTabsWithBlock:^{
-                      TabGridTopToolbar* strongSelf = weakSelf;
-                      if (!strongSelf) {
-                        return;
-                      }
-                      [strongSelf.buttonsDelegate
-                          closeAllButtonTapped:currentOverflowMenuButton];
-                    }]];
-    }
+  // Only display the Close All Tabs button if there are open tabs or groups.
+  if (_closeAllActionEnabled) {
+    UIButton* currentOverflowMenuButton = _overflowMenuButton;
+    [menuElements addObject:[actionFactory actionToCloseAllTabsWithBlock:^{
+                    TabGridTopToolbar* strongSelf = weakSelf;
+                    if (!strongSelf) {
+                      return;
+                    }
+                    [strongSelf.buttonsDelegate
+                        closeAllButtonTapped:currentOverflowMenuButton];
+                  }]];
+  }
 
-    if (_closeOtherTabsEnabled) {
-      UIAction* closeOtherTabsAction =
-          [actionFactory actionToCloseAllOtherTabsWithBlock:^{
-            [weakSelf.buttonsDelegate closeOtherTabsButtonTapped:nil];
-          }];
-      UIMenu* closeOtherMenu = [UIMenu menuWithTitle:@""
-                                               image:nil
-                                          identifier:nil
-                                             options:UIMenuOptionsDisplayInline
-                                            children:@[ closeOtherTabsAction ]];
-      [menuElements addObject:closeOtherMenu];
-    }
+  if (_closeOtherTabsEnabled) {
+    UIAction* closeOtherTabsAction =
+        [actionFactory actionToCloseAllOtherTabsWithBlock:^{
+          [weakSelf.buttonsDelegate closeOtherTabsButtonTapped:nil];
+        }];
+    UIMenu* closeOtherMenu = [UIMenu menuWithTitle:@""
+                                             image:nil
+                                        identifier:nil
+                                           options:UIMenuOptionsDisplayInline
+                                          children:@[ closeOtherTabsAction ]];
+    [menuElements addObject:closeOtherMenu];
+  }
 
-    if (_page == TabGridPageRegularTabs) {
-      [menuElements
-          addObject:[actionFactory actionToDeleteBrowsingDataWithBlock:^{
-            [weakSelf.buttonsDelegate deleteBrowsingDataButtonTapped:nil];
-          }]];
-    }
+  if (_page == TabGridPageRegularTabs) {
+    [menuElements
+        addObject:[actionFactory actionToDeleteBrowsingDataWithBlock:^{
+          [weakSelf.buttonsDelegate deleteBrowsingDataButtonTapped:nil];
+        }]];
+  }
 
-    menu = [UIMenu menuWithChildren:menuElements];
-  return menu;
+  return [UIMenu menuWithChildren:menuElements];
 }
 
 // Adds the different views to the view hierarchy and setup their constraints.
@@ -626,8 +677,8 @@ CGFloat HorizontalMargin() {
 
   _allViews = @[
     _selectAllButton, _overflowMenuButton, _searchButton, _pageControl,
-    _selectedTabsLabel, _searchBar, _cancelSearchButton, _doneButton,
-    _pageActionMenuEntrypointView
+    _selectedTabsLabel, _searchBar, _cancelSearchButton, _exitTabGridButton,
+    _exitSelectionButton, _pageActionMenuEntrypointView
   ];
 
   for (UIView* view in _allViews) {
@@ -654,37 +705,22 @@ CGFloat HorizontalMargin() {
                          constant:-HorizontalMargin()];
   _pageActionMenuEntrypointBeforeDoneConstraint =
       [_pageActionMenuEntrypointView.trailingAnchor
-          constraintEqualToAnchor:_doneButton.leadingAnchor
+          constraintEqualToAnchor:_exitTabGridButton.leadingAnchor
                          constant:-HorizontalMargin()];
 
   _overflowMenuConstraint = [_overflowMenuButton.trailingAnchor
       constraintEqualToAnchor:containerView.trailingAnchor
                      constant:-HorizontalMargin()];
   _overflowMenuBeforeDoneConstraint = [_overflowMenuButton.trailingAnchor
-      constraintEqualToAnchor:_doneButton.leadingAnchor
+      constraintEqualToAnchor:_exitTabGridButton.leadingAnchor
                      constant:-HorizontalMargin()];
-
-  NSLayoutConstraint* centeredLabelConstraint =
-      [_selectedTabsLabel.centerXAnchor
-          constraintEqualToAnchor:containerView.centerXAnchor];
-  centeredLabelConstraint.priority = UILayoutPriorityDefaultHigh;
 
   [NSLayoutConstraint activateConstraints:@[
     searchBarMaximumWidth,
-    [_selectAllButton.leadingAnchor
-        constraintEqualToAnchor:containerView.leadingAnchor
-                       constant:HorizontalMargin()],
     [_pageControl.centerXAnchor
         constraintEqualToAnchor:containerView.centerXAnchor],
 
-    centeredLabelConstraint,
-    [_selectedTabsLabel.leadingAnchor
-        constraintGreaterThanOrEqualToAnchor:_selectAllButton.trailingAnchor
-                                    constant:HorizontalMargin()],
-    [_selectedTabsLabel.trailingAnchor
-        constraintLessThanOrEqualToAnchor:_doneButton.leadingAnchor
-                                 constant:-HorizontalMargin()],
-    [_doneButton.trailingAnchor
+    [_exitTabGridButton.trailingAnchor
         constraintEqualToAnchor:containerView.trailingAnchor
                        constant:-HorizontalMargin()],
 
@@ -698,6 +734,15 @@ CGFloat HorizontalMargin() {
         constraintLessThanOrEqualToAnchor:containerView.trailingAnchor
                                  constant:-HorizontalMargin()],
   ]];
+
+  _selectionModeConstraints =
+      [self constraintsForSelectionModeWithContainerView:containerView];
+
+  if (_mode == TabGridMode::kSelection) {
+    [NSLayoutConstraint activateConstraints:_selectionModeConstraints];
+  } else {
+    [NSLayoutConstraint deactivateConstraints:_selectionModeConstraints];
+  }
 
   [self setButtonsForTraitCollection:self.traitCollection];
 }
@@ -772,7 +817,7 @@ CGFloat HorizontalMargin() {
     return _closeAllActionEnabled;
   }
   if (sel_isEqual(action, @selector(keyCommand_close))) {
-    return _doneButton.enabled || _mode == TabGridMode::kSearch;
+    return _exitTabGridButton.enabled || _mode == TabGridMode::kSearch;
   }
   if (sel_isEqual(action, @selector(keyCommand_find))) {
     return _searchButton.enabled;
@@ -787,10 +832,16 @@ CGFloat HorizontalMargin() {
 
 - (void)keyCommand_close {
   base::RecordAction(base::UserMetricsAction(kMobileKeyCommandClose));
-  if (_mode == TabGridMode::kSearch) {
-    [self cancelSearchButtonTapped:nil];
-  } else {
-    [self doneButtonTapped:nil];
+  switch (_mode) {
+    case TabGridMode::kNormal:
+      [self exitTabGridButtonTapped:nil];
+      break;
+    case TabGridMode::kSearch:
+      [self cancelSearchButtonTapped:nil];
+      break;
+    case TabGridMode::kSelection:
+      [self exitSelectionButtonTapped:nil];
+      break;
   }
 }
 
@@ -801,9 +852,15 @@ CGFloat HorizontalMargin() {
 
 #pragma mark - Control actions
 
-- (void)doneButtonTapped:(id)sender {
-  if (_doneButton.enabled) {
-    [self.buttonsDelegate doneButtonTapped:sender];
+- (void)exitTabGridButtonTapped:(id)sender {
+  if (_exitTabGridButton.enabled) {
+    [self.buttonsDelegate exitTabGridButtonTapped:sender];
+  }
+}
+
+- (void)exitSelectionButtonTapped:(id)sender {
+  if (_exitSelectionButton.enabled) {
+    [self.buttonsDelegate exitSelectionButtonTapped:sender];
   }
 }
 
@@ -859,8 +916,11 @@ CGFloat HorizontalMargin() {
   if (_overflowMenuButton && !_overflowMenuButton.hidden) {
     [elements addObject:_overflowMenuButton];
   }
-  if (_doneButton && !_doneButton.hidden) {
-    [elements addObject:_doneButton];
+  if (_exitTabGridButton && !_exitTabGridButton.hidden) {
+    [elements addObject:_exitTabGridButton];
+  }
+  if (_exitSelectionButton && !_exitSelectionButton.hidden) {
+    [elements addObject:_exitSelectionButton];
   }
   return elements;
 }

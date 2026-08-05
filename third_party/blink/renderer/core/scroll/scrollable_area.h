@@ -314,24 +314,9 @@ class CORE_EXPORT ScrollableArea : public GarbageCollectedMixin {
   // invalidation.
   void SetScrollControlsNeedFullPaintInvalidation();
 
-  // Convert points and rects between the scrollbar and its containing
-  // EmbeddedContentView. The client needs to implement these in order to be
-  // aware of layout effects like CSS transforms.
-  virtual gfx::Rect ConvertFromScrollbarToContainingEmbeddedContentView(
-      const Scrollbar& scrollbar,
-      const gfx::Rect& scrollbar_rect) const {
-    gfx::Rect local_rect = scrollbar_rect;
-    local_rect.Offset(scrollbar.Location().OffsetFromOrigin());
-    return local_rect;
-  }
   virtual gfx::Point ConvertFromContainingEmbeddedContentViewToScrollbar(
       const Scrollbar& scrollbar,
       const gfx::Point& parent_point) const {
-    NOTREACHED();
-  }
-  virtual gfx::Point ConvertFromScrollbarToContainingEmbeddedContentView(
-      const Scrollbar& scrollbar,
-      const gfx::Point& scrollbar_point) const {
     NOTREACHED();
   }
   virtual gfx::Point ConvertFromRootFrame(
@@ -790,6 +775,10 @@ class CORE_EXPORT ScrollableArea : public GarbageCollectedMixin {
       mojom::blink::ScrollType type) {
     active_smooth_scroll_type_ = type;
   }
+
+  // TODO(crbug.com/40517276): Rename this to ShouldCompositeScrollbar().
+  virtual bool MayCompositeScrollbar(const Scrollbar&) const { return true; }
+  bool UsesCompositedOverlayScrollbars() const;
 
   // This animator is used to handle painting animations for MacOS scrollbars
   // using AppKit-specific code (Cocoa APIs). It requires input from

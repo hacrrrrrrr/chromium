@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "base/base64url.h"
@@ -16,30 +18,128 @@
 #include "base/check_op.h"
 #include "base/containers/span.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "crypto/hash.h"
+#include "crypto/keypair.h"
 #include "crypto/random.h"
 #include "crypto/sign.h"
 #include "third_party/abseil-cpp/absl/strings/str_format.h"
 
 namespace client_update_protocol {
+
+class SigningStrategy {
+ public:
+  SigningStrategy(int key_version, crypto::keypair::PublicKey public_key)
+      : key_version_(key_version), public_key_(std::move(public_key)) {}
+  SigningStrategy(const SigningStrategy&) = delete;
+  SigningStrategy& operator=(const SigningStrategy&) = delete;
+
+  virtual ~SigningStrategy() = default;
+
+  std::string GetKeyId() const { return GetKeyIdForVersion(key_version_); }
+
+  std::string GetKeyIdForVersion(int version) const {
+    return GetKeyIdForVersionImpl(version);
+  }
+
+  bool HasValidSignatureLength(base::span<const uint8_t> signature) const {
+    return HasValidSignatureLengthImpl(signature);
+  }
+
+  bool VerifySignature(base::span<const uint8_t> digest,
+                       base::span<const uint8_t> signature) const {
+    return crypto::sign::Verify(GetSignatureKind(), public_key_, digest,
+                                signature);
+  }
+
+ private:
+  virtual std::string GetKeyIdForVersionImpl(int version) const = 0;
+  virtual crypto::sign::SignatureKind GetSignatureKind() const = 0;
+  virtual bool HasValidSignatureLengthImpl(
+      base::span<const uint8_t> signature) const = 0;
+
+  // The server keeps multiple signing keys; a version must be sent so that
+  // the correct signing key is used to sign the assembled message.
+  const int key_version_;
+
+  // The public key (ECDSA or ML-DSA-44) to use for verifying response
+  // signatures.
+  const crypto::keypair::PublicKey public_key_;
+};
+
 namespace {
 
-bool CupKeyOfKindHasValidLength(bool is_mldsa44,
-                                base::span<const uint8_t> signature) {
-  if (is_mldsa44) {
+class EcdsaSigningStrategy : public SigningStrategy {
+ public:
+  using SigningStrategy::SigningStrategy;
+
+ private:
+  std::string GetKeyIdForVersionImpl(int version) const override {
+    return base::NumberToString(version);
+  }
+
+  crypto::sign::SignatureKind GetSignatureKind() const override {
+    return crypto::sign::SignatureKind::ECDSA_SHA256;
+  }
+
+  bool HasValidSignatureLengthImpl(
+      base::span<const uint8_t> signature) const override {
+    // Ensure this is a valid ECDSA signature, which must have a length between
+    // 8 and 72 bytes, inclusive.
+    return signature.size() >= 8 && signature.size() <= 72;
+  }
+};
+
+class Mldsa44SigningStrategy : public SigningStrategy {
+ public:
+  using SigningStrategy::SigningStrategy;
+
+ private:
+  std::string GetKeyIdForVersionImpl(int version) const override {
+    return absl::StrFormat("ML-DSA-44-%d", version);
+  }
+
+  crypto::sign::SignatureKind GetSignatureKind() const override {
+    return crypto::sign::SignatureKind::MLDSA_44;
+  }
+
+  bool HasValidSignatureLengthImpl(
+      base::span<const uint8_t> signature) const override {
     // Valid ML-DSA-44 signatures are exactly 2,420 bytes.
     return signature.size() == 2420;
   }
-  // Ensure this is a valid ECDSA signature, which must have a length between
-  // 8 and 72 bytes, inclusive.
-  return signature.size() >= 8 && signature.size() <= 72;
+};
+
+}  // namespace
+
+std::unique_ptr<const SigningStrategy> Cup::CreateSigningStrategy(
+    int key_version,
+    base::span<const uint8_t> public_key) {
+  std::optional<crypto::keypair::PublicKey> key =
+      crypto::keypair::PublicKey::FromSubjectPublicKeyInfo(public_key);
+  if (!key) {
+    return nullptr;
+  }
+  if (key->IsMldsa44()) {
+    return std::make_unique<Mldsa44SigningStrategy>(key_version,
+                                                    std::move(*key));
+  }
+  if (key->IsEc()) {
+    return std::make_unique<EcdsaSigningStrategy>(key_version, std::move(*key));
+  }
+  return nullptr;
 }
 
-bool ParseETagHeader(bool is_mldsa44,
-                     std::string_view etag_header_value_in,
-                     std::vector<uint8_t>* signature_out,
-                     std::vector<uint8_t>* request_hash_out) {
+Cup::Cup(int key_version, base::span<const uint8_t> public_key)
+    : strategy_(CreateSigningStrategy(key_version, public_key)) {
+  CHECK_GT(key_version, 0);
+  CHECK(strategy_);
+}
+
+Cup::~Cup() = default;
+
+bool Cup::ParseETagHeader(std::string_view etag_header_value_in,
+                          std::vector<uint8_t>* signature_out,
+                          std::vector<uint8_t>* request_hash_out) const {
   // The ETag value is a UTF-8 string, formatted as "S:H", where:
   // * S is the signature in DER-encoded ASN.1 or raw format, converted to hex.
   // * H is the SHA-256 hash of the observed request body, standard hex format.
@@ -48,13 +148,12 @@ bool ParseETagHeader(bool is_mldsa44,
   std::string_view etag_header_value(etag_header_value_in);
 
   // Remove the weak prefix, then remove the begin and the end quotes.
-  const char kWeakETagPrefix[] = "W/";
-  if (base::StartsWith(etag_header_value, kWeakETagPrefix)) {
-    etag_header_value.remove_prefix(std::size(kWeakETagPrefix) - 1);
+  static constexpr std::string_view kWeakETagPrefix = "W/";
+  if (etag_header_value.starts_with(kWeakETagPrefix)) {
+    etag_header_value.remove_prefix(kWeakETagPrefix.size());
   }
-  if (etag_header_value.size() >= 2 &&
-      base::StartsWith(etag_header_value, "\"") &&
-      base::EndsWith(etag_header_value, "\"")) {
+  if (etag_header_value.size() >= 2 && etag_header_value.starts_with('"') &&
+      etag_header_value.ends_with('"')) {
     etag_header_value.remove_prefix(1);
     etag_header_value.remove_suffix(1);
   }
@@ -71,8 +170,7 @@ bool ParseETagHeader(bool is_mldsa44,
   if (!base::HexStringToBytes(sig_hex, signature_out)) {
     return false;
   }
-  if (!CupKeyOfKindHasValidLength(is_mldsa44,
-                                  base::as_byte_span(*signature_out))) {
+  if (!strategy_->HasValidSignatureLength(*signature_out)) {
     return false;
   }
 
@@ -87,40 +185,17 @@ bool ParseETagHeader(bool is_mldsa44,
   return true;
 }
 
-}  // namespace
-
-Cup::Cup(int key_version, base::span<const uint8_t> public_key)
-    : pub_key_version_(key_version),
-      public_key_(
-          *crypto::keypair::PublicKey::FromSubjectPublicKeyInfo(public_key)) {
-  CHECK_GT(key_version, 0);
-  CHECK(public_key_.IsMldsa44() || public_key_.IsEc());
-}
-
-Cup::~Cup() = default;
-
-std::string Cup::GetKeyId(int key_version) const {
-  int version = key_version < 0 ? pub_key_version_ : key_version;
-  if (public_key_.IsMldsa44()) {
-    return absl::StrFormat("ML-DSA-44-%d", version);
-  }
-  // ECDSA uses the version number and MLDSA uses the `ML-DSA-44-` prefix in
-  // addition to the version number. Starting with version 17, ECDSA keys
-  // will begin using the new string-based `ECDSA-SHA256-` prefix going forward.
-  return base::NumberToString(version);
-}
-
 void Cup::OverrideNonceForTesting(int key_version, uint32_t nonce) {
   CHECK(!request_query_cup2key_.empty());
-  request_query_cup2key_ =
-      absl::StrFormat("%s:%u", GetKeyId(key_version), nonce);
+  request_query_cup2key_ = absl::StrFormat(
+      "%s:%u", strategy_->GetKeyIdForVersion(key_version), nonce);
 }
 
 std::string Cup::PrepareRequestParameters(std::string_view request_body) {
   // Generate a random nonce to use for freshness, build the cup2key query
   // string, and compute the SHA-256 hash of the request body. Set these
   // two pieces of data aside to use during ValidateResponse().
-  std::array<uint8_t, 32> nonce;
+  std::array<uint8_t, 32> nonce = {};
   crypto::RandBytes(nonce);
 
   // The nonce is an opaque string to the server, so the exact encoding does not
@@ -129,7 +204,8 @@ std::string Cup::PrepareRequestParameters(std::string_view request_body) {
   base::Base64UrlEncode(nonce, base::Base64UrlEncodePolicy::OMIT_PADDING,
                         &nonce_b64);
 
-  request_query_cup2key_ = absl::StrFormat("%s:%s", GetKeyId(), nonce_b64);
+  request_query_cup2key_ =
+      absl::StrFormat("%s:%s", strategy_->GetKeyId(), nonce_b64);
   request_hash_ = crypto::hash::Sha256(base::as_byte_span(request_body));
 
   return absl::StrFormat("cup2key=%s&cup2hreq=%s", request_query_cup2key_,
@@ -149,8 +225,7 @@ bool Cup::ValidateResponse(std::string_view response_body,
   // hash of the request that the server observed) and decode to byte buffers.
   std::vector<uint8_t> signature;
   std::vector<uint8_t> observed_request_hash;
-  if (!ParseETagHeader(public_key_.IsMldsa44(), server_etag, &signature,
-                       &observed_request_hash)) {
+  if (!ParseETagHeader(server_etag, &signature, &observed_request_hash)) {
     return false;
   }
 
@@ -170,7 +245,7 @@ bool Cup::ValidateResponse(std::string_view response_body,
   hasher.Update(request_hash_);
   hasher.Update(crypto::hash::Sha256(base::as_byte_span(response_body)));
   hasher.Update(base::as_byte_span(request_query_cup2key_));
-  std::array<uint8_t, crypto::hash::kSha256Size> inner_hash;
+  std::array<uint8_t, crypto::hash::kSha256Size> inner_hash = {};
   hasher.Finish(inner_hash);
 
   // If the verification fails, that implies one of two outcomes:
@@ -180,10 +255,7 @@ bool Cup::ValidateResponse(std::string_view response_body,
   //   was modified, or a different nonce value was used.
   //
   // Note that the signature is taken over a hash of inner_hash.
-  return crypto::sign::Verify(public_key_.IsMldsa44()
-                                  ? crypto::sign::SignatureKind::MLDSA_44
-                                  : crypto::sign::SignatureKind::ECDSA_SHA256,
-                              public_key_, inner_hash, signature);
+  return strategy_->VerifySignature(inner_hash, signature);
 }
 
 }  // namespace client_update_protocol

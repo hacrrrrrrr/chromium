@@ -13,12 +13,14 @@ import androidx.fragment.app.Fragment;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.IntentUtils;
+import org.chromium.base.ResettersForTesting;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.about_settings.AboutChromeSettings;
 import org.chromium.chrome.browser.about_settings.LegalInformationSettings;
 import org.chromium.chrome.browser.appearance.settings.AppearanceSettingsFragment;
 import org.chromium.chrome.browser.autofill.settings.AndroidPaymentAppsFragment;
+import org.chromium.chrome.browser.autofill.settings.AutofillAndPasswordsFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillBuyNowPayLaterFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillCardBenefitsFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillIdentityDocsFragment;
@@ -27,7 +29,6 @@ import org.chromium.chrome.browser.autofill.settings.AutofillProfilesFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillShoppingFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillTravelFragment;
 import org.chromium.chrome.browser.autofill.settings.FinancialAccountsManagementFragment;
-import org.chromium.chrome.browser.autofill.settings.HomeOfTransactionsFragment;
 import org.chromium.chrome.browser.autofill.settings.NonCardPaymentMethodsManagementFragment;
 import org.chromium.chrome.browser.autofill.settings.options.AutofillOptionsFragment;
 import org.chromium.chrome.browser.autofill.settings.personal_context.AutofillPersonalContextFragment;
@@ -47,15 +48,6 @@ import org.chromium.chrome.browser.prefetch.settings.StandardPreloadingSettingsF
 import org.chromium.chrome.browser.privacy.secure_dns.SecureDnsSettings;
 import org.chromium.chrome.browser.privacy.settings.DoNotTrackSettings;
 import org.chromium.chrome.browser.privacy.settings.PrivacySettings;
-import org.chromium.chrome.browser.privacy_sandbox.AdMeasurementFragment;
-import org.chromium.chrome.browser.privacy_sandbox.FledgeAllSitesFragment;
-import org.chromium.chrome.browser.privacy_sandbox.FledgeBlockedSitesFragment;
-import org.chromium.chrome.browser.privacy_sandbox.FledgeFragment;
-import org.chromium.chrome.browser.privacy_sandbox.FledgeLearnMoreFragment;
-import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsFragment;
-import org.chromium.chrome.browser.privacy_sandbox.TopicsBlockedFragment;
-import org.chromium.chrome.browser.privacy_sandbox.TopicsFragment;
-import org.chromium.chrome.browser.privacy_sandbox.TopicsManageFragment;
 import org.chromium.chrome.browser.safe_browsing.settings.EnhancedProtectionSettingsFragment;
 import org.chromium.chrome.browser.safe_browsing.settings.SafeBrowsingSettingsFragment;
 import org.chromium.chrome.browser.safe_browsing.settings.StandardProtectionSettingsFragment;
@@ -86,12 +78,12 @@ import org.chromium.components.browser_ui.site_settings.SingleCategorySettings;
 import org.chromium.components.browser_ui.site_settings.SingleWebsiteSettings;
 import org.chromium.components.browser_ui.site_settings.SiteSettings;
 import org.chromium.components.browser_ui.site_settings.StorageAccessSubpageSettings;
-import org.chromium.components.page_info.PageInfoAdPersonalizationSettings;
 import org.chromium.components.page_info.PageInfoCookiesSettings;
 
 /** Implementation class for launching a {@link SettingsActivity}. */
 @NullMarked
 public class SettingsNavigationImpl implements SettingsNavigation {
+    private boolean mUseSettingsActivityForTesting;
 
     /** Instantiated through SettingsNavigationFactory. */
     SettingsNavigationImpl() {}
@@ -119,10 +111,10 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             case SettingsFragment.ACCESSIBILITY:
             case SettingsFragment.ADAPTIVE_TOOLBAR:
             case SettingsFragment.ADDRESS_BAR:
-            case SettingsFragment.AD_MEASUREMENT:
             case SettingsFragment.ALL_SITES:
             case SettingsFragment.ANDROID_PAYMENT_APPS:
             case SettingsFragment.APPEARANCE:
+            case SettingsFragment.AUTOFILL_AND_PASSWORDS:
             case SettingsFragment.AUTOFILL_BUY_NOW_PAY_LATER:
             case SettingsFragment.AUTOFILL_CARD_BENEFITS:
             case SettingsFragment.AUTOFILL_IDENTITY_DOCS:
@@ -142,7 +134,6 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             case SettingsFragment.GLIC_PERMISSIONS:
             case SettingsFragment.GOOGLE_SERVICES:
             case SettingsFragment.GROUPED_WEBSITES:
-            case SettingsFragment.HOME_OF_TRANSACTIONS:
             case SettingsFragment.HOMEPAGE:
             case SettingsFragment.HTTPS_FIRST_MODE:
             case SettingsFragment.IMAGE_DESCRIPTIONS:
@@ -161,14 +152,6 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             case SettingsFragment.PRELOAD_PAGES_STANDARD:
             case SettingsFragment.PRICE_NOTIFICATION:
             case SettingsFragment.PRIVACY:
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE:
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_ALL_SITES:
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_BLOCKED_SITES:
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_LEARN_MORE:
-            case SettingsFragment.PRIVACY_SANDBOX_SETTINGS:
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS:
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS_BLOCKED:
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS_MANAGE:
             case SettingsFragment.SAFE_BROWSING:
             case SettingsFragment.SAFE_BROWSING_ENHANCED:
             case SettingsFragment.SAFE_BROWSING_STANDARD:
@@ -222,7 +205,7 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             @Nullable Bundle fragmentArgs,
             boolean addToBackStack,
             @Nullable String tag) {
-        if (SettingsInTab.isEnabled()) {
+        if (useSettingsInTab()) {
             Activity activity = ActivityUtil.getActivityFromContext(context);
             // Some components pass a non-Activity context (e.g. AccessibilitySettings).
             if (activity == null) {
@@ -230,18 +213,20 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             }
             assert activity != null;
             SettingsHostFragment settingsHostFragment = SettingsHostFragment.get(activity);
-            assert settingsHostFragment != null;
-            // A null `fragment` implies the main settings page, so pass null to showFragment().
-            Fragment targetFragment =
-                    fragment != null
-                            ? Fragment.instantiate(context, fragment.getName(), fragmentArgs)
-                            : null;
-            if (settingsHostFragment.showFragment(targetFragment, addToBackStack, tag)) {
-                // TODO(crbug.com/521895796): Once we have a mechanism to open the settings
-                // tab when it is closed, switch to that, and move this "return" outside this block.
-                // Until then we fall back to SettingsActivity, just in case.
-                return;
+            // SettingsHostFragment will be null if settings isn't open.
+            if (settingsHostFragment != null) {
+                // A null `fragment` implies the main settings page, so pass null to
+                // showFragment().
+                Fragment targetFragment =
+                        fragment != null
+                                ? Fragment.instantiate(context, fragment.getName(), fragmentArgs)
+                                : null;
+                if (settingsHostFragment.showFragment(targetFragment, addToBackStack, tag)) {
+                    // The target fragment was shown in an existing settings tab.
+                    return;
+                }
             }
+            // Fall through and use an Intent to open a settings tab.
         }
         Intent intent = createSettingsIntent(context, fragment, fragmentArgs, addToBackStack, tag);
         IntentUtils.safeStartActivity(context, intent);
@@ -280,7 +265,7 @@ public class SettingsNavigationImpl implements SettingsNavigation {
             @Nullable String tag) {
         String fragmentName = fragment == null ? null : fragment.getName();
         return SettingsIntentUtil.createIntent(
-                context, fragmentName, fragmentArgs, addToBackStack, tag);
+                context, fragmentName, fragmentArgs, addToBackStack, tag, useSettingsInTab());
     }
 
     @Override
@@ -300,14 +285,14 @@ public class SettingsNavigationImpl implements SettingsNavigation {
                 return AdaptiveToolbarSettingsFragment.class;
             case SettingsFragment.ADDRESS_BAR:
                 return AddressBarSettingsFragment.class;
-            case SettingsFragment.AD_MEASUREMENT:
-                return AdMeasurementFragment.class;
             case SettingsFragment.ALL_SITES:
                 return AllSiteSettings.class;
             case SettingsFragment.ANDROID_PAYMENT_APPS:
                 return AndroidPaymentAppsFragment.class;
             case SettingsFragment.APPEARANCE:
                 return AppearanceSettingsFragment.class;
+            case SettingsFragment.AUTOFILL_AND_PASSWORDS:
+                return AutofillAndPasswordsFragment.class;
             case SettingsFragment.AUTOFILL_BUY_NOW_PAY_LATER:
                 return AutofillBuyNowPayLaterFragment.class;
             case SettingsFragment.AUTOFILL_CARD_BENEFITS:
@@ -348,8 +333,6 @@ public class SettingsNavigationImpl implements SettingsNavigation {
                 return GoogleServicesSettings.class;
             case SettingsFragment.GROUPED_WEBSITES:
                 return GroupedWebsitesSettings.class;
-            case SettingsFragment.HOME_OF_TRANSACTIONS:
-                return HomeOfTransactionsFragment.class;
             case SettingsFragment.HOMEPAGE:
                 return HomepageSettings.class;
             case SettingsFragment.HTTPS_FIRST_MODE:
@@ -368,8 +351,6 @@ public class SettingsNavigationImpl implements SettingsNavigation {
                 return ManageSyncSettings.class;
             case SettingsFragment.NON_CARD_PAYMENT_METHODS:
                 return NonCardPaymentMethodsManagementFragment.class;
-            case SettingsFragment.PAGE_INFO_AD_PERSONALIZATION:
-                return PageInfoAdPersonalizationSettings.class;
             case SettingsFragment.PAGE_INFO_COOKIES:
                 return PageInfoCookiesSettings.class;
             case SettingsFragment.PAYMENT_METHODS:
@@ -386,22 +367,6 @@ public class SettingsNavigationImpl implements SettingsNavigation {
                 return PriceNotificationSettingsFragment.class;
             case SettingsFragment.PRIVACY:
                 return PrivacySettings.class;
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE:
-                return FledgeFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_ALL_SITES:
-                return FledgeAllSitesFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_BLOCKED_SITES:
-                return FledgeBlockedSitesFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_FLEDGE_LEARN_MORE:
-                return FledgeLearnMoreFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_SETTINGS:
-                return PrivacySandboxSettingsFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS:
-                return TopicsFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS_BLOCKED:
-                return TopicsBlockedFragment.class;
-            case SettingsFragment.PRIVACY_SANDBOX_TOPICS_MANAGE:
-                return TopicsManageFragment.class;
             case SettingsFragment.SAFE_BROWSING:
                 return SafeBrowsingSettingsFragment.class;
             case SettingsFragment.SAFE_BROWSING_ENHANCED:
@@ -449,7 +414,7 @@ public class SettingsNavigationImpl implements SettingsNavigation {
         if (activity == null) return;
 
         // SettingsInTab does not use SettingsActivity.
-        if (SettingsInTab.isEnabled()) {
+        if (useSettingsInTab()) {
             SettingsHostFragment settingsHostFragment = SettingsHostFragment.get(activity);
             if (settingsHostFragment != null) {
                 settingsHostFragment.finishCurrentSettings(fragment);
@@ -463,7 +428,7 @@ public class SettingsNavigationImpl implements SettingsNavigation {
     @Override
     public void executePendingNavigations(Activity activity) {
         // SettingsInTab does not use SettingsActivity.
-        if (SettingsInTab.isEnabled()) {
+        if (useSettingsInTab()) {
             SettingsHostFragment settingsHostFragment = SettingsHostFragment.get(activity);
             if (settingsHostFragment != null) {
                 settingsHostFragment.executePendingNavigations();
@@ -472,5 +437,19 @@ public class SettingsNavigationImpl implements SettingsNavigation {
         }
 
         ((SettingsActivity) activity).executePendingNavigations();
+    }
+
+    @Override
+    public void setUseSettingsActivityForTesting(boolean value) {
+        mUseSettingsActivityForTesting = value;
+        ResettersForTesting.register(() -> mUseSettingsActivityForTesting = false);
+    }
+
+    private boolean useSettingsInTab() {
+        // Always use SettingsActivity if requested by tests.
+        if (mUseSettingsActivityForTesting) {
+            return false;
+        }
+        return SettingsInTab.isEnabled();
     }
 }

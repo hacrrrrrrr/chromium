@@ -7,13 +7,10 @@
 
 #import "base/feature_list.h"
 
-// Enables the EnableScreenshotProtectionIOS feature.
-BASE_DECLARE_FEATURE(kEnableScreenshotProtectionIOS);
-
 // Enables the enterprise watermarking feature on iOS.
 BASE_DECLARE_FEATURE(kEnableEnterpriseWatermarkingIOS);
 
-// Returns true if the EnableScreenshotProtectionIOS feature is enabled.
-bool IsEnableScreenshotProtectionIOSEnabled();
+// Returns true if the EnableEnterpriseWatermarkingIOS feature is enabled.
+bool IsEnableEnterpriseWatermarkingIOS();
 
 #endif  // IOS_CHROME_BROWSER_ENTERPRISE_DATA_PROTECTION_PUBLIC_FEATURES_H_

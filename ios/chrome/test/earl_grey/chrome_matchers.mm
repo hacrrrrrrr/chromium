@@ -103,6 +103,12 @@ id<GREYMatcher> ImageViewWithCustomSymbolNameAndPointSize(NSString* symbolName,
                                                           pointSize:pointSize];
 }
 
+id<GREYMatcher> ImageViewWithSymbolAndPointSize(Symbol symbol,
+                                                CGFloat pointSize) {
+  return [ChromeMatchersAppInterface imageViewWithSymbol:symbol
+                                               pointSize:pointSize];
+}
+
 id<GREYMatcher> ImageViewWithImage(UIImage* image) {
   return [ChromeMatchersAppInterface imageViewWithImage:image];
 }
@@ -783,10 +789,6 @@ id<GREYMatcher> TabGridDoneButton() {
   return [ChromeMatchersAppInterface tabGridDoneButton];
 }
 
-id<GREYMatcher> TabGridUndoCloseAllButton() {
-  return [ChromeMatchersAppInterface tabGridUndoCloseAllButton];
-}
-
 id<GREYMatcher> TabGridSelectShowHistoryCell() {
   return [ChromeMatchersAppInterface tabGridSelectShowHistoryCell];
 }
@@ -1040,14 +1042,6 @@ id<GREYMatcher> IncognitoInterstitialCancelButton() {
 
 id<GREYMatcher> TabGridOverflowMenuButton() {
   return [ChromeMatchersAppInterface tabGridOverflowMenuButton];
-}
-
-id<GREYMatcher> TabGridEditButton() {
-  return [ChromeMatchersAppInterface tabGridEditButton];
-}
-
-id<GREYMatcher> TabGridEditMenuCloseAllButton() {
-  return [ChromeMatchersAppInterface tabGridEditMenuCloseAllButton];
 }
 
 id<GREYMatcher> TabGridOverflowMenuCloseAllButton() {

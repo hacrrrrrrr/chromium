@@ -419,7 +419,7 @@ void ServiceWorkerSubresourceLoader::DispatchFetchEvent() {
             auto timing = blink::mojom::ServiceWorkerFetchEventTiming::New();
             timing->dispatch_event_time = base::TimeTicks::Now();
             timing->respond_with_settled_time = base::TimeTicks::Now();
-            OnFallback(std::nullopt, std::move(timing));
+            OnFallback(std::nullopt, std::move(timing), /*errors=*/nullptr);
           }
           return;
         case network::mojom::ServiceWorkerRouterSourceType::
@@ -643,7 +643,8 @@ void ServiceWorkerSubresourceLoader::SettleFetchEventDispatch(
 
 void ServiceWorkerSubresourceLoader::OnResponse(
     blink::mojom::FetchAPIResponsePtr response,
-    blink::mojom::ServiceWorkerFetchEventTimingPtr timing) {
+    blink::mojom::ServiceWorkerFetchEventTimingPtr timing,
+    blink::mojom::ServiceWorkerFetchHandlerErrorsPtr errors) {
   TRACE_EVENT("ServiceWorker", "ServiceWorkerSubresourceLoader::OnResponse",
               perfetto::Flow::ProcessScoped(
                   request_id_, kServiceWorkerSubresourceLoaderScope));
@@ -659,7 +660,8 @@ void ServiceWorkerSubresourceLoader::OnResponse(
 void ServiceWorkerSubresourceLoader::OnResponseStream(
     blink::mojom::FetchAPIResponsePtr response,
     blink::mojom::ServiceWorkerStreamHandlePtr body_as_stream,
-    blink::mojom::ServiceWorkerFetchEventTimingPtr timing) {
+    blink::mojom::ServiceWorkerFetchEventTimingPtr timing,
+    blink::mojom::ServiceWorkerFetchHandlerErrorsPtr errors) {
   // TODO(crbug.com/40851723): remove the following workaround when we can
   // always expect CPUs have invariant TSC.
   timing = AdjustTimingIfNeededCrBug1342408(std::move(timing));
@@ -678,7 +680,8 @@ void ServiceWorkerSubresourceLoader::OnResponseStream(
 
 void ServiceWorkerSubresourceLoader::OnFallback(
     std::optional<network::DataElementChunkedDataPipe> request_body,
-    blink::mojom::ServiceWorkerFetchEventTimingPtr timing) {
+    blink::mojom::ServiceWorkerFetchEventTimingPtr timing,
+    blink::mojom::ServiceWorkerFetchHandlerErrorsPtr errors) {
   SettleFetchEventDispatch(blink::ServiceWorkerStatusCode::kOk);
   if (IsResponseAlreadyCommittedByRaceNetworkRequest()) {
     MaybeDeleteThis();
@@ -867,9 +870,15 @@ void ServiceWorkerSubresourceLoader::StartResponse(
       response_head_->load_timing.receive_headers_start;
   response_source_ = response->response_source;
 
-  // Constructed subresource responses are always same-origin as the requesting
-  // client.
-  response_head_->timing_allow_passed = true;
+  // Synthetic and same-origin responses are same-origin to the requesting
+  // client, so the timing allow check trivially passes. Filtered responses
+  // wrap a cross-origin response for which the timing allow check must not
+  // be assumed to have passed.
+  response_head_->timing_allow_passed =
+      response_head_->response_type ==
+          network::mojom::FetchResponseType::kBasic ||
+      response_head_->response_type ==
+          network::mojom::FetchResponseType::kDefault;
 
   // Set the actual source type to `kFetchEvent` if nothing is set yet.
   auto* router_info = response_head_->service_worker_router_info.get();
@@ -1481,7 +1490,7 @@ void ServiceWorkerSubresourceLoader::DidCacheStorageMatch(
     base::UmaHistogramEnumeration(
         "ServiceWorker.StaticRouter.Subresource.CacheStorageError",
         result.error());
-    OnFallback(std::nullopt, std::move(timing));
+    OnFallback(std::nullopt, std::move(timing), /*errors=*/nullptr);
     return;
   }
   // EagerResponse should be used only if `in_related_fetch_event` is set.
@@ -1515,7 +1524,7 @@ void ServiceWorkerSubresourceLoader::DidCacheStorageMatch(
   }
   response_head_->service_worker_router_info->actual_source_type =
       network::mojom::ServiceWorkerRouterSourceType::kCache;
-  OnResponse(std::move(response), std::move(timing));
+  OnResponse(std::move(response), std::move(timing), /*errors=*/nullptr);
 }
 
 void ServiceWorkerSubresourceLoader::ValidateResponseSentToClient() {

@@ -32,6 +32,7 @@
 #include "chrome/browser/ui/browser_init_state.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/incognito_allowed_url.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
@@ -48,6 +49,7 @@
 #include "chrome/browser/ui/web_applications/web_app_launch_navigation_handle_user_data.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_tabbed_utils.h"
+#include "chrome/browser/ui/window_feature_controller/window_feature_controller.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/common/chrome_features.h"
@@ -85,6 +87,8 @@
 #include "chrome/browser/ash/boca/on_task/on_task_locked_controller.h"
 #include "chrome/browser/ui/ash/system_web_apps/system_web_app_ui_utils.h"
 #include "components/account_id/account_id.h"
+#include "content/public/browser/global_routing_id.h"
+#include "services/network/public/mojom/web_sandbox_flags.mojom.h"
 #endif
 
 #if defined(USE_AURA)
@@ -125,11 +129,10 @@ bool WindowCanOpenTabs(const NavigateParams& params) {
     return false;
   }
 
-  return params.browser->GetBrowserForMigrationOnly()->CanSupportWindowFeature(
-             Browser::WindowFeature::kFeatureTabStrip) ||
-         params.browser->GetBrowserForMigrationOnly()
-             ->tab_strip_model()
-             ->empty();
+  return WindowFeatureController::From(params.browser)
+             ->CanSupportWindowFeature(
+                 WindowFeatureController::WindowFeature::kFeatureTabStrip) ||
+         params.browser->tab_strip_model()->empty();
 }
 
 // Finds an existing Browser compatible with |profile|, making a new one if no
@@ -138,7 +141,7 @@ Browser* GetOrCreateBrowser(Profile* profile, bool user_gesture) {
   BrowserWindowInterface* browser =
       ProfileBrowserCollection::GetForProfile(profile)->FindTabbedBrowser();
 
-  if (!browser && Browser::GetCreationStatusForProfile(profile) ==
+  if (!browser && GetBrowserWindowCreationStatusForProfile(*profile) ==
                       Browser::CreationStatus::kOk) {
     browser = Browser::Create(Browser::CreateParams(profile, user_gesture));
   }
@@ -149,6 +152,38 @@ bool IncognitoModeForced(const Profile* profile) {
   return IncognitoModePrefs::GetAvailability(profile->GetPrefs()) ==
          policy::IncognitoModeAvailability::kForced;
 }
+
+#if BUILDFLAG(IS_CHROMEOS)
+// Returns true if the navigation request originated from a captive portal
+// sign-in window. In non-Guest sessions, this is identified by checking if the
+// initiating profile has a CaptivePortal OTRProfileID. In Guest sessions, where
+// the primary OTR profile is reused, this checks the CaptivePortalTabHelper on
+// the source WebContents.
+bool ShouldForceCaptivePortalSigninIntoCurrentTab(const NavigateParams& params,
+                                                  Browser* source_browser) {
+  if (params.initiating_profile->IsOffTheRecord() &&
+      params.initiating_profile->GetOTRProfileID().IsCaptivePortal()) {
+    return true;
+  }
+#if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  // In Guest mode the captive portal signin window uses the active profile
+  // rather than a dedicated captive portal OTR profile, so also check the
+  // source WebContents.
+  content::WebContents* source_contents = params.source_contents;
+  if (!source_contents && source_browser) {
+    source_contents = source_browser->tab_strip_model()->GetActiveWebContents();
+  }
+  if (source_contents) {
+    auto* helper = captive_portal::CaptivePortalTabHelper::FromWebContents(
+        source_contents);
+    if (helper && helper->is_captive_portal_window()) {
+      return true;
+    }
+  }
+#endif  // BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+  return false;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 // Change some of the navigation parameters based on the particular URL.
 // Returns true on success. Otherwise, if changing params leads the browser
@@ -263,10 +298,11 @@ std::tuple<BrowserWindowInterface*, int> GetBrowserAndTabForDisposition(
       std::string app_name;
       if (!params.app_id.empty()) {
         app_name = web_app::GenerateApplicationNameFromAppId(params.app_id);
-      } else if (params.browser && !params.browser->GetBrowserForMigrationOnly()
-                                        ->app_name()
-                                        .empty()) {
-        app_name = params.browser->GetBrowserForMigrationOnly()->app_name();
+      } else if (params.browser && !BrowserInitState::From(params.browser)
+                                        ->create_params()
+                                        .app_name.empty()) {
+        app_name =
+            BrowserInitState::From(params.browser)->create_params().app_name;
       }
 
       auto browser_params = Browser::CreateParams::CreateForPictureInPicture(
@@ -303,12 +339,13 @@ std::tuple<BrowserWindowInterface*, int> GetBrowserAndTabForDisposition(
       std::string app_name;
       if (!params.app_id.empty()) {
         app_name = web_app::GenerateApplicationNameFromAppId(params.app_id);
-      } else if (params.browser && !params.browser->GetBrowserForMigrationOnly()
-                                        ->app_name()
-                                        .empty()) {
-        app_name = params.browser->GetBrowserForMigrationOnly()->app_name();
+      } else if (params.browser && !BrowserInitState::From(params.browser)
+                                        ->create_params()
+                                        .app_name.empty()) {
+        app_name =
+            BrowserInitState::From(params.browser)->create_params().app_name;
       }
-      if (Browser::GetCreationStatusForProfile(profile) !=
+      if (GetBrowserWindowCreationStatusForProfile(*profile) !=
           Browser::CreationStatus::kOk) {
         return {nullptr, -1};
       }
@@ -332,7 +369,7 @@ std::tuple<BrowserWindowInterface*, int> GetBrowserAndTabForDisposition(
     case WindowOpenDisposition::NEW_WINDOW: {
       // Make a new normal browser window.
       Browser* browser = nullptr;
-      if (Browser::GetCreationStatusForProfile(profile) ==
+      if (GetBrowserWindowCreationStatusForProfile(*profile) ==
           Browser::CreationStatus::kOk) {
         browser = Browser::Create(
             Browser::CreateParams(profile, params.user_gesture));
@@ -546,14 +583,31 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
   DCHECK(params->initiating_profile);
 
 #if BUILDFLAG(IS_CHROMEOS)
-  if (params->initiating_profile->IsOffTheRecord() &&
-      params->initiating_profile->GetOTRProfileID().IsCaptivePortal() &&
-      params->disposition != WindowOpenDisposition::NEW_POPUP &&
+  if (params->disposition != WindowOpenDisposition::NEW_POPUP &&
       params->disposition != WindowOpenDisposition::CURRENT_TAB &&
+      ShouldForceCaptivePortalSigninIntoCurrentTab(*params, source_browser) &&
       !IncognitoModeForced(params->initiating_profile)) {
     // Navigation outside of the current tab or the initial popup window from a
     // captive portal signin window should be prevented.
-    params->disposition = WindowOpenDisposition::CURRENT_TAB;
+    content::RenderFrameHost* initiator_rfh = nullptr;
+    if (params->initiator_frame_token.has_value()) {
+      initiator_rfh = content::RenderFrameHost::FromFrameToken(
+          content::GlobalRenderFrameHostToken(params->initiator_process_id,
+                                              *params->initiator_frame_token));
+    }
+    // If the navigation is initiated by a subframe that is sandboxed against
+    // top-level navigation (e.g., an iframe with allow-popups but without
+    // allow-top-navigation), rewriting the disposition to CURRENT_TAB would
+    // allow the sandboxed frame to navigate the top-level captive portal
+    // window, bypassing the sandbox restriction. In that case, fall back to
+    // NEW_POPUP so that the sandbox restriction is respected while still
+    // allowing popups.
+    if (initiator_rfh && initiator_rfh->IsSandboxed(
+                             network::mojom::WebSandboxFlags::kTopNavigation)) {
+      params->disposition = WindowOpenDisposition::NEW_POPUP;
+    } else {
+      params->disposition = WindowOpenDisposition::CURRENT_TAB;
+    }
   }
 #endif
 
@@ -566,6 +620,7 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
     return nullptr;
   }
 
+#if BUILDFLAG(IS_CHROMEOS)
   // Block navigation requests when in locked fullscreen mode. We allow
   // navigation requests in the webapp when locked for OnTask (only relevant for
   // non-web browser scenarios).
@@ -574,16 +629,15 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
   if (source_browser) {
     bool should_block_navigation =
         platform_util::IsBrowserLockedFullscreen(source_browser);
-#if BUILDFLAG(IS_CHROMEOS)
     if (ash::boca::OnTaskLockedController::From(source_browser)
             ->is_locked_for_on_task()) {
       should_block_navigation = false;
     }
-#endif  // BUILDFLAG(IS_CHROMEOS)
     if (should_block_navigation) {
       return nullptr;
     }
   }
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
   // Open System Apps in their standalone window if necessary.
   // TODO(crbug.com/40136163): Remove this code after we integrate with intent
@@ -658,8 +712,9 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
   if (params->disposition == WindowOpenDisposition::NEW_PICTURE_IN_PICTURE) {
     // Picture in picture windows may not be opened by other picture in
     // picture windows, or without an opener.
-    if (!params->browser || params->browser->GetBrowserForMigrationOnly()
-                                ->is_type_picture_in_picture()) {
+    if (!params->browser ||
+        params->browser->GetType() ==
+            BrowserWindowInterface::Type::TYPE_PICTURE_IN_PICTURE) {
       params->browser = nullptr;
       return nullptr;
     }
@@ -717,7 +772,8 @@ base::WeakPtr<content::NavigationHandle> NavigateImpl(
   // focusing a regular browser window and opening a tab in the background
   // of that window. Change the disposition to NEW_FOREGROUND_TAB so that
   // the new tab is focused.
-  if (source_browser && source_browser->is_type_app() &&
+  if (source_browser &&
+      source_browser->GetType() == BrowserWindowInterface::Type::TYPE_APP &&
       params->disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB &&
       !(web_app::AppBrowserController::From(source_browser) &&
         web_app::AppBrowserController::From(source_browser)->has_tab_strip())) {

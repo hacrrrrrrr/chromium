@@ -70,8 +70,6 @@ class TestStoragePartition : public StoragePartition {
   cert_verifier::mojom::CertVerifierServiceUpdater*
   GetCertVerifierServiceUpdater() override;
 
-  storage::SharedStorageManager* GetSharedStorageManager() override;
-
   void set_url_loader_factory_for_browser_process(
       network::TestURLLoaderFactory* factory) {
     test_url_loader_factory_ = factory;
@@ -150,9 +148,6 @@ class TestStoragePartition : public StoragePartition {
   }
   PlatformNotificationContext* GetPlatformNotificationContext() override;
 
-  InterestGroupManager* GetInterestGroupManager() override;
-
-  PrivateAggregationDataModel* GetPrivateAggregationDataModel() override;
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
   CdmStorageDataModel* GetCdmStorageDataModel() override;
@@ -166,12 +161,6 @@ class TestStoragePartition : public StoragePartition {
   }
 
   void DeleteStaleSessionData() override {}
-
-  void set_browsing_topics_site_data_manager(
-      BrowsingTopicsSiteDataManager* manager) {
-    browsing_topics_site_data_manager_ = manager;
-  }
-  BrowsingTopicsSiteDataManager* GetBrowsingTopicsSiteDataManager() override;
 
   void set_devtools_background_services_context(
       DevToolsBackgroundServicesContext* context) {
@@ -275,8 +264,6 @@ class TestStoragePartition : public StoragePartition {
   raw_ptr<GeneratedCodeCacheContext> generated_code_cache_context_ = nullptr;
   raw_ptr<network::mojom::DeviceBoundSessionManager>
       device_bound_session_manager_ = nullptr;
-  raw_ptr<BrowsingTopicsSiteDataManager> browsing_topics_site_data_manager_ =
-      nullptr;
   raw_ptr<PlatformNotificationContext> platform_notification_context_ = nullptr;
   raw_ptr<DevToolsBackgroundServicesContext>
       devtools_background_services_context_ = nullptr;

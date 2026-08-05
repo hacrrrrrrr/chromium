@@ -169,6 +169,7 @@ export class WebClient implements GlicWebClient {
   panelOpenStateKind = ObservableValue.withNoValue<PanelStateKind>();
   panelOpenData = ObservableValue.withNoValue<PanelOpeningData>();
   invokeData = ObservableValue.withNoValue<InvokeOptions>();
+  onCheckResponsive: () => Promise<void> = () => Promise.resolve();
 
   async invoke(options: InvokeOptions): Promise<void> {
     this.invokeData.assignAndSignal(options);
@@ -206,6 +207,10 @@ export class WebClient implements GlicWebClient {
 
   async stopMicrophone(): Promise<void> {
     this.onStopMicrophone();
+  }
+
+  checkResponsive(): Promise<void> {
+    return Promise.resolve();
   }
 
   waitForFirstOpen(): Promise<void> {
@@ -252,6 +257,14 @@ export type BrowserCommand = {
 }|{
   command: 'make-navigate-action',
   tabId?: string, url: string, taskId: number,
+}|{
+  command: 'make-attempt-otp-filling-action',
+  taskId: number,
+  tabId?: string,
+  nodeId: number,
+  documentIdentifier: string,
+  forSignin: boolean,
+  otpType: number,
 };
 
 export class BrowserControl {
@@ -296,6 +309,22 @@ export class BrowserControl {
     const base64 =
         await this.testStepper.doCommand(
             {command: 'make-navigate-action', taskId, url, tabId}) as string;
+    return Uint8Array.fromBase64(base64).buffer as ArrayBuffer;
+  }
+
+  async makeAttemptOtpFillingAction(
+      taskId: number, nodeId: number, documentIdentifier: string,
+      forSignin: boolean, otpType: number,
+      tabId?: string): Promise<ArrayBuffer> {
+    const base64 = await this.testStepper.doCommand({
+      command: 'make-attempt-otp-filling-action',
+      taskId,
+      tabId,
+      nodeId,
+      documentIdentifier,
+      forSignin,
+      otpType,
+    }) as string;
     return Uint8Array.fromBase64(base64).buffer as ArrayBuffer;
   }
 }

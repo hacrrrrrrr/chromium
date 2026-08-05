@@ -22,12 +22,10 @@
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
-namespace base {
-class TickClock;
-}
-
 namespace blink {
 struct DOMPaintTimingInfo;
+class LargestContentfulPaintManager;
+class ImageElementTiming;
 class LocalFrame;
 class PaintTimingDetector;
 class TextElementTiming;
@@ -188,14 +186,20 @@ class CORE_EXPORT PaintTiming final : public GarbageCollected<PaintTiming>,
       wtf_size_t index,
       const viz::FrameTimingDetails&);
 
-  // The caller owns the |clock| which must outlive the PaintTiming.
-  void SetTickClockForTesting(const base::TickClock* clock);
-
   void OnRestoredFromBackForwardCache();
 
   void MarkPaintTiming();
 
+  void OnInputOrScroll();
+
   void Trace(Visitor*) const override;
+
+  // Returns the `LargestContentfulPaintManager` associated with this
+  // `PaintTiming`. Returns null if hard LCP is no longer being recorded, e.g.
+  // after first input.
+  LargestContentfulPaintManager* GetLargestContentfulPaintManager() {
+    return largest_contentful_paint_manager_;
+  }
 
   // Sets the `CallbackManager` to handle presentation time callbacks. Used for
   // unit tests.
@@ -208,6 +212,8 @@ class CORE_EXPORT PaintTiming final : public GarbageCollected<PaintTiming>,
   PaintTimingDetector& GetPaintTimingDetector() {
     return *paint_timing_detector_.Get();
   }
+
+  ImageElementTiming* GetImageElementTiming() { return image_element_timing_; }
 
  private:
   friend class RecodingTimeAfterBackForwardCacheRestoreFrameCallback;
@@ -283,13 +289,13 @@ class CORE_EXPORT PaintTiming final : public GarbageCollected<PaintTiming>,
   base::TimeTicks lcp_mouse_over_dispatch_time_;
 
   Member<PaintTimingDetector> paint_timing_detector_;
+  Member<ImageElementTiming> image_element_timing_;
   Member<TextElementTiming> text_element_timing_;
+  Member<LargestContentfulPaintManager> largest_contentful_paint_manager_;
   Member<FirstMeaningfulPaintDetector> fmp_detector_;
   // The callback ID for requestAnimationFrame to record its time after the page
   // is restored from the back-forward cache.
   int raf_after_bfcache_restore_measurement_callback_id_ = 0;
-
-  const base::TickClock* clock_;
 
   HashSet<PaintEvent> pending_paint_events_;
 

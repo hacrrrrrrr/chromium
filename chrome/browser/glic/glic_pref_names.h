@@ -7,8 +7,11 @@
 
 #include <optional>
 
+#include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/glic/host/glic.mojom.h"
 #include "components/glic/glic_pref_names.h"
+#include "components/prefs/pref_registry_simple.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -31,6 +34,11 @@ inline constexpr char kGlicLauncherEnabled[] = "glic.launcher_enabled";
 // TODO(b/517917926): Migrate handling of the launcher to
 // local_hotkey_manager.cc.
 inline constexpr char kGlicLauncherHotkey[] = "glic.launcher_hotkey";
+
+// Boolean pref that determines if the Glic hotkey scope is global (true) or
+// local (false).
+inline constexpr char kGlicHotkeyGlobalScopeEnabled[] =
+    "glic.hotkey_global_scope_enabled";
 
 // String pref that keeps track of the non-localized version of the registered
 // selection hotkey for Glic.
@@ -60,6 +68,16 @@ inline constexpr char kGlicWebContinuityOriginatingHostUrlPreset[] =
 
 // Values for the "glic.actuation_on_web" pref.
 enum class GlicActuationOnWebPolicyState {
+  kMinValue = 0,
+
+  kEnabled = kMinValue,
+  kDisabled = 1,
+
+  kMaxValue = kDisabled
+};
+
+// Values for the "glic.file_upload_allowed" pref.
+enum class GlicFileUploadPolicyState {
   kMinValue = 0,
 
   kEnabled = kMinValue,
@@ -136,6 +154,10 @@ inline constexpr char kGlicKeepSidepanelOpenOnNewTabsEnabled[] =
 // accounts.
 inline constexpr char kGlicActuationOnWeb[] = "glic.actuation_on_web";
 
+// Integer pref that determines if Glic file upload is enabled. This is
+// controlled from the enterprise policy.
+inline constexpr char kGlicFileUploadAllowed[] = "glic.file_upload_allowed";
+
 // List prefs for allow/blocklists of URLs for more granular control than
 // `kGlicActuationOnWeb`.
 inline constexpr char kGlicActuationOnWebAllowedForURLs[] =
@@ -162,6 +184,11 @@ inline constexpr char kGlicUseAltOSIcon[] = "glic.use_alt_os_icon";
 // Returns the actuation capability policy state if the preference contains a
 // valid enumerator value, or std::nullopt otherwise.
 std::optional<GlicActuationOnWebPolicyState> GetActuationOnWebCapability(
+    const PrefService* pref_service);
+
+// Returns the file upload capability policy state. Defaults to kDisabled if the
+// preference is missing or invalid.
+glic::mojom::FileUploadPolicyState GetFileUploadAllowedCapability(
     const PrefService* pref_service);
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);

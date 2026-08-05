@@ -286,6 +286,13 @@ FieldTrial* FieldTrial::CreateSimulatedFieldTrial(
 bool FieldTrial::ParseFieldTrialsString(std::string_view trials_string,
                                         bool override_trials,
                                         std::vector<State>& entries) {
+  // Each trial consumes two separator-delimited tokens (name and group), so
+  // this is an upper bound on the number of entries that will be parsed.
+  entries.reserve(static_cast<size_t>(std::ranges::count(
+                      trials_string, kPersistentStringSeparator)) /
+                      2 +
+                  1);
+
   size_t next_item = 0;
   while (next_item < trials_string.length()) {
     // Parse one entry. Entries have the format
@@ -510,6 +517,7 @@ std::vector<FieldTrial::State> FieldTrialList::GetAllFieldTrialStates(
   }
 
   AutoLock auto_lock(global_->lock_);
+  states.reserve(global_->registered_.size());
   for (const auto& registered : global_->registered_) {
     FieldTrial::PickleState trial;
     registered.second->GetStateWhileLocked(&trial);
@@ -1174,10 +1182,11 @@ void FieldTrialList::Register(FieldTrial* trial, bool is_randomized_trial) {
   DCHECK(global_);
 
   AutoLock auto_lock(global_->lock_);
-  CHECK(!global_->PreLockedFind(trial->trial_name())) << trial->trial_name();
+  auto [_, inserted] =
+      global_->registered_.try_emplace(trial->trial_name(), trial);
+  CHECK(inserted) << trial->trial_name();
   trial->AddRef();
   trial->SetTrialRegistered();
-  global_->registered_[trial->trial_name()] = trial;
 
   if (is_randomized_trial) {
     ++global_->num_registered_randomized_trials_;
@@ -1233,11 +1242,9 @@ void FieldTrialList::GetActiveFieldTrialGroupsInternal(
              ->GetRuntimeOverrides()) {
       // Runtime FieldTrial overrides are all considered active, so include them
       // all.
-      FieldTrial::ActiveGroup active_group;
-      active_group.trial_name = runtime_override.trial_name;
-      active_group.group_name = runtime_override.group_name;
-      active_group.is_overridden = false;
-      active_groups->push_back(std::move(active_group));
+      active_groups->emplace_back(runtime_override.trial_name,
+                                  runtime_override.group_name,
+                                  /*is_overridden=*/false);
       if (runtime_override.overridden_trial) {
         trials_to_ignore.insert(
             runtime_override.overridden_trial->trial_name());

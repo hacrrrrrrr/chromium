@@ -185,10 +185,10 @@ void LayoutText::Trace(Visitor* visitor) const {
   LayoutObject::Trace(visitor);
 }
 
-LayoutText* LayoutText::CreateEmptyAnonymous(Document& doc,
+LayoutText* LayoutText::CreateEmptyAnonymous(Document& document,
                                              const ComputedStyle* style) {
   auto* text = MakeGarbageCollected<LayoutText>(nullptr, StringImpl::empty_);
-  text->SetDocumentForAnonymous(&doc);
+  text->SetDocumentForAnonymous(document);
   text->SetStyle(style);
   return text;
 }
@@ -1204,13 +1204,11 @@ std::optional<unsigned> LayoutText::CaretOffsetForPosition(
   if (position.IsAfterAnchor())
     return OriginalTextLength();
   DCHECK(position.IsOffsetInAnchor()) << position;
-  DCHECK_LE(position.OffsetInContainerNode(),
-            static_cast<int>(OriginalTextLength()))
-      << position;
+  DCHECK_LE(position.OffsetInContainerNode(), OriginalTextLength()) << position;
   return position.OffsetInContainerNode();
 }
 
-int LayoutText::CaretMinOffset() const {
+wtf_size_t LayoutText::CaretMinOffset() const {
   NOT_DESTROYED();
   DCHECK(!GetDocument().NeedsLayoutTreeUpdate());
 
@@ -1230,7 +1228,7 @@ int LayoutText::CaretMinOffset() const {
   return 0;
 }
 
-int LayoutText::CaretMaxOffset() const {
+wtf_size_t LayoutText::CaretMaxOffset() const {
   NOT_DESTROYED();
   DCHECK(!GetDocument().NeedsLayoutTreeUpdate());
 

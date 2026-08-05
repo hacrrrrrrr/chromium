@@ -104,10 +104,13 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.shared_preferences.SharedPreferencesManager;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.base.test.util.HistogramWatcher;
+import org.chromium.base.test.util.UserActionTester;
 import org.chromium.build.BuildConfig;
 import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.actor.ui.ActorUiTabController.ActorOverlayState;
@@ -115,6 +118,7 @@ import org.chromium.chrome.browser.actor.ui.ActorUiTabController.HandoffButtonSt
 import org.chromium.chrome.browser.actor.ui.ActorUiTabController.UiTabState;
 import org.chromium.chrome.browser.actor.ui.TabIndicatorStatus;
 import org.chromium.chrome.browser.collaboration.CollaborationServiceFactory;
+import org.chromium.chrome.browser.compositor.overlays.strip.StripTabUnderlineManager;
 import org.chromium.chrome.browser.data_sharing.DataSharingServiceFactory;
 import org.chromium.chrome.browser.data_sharing.DataSharingTabManager;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
@@ -176,6 +180,7 @@ import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardPropert
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.TabActionState;
 import org.chromium.chrome.browser.tasks.tab_management.TabProperties.UiType;
 import org.chromium.chrome.browser.tasks.tab_management.TabSwitcherMessageManager.MessageType;
+import org.chromium.chrome.browser.tasks.tab_management.vertical_tabs.VerticalTabListProperties.RailCollapseState;
 import org.chromium.chrome.browser.undo_tab_close_snackbar.UndoBarExplicitTrigger;
 import org.chromium.components.browser_ui.util.motion.MotionEventTestUtils;
 import org.chromium.components.browser_ui.widget.ActionConfirmationResult;
@@ -993,6 +998,49 @@ public class TabListMediatorUnitTest {
 
         verify(mTabListItemOnClickListenerProvider)
                 .onTabSelecting(mModelList.get(1).model.get(TabProperties.TAB_ID), true);
+    }
+
+    @Test
+    public void testTabSelection_LogsUserAction_Vertical() {
+        setUpTabListMediator(TabListMediatorType.VERTICAL_TABS, TabListMode.VERTICAL);
+
+        mMediator.resetWithListOfTabs(List.of(mTab1), null, false);
+
+        UserActionTester userActionTester = new UserActionTester();
+
+        mModelList
+                .get(0)
+                .model
+                .get(TabProperties.TAB_CLICK_LISTENER)
+                .run(
+                        mItemView1,
+                        mModelList.get(0).model.get(TabProperties.TAB_ID),
+                        /* triggeringMotion= */ null);
+
+        assertTrue(userActionTester.getActions().contains("MobileTabSwitched.VerticalTabs"));
+        userActionTester.tearDown();
+    }
+
+    @Test
+    public void testTabSelection_LogsUserAction_Vertical_Pinned() {
+        setUpTabListMediator(TabListMediatorType.VERTICAL_TABS, TabListMode.VERTICAL);
+        doReturn(true).when(mTab1).getIsPinned();
+
+        mMediator.resetWithListOfTabs(List.of(mTab1), null, false);
+
+        UserActionTester userActionTester = new UserActionTester();
+
+        mModelList
+                .get(0)
+                .model
+                .get(TabProperties.TAB_CLICK_LISTENER)
+                .run(
+                        mItemView1,
+                        mModelList.get(0).model.get(TabProperties.TAB_ID),
+                        /* triggeringMotion= */ null);
+
+        assertTrue(userActionTester.getActions().contains("MobileTabSwitched.VerticalTabsPinned"));
+        userActionTester.tearDown();
     }
 
     @Test
@@ -5976,6 +6024,50 @@ public class TabListMediatorUnitTest {
                 TabIndicatorStatus.DYNAMIC, model.get(TabProperties.ACTOR_UI_STATE).tabIndicator);
     }
 
+    @Test
+    public void testGlicIndicatorManager_NullInGridMode() {
+        GlicEnabling.setEnabledForTesting(true);
+        setUpTabListMediator(TabListMediatorType.TAB_SWITCHER, TabListMode.GRID);
+        assertNull(mMediator.getOrInitGlicIndicatorManagerForTesting(mTab1));
+    }
+
+    @Test
+    public void testGlicIndicatorManager_NullInIncognito() {
+        GlicEnabling.setEnabledForTesting(true);
+        setUpTabListMediator(TabListMediatorType.TAB_SWITCHER, TabListMode.VERTICAL);
+        when(mTab1.isIncognito()).thenReturn(true);
+        assertNull(mMediator.getOrInitGlicIndicatorManagerForTesting(mTab1));
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.CONTEXTUAL_TASKS)
+    public void testGlicIndicatorManager_NullWhenFlagsDisabled() {
+        GlicEnabling.setEnabledForTesting(false);
+        setUpTabListMediator(TabListMediatorType.TAB_SWITCHER, TabListMode.VERTICAL);
+        when(mTab1.isIncognito()).thenReturn(false);
+        assertNull(mMediator.getOrInitGlicIndicatorManagerForTesting(mTab1));
+    }
+
+    @Test
+    public void testGlicObserver_UpdatesModel() {
+        setUpTabListMediator(TabListMediatorType.TAB_SWITCHER, TabListMode.VERTICAL);
+        initAndAssertAllProperties();
+
+        StripTabUnderlineManager.Observer observer = mMediator.getGlicObserverForTesting();
+        assertNotNull(observer);
+
+        assertFalse(mModelList.get(0).model.get(TabProperties.IS_GLIC_ACTIVE));
+
+        observer.onIndicatorStateChanged(TAB1_ID, true);
+        assertTrue(mModelList.get(0).model.get(TabProperties.IS_GLIC_ACTIVE));
+
+        observer.onIndicatorStateChanged(TAB1_ID, false);
+        assertFalse(mModelList.get(0).model.get(TabProperties.IS_GLIC_ACTIVE));
+
+        // Ensure no NPE occurs when an invalid or unknown tab ID is updated.
+        observer.onIndicatorStateChanged(Tab.INVALID_TAB_ID, true);
+    }
+
     private void setUpTabGroupCardDescriptionString() {
         doAnswer(
                         invocation -> {
@@ -6100,6 +6192,36 @@ public class TabListMediatorUnitTest {
     }
 
     @Test
+    public void testSetThumbnailSpinnerVisibility_TabInGroup() {
+        setUpTabListMediator(TabListMediatorType.TAB_GRID_DIALOG, TabListMode.GRID);
+        initAndAssertAllProperties();
+
+        createTabGroup(List.of(mTab1), TAB_GROUP_ID);
+
+        PropertyModel model = mModelList.get(0).model;
+        model.addObserver(mPropertyObserver);
+
+        mMediator.setThumbnailSpinnerVisibility(mTab1, true);
+        verify(mPropertyObserver)
+                .onPropertyChanged(eq(model), eq(TabProperties.SHOW_THUMBNAIL_SPINNER));
+        assertTrue(model.get(TabProperties.SHOW_THUMBNAIL_SPINNER));
+
+        mMediator.setThumbnailSpinnerVisibility(mTab1, false);
+        verify(mPropertyObserver, times(2))
+                .onPropertyChanged(eq(model), eq(TabProperties.SHOW_THUMBNAIL_SPINNER));
+        assertFalse(model.get(TabProperties.SHOW_THUMBNAIL_SPINNER));
+        verify(mPropertyObserver).onPropertyChanged(eq(model), eq(TabProperties.THUMBNAIL_FETCHER));
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testSetThumbnailSpinnerVisibility_NotFlatLayout_Asserts() {
+        setUpTabListMediator(TabListMediatorType.TAB_SWITCHER, TabListMode.GRID);
+        initAndAssertAllProperties();
+
+        mMediator.setThumbnailSpinnerVisibility(mTab1, true);
+    }
+
+    @Test
     public void indexFromTabId_NestedLayout_PrioritizesChildOverHeader() {
         setUpNestedLayoutWithTwoTabGroup(/* isCollapsed= */ false);
 
@@ -6169,6 +6291,60 @@ public class TabListMediatorUnitTest {
                 UiType.PRICE_MESSAGE,
                 new PropertyModel.Builder(TabProperties.ALL_KEYS_TAB_GRID).build());
         assertEquals(initialSize, mModelList.size());
+    }
+
+    @Test
+    public void testRailCollapseStateSupplier_updatesExistingTabsAndNewTabs() {
+        SettableNonNullObservableSupplier<@RailCollapseState Integer> railCollapseStateSupplier =
+                ObservableSuppliers.createNonNull(RailCollapseState.EXPANDED);
+        when(mTabListConfigDelegate.getRailCollapseStateSupplier())
+                .thenReturn(railCollapseStateSupplier);
+
+        setUpTabListMediator(TabListMediatorType.VERTICAL_TABS, TabListMode.VERTICAL);
+
+        Tab tab3 = prepareTab(TAB3_ID, TAB3_TITLE, TAB3_URL);
+        mockTabIndexes(mTab1, mTab2, tab3);
+
+        mMediator.resetWithListOfTabs(List.of(mTab1, mTab2), null, false);
+        assertEquals(
+                RailCollapseState.EXPANDED,
+                mModelList.get(0).model.get(TabProperties.RAIL_COLLAPSE_STATE));
+        assertEquals(
+                RailCollapseState.EXPANDED,
+                mModelList.get(1).model.get(TabProperties.RAIL_COLLAPSE_STATE));
+
+        railCollapseStateSupplier.set(RailCollapseState.COLLAPSED);
+        assertEquals(
+                RailCollapseState.COLLAPSED,
+                mModelList.get(0).model.get(TabProperties.RAIL_COLLAPSE_STATE));
+        assertEquals(
+                RailCollapseState.COLLAPSED,
+                mModelList.get(1).model.get(TabProperties.RAIL_COLLAPSE_STATE));
+
+        mTabModelObserverCaptor
+                .getValue()
+                .didAddTab(
+                        tab3,
+                        TabLaunchType.FROM_CHROME_UI,
+                        TabCreationState.LIVE_IN_FOREGROUND,
+                        false);
+        assertEquals(
+                RailCollapseState.COLLAPSED,
+                mModelList.get(2).model.get(TabProperties.RAIL_COLLAPSE_STATE));
+    }
+
+    @Test
+    public void testRailCollapseStateSupplier_unregistersOnDestroy() {
+        SettableNonNullObservableSupplier<@RailCollapseState Integer> railCollapseStateSupplier =
+                ObservableSuppliers.createNonNull(RailCollapseState.EXPANDED);
+        when(mTabListConfigDelegate.getRailCollapseStateSupplier())
+                .thenReturn(railCollapseStateSupplier);
+
+        setUpTabListMediator(TabListMediatorType.VERTICAL_TABS, TabListMode.VERTICAL);
+        assertTrue(railCollapseStateSupplier.hasObservers());
+
+        mMediator.destroy();
+        assertFalse(railCollapseStateSupplier.hasObservers());
     }
 
     private void mockTabIndexes(Tab... tabs) {
@@ -6556,5 +6732,41 @@ public class TabListMediatorUnitTest {
                                         .build()),
                         /* allowDialog= */ eq(true),
                         any());
+    }
+
+    @Test
+    public void testToggleTabGroupExpansion_LogsHistogramVertical() {
+        setUpTabListMediator(TabListMediatorType.VERTICAL_TABS, TabListMode.VERTICAL);
+
+        List<Tab> tabs = List.of(mTab1);
+        createTabGroup(tabs, TAB_GROUP_ID);
+        mMediator.resetWithListOfTabs(tabs, null, false);
+
+        // Mock tab model collapse state.
+        doReturn(false).when(mTabModel).getTabGroupCollapsed(TAB_GROUP_ID);
+
+        var histogramWatcher =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Android.VerticalTabs.TabGroupCollapsed", true);
+
+        // Toggle expansion (from expanded (false) to collapsed (true)).
+        mMediator.toggleTabGroupExpansion(TAB1_ID);
+
+        verify(mTabModel).setTabGroupCollapsed(TAB_GROUP_ID, true, false);
+
+        histogramWatcher.assertExpected();
+
+        // Test expand.
+        doReturn(true).when(mTabModel).getTabGroupCollapsed(TAB_GROUP_ID);
+        histogramWatcher =
+                HistogramWatcher.newSingleRecordWatcher(
+                        "Android.VerticalTabs.TabGroupCollapsed", false);
+
+        // Toggle expansion (from collapsed (true) to expanded (false)).
+        mMediator.toggleTabGroupExpansion(TAB1_ID);
+
+        verify(mTabModel).setTabGroupCollapsed(TAB_GROUP_ID, false, false);
+
+        histogramWatcher.assertExpected();
     }
 }

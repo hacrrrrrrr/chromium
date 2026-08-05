@@ -15,6 +15,7 @@
 #include "chrome/browser/background/glic/glic_status_icon.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/glic/common/local_hotkey_manager.h"
+#include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/features.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
@@ -25,74 +26,15 @@
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
+#include "components/prefs/pref_service.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accelerators/global_accelerator_listener/global_accelerator_listener.h"
-
-#if BUILDFLAG(IS_CHROMEOS)
-#include "ash/accelerators/accelerator_controller_impl.h"
-#include "ash/shell.h"
-#endif
 
 #if BUILDFLAG(IS_WIN)
 #include "chrome/browser/startup/startup_launch_manager.h"
 #endif
 
 namespace glic {
-
-#if BUILDFLAG(IS_CHROMEOS)
-class GlicBackgroundModeManager::AcceleratorRegistrar
-    : public ui::AcceleratorTarget {
- public:
-  AcceleratorRegistrar(GlicBackgroundModeManager* manager,
-                       const std::vector<ui::Accelerator>& accelerators)
-      : manager_(CHECK_DEREF(manager)) {
-    if (ash::Shell::HasInstance()) {
-      manager->actual_registered_hotkeys_.clear();
-      // TODO(crbug.com/461584318): Handle overwriting browser and system
-      // shortcuts.
-      auto* accel_controller = ash::Shell::Get()->accelerator_controller();
-      for (auto accelerator : accelerators) {
-        if (!accelerator.IsEmpty() &&
-            (!accel_controller->IsReserved(accelerator) ||
-             !accel_controller->IsRegistered(accelerator))) {
-          accel_controller->Register({accelerator}, this);
-        } else {
-          accelerator = ui::Accelerator();
-        }
-        manager->actual_registered_hotkeys_.push_back(accelerator);
-      }
-    }
-  }
-
-  ~AcceleratorRegistrar() override {
-    if (ash::Shell::HasInstance() &&
-        !manager_->actual_registered_hotkeys_.empty()) {
-      auto* accel_controller = ash::Shell::Get()->accelerator_controller();
-      accel_controller->UnregisterAll(this);
-    }
-    manager_->actual_registered_hotkeys_.clear();
-  }
-
-  // ui::AcceleratorTarget:
-  bool CanHandleAccelerators() const override { return true; }
-
-  // ui::AcceleratorTarget:
-  bool AcceleratorPressed(const ui::Accelerator& accelerator) override {
-    auto it =
-        std::find(manager_->actual_registered_hotkeys_.begin(),
-                  manager_->actual_registered_hotkeys_.end(), accelerator);
-    if (it != manager_->actual_registered_hotkeys_.end()) {
-      manager_->HandleHotkey(accelerator);
-      return true;
-    }
-    return false;
-  }
-
- private:
-  const raw_ref<GlicBackgroundModeManager> manager_;
-};
-
-#else
 
 class GlicBackgroundModeManager::AcceleratorRegistrar
     : public ui::GlobalAcceleratorListener::Observer {
@@ -115,7 +57,7 @@ class GlicBackgroundModeManager::AcceleratorRegistrar
                                                               this)) {
           accelerator = ui::Accelerator();
         }
-        manager_->actual_registered_hotkeys_.push_back(accelerator);
+        manager->actual_registered_hotkeys_.push_back(accelerator);
       }
       global_accelerator_listener->SetShortcutHandlingSuspended(
           shortcut_handling_suspended);
@@ -145,14 +87,13 @@ class GlicBackgroundModeManager::AcceleratorRegistrar
  private:
   const raw_ref<GlicBackgroundModeManager> manager_;
 };
-#endif
 
 GlicBackgroundModeManager::GlicBackgroundModeManager(StatusTray* status_tray)
     : configuration_(std::make_unique<GlicLauncherConfiguration>(this)),
       status_tray_(status_tray),
       enabled_pref_(GlicLauncherConfiguration::IsEnabled()),
       expected_registered_hotkeys_(
-          !base::FeatureList::IsEnabled(features::kGlicHotkeyLocalScope)
+          ShouldRegisterGlobalHotkey()
               ? std::vector<ui::Accelerator>{GlicLauncherConfiguration::
                                                  GetToggleHotkey()}
               : std::vector<ui::Accelerator>{}) {
@@ -162,9 +103,6 @@ GlicBackgroundModeManager::GlicBackgroundModeManager(StatusTray* status_tray)
        g_browser_process->profile_manager()->GetLoadedProfiles()) {
     OnProfileAdded(profile);
   }
-#if BUILDFLAG(IS_WIN)
-  startup_launch_client_.SetLaunchOnStartup(enabled_pref_);
-#endif
   UpdateState();
 }
 
@@ -182,25 +120,38 @@ void GlicBackgroundModeManager::OnEnabledChanged(bool enabled) {
   }
 
   enabled_pref_ = enabled;
+  UpdateExpectedHotkeys();
   UpdateState();
-#if BUILDFLAG(IS_WIN)
-  startup_launch_client_.SetLaunchOnStartup(enabled_pref_);
-#endif
 }
 
 void GlicBackgroundModeManager::OnGlobalHotkeyChanged() {
-  std::vector<ui::Accelerator> new_hotkeys;
+  if (UpdateExpectedHotkeys()) {
+    UpdateState();
+  } else if (status_icon_) {
+    status_icon_->UpdateHotkey(GetHotkeyToShow());
+  }
+}
 
-  if (!base::FeatureList::IsEnabled(features::kGlicHotkeyLocalScope)) {
+bool GlicBackgroundModeManager::UpdateExpectedHotkeys() {
+  std::vector<ui::Accelerator> new_hotkeys;
+  if (ShouldRegisterGlobalHotkey()) {
     new_hotkeys.push_back(GlicLauncherConfiguration::GetToggleHotkey());
   }
-
   if (expected_registered_hotkeys_ == new_hotkeys) {
-    return;
+    return false;
   }
-
   expected_registered_hotkeys_ = std::move(new_hotkeys);
-  UpdateState();
+  return true;
+}
+
+ui::Accelerator GlicBackgroundModeManager::GetHotkeyToShow() const {
+  if (ShouldRegisterGlobalHotkey()) {
+    return actual_registered_hotkeys_.empty()
+               ? ui::Accelerator()
+               : actual_registered_hotkeys_.at(
+                     static_cast<size_t>(HotkeyIndex::kPanelKey));
+  }
+  return GlicLauncherConfiguration::GetToggleHotkey();
 }
 
 void GlicBackgroundModeManager::ToggleUI(bool prevent_close,
@@ -259,8 +210,7 @@ void GlicBackgroundModeManager::OnProfileAdded(Profile* profile) {
 
   // If a profile is added when not in background mode, check if it can now be
   // entered.
-  if (!status_icon_) {
-    CHECK(!keep_alive_);
+  if (!keep_alive_) {
     UpdateState();
   }
 }
@@ -272,7 +222,7 @@ void GlicBackgroundModeManager::OnProfileWillBeDestroyed(Profile* profile) {
 
   // If a profile is removed while in background mode, check if it must now be
   // exited.
-  if (status_icon_) {
+  if (keep_alive_) {
     UpdateState();
   }
 }
@@ -282,7 +232,7 @@ void GlicBackgroundModeManager::Shutdown() {
   g_browser_process->profile_manager()->RemoveObserver(this);
 }
 
-void GlicBackgroundModeManager::EnterBackgroundMode() {
+void GlicBackgroundModeManager::EnterBackgroundMode(bool show_status_icon) {
   KeepAliveRegistry* const keep_alive_registry =
       KeepAliveRegistry::GetInstance();
   if (!keep_alive_ && keep_alive_registry &&
@@ -291,9 +241,13 @@ void GlicBackgroundModeManager::EnterBackgroundMode() {
         KeepAliveOrigin::GLIC_LAUNCHER, KeepAliveRestartOption::ENABLED);
   }
 
-  if (!status_icon_) {
-    status_icon_ = GlicStatusIcon::Create(this, status_tray_);
-    status_icon_->Init();
+  if (show_status_icon) {
+    if (!status_icon_) {
+      status_icon_ = GlicStatusIcon::Create(this, status_tray_);
+      status_icon_->Init();
+    }
+  } else {
+    status_icon_.reset();
   }
 }
 
@@ -316,21 +270,31 @@ void GlicBackgroundModeManager::UnregisterHotkey() {
 void GlicBackgroundModeManager::UpdateState() {
   UnregisterHotkey();
 
-  bool background_mode_enabled = enabled_pref_ && IsEnabledInAnyLoadedProfile();
-  if (background_mode_enabled) {
-    EnterBackgroundMode();
-    RegisterHotkeys(expected_registered_hotkeys_);
+  bool any_profile_enabled = IsEnabledInAnyLoadedProfile();
+  bool register_global_hotkeys =
+      any_profile_enabled && ShouldRegisterGlobalHotkey();
+
+  // We need to keep Chrome alive if launcher is enabled OR global hotkeys need
+  // to be registered.
+  bool should_be_active =
+      any_profile_enabled && (enabled_pref_ || ShouldRegisterGlobalHotkey());
+
+  if (should_be_active) {
+    EnterBackgroundMode(
+        /*show_status_icon=*/enabled_pref_ && any_profile_enabled);
+    if (register_global_hotkeys) {
+      RegisterHotkeys(expected_registered_hotkeys_);
+    }
+    if (status_icon_) {
+      status_icon_->UpdateHotkey(GetHotkeyToShow());
+    }
   } else {
     ExitBackgroundMode();
   }
 
-  if (status_icon_) {
-    status_icon_->UpdateHotkey(
-        actual_registered_hotkeys_.empty()
-            ? ui::Accelerator()
-            : actual_registered_hotkeys_.at(
-                  static_cast<size_t>(HotkeyIndex::kPanelKey)));
-  }
+#if BUILDFLAG(IS_WIN)
+  startup_launch_client_.SetLaunchOnStartup(should_be_active);
+#endif
 }
 
 bool GlicBackgroundModeManager::IsEnabledInAnyLoadedProfile() {
@@ -342,6 +306,18 @@ bool GlicBackgroundModeManager::IsEnabledInAnyLoadedProfile() {
     }
   }
   return false;
+}
+
+bool GlicBackgroundModeManager::ShouldRegisterGlobalHotkey() const {
+  if (GlicLauncherConfiguration::GetToggleHotkey().IsEmpty()) {
+    return false;
+  }
+  if (!base::FeatureList::IsEnabled(features::kGlicHotkeyLocalScope)) {
+    return enabled_pref_;
+  }
+  return g_browser_process->local_state() &&
+         g_browser_process->local_state()->GetBoolean(
+             prefs::kGlicHotkeyGlobalScopeEnabled);
 }
 
 }  // namespace glic

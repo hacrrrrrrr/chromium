@@ -70,7 +70,7 @@ class QuickDeleteMediatorTest : public PlatformTest {
         ios::TemplateURLServiceFactory::GetDefaultFactory());
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
-        AuthenticationServiceFactory::GetFactoryWithDelegate(
+        AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     builder.AddTestingFactory(SyncServiceFactory::GetInstance(),
                               base::BindRepeating(&CreateTestSyncService));
@@ -84,7 +84,7 @@ class QuickDeleteMediatorTest : public PlatformTest {
     fake_identity_ = [FakeSystemIdentity fakeIdentity1];
     system_identity_manager->AddIdentity(fake_identity_);
 
-    scene_state_ = [[SceneState alloc] initWithAppState:nil];
+    scene_state_ = [[SceneState alloc] init];
     history_service_ = ios::HistoryServiceFactory::GetForProfile(
         profile_.get(), ServiceAccessType::EXPLICIT_ACCESS);
 
