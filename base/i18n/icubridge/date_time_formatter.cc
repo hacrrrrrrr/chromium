@@ -544,7 +544,8 @@ std::u16string IcuBridge::DateTimeFormatter::Format(
 base::HourClockType IcuBridge::DateTimeFormatter::GetHourClockType() const {
   UErrorCode status = U_ZERO_ERROR;
   std::unique_ptr<icu::DateTimePatternGenerator> generator(
-      icu::DateTimePatternGenerator::createInstance(status));
+      icu::DateTimePatternGenerator::createInstance(
+          IcuLocaleConverter::GetInstance().FromLanguageTag(locale_), status));
   DCHECK(U_SUCCESS(status));
   icu::UnicodeString pattern =
       generator->getBestPattern(icu::UnicodeString("j"), status);
