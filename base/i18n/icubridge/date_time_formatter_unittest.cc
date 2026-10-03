@@ -1651,24 +1651,34 @@ TEST_F(DateTimeFormatterTest, MD_AllChromiumPlatformLocales) {
 }
 
 TEST_F(DateTimeFormatterTest, GetHourClockType) {
-  const IcuBridge::DateTimeFormatter& formatter =
-      IcuBridge::GetInstance().date_time_formatter();
+  // A formatter is bound to its locale, so changing the process default locale
+  // after construction must not change the formatter's result.
+  const IcuBridge::DateTimeFormatter& en_us =
+      IcuBridge::GetInstance().date_time_formatter(
+          GetKnownLanguageTag("en-US"));
+  const IcuBridge::DateTimeFormatter& en_gb =
+      IcuBridge::GetInstance().date_time_formatter(
+          GetKnownLanguageTag("en-GB"));
+  const IcuBridge::DateTimeFormatter& ar_eg =
+      IcuBridge::GetInstance().date_time_formatter(
+          GetKnownLanguageTag("ar-EG"));
+  const IcuBridge::DateTimeFormatter& fa_ir =
+      IcuBridge::GetInstance().date_time_formatter(
+          GetKnownLanguageTag("fa-IR"));
 
-  // Test zero-argument version (which checks default locale) under different
-  // default locales.
   test::ScopedRestoreICUDefaultLocale restore_locale;
 
-  i18n::SetICUDefaultLocale("en-US");
-  EXPECT_EQ(base::k12HourClock, formatter.GetHourClockType());
-
   i18n::SetICUDefaultLocale("en-GB");
-  EXPECT_EQ(base::k24HourClock, formatter.GetHourClockType());
+  EXPECT_EQ(base::k12HourClock, en_us.GetHourClockType());
+  EXPECT_EQ(base::k24HourClock, en_gb.GetHourClockType());
+  EXPECT_EQ(base::k12HourClock, ar_eg.GetHourClockType());
+  EXPECT_EQ(base::k24HourClock, fa_ir.GetHourClockType());
 
-  i18n::SetICUDefaultLocale("ar-EG");
-  EXPECT_EQ(base::k12HourClock, formatter.GetHourClockType());
-
-  i18n::SetICUDefaultLocale("fa-IR");
-  EXPECT_EQ(base::k24HourClock, formatter.GetHourClockType());
+  i18n::SetICUDefaultLocale("en-US");
+  EXPECT_EQ(base::k12HourClock, en_us.GetHourClockType());
+  EXPECT_EQ(base::k24HourClock, en_gb.GetHourClockType());
+  EXPECT_EQ(base::k12HourClock, ar_eg.GetHourClockType());
+  EXPECT_EQ(base::k24HourClock, fa_ir.GetHourClockType());
 }
 
 }  // namespace base::i18n
